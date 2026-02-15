@@ -8,6 +8,7 @@ use smol_str::SmolStr;
 
 use crate::def_index::{DefIndex, Exports, NamePath, UseSite};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::name_graph::NameGraph;
 use crate::resolve_index::{Resolution, ResolveIndex};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
@@ -68,31 +69,48 @@ fn detect_duplicates(
     }
 }
 
-pub fn build_resolve_index(def: &DefIndex) -> ResolveIndex {
+/// Resolve all use-sites using only offset-independent data.
+///
+/// Returns one entry per use-site (same order as `NameGraph.use_entries`).
+/// `None` means unresolved. No diagnostics -- those are produced later
+/// in `build_resolve_index` where ranges are available.
+pub fn build_resolve_core(graph: &NameGraph) -> Box<[Option<Resolution>]> {
+    graph
+        .use_entries
+        .iter()
+        .map(|entry| match &entry.path {
+            NamePath::Simple(name) => {
+                let sym_id = graph
+                    .scopes
+                    .resolve(graph, entry.scope, entry.expected_ns, name)?;
+                Some(Resolution {
+                    symbol: sym_id,
+                    namespace: graph.symbol_kinds[sym_id.0 as usize].namespace(),
+                })
+            }
+        })
+        .collect()
+}
+
+/// Build the per-file resolution index from pre-computed core results.
+///
+/// Zips `def.use_sites` (for `ast_ids` and ranges) with `core` (for
+/// resolutions), builds the `HashMap` and diagnostics. O(n) with no
+/// resolve logic.
+pub fn build_resolve_index(def: &DefIndex, core: &[Option<Resolution>]) -> ResolveIndex {
     let mut resolutions = HashMap::new();
     let mut diagnostics = Vec::new();
 
-    for use_site in &def.use_sites {
-        match &use_site.path {
-            NamePath::Simple(name) => {
-                if let Some(sym_id) =
-                    def.scopes
-                        .resolve(&def.symbols, use_site.scope, use_site.expected_ns, name)
-                {
-                    resolutions.insert(
-                        use_site.ast_id,
-                        Resolution {
-                            symbol: sym_id,
-                            namespace: def.symbols.get(sym_id).kind.namespace(),
-                        },
-                    );
-                } else {
-                    diagnostics.push(SemanticDiag {
-                        kind: SemanticDiagKind::UnresolvedName { name: name.clone() },
-                        range: use_site.range,
-                    });
-                }
-            }
+    for (use_site, resolution) in def.use_sites.iter().zip(core.iter()) {
+        if let Some(res) = resolution {
+            resolutions.insert(use_site.ast_id, *res);
+        } else if let Some(name) = use_site.path.as_simple() {
+            diagnostics.push(SemanticDiag {
+                kind: SemanticDiagKind::UnresolvedName {
+                    name: SmolStr::new(name),
+                },
+                range: use_site.range,
+            });
         }
     }
 
@@ -437,4 +455,43 @@ fn port_name_ident(port_node: &SyntaxNode) -> Option<lyra_parser::SyntaxToken> {
         }
     }
     last_ident
+}
+
+#[cfg(test)]
+mod tests {
+    use lyra_source::FileId;
+
+    use super::*;
+    use crate::name_graph::NameGraph;
+
+    fn parse_source(src: &str) -> (lyra_parser::Parse, lyra_ast::AstIdMap) {
+        let tokens = lyra_lexer::lex(src);
+        let pp = lyra_preprocess::preprocess_identity(FileId(0), &tokens, src);
+        let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
+        let map = lyra_ast::AstIdMap::from_root(FileId(0), &parse.syntax());
+        (parse, map)
+    }
+
+    #[test]
+    fn use_site_ordering_stable_across_whitespace() {
+        let src_a = "module m; logic x; assign x = 0; endmodule";
+        let src_b = "module  m;  logic  x;  assign  x  =  0;  endmodule";
+
+        let (parse_a, map_a) = parse_source(src_a);
+        let def_a = build_def_index(FileId(0), &parse_a, &map_a);
+        let graph_a = NameGraph::from_def_index(&def_a);
+
+        let (parse_b, map_b) = parse_source(src_b);
+        let def_b = build_def_index(FileId(0), &parse_b, &map_b);
+        let graph_b = NameGraph::from_def_index(&def_b);
+
+        // NameGraph should be equal (offset-independent)
+        assert_eq!(
+            graph_a, graph_b,
+            "NameGraph should be equal across whitespace edits"
+        );
+
+        // Ranges and ast_ids differ, confirming DefIndex is NOT equal
+        assert_ne!(def_a, def_b, "DefIndex should differ (offsets changed)");
+    }
 }

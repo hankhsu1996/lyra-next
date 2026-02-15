@@ -1,6 +1,7 @@
 use lyra_preprocess::{IncludeProvider, ResolvedInclude};
 use lyra_semantic::def_index::DefIndex;
-use lyra_semantic::resolve_index::ResolveIndex;
+use lyra_semantic::name_graph::NameGraph;
+use lyra_semantic::resolve_index::{Resolution, ResolveIndex};
 use lyra_semantic::symbols::GlobalSymbolId;
 use salsa::Setter;
 
@@ -172,14 +173,35 @@ pub fn def_index_file(db: &dyn salsa::Database, file: SourceFile) -> DefIndex {
     lyra_semantic::build_def_index(file.file_id(db), parse, map)
 }
 
+/// Extract offset-independent name graph from the definition index (Salsa-cached).
+///
+/// On whitespace-only edits, this query re-executes but produces an equal
+/// result (no ranges), so Salsa backdates it and skips re-running the
+/// expensive `resolve_core_file` downstream.
+#[salsa::tracked(return_ref)]
+pub fn name_graph_file(db: &dyn salsa::Database, file: SourceFile) -> NameGraph {
+    NameGraph::from_def_index(def_index_file(db, file))
+}
+
+/// Resolve all use-sites using only offset-independent data (Salsa-cached).
+///
+/// Depends on `name_graph_file`. When the name graph is backdated (e.g.
+/// whitespace edit), this query is NOT re-executed.
+#[salsa::tracked(return_ref)]
+pub fn resolve_core_file(db: &dyn salsa::Database, file: SourceFile) -> Box<[Option<Resolution>]> {
+    lyra_semantic::build_resolve_core(name_graph_file(db, file))
+}
+
 /// Build per-file resolution index (Salsa-cached).
 ///
-/// Resolves all name-use sites recorded in the `DefIndex` to their declarations.
-/// Depends on `def_index_file`.
+/// Combines offset-independent resolve results from `resolve_core_file`
+/// with offset-dependent data from `def_index_file` (`ast_ids`, ranges)
+/// to produce the final `HashMap` and diagnostics. Trivially cheap.
 #[salsa::tracked(return_ref)]
 pub fn resolve_index_file(db: &dyn salsa::Database, file: SourceFile) -> ResolveIndex {
     let def = def_index_file(db, file);
-    lyra_semantic::build_resolve_index(def)
+    let core = resolve_core_file(db, file);
+    lyra_semantic::build_resolve_index(def, core)
 }
 
 /// Resolve the name at a cursor position.
@@ -898,9 +920,8 @@ mod tests {
     }
 
     #[test]
-    fn resolve_index_stable_when_def_index_unchanged() {
+    fn whitespace_edit_skips_resolve_core() {
         let mut db = EventDb::new();
-        // Start with source that has a declaration and use
         let file = SourceFile::new(
             &db,
             lyra_source::FileId(0),
@@ -908,28 +929,58 @@ mod tests {
             IncludeMap::default(),
         );
 
-        let _ = resolve_index_file(&db, file);
+        // Prime cache and extract stable scalars before mutable borrow
+        let res_count_before = resolve_index_file(&db, file).resolutions.len();
+        let diag_count_before = file_diagnostics(&db, file).len();
+        // Spot-check: 'x' in 'assign x = 0' at offset 25
+        let x_sym_before = resolve_at(&db, file, lyra_source::TextSize::new(25));
         db.take_log();
 
-        // Change whitespace only -- this changes token offsets but NOT
-        // the set of declarations or their names. The DefIndex should
-        // re-execute but produce an equal result, so ResolveIndex
-        // should NOT re-execute (Salsa durability).
+        // Whitespace-only edit: changes offsets but not names/scopes
         update_file_text(
             &mut db,
             file,
-            "module  m; logic  x; assign  x  =  0; endmodule".to_string(),
+            "module  m;  logic  x;  assign  x  =  0;  endmodule".to_string(),
         );
-        let _ = resolve_index_file(&db, file);
+        let res_count_after = resolve_index_file(&db, file).resolutions.len();
         let log = db.take_log();
-        // def_index_file will re-execute (parse changed)
+
+        // def_index_file re-executes (parse changed, offsets differ)
         assert!(
             log.iter().any(|e| e.contains("def_index_file")),
             "def_index_file should re-execute: {log:?}"
         );
-        // But the result changes (offsets differ), so resolve_index_file
-        // also re-executes. This is expected -- true durability requires
-        // offset-independent DefIndex, which is a future optimization.
+        // name_graph_file re-executes but produces equal result -> backdated
+        assert!(
+            log.iter().any(|e| e.contains("name_graph_file")),
+            "name_graph_file should re-execute: {log:?}"
+        );
+        // resolve_core_file should NOT re-execute (backdated input)
+        assert!(
+            !log.iter().any(|e| e.contains("resolve_core_file")),
+            "resolve_core_file should be skipped (backdated): {log:?}"
+        );
+
+        // Functional equivalence via stable projections
+        assert_eq!(
+            res_count_before, res_count_after,
+            "resolution count should match"
+        );
+        assert_eq!(
+            diag_count_before,
+            file_diagnostics(&db, file).len(),
+            "diagnostic count should match"
+        );
+
+        // Spot-check: 'x' in 'assign  x  =  0' resolves to same SymbolId
+        let text = file.text(&db);
+        let x_pos = text.rfind("x  =").expect("should find 'x  ='");
+        let x_sym_after = resolve_at(&db, file, lyra_source::TextSize::new(x_pos as u32));
+        assert_eq!(
+            x_sym_before.map(|g| g.local),
+            x_sym_after.map(|g| g.local),
+            "same SymbolId before and after whitespace edit"
+        );
     }
 
     #[test]
