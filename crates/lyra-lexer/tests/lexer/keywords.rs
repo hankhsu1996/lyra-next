@@ -2,6 +2,18 @@ use super::common::single;
 use lyra_lexer::SyntaxKind;
 
 #[test]
+fn non_keywords_return_ident() {
+    let non_keywords = ["foo", "Module", "ALWAYS", "my_var", "x"];
+    for word in non_keywords {
+        assert_eq!(
+            single(word).0,
+            SyntaxKind::Ident,
+            "{word:?} should lex as Ident"
+        );
+    }
+}
+
+#[test]
 fn keywords_vs_identifiers() {
     assert_eq!(single("module").0, SyntaxKind::ModuleKw);
     assert_eq!(single("Module").0, SyntaxKind::Ident);
