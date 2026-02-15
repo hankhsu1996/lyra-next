@@ -1,4 +1,4 @@
-use lyra_ast::AstId;
+use lyra_ast::ErasedAstId;
 
 /// Unique key for a symbol in the semantic store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -10,7 +10,7 @@ pub struct Symbol {
     pub id: SymbolId,
     pub name: String,
     pub kind: SymbolKind,
-    pub ast: AstId,
+    pub ast: ErasedAstId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
