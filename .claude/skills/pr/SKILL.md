@@ -2,7 +2,6 @@
 name: pr
 description: Create a pull request with a well-formatted description
 disable-model-invocation: true
-allowed-tools: Bash(git status:*), Bash(git log:*), Bash(git diff:*), Bash(git push:*), Bash(git branch:*), Bash(git fetch:*), Bash(git rev-list:*), Bash(git rebase:*), Bash(gh:*)
 ---
 
 # Pull Request
@@ -72,6 +71,7 @@ Simple fixes may need only Summary. Don't force sections that have nothing meani
 3. **Read the full diff** (`git diff origin/main..HEAD`) before writing the PR description. The `--stat` above is not sufficient - you must see the actual code changes.
 4. Push if needed: `git push -u origin <branch>`
 5. Create PR: `gh pr create --title "..." --body "..."`
-6. Return the PR URL to the user
+6. Enable auto-merge: `gh pr merge --auto --squash` (skip if user says no auto-merge)
+7. Return the PR URL to the user
 
 If updating an existing PR, push the new commits and update the PR body with `gh pr edit`.

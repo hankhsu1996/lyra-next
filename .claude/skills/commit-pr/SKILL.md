@@ -1,14 +1,18 @@
 ---
-name: commit
-description: Create a commit with a well-formatted message
+name: commit-pr
+description: Commit changes and create a pull request in one step
 disable-model-invocation: true
 ---
 
-# Commit
+# Commit and PR
 
-Create a commit following the project format.
+Commit changes and create a PR in one step. This combines the commit and pr skills.
 
-## STOP: Check Branch First
+---
+
+## Part 1: Commit
+
+### STOP: Check Branch First
 
 **You are NOT allowed to commit on main.** Before doing ANYTHING else:
 
@@ -18,14 +22,14 @@ Create a commit following the project format.
 
 Do NOT proceed with formatting or staging until you are on a feature branch.
 
-## Context
+### Context
 
 - **Current branch:** !`git branch --show-current`
 - **Git status:** !`git status --short`
 - **Staged diff:** !`git diff --cached`
 - **Unstaged diff:** !`git diff`
 
-## Pre-commit Checks
+### Pre-commit Checks
 
 Before committing, format and check everything:
 
@@ -71,7 +75,7 @@ Before committing, format and check everything:
 
    If any fail, fix violations before committing.
 
-## Commit Format
+### Commit Format
 
 ```
 <Summary starting with verb, 50 chars or less>
@@ -88,7 +92,7 @@ Bullet points should be **concise** (under 60 chars each) and describe **what ch
 
 **IMPORTANT: Describe the outcome, not the process.** The commit message reflects what changed, not how you got there.
 
-## Branch Rules
+### Branch Rules
 
 **Branch name format:** `<type>/<short-description>`
 
@@ -106,7 +110,7 @@ Bullet points should be **concise** (under 60 chars each) and describe **what ch
 - `chore/update-deps` (CI changes go here)
 - `docs/api-reference`
 
-## Instructions
+### Commit Instructions
 
 1. **Check branch first** - See "STOP: Check Branch First" section above. Do NOT skip this.
 2. Format all files (`cargo fmt`)
@@ -116,3 +120,70 @@ Bullet points should be **concise** (under 60 chars each) and describe **what ch
 6. Run `git commit` as a separate command (do NOT chain with add)
 
 **Note:** Never use `git commit --amend` if the previous commit has been pushed. If `git status` shows "Your branch is up to date with origin", the last commit is pushed - create a new commit instead.
+
+---
+
+## Part 2: PR
+
+### PR Context
+
+- **Commits on this branch:** !`git log --oneline main..HEAD`
+- **Full diff from main:** !`git diff --merge-base origin/main HEAD --stat`
+- **Commits behind main:** !`git fetch origin main --quiet && git rev-list --count HEAD..origin/main`
+
+### PR Format
+
+**Title:**
+
+- Start with verb, capitalized
+- Do NOT use colon format like "Fix: xxx"
+
+**Body:**
+
+Always start with `## Summary` as a paragraph (not bullet points) describing what the PR does.
+
+After Summary, add sections only if they add value. All sections are optional:
+
+- `## Design` - For non-trivial design decisions, architectural reasoning
+- `## Testing` - Only if testing approach is non-obvious or worth highlighting
+- Other sections as appropriate for the PR
+
+Simple fixes may need only Summary. Don't force sections that have nothing meaningful to say.
+
+**What makes a good PR description:**
+
+- **Design rationale**: Explain the approach and why. If minimal, explain why existing infrastructure was sufficient.
+- **What didn't change**: Often more informative than listing what did. Shows architectural understanding.
+- **Alternatives explored**: If complexity was considered and rejected, mention it briefly.
+- **Why it works**: If something works with little code, explain the underlying reason.
+
+**Formatting:**
+
+- Summary: paragraph, not bullet points
+- Other sections: bullet points, checkboxes, or prose as appropriate
+- Use h3 subsections within sections if content is substantial
+
+**Adapt to PR type:**
+
+- **Feature PRs**: Summary + Design with rationale
+- **Bug fix PRs**: Summary + root cause analysis
+- **Chore/docs PRs**: Summary only, keep brief
+
+**Avoid:**
+
+- Bullet points in Summary
+- Listing files changed (GitHub shows this)
+- Internal planning concepts ("Phase 1", "Step 2")
+
+**ASCII only.** No Unicode, no emojis.
+
+**CRITICAL: Do NOT add attribution.** No "Generated with Claude Code", no "Co-Authored-By", no author credits.
+
+### PR Instructions
+
+1. If commits behind main > 0, rebase first: `git rebase origin/main`
+2. **Read the full diff** (`git diff origin/main..HEAD`) before writing the PR description. The `--stat` above is not sufficient - you must see the actual code changes.
+3. Push: `git push -u origin <branch>`
+4. Create PR: `gh pr create --title "..." --body "..."`
+5. Enable auto-merge: `gh pr merge --auto --squash` (skip if user says no auto-merge)
+6. Return the PR URL to the user
