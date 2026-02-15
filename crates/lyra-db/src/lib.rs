@@ -25,6 +25,42 @@ pub fn parse_file(db: &dyn salsa::Database, file: SourceFile) -> lyra_parser::Pa
     lyra_parser::parse(tokens, file.text(db))
 }
 
+/// Return a typed `SourceFile` AST root for the given file.
+///
+/// Returns `None` if the root node cannot be cast to `SourceFile` (should
+/// not happen with a correct parser, but no panic in library code).
+pub fn ast_root(db: &dyn salsa::Database, file: SourceFile) -> Option<lyra_ast::SourceFile> {
+    let parse = parse_file(db, file);
+    lyra_ast::AstNode::cast(parse.syntax())
+}
+
+/// Build the per-file `AstIdMap` (Salsa-cached).
+#[salsa::tracked(return_ref)]
+pub fn ast_id_map(db: &dyn salsa::Database, file: SourceFile) -> lyra_ast::AstIdMap {
+    let parse = parse_file(db, file);
+    lyra_ast::AstIdMap::from_root(file.file_id(db), &parse.syntax())
+}
+
+/// Convert parse errors into diagnostics (Salsa-cached).
+#[salsa::tracked(return_ref)]
+pub fn file_diagnostics(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_diag::Diagnostic> {
+    let parse = parse_file(db, file);
+    let file_id = file.file_id(db);
+    parse
+        .errors
+        .iter()
+        .map(|e| {
+            lyra_diag::Diagnostic::error(
+                lyra_source::Span {
+                    file: file_id,
+                    range: e.range,
+                },
+                &e.message,
+            )
+        })
+        .collect()
+}
+
 /// The central Salsa database for Lyra.
 #[salsa::db]
 #[derive(Default, Clone)]
@@ -39,6 +75,8 @@ impl salsa::Database for LyraDatabase {
 
 #[cfg(test)]
 mod tests {
+    use lyra_ast::AstNode;
+
     use super::*;
 
     #[test]
@@ -69,5 +107,86 @@ mod tests {
         let parse2 = parse_file(&db, file);
         assert!(parse2.errors.is_empty());
         assert_eq!(parse2.syntax().text().to_string(), "module top; endmodule");
+    }
+
+    #[test]
+    fn ast_root_returns_typed_source_file() {
+        let db = LyraDatabase::default();
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module top; endmodule".to_string(),
+        );
+        let root = ast_root(&db, file).expect("parser produces SourceFile root");
+        let modules: Vec<_> = root.modules().collect();
+        assert_eq!(modules.len(), 1);
+        assert_eq!(
+            modules[0].name().map(|n| n.text().to_string()),
+            Some("top".to_string()),
+        );
+    }
+
+    #[test]
+    fn ast_id_map_roundtrip() {
+        let db = LyraDatabase::default();
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module top; endmodule".to_string(),
+        );
+        let root = ast_root(&db, file).expect("parser produces SourceFile root");
+        let map = ast_id_map(&db, file);
+        let parse = parse_file(&db, file);
+
+        for module in root.modules() {
+            let id = map.ast_id(&module).expect("module should have an id");
+            let recovered = map
+                .get(&parse.syntax(), id)
+                .expect("should recover module from id");
+            assert_eq!(module.text_range(), recovered.text_range());
+        }
+    }
+
+    #[test]
+    fn cross_file_get_returns_none() {
+        let db = LyraDatabase::default();
+        let file_a = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module a; endmodule".to_string(),
+        );
+        let file_b = SourceFile::new(
+            &db,
+            lyra_source::FileId(1),
+            "module b; endmodule".to_string(),
+        );
+        let root_b = ast_root(&db, file_b).expect("parser produces SourceFile root");
+        let map_a = ast_id_map(&db, file_a);
+        let map_b = ast_id_map(&db, file_b);
+        let parse_a = parse_file(&db, file_a);
+
+        // Get an id from map_b
+        let module_b = root_b.modules().next().expect("file b has a module");
+        let id_b = map_b.ast_id(&module_b).expect("module should have an id");
+        // Resolving file_b's id against file_a's root via map_a returns None
+        // because the id carries file_b's FileId which doesn't match map_a.
+        assert!(map_a.get(&parse_a.syntax(), id_b).is_none());
+    }
+
+    #[test]
+    fn file_diagnostics_maps_parse_errors() {
+        let db = LyraDatabase::default();
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(42),
+            "module top;".to_string(), // missing endmodule
+        );
+        let diags = file_diagnostics(&db, file);
+        assert!(!diags.is_empty());
+        // All diags should reference the correct file
+        for d in diags {
+            assert_eq!(d.span.file, lyra_source::FileId(42));
+            assert_eq!(d.severity, lyra_diag::Severity::Error);
+        }
     }
 }

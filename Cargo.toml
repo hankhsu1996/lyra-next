@@ -24,6 +24,7 @@ bumpalo = { version = "3", features = ["collections"] }
 text-size = "1"
 rowan = "0.16"
 salsa = "0.19"
+smallvec = "1"
 insta = { version = "1", features = ["glob"] }
 
 [workspace.lints.rust]

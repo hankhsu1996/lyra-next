@@ -14,10 +14,10 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 ## M1: Syntax Core -- in progress
 
 - [x] Lexer (full IEEE 1800-2023 token set)
-- [ ] Parser (grammar rules, rowan green trees)
+- [x] Parser (grammar rules, rowan green trees)
 - [ ] Preprocessor (`define`, `ifdef`, `include`)
-- [ ] Typed AST wrappers with AstId
-- [ ] Parse error diagnostics with correct spans
+- [x] Typed AST wrappers with AstId
+- [x] Parse error diagnostics with correct spans
 
 ## M2: Source Model and Incremental -- not started
 
