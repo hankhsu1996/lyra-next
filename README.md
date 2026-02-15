@@ -12,6 +12,8 @@ The semantic core provides:
 - Structured diagnostics with precise source locations
 - Incremental analysis that only recomputes what changed
 
+This is a from-scratch rewrite of [Lyra](https://github.com/nicovank/Lyra), which was originally built in C++.
+
 ## Building
 
 ```bash
