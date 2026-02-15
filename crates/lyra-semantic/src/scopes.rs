@@ -1,5 +1,21 @@
 use crate::symbols::{Namespace, SymbolId, SymbolKind, SymbolTable};
 
+/// Trait for looking up symbol names by id during resolution.
+///
+/// `ScopeTree::resolve` needs symbol names for binary search but does
+/// not need the full `Symbol` struct. This trait allows resolution to
+/// work against both `SymbolTable` (full data) and `NameGraph`
+/// (offset-independent projection).
+pub trait SymbolNameLookup {
+    fn name(&self, id: SymbolId) -> &str;
+}
+
+impl SymbolNameLookup for SymbolTable {
+    fn name(&self, id: SymbolId) -> &str {
+        self.get(id).name.as_str()
+    }
+}
+
 /// Scope identifier, per-file index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeId(pub(crate) u32);
@@ -100,11 +116,11 @@ impl ScopeTree {
     /// Resolve a name starting from `scope`, walking parent chain.
     ///
     /// Binary search within each scope's sorted bindings using the
-    /// `symbols` table for name comparisons. Returns the first match
+    /// `names` lookup for name comparisons. Returns the first match
     /// (for duplicates, the first in sorted order).
     pub fn resolve(
         &self,
-        symbols: &SymbolTable,
+        names: &dyn SymbolNameLookup,
         scope: ScopeId,
         ns: Namespace,
         name: &str,
@@ -114,16 +130,16 @@ impl ScopeTree {
             Namespace::Value => &s.value_ns,
             Namespace::Type => &s.type_ns,
         };
-        let result = bindings.binary_search_by(|id| symbols.get(*id).name.as_str().cmp(name));
+        let result = bindings.binary_search_by(|id| names.name(*id).cmp(name));
         if let Ok(mut idx) = result {
             // Walk back to find the first entry with this name
-            while idx > 0 && symbols.get(bindings[idx - 1]).name == name {
+            while idx > 0 && names.name(bindings[idx - 1]) == name {
                 idx -= 1;
             }
             return Some(bindings[idx]);
         }
         if let Some(parent) = s.parent {
-            return self.resolve(symbols, parent, ns, name);
+            return self.resolve(names, parent, ns, name);
         }
         None
     }

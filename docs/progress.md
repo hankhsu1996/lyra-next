@@ -35,10 +35,11 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Structured semantic diagnostics (SemanticDiagKind enum)
 - [x] DefIndex: per-file definition collection (symbols, scopes, exports, use sites)
 - [x] ResolveIndex: per-file name resolution (HashMap<ErasedAstId, SymbolId>)
-- [x] Builder: build_def_index and build_resolve_index
-- [x] Salsa queries: def_index_file, resolve_index_file, resolve_at, symbol_by_id
+- [x] Builder: build_def_index, build_resolve_core, build_resolve_index
+- [x] Salsa queries: def_index_file, name_graph_file, resolve_core_file, resolve_index_file, resolve_at, symbol_by_id
 - [x] file_diagnostics includes semantic diagnostics
 - [x] Incremental invalidation tests (cache hit, recompute, cross-file isolation)
+- [x] Offset-independent NameGraph query (whitespace edits skip resolve_core via Salsa backdating)
 - [ ] Scope graph with scope kinds (module/block/generate) and parent chain
 - [ ] Multi-namespace name tables (value vs type)
 - [ ] Path model for hierarchical/qualified names (pkg::sym, a.b.c)
@@ -47,7 +48,7 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 
 ## Cross-cutting infrastructure
 
-- [ ] Salsa query granularity (avoid cascading invalidation on unrelated edits)
+- [x] Salsa query granularity: NameGraph decouples offset-dependent parse from offset-independent resolution
 - [ ] Diagnostic codes, labels, and fixits
 - [ ] AST API extensibility (reduce hand-written boilerplate)
 - [ ] Test harness: snapshot corpus runner

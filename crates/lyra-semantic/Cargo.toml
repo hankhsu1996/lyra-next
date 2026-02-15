@@ -14,3 +14,6 @@ lyra-diag.workspace = true
 lyra-lexer.workspace = true
 lyra-parser.workspace = true
 smol_str.workspace = true
+
+[dev-dependencies]
+lyra-preprocess.workspace = true
