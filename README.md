@@ -4,14 +4,15 @@ SystemVerilog tooling is fragmented. Every language server, linter, simulator, a
 
 Lyra Next is a unified SystemVerilog toolchain built in Rust. A single incremental semantic core handles parsing, name resolution, type checking, and diagnostics. Tools like the LSP, linter, formatter, and simulator are all clients of that core.
 
-- Hand-written recursive-descent parser producing a lossless CST
-- Normalized typed AST
-- Symbol and scope resolution with stable IDs
-- Type system and constant evaluation foundations
-- Structured diagnostics with precise spans and fix-its
-- Incremental query engine (only recompute what changed)
+The semantic core provides:
 
-This is a from-scratch Rust rewrite of [Lyra](https://github.com/nicovank/Lyra), a SystemVerilog compiler originally written in C++.
+- Lossless parsing that preserves every token, including whitespace and comments
+- Name resolution and scope analysis
+- Type checking and constant evaluation
+- Structured diagnostics with precise source locations
+- Incremental analysis that only recomputes what changed
+
+The project grew out of [Lyra](https://github.com/nicovank/Lyra), a SystemVerilog compiler written in C++.
 
 ## Building
 
