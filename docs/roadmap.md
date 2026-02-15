@@ -75,14 +75,20 @@ re-parsed. Query results for the untouched file come from cache.
 **Deliverables:**
 
 - `SymbolId` and symbol table in `lyra-semantic`.
-- Scope graph: lexical scopes, module scopes, package scopes.
-- `resolve(FileId, AstId) -> Option<SymbolId>` query.
+- Scope graph with typed scope kinds (module, block, generate, etc.)
+  and parent-chain walk.
+- Multi-namespace name tables (value vs type at minimum).
+- Path model for hierarchical and qualified names (`pkg::sym`, `a.b.c`).
+- `resolve(FileId, AstId) -> Option<SymbolId>` query, with result shape
+  that carries namespace and ambiguity info.
 - `symbols_in_scope(ScopeId) -> Vec<SymbolId>` query.
+- Cross-file resolution: packages, imports, global symbol index.
 - Unresolved-name diagnostic with span pointing to the use site.
 - Duplicate-definition diagnostic.
 
 **Demo:** Given a name use, resolve it to its declaration and return the source
-location. Unresolved names produce a diagnostic.
+location. Cross-file package imports resolve correctly. Unresolved names
+produce a diagnostic.
 
 ## M4: Type Skeleton
 

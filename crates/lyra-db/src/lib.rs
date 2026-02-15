@@ -196,10 +196,10 @@ pub fn resolve_at(
     let name_ref = find_name_ref_at(&parse.syntax(), offset)?;
     let ast_id = ast_map.ast_id(&name_ref)?.erase();
     let resolve = resolve_index_file(db, file);
-    let local = *resolve.resolutions.get(&ast_id)?;
+    let resolution = resolve.resolutions.get(&ast_id)?;
     Some(GlobalSymbolId {
         file: file.file_id(db),
-        local,
+        local: resolution.symbol,
     })
 }
 

@@ -4,7 +4,7 @@ use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
 use crate::scopes::{ScopeId, ScopeTree};
-use crate::symbols::{SymbolId, SymbolTable};
+use crate::symbols::{Namespace, SymbolId, SymbolTable};
 
 /// Per-file definition index: symbols, scopes, exports.
 ///
@@ -20,10 +20,29 @@ pub struct DefIndex {
     pub diagnostics: Box<[SemanticDiag]>,
 }
 
+/// A name path: simple identifier or (future) qualified/hierarchical path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum NamePath {
+    /// Simple identifier: `foo`
+    Simple(SmolStr),
+    // Future variants:
+    // Qualified { package: SmolStr, name: SmolStr },  // pkg::sym
+    // Hierarchical(Box<[SmolStr]>),                   // a.b.c
+}
+
+impl NamePath {
+    pub fn as_simple(&self) -> Option<&str> {
+        match self {
+            Self::Simple(s) => Some(s.as_str()),
+        }
+    }
+}
+
 /// A recorded name-use site awaiting resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UseSite {
-    pub name: SmolStr,
+    pub path: NamePath,
+    pub expected_ns: Namespace,
     pub range: TextRange,
     pub scope: ScopeId,
     pub ast_id: ErasedAstId,

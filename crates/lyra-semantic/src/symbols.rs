@@ -3,6 +3,18 @@ use smol_str::SmolStr;
 
 use crate::scopes::ScopeId;
 
+/// Which namespace a symbol or use site belongs to.
+///
+/// SV has separate namespaces for values (nets, variables, ports,
+/// parameters, functions, tasks) and types (typedefs, classes, enum types,
+/// struct types). A scope can hold one value and one type with the same
+/// identifier without conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Namespace {
+    Value,
+    Type,
+}
+
 /// Per-file symbol index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SymbolId(pub(crate) u32);
@@ -21,6 +33,20 @@ pub enum SymbolKind {
     Net,
     Variable,
     Parameter,
+}
+
+impl SymbolKind {
+    /// The namespace this symbol kind belongs to.
+    ///
+    /// Module symbols live in `Exports`, not lexical scopes. This mapping
+    /// exists for completeness but `add_binding` is never called for modules.
+    pub(crate) fn namespace(self) -> Namespace {
+        match self {
+            Self::Module | Self::Port | Self::Net | Self::Variable | Self::Parameter => {
+                Namespace::Value
+            } // Future: Self::Typedef | Self::Class => Namespace::Type,
+        }
+    }
 }
 
 /// A resolved symbol entry.

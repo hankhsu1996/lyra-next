@@ -1,4 +1,4 @@
-use crate::symbols::{SymbolId, SymbolTable};
+use crate::symbols::{Namespace, SymbolId, SymbolKind, SymbolTable};
 
 /// Scope identifier, per-file index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,19 +9,26 @@ pub enum ScopeKind {
     File,
     Module,
     Block,
+    Generate,
+    Function,
+    Task,
+    Package,
+    Interface,
+    Class,
 }
 
 /// A single scope in the scope tree.
 ///
-/// `bindings` stores `SymbolId`s sorted by the corresponding
-/// `Symbol.name`. Names live once in `Symbol`; scope entries
-/// reference by id. Resolve does binary search with a custom
+/// `value_ns` and `type_ns` store `SymbolId`s sorted by the
+/// corresponding `Symbol.name`. Names live once in `Symbol`; scope
+/// entries reference by id. Resolve does binary search with a custom
 /// comparator that looks up `symbols[mid].name`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scope {
     pub kind: ScopeKind,
     pub parent: Option<ScopeId>,
-    pub bindings: Box<[SymbolId]>,
+    pub value_ns: Box<[SymbolId]>,
+    pub type_ns: Box<[SymbolId]>,
 }
 
 /// Frozen scope tree, indexed by `ScopeId`.
@@ -38,7 +45,8 @@ pub(crate) struct ScopeTreeBuilder {
 pub(crate) struct ScopeBuilderEntry {
     pub(crate) kind: ScopeKind,
     pub(crate) parent: Option<ScopeId>,
-    pub(crate) bindings: Vec<SymbolId>,
+    pub(crate) value_bindings: Vec<SymbolId>,
+    pub(crate) type_bindings: Vec<SymbolId>,
 }
 
 impl ScopeTreeBuilder {
@@ -51,13 +59,18 @@ impl ScopeTreeBuilder {
         self.scopes.push(ScopeBuilderEntry {
             kind,
             parent,
-            bindings: Vec::new(),
+            value_bindings: Vec::new(),
+            type_bindings: Vec::new(),
         });
         id
     }
 
-    pub(crate) fn add_binding(&mut self, scope: ScopeId, sym: SymbolId) {
-        self.scopes[scope.0 as usize].bindings.push(sym);
+    pub(crate) fn add_binding(&mut self, scope: ScopeId, sym: SymbolId, kind: SymbolKind) {
+        let entry = &mut self.scopes[scope.0 as usize];
+        match kind.namespace() {
+            Namespace::Value => entry.value_bindings.push(sym),
+            Namespace::Type => entry.type_bindings.push(sym),
+        }
     }
 
     pub(crate) fn freeze(self, symbols: &SymbolTable) -> ScopeTree {
@@ -65,12 +78,15 @@ impl ScopeTreeBuilder {
             .scopes
             .into_iter()
             .map(|entry| {
-                let mut bindings = entry.bindings;
-                bindings.sort_by(|a, b| symbols.get(*a).name.cmp(&symbols.get(*b).name));
+                let mut value_bindings = entry.value_bindings;
+                value_bindings.sort_by(|a, b| symbols.get(*a).name.cmp(&symbols.get(*b).name));
+                let mut type_bindings = entry.type_bindings;
+                type_bindings.sort_by(|a, b| symbols.get(*a).name.cmp(&symbols.get(*b).name));
                 Scope {
                     kind: entry.kind,
                     parent: entry.parent,
-                    bindings: bindings.into_boxed_slice(),
+                    value_ns: value_bindings.into_boxed_slice(),
+                    type_ns: type_bindings.into_boxed_slice(),
                 }
             })
             .collect();
@@ -86,20 +102,28 @@ impl ScopeTree {
     /// Binary search within each scope's sorted bindings using the
     /// `symbols` table for name comparisons. Returns the first match
     /// (for duplicates, the first in sorted order).
-    pub fn resolve(&self, symbols: &SymbolTable, scope: ScopeId, name: &str) -> Option<SymbolId> {
+    pub fn resolve(
+        &self,
+        symbols: &SymbolTable,
+        scope: ScopeId,
+        ns: Namespace,
+        name: &str,
+    ) -> Option<SymbolId> {
         let s = &self.scopes[scope.0 as usize];
-        let result = s
-            .bindings
-            .binary_search_by(|id| symbols.get(*id).name.as_str().cmp(name));
+        let bindings = match ns {
+            Namespace::Value => &s.value_ns,
+            Namespace::Type => &s.type_ns,
+        };
+        let result = bindings.binary_search_by(|id| symbols.get(*id).name.as_str().cmp(name));
         if let Ok(mut idx) = result {
             // Walk back to find the first entry with this name
-            while idx > 0 && symbols.get(s.bindings[idx - 1]).name == name {
+            while idx > 0 && symbols.get(bindings[idx - 1]).name == name {
                 idx -= 1;
             }
-            return Some(s.bindings[idx]);
+            return Some(bindings[idx]);
         }
         if let Some(parent) = s.parent {
-            return self.resolve(symbols, parent, name);
+            return self.resolve(symbols, parent, ns, name);
         }
         None
     }
@@ -138,13 +162,16 @@ mod tests {
             def_range: range,
             scope,
         });
-        scope_builder.add_binding(scope, id);
+        scope_builder.add_binding(scope, id, SymbolKind::Variable);
 
         let symbols = sym_builder.freeze();
         let scopes = scope_builder.freeze(&symbols);
 
-        assert_eq!(scopes.resolve(&symbols, scope, "x"), Some(id));
-        assert_eq!(scopes.resolve(&symbols, scope, "y"), None);
+        assert_eq!(
+            scopes.resolve(&symbols, scope, Namespace::Value, "x"),
+            Some(id)
+        );
+        assert_eq!(scopes.resolve(&symbols, scope, Namespace::Value, "y"), None);
     }
 
     #[test]
@@ -161,13 +188,13 @@ mod tests {
             def_range: range,
             scope: parent,
         });
-        scope_builder.add_binding(parent, id);
+        scope_builder.add_binding(parent, id, SymbolKind::Port);
 
         let symbols = sym_builder.freeze();
         let scopes = scope_builder.freeze(&symbols);
 
         assert_eq!(
-            scopes.resolve(&symbols, child, "a"),
+            scopes.resolve(&symbols, child, Namespace::Value, "a"),
             Some(id),
             "child scope should find binding in parent"
         );
@@ -187,20 +214,20 @@ mod tests {
             def_range: range1,
             scope,
         });
-        let _id2 = sym_builder.push(Symbol {
+        let id2 = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
             def_range: range2,
             scope,
         });
-        scope_builder.add_binding(scope, id1);
-        scope_builder.add_binding(scope, _id2);
+        scope_builder.add_binding(scope, id1, SymbolKind::Variable);
+        scope_builder.add_binding(scope, id2, SymbolKind::Variable);
 
         let symbols = sym_builder.freeze();
         let scopes = scope_builder.freeze(&symbols);
 
         assert_eq!(
-            scopes.resolve(&symbols, scope, "x"),
+            scopes.resolve(&symbols, scope, Namespace::Value, "x"),
             Some(id1),
             "should return first definition"
         );
