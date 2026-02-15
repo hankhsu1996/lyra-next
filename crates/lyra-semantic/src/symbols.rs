@@ -9,10 +9,16 @@ use crate::scopes::ScopeId;
 /// parameters, functions, tasks) and types (typedefs, classes, enum types,
 /// struct types). A scope can hold one value and one type with the same
 /// identifier without conflict.
+///
+/// The Definition namespace (IEEE 1800-2023 section 3.13(a)) holds
+/// non-nested module, primitive, program, and interface identifiers.
+/// These are global within a compilation unit and are NOT resolved
+/// through lexical scope chains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Namespace {
     Value,
     Type,
+    Definition,
 }
 
 /// Per-file symbol index.
@@ -38,13 +44,13 @@ pub enum SymbolKind {
 impl SymbolKind {
     /// The namespace this symbol kind belongs to.
     ///
-    /// Module symbols live in `Exports`, not lexical scopes. This mapping
-    /// exists for completeness but `add_binding` is never called for modules.
+    /// Modules live in the Definition namespace (IEEE 1800 section 3.13(a)),
+    /// resolved via `GlobalDefIndex`, not lexical scopes.
     pub(crate) fn namespace(self) -> Namespace {
         match self {
-            Self::Module | Self::Port | Self::Net | Self::Variable | Self::Parameter => {
-                Namespace::Value
-            } // Future: Self::Typedef | Self::Class => Namespace::Type,
+            Self::Module => Namespace::Definition,
+            Self::Port | Self::Net | Self::Variable | Self::Parameter => Namespace::Value,
+            // Future: Self::Typedef | Self::Class => Namespace::Type,
         }
     }
 }

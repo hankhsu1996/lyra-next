@@ -36,15 +36,18 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] DefIndex: per-file definition collection (symbols, scopes, exports, use sites)
 - [x] ResolveIndex: per-file name resolution (HashMap<ErasedAstId, SymbolId>)
 - [x] Builder: build_def_index, build_resolve_core, build_resolve_index
-- [x] Salsa queries: def_index_file, name_graph_file, resolve_core_file, resolve_index_file, resolve_at, symbol_by_id
+- [x] Salsa queries: def_index_file, name_graph_file, resolve_core_file, resolve_index_file, resolve_at, symbol_global
 - [x] file_diagnostics includes semantic diagnostics
 - [x] Incremental invalidation tests (cache hit, recompute, cross-file isolation)
 - [x] Offset-independent NameGraph query (whitespace edits skip resolve_core via Salsa backdating)
+- [x] Cross-file module instantiation resolution (CompilationUnit, GlobalDefIndex, Definition namespace)
+- [x] Cursor resolution for module instantiation type names (find_module_instantiation_name_at fallback)
+- [x] Unit-level diagnostics for duplicate global module definitions
 - [ ] Scope graph with scope kinds (module/block/generate) and parent chain
 - [ ] Multi-namespace name tables (value vs type)
 - [ ] Path model for hierarchical/qualified names (pkg::sym, a.b.c)
 - [ ] Richer resolve result (namespace, ambiguity info)
-- [ ] Cross-file resolution (GlobalIndex, packages, imports)
+- [ ] Cross-file resolution for primitives, programs, interfaces
 
 ## Cross-cutting infrastructure
 

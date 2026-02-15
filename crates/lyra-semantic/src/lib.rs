@@ -2,6 +2,7 @@ mod builder;
 pub mod const_eval;
 pub mod def_index;
 pub mod diagnostic;
+pub mod global_index;
 pub mod name_graph;
 pub mod resolve_index;
 pub mod scopes;

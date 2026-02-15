@@ -10,6 +10,7 @@ pub enum MessageId {
     PreprocessError,
     UnresolvedName,
     DuplicateDefinition,
+    DuplicateModuleDefinition,
     // Label messages
     NotFoundInScope,
     RedefinedHere,
@@ -64,6 +65,7 @@ pub fn render_message(msg: &Message) -> String {
     match msg.id {
         MessageId::UnresolvedName => format!("unresolved name `{}`", name()),
         MessageId::DuplicateDefinition => format!("duplicate definition of `{}`", name()),
+        MessageId::DuplicateModuleDefinition => format!("duplicate module definition `{}`", name()),
         MessageId::NotFoundInScope => "not found in this scope".into(),
         MessageId::RedefinedHere => "redefined here".into(),
         MessageId::FirstDefinedHere => "first defined here".into(),

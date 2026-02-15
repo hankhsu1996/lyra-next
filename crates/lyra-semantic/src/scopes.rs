@@ -86,6 +86,9 @@ impl ScopeTreeBuilder {
         match kind.namespace() {
             Namespace::Value => entry.value_bindings.push(sym),
             Namespace::Type => entry.type_bindings.push(sym),
+            // Definition-namespace symbols (modules) live in GlobalDefIndex,
+            // not lexical scopes.
+            Namespace::Definition => {}
         }
     }
 
@@ -129,6 +132,9 @@ impl ScopeTree {
         let bindings = match ns {
             Namespace::Value => &s.value_ns,
             Namespace::Type => &s.type_ns,
+            // Definition-namespace names are resolved via GlobalDefIndex,
+            // not lexical scope chains.
+            Namespace::Definition => return None,
         };
         let result = bindings.binary_search_by(|id| names.name(*id).cmp(name));
         if let Ok(mut idx) = result {
