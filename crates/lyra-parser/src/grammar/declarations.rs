@@ -14,19 +14,21 @@ pub(crate) fn param_decl(p: &mut Parser) {
     {
         type_spec(p);
     }
+    param_declarator(p);
+    while p.eat(SyntaxKind::Comma) {
+        param_declarator(p);
+    }
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::ParamDecl);
+}
+
+fn param_declarator(p: &mut Parser) {
+    let m = p.start();
     p.expect(SyntaxKind::Ident);
     if p.eat(SyntaxKind::Assign) {
         expressions::expr(p);
     }
-    // Additional declarators: `, name = expr`
-    while p.eat(SyntaxKind::Comma) {
-        p.expect(SyntaxKind::Ident);
-        if p.eat(SyntaxKind::Assign) {
-            expressions::expr(p);
-        }
-    }
-    p.expect(SyntaxKind::Semicolon);
-    m.complete(p, SyntaxKind::ParamDecl);
+    m.complete(p, SyntaxKind::Declarator);
 }
 
 // Net declaration: `wire [7:0] a, b ;`
@@ -51,6 +53,7 @@ pub(crate) fn net_decl(p: &mut Parser) {
 }
 
 fn net_declarator(p: &mut Parser) {
+    let m = p.start();
     p.expect(SyntaxKind::Ident);
     while p.at(SyntaxKind::LBracket) {
         unpacked_dimension(p);
@@ -58,6 +61,7 @@ fn net_declarator(p: &mut Parser) {
     if p.eat(SyntaxKind::Assign) {
         expressions::expr(p);
     }
+    m.complete(p, SyntaxKind::Declarator);
 }
 
 // Variable declaration: `logic [7:0] a = 0, b ;`
@@ -87,6 +91,7 @@ pub(crate) fn var_decl(p: &mut Parser) {
 }
 
 fn var_declarator(p: &mut Parser) {
+    let m = p.start();
     p.expect(SyntaxKind::Ident);
     while p.at(SyntaxKind::LBracket) {
         unpacked_dimension(p);
@@ -94,6 +99,7 @@ fn var_declarator(p: &mut Parser) {
     if p.eat(SyntaxKind::Assign) {
         expressions::expr(p);
     }
+    m.complete(p, SyntaxKind::Declarator);
 }
 
 // Parse a type specifier: `logic`, `reg`, `bit`, `logic [7:0]`, `Ident`, etc.

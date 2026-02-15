@@ -413,6 +413,7 @@ pub enum SyntaxKind {
     NameRef,
     Literal,
     ErrorNode,
+    Declarator,
 }
 
 /// First node kind value -- tokens are `< NODE_START`, nodes `>= NODE_START`.

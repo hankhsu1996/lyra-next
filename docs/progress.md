@@ -27,7 +27,19 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Preprocess invalidation via include deps
 - [x] Source map model for macro expansion
 
-## M3: Names and Scopes -- not started
+## M3: Names and Scopes
+
+- [x] Declarator AST node (parser wraps each declarator)
+- [x] Symbol/SymbolTable with SmolStr names, SymbolKind, TextRange def_range
+- [x] ScopeTree with sorted bindings, binary-search resolve, parent-chain walk
+- [x] Structured semantic diagnostics (SemanticDiagKind enum)
+- [x] DefIndex: per-file definition collection (symbols, scopes, exports, use sites)
+- [x] ResolveIndex: per-file name resolution (HashMap<ErasedAstId, SymbolId>)
+- [x] Builder: build_def_index and build_resolve_index
+- [x] Salsa queries: def_index_file, resolve_index_file, resolve_at, symbol_by_id
+- [x] file_diagnostics includes semantic diagnostics
+- [x] Incremental invalidation tests (cache hit, recompute, cross-file isolation)
+- [ ] Cross-file resolution (GlobalIndex, packages, imports)
 
 ## M4: Type Skeleton -- not started
 

@@ -31,12 +31,13 @@ fn param_port_decl(p: &mut Parser) {
     if is_type_start(p.current()) && p.current() != SyntaxKind::Ident {
         type_spec(p);
     }
-    // Name
+    // Declarator: name [= expr]
+    let d = p.start();
     p.expect(SyntaxKind::Ident);
-    // Optional default value
     if p.eat(SyntaxKind::Assign) {
         expressions::expr(p);
     }
+    d.complete(p, SyntaxKind::Declarator);
     m.complete(p, SyntaxKind::ParamDecl);
 }
 

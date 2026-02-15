@@ -53,6 +53,7 @@ ast_node!(ArgList, SyntaxKind::ArgList);
 ast_node!(NameRef, SyntaxKind::NameRef);
 ast_node!(Literal, SyntaxKind::Literal);
 ast_node!(ErrorNode, SyntaxKind::ErrorNode);
+ast_node!(Declarator, SyntaxKind::Declarator);
 
 // Accessors
 
@@ -145,8 +146,8 @@ impl ParamPortList {
 }
 
 impl ParamDecl {
-    pub fn name(&self) -> Option<Ident> {
-        support::ident(&self.syntax)
+    pub fn declarators(&self) -> AstChildren<Declarator> {
+        support::children(&self.syntax)
     }
 
     pub fn type_spec(&self) -> Option<TypeSpec> {
@@ -182,9 +183,17 @@ impl VarDecl {
     pub fn type_spec(&self) -> Option<TypeSpec> {
         support::child(&self.syntax)
     }
+
+    pub fn declarators(&self) -> AstChildren<Declarator> {
+        support::children(&self.syntax)
+    }
 }
 
 impl NetDecl {
+    pub fn declarators(&self) -> AstChildren<Declarator> {
+        support::children(&self.syntax)
+    }
+
     pub fn net_type(&self) -> Option<Keyword> {
         support::keyword(
             &self.syntax,
@@ -288,6 +297,12 @@ impl InstancePortList {
 impl CallExpr {
     pub fn arg_list(&self) -> Option<ArgList> {
         support::child(&self.syntax)
+    }
+}
+
+impl Declarator {
+    pub fn name(&self) -> Option<Ident> {
+        support::ident(&self.syntax)
     }
 }
 

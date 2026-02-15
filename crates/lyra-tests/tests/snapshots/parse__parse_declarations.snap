@@ -22,8 +22,9 @@ SourceFile@0..112
           Literal@28..29
             IntLiteral@28..29 "0"
           RBracket@29..30 "]"
-        Whitespace@30..31 " "
-        Ident@31..32 "w"
+        Declarator@30..32
+          Whitespace@30..31 " "
+          Ident@31..32 "w"
         Semicolon@32..33 ";"
       VarDecl@33..53
         TypeSpec@33..47
@@ -38,33 +39,37 @@ SourceFile@0..112
             Literal@45..46
               IntLiteral@45..46 "0"
             RBracket@46..47 "]"
-        Whitespace@47..48 " "
-        Ident@48..49 "x"
+        Declarator@47..49
+          Whitespace@47..48 " "
+          Ident@48..49 "x"
         Comma@49..50 ","
-        Whitespace@50..51 " "
-        Ident@51..52 "y"
+        Declarator@50..52
+          Whitespace@50..51 " "
+          Ident@51..52 "y"
         Semicolon@52..53 ";"
       ParamDecl@53..77
         Whitespace@53..56 "\n  "
         ParameterKw@56..65 "parameter"
-        Whitespace@65..66 " "
-        Ident@66..71 "DEPTH"
-        Whitespace@71..72 " "
-        Assign@72..73 "="
-        Literal@73..76
-          Whitespace@73..74 " "
-          IntLiteral@74..76 "16"
+        Declarator@65..76
+          Whitespace@65..66 " "
+          Ident@66..71 "DEPTH"
+          Whitespace@71..72 " "
+          Assign@72..73 "="
+          Literal@73..76
+            Whitespace@73..74 " "
+            IntLiteral@74..76 "16"
         Semicolon@76..77 ";"
       ParamDecl@77..101
         Whitespace@77..80 "\n  "
         LocalparamKw@80..90 "localparam"
-        Whitespace@90..91 " "
-        Ident@91..96 "WIDTH"
-        Whitespace@96..97 " "
-        Assign@97..98 "="
-        Literal@98..100
-          Whitespace@98..99 " "
-          IntLiteral@99..100 "8"
+        Declarator@90..100
+          Whitespace@90..91 " "
+          Ident@91..96 "WIDTH"
+          Whitespace@96..97 " "
+          Assign@97..98 "="
+          Literal@98..100
+            Whitespace@98..99 " "
+            IntLiteral@99..100 "8"
         Semicolon@100..101 ";"
     Whitespace@101..102 "\n"
     EndmoduleKw@102..111 "endmodule"

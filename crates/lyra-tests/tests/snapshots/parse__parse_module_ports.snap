@@ -15,13 +15,14 @@ SourceFile@0..146
       ParamDecl@15..37
         Whitespace@15..18 "\n  "
         ParameterKw@18..27 "parameter"
-        Whitespace@27..28 " "
-        Ident@28..33 "WIDTH"
-        Whitespace@33..34 " "
-        Assign@34..35 "="
-        Literal@35..37
-          Whitespace@35..36 " "
-          IntLiteral@36..37 "8"
+        Declarator@27..37
+          Whitespace@27..28 " "
+          Ident@28..33 "WIDTH"
+          Whitespace@33..34 " "
+          Assign@34..35 "="
+          Literal@35..37
+            Whitespace@35..36 " "
+            IntLiteral@36..37 "8"
       Whitespace@37..38 "\n"
       RParen@38..39 ")"
     PortList@39..134

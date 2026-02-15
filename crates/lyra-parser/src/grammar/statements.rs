@@ -163,10 +163,12 @@ fn for_stmt(p: &mut Parser) {
 fn for_var_decl(p: &mut Parser) {
     let m = p.start();
     declarations::type_spec(p);
+    let d = p.start();
     p.expect(SyntaxKind::Ident);
     if p.eat(SyntaxKind::Assign) {
         expressions::expr(p);
     }
+    d.complete(p, SyntaxKind::Declarator);
     m.complete(p, SyntaxKind::VarDecl);
 }
 

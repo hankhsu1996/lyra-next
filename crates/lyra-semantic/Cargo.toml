@@ -11,4 +11,6 @@ workspace = true
 lyra-source.workspace = true
 lyra-ast.workspace = true
 lyra-diag.workspace = true
-lyra-arena.workspace = true
+lyra-lexer.workspace = true
+lyra-parser.workspace = true
+smol_str.workspace = true
