@@ -198,7 +198,11 @@ fn unresolved_include_keeps_tokens() {
 fn scan_includes_finds_paths() {
     let text = "`include \"a.sv\"\nmodule top; `include \"b.sv\"\nendmodule";
     let tokens = lyra_lexer::lex(text);
-    let paths = scan_includes(&tokens, text);
+    let ranges = scan_includes(&tokens, text);
+    let paths: Vec<&str> = ranges
+        .iter()
+        .map(|r| &text[usize::from(r.start())..usize::from(r.end())])
+        .collect();
     assert_eq!(paths, vec!["a.sv", "b.sv"]);
 }
 
