@@ -1,17 +1,14 @@
 # Roadmap
 
 Milestone-based plan for Lyra Next. Each milestone enables a set of
-capabilities; LRM features are pulled in continuously once the required
-capability exists.
+capabilities. Progress history lives in `docs/progress.md`.
 
-## How Milestones Relate to Backlogs
+## How Milestones Relate to Work
 
-- **Infra backlog** items land primarily in M0--M2.
-- **Semantic capability** items land primarily in M3--M5.
-- **LRM feature** items are not milestones. They are pulled from the LRM
-  feature backlog as soon as the capabilities they require are available.
-  A milestone is done when its capabilities are stable, regardless of how
-  many LRM features have been implemented on top.
+- Infra-heavy work lands mostly in M0--M2.
+- Semantic capability work lands mostly in M3--M5.
+- LRM features are pulled continuously once the required capability exists.
+- A milestone is done when capabilities are stable and demonstrated.
 
 ## M0: Harness and Project Skeleton
 
@@ -40,8 +37,8 @@ capability exists.
 - `lyra-parser` builds rowan green trees. Roundtrip fidelity: green tree
   text equals original source, byte for byte.
 - `lyra-ast` provides typed wrappers with `AstId` (stable node identity).
-- `lyra-preprocess` handles basic preprocessor directives (`` `define ``,
-  `` `ifdef ``, `` `include ``).
+- `lyra-preprocess` handles basic preprocessor directives (`define`,
+  `ifdef`, `include`).
 - Parse error diagnostics with correct spans.
 
 **Demo:** Parse a multi-module SV file, dump the CST, verify roundtrip.
@@ -66,7 +63,7 @@ re-parsed. Query results for the untouched file come from cache.
 
 ## M3: Names and Scopes
 
-**Objective:** First real semantic analysis -- resolve names to declarations.
+**Objective:** First semantic analysis -- resolve names to declarations.
 
 **Deliverables:**
 
@@ -77,7 +74,7 @@ re-parsed. Query results for the untouched file come from cache.
 - Unresolved-name diagnostic with span pointing to the use site.
 - Duplicate-definition diagnostic.
 
-**Demo:** Minimal go-to-definition: given a name use, return the declaration
+**Demo:** Given a name use, resolve it to its declaration and return the source
 location. Unresolved names produce a diagnostic.
 
 ## M4: Type Skeleton
@@ -109,7 +106,8 @@ Type errors shown with expected vs actual.
   `Vec<Diagnostic>`.
 - Batch driver crate (`lyra-cli`): load files, run queries, print
   diagnostics. Useful for CI integration.
-- Core remains a library. Tools are separate crates that depend on `lyra-db`.
+- Core remains a library. Tools are separate crates that depend on
+  `lyra-db`.
 - Performance baseline: parse + full semantic analysis of a 10K-line file
   under 1 second.
 
@@ -118,18 +116,7 @@ and hover work. Diagnostics appear on save. CLI linter runs in CI.
 
 ## Rules
 
-1. **Milestones are capability gates, not feature lists.** A milestone is
-   done when its queries are stable and tested, not when every possible LRM
-   feature using those queries is implemented.
-
-2. **LRM features flow continuously.** Once M1 lands, simple syntax-only
-   LRM features can be added at any time. Once M3 lands, name-resolution
-   features can be added. There is no "LRM milestone."
-
-3. **Earlier milestones can receive additions.** If M3 work reveals that the
-   parser needs a new production, that goes into the syntax layer (M1
-   scope) as a normal PR. Milestones are not phases that close.
-
-4. **Each milestone has a demo.** If you cannot demonstrate the capability
-   to a user (even a developer user running a CLI command), the milestone
-   is not done.
+1. Milestones are capability gates, not exhaustive feature lists.
+2. LRM features flow continuously once dependent capabilities exist.
+3. Earlier milestones can receive additions discovered by later work.
+4. Each milestone needs a demonstrable outcome.

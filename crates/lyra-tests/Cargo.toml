@@ -1,0 +1,19 @@
+[package]
+name = "lyra-tests"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lyra-source.workspace = true
+lyra-lexer.workspace = true
+lyra-preprocess.workspace = true
+lyra-parser.workspace = true
+lyra-db.workspace = true
+lyra-diag.workspace = true
+
+[dev-dependencies]
+insta = { workspace = true }
