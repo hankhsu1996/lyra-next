@@ -286,10 +286,11 @@ pub fn preprocess(
 
         if tok.kind == SyntaxKind::Directive
             && tok_text == "`include"
-            && let Some((path, path_range, skip_count)) =
-                find_include_path(tokens, text, i, src_cursor)
+            && let Some((inner_range, path_range, skip_count)) =
+                find_include_path(tokens, i, src_cursor)
         {
-            if let Some(resolved) = provider.resolve(&path) {
+            let path = &text[usize::from(inner_range.start())..usize::from(inner_range.end())];
+            if let Some(resolved) = provider.resolve(path) {
                 // Flush pending main-file text up to the directive
                 let pending = &text[flush_start..src_cursor];
                 if !pending.is_empty() {
@@ -351,7 +352,10 @@ pub fn preprocess(
             );
             errors.push(PreprocError {
                 range: mapped_range,
-                message: format!("unresolved include: \"{path}\""),
+                message: format!(
+                    "unresolved include: \"{}\"",
+                    &text[usize::from(inner_range.start())..usize::from(inner_range.end())]
+                ),
             });
             // Fall through to copy token as-is
         }
@@ -386,7 +390,7 @@ pub fn preprocess_identity(file: FileId, tokens: &[Token], text: &str) -> Prepro
 /// Lightweight scan for `` `include `` directives. Returns the quoted
 /// paths without performing any expansion. Useful for the tool layer
 /// to discover include dependencies before setting up resolution.
-pub fn scan_includes(tokens: &[Token], text: &str) -> Vec<String> {
+pub fn scan_includes(tokens: &[Token], text: &str) -> Vec<TextRange> {
     let mut paths = Vec::new();
     let mut cursor: usize = 0;
 
@@ -396,9 +400,9 @@ pub fn scan_includes(tokens: &[Token], text: &str) -> Vec<String> {
 
         if tok.kind == SyntaxKind::Directive
             && tok_text == "`include"
-            && let Some((path, _, _)) = find_include_path(tokens, text, i, cursor)
+            && let Some((inner_range, _, _)) = find_include_path(tokens, i, cursor)
         {
-            paths.push(path);
+            paths.push(inner_range);
         }
         cursor += tok_len;
     }
@@ -408,15 +412,15 @@ pub fn scan_includes(tokens: &[Token], text: &str) -> Vec<String> {
 
 /// Find the include path after a `` `include `` directive token.
 ///
-/// Returns `(path, path_token_range_in_text, token_count_to_skip)` where
-/// `token_count_to_skip` includes the directive token itself plus any
-/// whitespace and the string literal.
+/// Returns `(inner_range, literal_range, token_count_to_skip)` where
+/// `inner_range` is the path text without quotes, `literal_range` is the
+/// full string literal span, and `token_count_to_skip` includes the
+/// directive token itself plus any whitespace and the string literal.
 fn find_include_path(
     tokens: &[Token],
-    text: &str,
     directive_idx: usize,
     directive_cursor: usize,
-) -> Option<(String, TextRange, usize)> {
+) -> Option<(TextRange, TextRange, usize)> {
     let mut cursor = directive_cursor;
     let dir_len: usize = tokens[directive_idx].len.into();
     cursor += dir_len;
@@ -440,18 +444,21 @@ fn find_include_path(
         return None;
     }
 
-    let path_text = &text[cursor..cursor + tok_len];
-    // Strip surrounding quotes
-    if path_text.len() < 2 {
+    // Must have at least opening and closing quotes
+    if tok_len < 2 {
         return None;
     }
-    let path = path_text[1..path_text.len() - 1].to_string();
-    let path_range = TextRange::new(
+
+    let inner_range = TextRange::new(
+        TextSize::new((cursor + 1) as u32),
+        TextSize::new((cursor + tok_len - 1) as u32),
+    );
+    let literal_range = TextRange::new(
         TextSize::new(cursor as u32),
         TextSize::new((cursor + tok_len) as u32),
     );
 
     // skip_count = directive + whitespace + string literal
     let skip_count = j - directive_idx + 1;
-    Some((path, path_range, skip_count))
+    Some((inner_range, literal_range, skip_count))
 }
