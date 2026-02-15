@@ -9,6 +9,8 @@ Lyra Next is a Rust-based SystemVerilog parser and semantic analyzer. It provide
 - Structured diagnostics with precise spans and fix-its
 - Incremental query engine (only recompute what changed)
 
+This is a from-scratch Rust rewrite of [Lyra](https://github.com/nicovank/Lyra), a SystemVerilog compiler originally written in C++.
+
 ## Building
 
 ```bash
