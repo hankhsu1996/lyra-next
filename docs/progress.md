@@ -24,8 +24,8 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Line index (byte offset to line/col mapping)
 - [x] File text update with incremental invalidation
 - [x] Cache-hit tests (EventDb, per-file isolation, no-change caching)
-- [ ] Preprocess invalidation via include deps
-- [ ] Source map model for macro expansion
+- [x] Preprocess invalidation via include deps
+- [x] Source map model for macro expansion
 
 ## M3: Names and Scopes -- not started
 

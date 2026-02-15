@@ -4,7 +4,7 @@ Lyra uses [Salsa](https://github.com/salsa-rs/salsa) for demand-driven increment
 
 ## Query Dependency DAG
 
-Every `SourceFile` is a `#[salsa::input]` with two fields: `file_id` and `text`. Salsa automatically tracks which queries read which inputs. The core query chain is:
+Every `SourceFile` is a `#[salsa::input]` with three fields: `file_id`, `text`, and `include_map`. Salsa automatically tracks which queries read which inputs. The core query chain is:
 
 ```
 SourceFile.text
@@ -62,3 +62,20 @@ This pattern lives in `lyra-db`'s `#[cfg(test)]` module because it needs access 
 - **No-change caching**: querying a file whose text has not changed since the last query produces zero `WillExecute` events.
 - **Invalidation propagation**: editing a file and re-querying it produces `WillExecute` events for the full query chain (lex, preprocess, parse).
 - **Line index invalidation**: changing text that adds/removes newlines produces a different `LineIndex` on the next query.
+- **Include invalidation**: editing an included file invalidates the includer's `preprocess_file` and all downstream queries. Unrelated files are not affected.
+
+## Cross-File Include Invalidation
+
+`SourceFile` carries an `include_map: Vec<(String, SourceFile)>` field that maps include paths to their resolved `SourceFile` inputs. During preprocessing, `DbIncludeProvider` resolves include paths by looking up this map and reading through Salsa queries (`lex_file`, `file.text`), which establishes dependency edges in the Salsa graph.
+
+When an included file's text changes:
+
+1. `lex_file(included)` is invalidated (text changed)
+2. `preprocess_file(includer)` is invalidated because it read `lex_file(included)` and `included.text` through the provider
+3. `parse_file(includer)` is invalidated because it depends on `preprocess_file`
+4. Unrelated files that do not include the changed file are unaffected
+
+This is verified by two `EventDb` tests:
+
+- `edit_included_file_invalidates_includer`: editing file B causes file A (which includes B) to re-execute its query chain.
+- `edit_included_file_does_not_invalidate_unrelated`: editing file B does not cause file C (which has no relationship to B) to re-execute.

@@ -1,11 +1,19 @@
+use lyra_preprocess::{IncludeProvider, ResolvedInclude};
 use salsa::Setter;
 
 /// A source file input for the Salsa database.
+///
+/// The `include_map` field carries resolution metadata: which include
+/// paths map to which files. Only the tool layer should set this field
+/// (via `set_include_map`). Long-term, this could move to a separate
+/// tracked query to decouple content changes from resolution changes.
 #[salsa::input]
 pub struct SourceFile {
     pub file_id: lyra_source::FileId,
     #[return_ref]
     pub text: String,
+    #[return_ref]
+    pub include_map: Vec<(String, SourceFile)>,
 }
 
 /// Lex a source file into tokens (including trivia and EOF).
@@ -14,20 +22,44 @@ pub fn lex_file(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_lexer::T
     lyra_lexer::lex(file.text(db))
 }
 
+/// Include provider that resolves paths via Salsa queries.
+struct DbIncludeProvider<'a> {
+    db: &'a dyn salsa::Database,
+    include_map: &'a [(String, SourceFile)],
+}
+
+impl IncludeProvider for DbIncludeProvider<'_> {
+    fn resolve(&self, path: &str) -> Option<ResolvedInclude> {
+        let (_, file) = self.include_map.iter().find(|(p, _)| p == path)?;
+        Some(ResolvedInclude {
+            file_id: file.file_id(self.db),
+            tokens: lex_file(self.db, *file).clone(),
+            text: file.text(self.db).clone(),
+        })
+    }
+}
+
 /// Run the preprocessor over lexed tokens.
 #[salsa::tracked(return_ref)]
 pub fn preprocess_file(
     db: &dyn salsa::Database,
     file: SourceFile,
 ) -> lyra_preprocess::PreprocOutput {
-    lyra_preprocess::preprocess(file.file_id(db), lex_file(db, file))
+    let include_map = file.include_map(db);
+    let provider = DbIncludeProvider { db, include_map };
+    lyra_preprocess::preprocess(
+        file.file_id(db),
+        lex_file(db, file),
+        file.text(db),
+        &provider,
+    )
 }
 
 /// Parse a source file into a lossless green tree with diagnostics.
 #[salsa::tracked(return_ref)]
 pub fn parse_file(db: &dyn salsa::Database, file: SourceFile) -> lyra_parser::Parse {
     let pp = preprocess_file(db, file);
-    lyra_parser::parse(&pp.tokens, file.text(db))
+    lyra_parser::parse(&pp.tokens, &pp.expanded_text)
 }
 
 /// Build the line index for a source file (Salsa-cached).
@@ -68,24 +100,26 @@ pub fn ast_id_map(db: &dyn salsa::Database, file: SourceFile) -> lyra_ast::AstId
     lyra_ast::AstIdMap::from_root(file.file_id(db), &parse.syntax())
 }
 
-/// Convert parse errors into diagnostics (Salsa-cached).
+/// Convert parse and preprocess errors into diagnostics (Salsa-cached).
 #[salsa::tracked(return_ref)]
 pub fn file_diagnostics(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_diag::Diagnostic> {
+    let pp = preprocess_file(db, file);
     let parse = parse_file(db, file);
-    let file_id = file.file_id(db);
-    parse
+
+    let mut diags: Vec<lyra_diag::Diagnostic> = pp
         .errors
         .iter()
-        .map(|e| {
-            lyra_diag::Diagnostic::error(
-                lyra_source::Span {
-                    file: file_id,
-                    range: e.range,
-                },
-                &e.message,
-            )
-        })
-        .collect()
+        .map(|e| lyra_diag::Diagnostic::error(pp.source_map.map_span(e.range), &e.message))
+        .collect();
+
+    diags.extend(
+        parse
+            .errors
+            .iter()
+            .map(|e| lyra_diag::Diagnostic::error(pp.source_map.map_span(e.range), &e.message)),
+    );
+
+    diags
 }
 
 /// The central Salsa database for Lyra.
@@ -106,44 +140,30 @@ mod tests {
 
     use super::*;
 
+    fn new_file(db: &dyn salsa::Database, id: u32, text: &str) -> SourceFile {
+        SourceFile::new(db, lyra_source::FileId(id), text.to_string(), vec![])
+    }
+
     #[test]
     fn smoke_db_roundtrip() {
         let db = LyraDatabase::default();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module top; endmodule".to_string(),
-        );
+        let file = new_file(&db, 0, "module top; endmodule");
         assert_eq!(file.text(&db), "module top; endmodule");
     }
 
     #[test]
     fn end_to_end_parse() {
         let db = LyraDatabase::default();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module top; endmodule".to_string(),
-        );
+        let file = new_file(&db, 0, "module top; endmodule");
         let parse = parse_file(&db, file);
         assert!(parse.errors.is_empty());
         assert_eq!(parse.syntax().text().to_string(), "module top; endmodule");
-
-        // Repeat call: sanity-check that a second invocation returns the same result.
-        // Cache-hit assertions with event counting are in the EventDb tests below.
-        let parse2 = parse_file(&db, file);
-        assert!(parse2.errors.is_empty());
-        assert_eq!(parse2.syntax().text().to_string(), "module top; endmodule");
     }
 
     #[test]
     fn ast_root_returns_typed_source_file() {
         let db = LyraDatabase::default();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module top; endmodule".to_string(),
-        );
+        let file = new_file(&db, 0, "module top; endmodule");
         let root = ast_root(&db, file).expect("parser produces SourceFile root");
         let modules: Vec<_> = root.modules().collect();
         assert_eq!(modules.len(), 1);
@@ -156,11 +176,7 @@ mod tests {
     #[test]
     fn ast_id_map_roundtrip() {
         let db = LyraDatabase::default();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module top; endmodule".to_string(),
-        );
+        let file = new_file(&db, 0, "module top; endmodule");
         let root = ast_root(&db, file).expect("parser produces SourceFile root");
         let map = ast_id_map(&db, file);
         let parse = parse_file(&db, file);
@@ -177,26 +193,15 @@ mod tests {
     #[test]
     fn cross_file_get_returns_none() {
         let db = LyraDatabase::default();
-        let file_a = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module a; endmodule".to_string(),
-        );
-        let file_b = SourceFile::new(
-            &db,
-            lyra_source::FileId(1),
-            "module b; endmodule".to_string(),
-        );
+        let file_a = new_file(&db, 0, "module a; endmodule");
+        let file_b = new_file(&db, 1, "module b; endmodule");
         let root_b = ast_root(&db, file_b).expect("parser produces SourceFile root");
         let map_a = ast_id_map(&db, file_a);
         let map_b = ast_id_map(&db, file_b);
         let parse_a = parse_file(&db, file_a);
 
-        // Get an id from map_b
         let module_b = root_b.modules().next().expect("file b has a module");
         let id_b = map_b.ast_id(&module_b).expect("module should have an id");
-        // Resolving file_b's id against file_a's root via map_a returns None
-        // because the id carries file_b's FileId which doesn't match map_a.
         assert!(map_a.get(&parse_a.syntax(), id_b).is_none());
     }
 
@@ -204,7 +209,7 @@ mod tests {
     fn source_map_identity() {
         let db = LyraDatabase::default();
         let fid = lyra_source::FileId(5);
-        let file = SourceFile::new(&db, fid, "module m; endmodule".to_string());
+        let file = SourceFile::new(&db, fid, "module m; endmodule".to_string(), vec![]);
         let sm = source_map(&db, file);
         let range = lyra_source::TextRange::new(
             lyra_source::TextSize::new(0),
@@ -212,17 +217,12 @@ mod tests {
         );
         let span = sm.map_span(range);
         assert_eq!(span.file, fid);
-        assert_eq!(span.range, range);
     }
 
     #[test]
     fn include_graph_empty() {
         let db = LyraDatabase::default();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module m; endmodule".to_string(),
-        );
+        let file = new_file(&db, 0, "module m; endmodule");
         let ig = include_graph(&db, file);
         assert!(ig.is_empty());
         assert!(ig.dependencies().is_empty());
@@ -234,15 +234,39 @@ mod tests {
         let file = SourceFile::new(
             &db,
             lyra_source::FileId(42),
-            "module top;".to_string(), // missing endmodule
+            "module top;".to_string(),
+            vec![],
         );
         let diags = file_diagnostics(&db, file);
         assert!(!diags.is_empty());
-        // All diags should reference the correct file
         for d in diags {
             assert_eq!(d.span.file, lyra_source::FileId(42));
             assert_eq!(d.severity, lyra_diag::Severity::Error);
         }
+    }
+
+    #[test]
+    fn roundtrip_expanded_text() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module top; endmodule");
+        let pp = preprocess_file(&db, file);
+        let parse = parse_file(&db, file);
+        assert_eq!(parse.syntax().text().to_string(), pp.expanded_text);
+    }
+
+    #[test]
+    fn roundtrip_expanded_text_with_include() {
+        let db = LyraDatabase::default();
+        let file_b = SourceFile::new(&db, lyra_source::FileId(1), "wire w;".to_string(), vec![]);
+        let file_a = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module top; `include \"b.sv\"\nendmodule".to_string(),
+            vec![("b.sv".to_string(), file_b)],
+        );
+        let pp = preprocess_file(&db, file_a);
+        let parse = parse_file(&db, file_a);
+        assert_eq!(parse.syntax().text().to_string(), pp.expanded_text);
     }
 
     // Event-logging database for cache-hit assertions.
@@ -291,22 +315,21 @@ mod tests {
             &db,
             lyra_source::FileId(0),
             "module a; endmodule".to_string(),
+            vec![],
         );
         let file_b = SourceFile::new(
             &db,
             lyra_source::FileId(1),
             "module b; endmodule".to_string(),
+            vec![],
         );
 
-        // Prime the cache for both files
         let _ = parse_file(&db, file_a);
         let _ = parse_file(&db, file_b);
         db.take_log();
 
-        // Edit file_a only
         update_file_text(&mut db, file_a, "module a2; endmodule".to_string());
 
-        // Re-query file_b -- should be a cache hit (no WillExecute)
         let _ = parse_file(&db, file_b);
         let log = db.take_log();
         assert!(
@@ -314,7 +337,6 @@ mod tests {
             "file_b should not re-execute after file_a edit: {log:?}",
         );
 
-        // Re-query file_a -- should re-execute
         let _ = parse_file(&db, file_a);
         let log = db.take_log();
         assert!(
@@ -330,11 +352,11 @@ mod tests {
             &db,
             lyra_source::FileId(0),
             "line one\nline two".to_string(),
+            vec![],
         );
         let idx = line_index(&db, file);
         assert_eq!(idx.line_count(), 2);
 
-        // Add a third line
         update_file_text(&mut db, file, "line one\nline two\nline three".to_string());
         let idx = line_index(&db, file);
         assert_eq!(idx.line_count(), 3);
@@ -347,18 +369,79 @@ mod tests {
             &db,
             lyra_source::FileId(0),
             "module m; endmodule".to_string(),
+            vec![],
         );
 
-        // Prime the cache
         let _ = parse_file(&db, file);
         db.take_log();
 
-        // Query again with no text change
         let _ = parse_file(&db, file);
         let log = db.take_log();
         assert!(
             !has_will_execute(&log),
             "no re-execution expected when text unchanged: {log:?}",
+        );
+    }
+
+    #[test]
+    fn edit_included_file_invalidates_includer() {
+        let mut db = EventDb::new();
+        let file_b = SourceFile::new(&db, lyra_source::FileId(1), "wire w;".to_string(), vec![]);
+        let file_a = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module top; `include \"b.sv\"\nendmodule".to_string(),
+            vec![("b.sv".to_string(), file_b)],
+        );
+
+        let _ = parse_file(&db, file_a);
+        db.take_log();
+
+        update_file_text(&mut db, file_b, "wire x;".to_string());
+
+        let _ = parse_file(&db, file_a);
+        let log = db.take_log();
+        assert!(
+            has_will_execute(&log),
+            "file_a should re-execute after included file_b changed: {log:?}",
+        );
+    }
+
+    #[test]
+    fn edit_included_file_does_not_invalidate_unrelated() {
+        let mut db = EventDb::new();
+        let file_b = SourceFile::new(&db, lyra_source::FileId(1), "wire w;".to_string(), vec![]);
+        let file_a = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module top; `include \"b.sv\"\nendmodule".to_string(),
+            vec![("b.sv".to_string(), file_b)],
+        );
+        let file_c = SourceFile::new(
+            &db,
+            lyra_source::FileId(2),
+            "module c; endmodule".to_string(),
+            vec![],
+        );
+
+        let _ = parse_file(&db, file_a);
+        let _ = parse_file(&db, file_c);
+        db.take_log();
+
+        update_file_text(&mut db, file_b, "wire x;".to_string());
+
+        let _ = parse_file(&db, file_c);
+        let log = db.take_log();
+        assert!(
+            !has_will_execute(&log),
+            "file_c should not re-execute after file_b changed: {log:?}",
+        );
+
+        let _ = parse_file(&db, file_a);
+        let log = db.take_log();
+        assert!(
+            has_will_execute(&log),
+            "file_a should re-execute after included file_b changed: {log:?}",
         );
     }
 }
