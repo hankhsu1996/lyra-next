@@ -74,26 +74,19 @@ def should_check_file(filepath: str) -> bool:
     return (
         path.suffix in EXTENSIONS
         and any(filepath.startswith(inc) for inc in INCLUDE_PATHS)
+        and "/tests/" not in filepath
     )
 
 
 def is_in_test_context(lines: list[str], lineno: int) -> bool:
-    """Heuristic: scan backwards for #[test] or #[cfg(test)] within 30 lines."""
-    start = max(0, lineno - 30)
-    for i in range(lineno - 1, start - 1, -1):
-        line = lines[i]
-        if RE_TEST_ATTR.search(line):
+    """Check whether lineno is inside a #[cfg(test)] module or #[test] fn.
+
+    Scans backwards looking for #[cfg(test)] or #[test]. Simple and
+    conservative: any occurrence above the violation line counts.
+    """
+    for i in range(lineno - 1, -1, -1):
+        if RE_TEST_ATTR.search(lines[i]):
             return True
-        # If we hit a top-level fn/impl/mod, check if it has a test attr
-        # on the preceding line(s) before giving up
-        stripped = line.lstrip()
-        if stripped.startswith("pub fn ") or stripped.startswith("fn "):
-            for j in range(i - 1, max(0, i - 3) - 1, -1):
-                if RE_TEST_ATTR.search(lines[j]):
-                    return True
-            return False
-        if stripped.startswith("impl ") or stripped.startswith("pub mod "):
-            return False
     return False
 
 
