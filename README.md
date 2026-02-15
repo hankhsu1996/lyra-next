@@ -6,9 +6,7 @@ Instead of building each tool independently, Lyra Next provides a single increme
 
 ## What this project is
 
-Lyra Next is not a compiler frontend, not a simulator, and not an LSP.
-
-It is a semantic database for SystemVerilog:
+Lyra Next is a semantic database for SystemVerilog:
 
 - Hand-written recursive-descent parser producing a lossless CST
 - Normalized typed AST
