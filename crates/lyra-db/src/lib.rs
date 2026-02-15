@@ -1,3 +1,5 @@
+use salsa::Setter;
+
 /// A source file input for the Salsa database.
 #[salsa::input]
 pub struct SourceFile {
@@ -26,6 +28,18 @@ pub fn preprocess_file(
 pub fn parse_file(db: &dyn salsa::Database, file: SourceFile) -> lyra_parser::Parse {
     let pp = preprocess_file(db, file);
     lyra_parser::parse(&pp.tokens, file.text(db))
+}
+
+/// Build the line index for a source file (Salsa-cached).
+#[salsa::tracked(return_ref)]
+pub fn line_index(db: &dyn salsa::Database, file: SourceFile) -> lyra_source::LineIndex {
+    lyra_source::LineIndex::new(file.text(db))
+}
+
+/// Update the text of an existing source file, triggering Salsa
+/// invalidation for all queries that depend on it.
+pub fn update_file_text(db: &mut dyn salsa::Database, file: SourceFile, text: String) {
+    file.set_text(db).to(text);
 }
 
 /// Access the source map for a preprocessed file.
@@ -116,7 +130,7 @@ mod tests {
         assert_eq!(parse.syntax().text().to_string(), "module top; endmodule");
 
         // Repeat call: sanity-check that a second invocation returns the same result.
-        // Actual cache-hit assertions (event counting) belong in M2.
+        // Cache-hit assertions with event counting are in the EventDb tests below.
         let parse2 = parse_file(&db, file);
         assert!(parse2.errors.is_empty());
         assert_eq!(parse2.syntax().text().to_string(), "module top; endmodule");
@@ -229,5 +243,122 @@ mod tests {
             assert_eq!(d.span.file, lyra_source::FileId(42));
             assert_eq!(d.severity, lyra_diag::Severity::Error);
         }
+    }
+
+    // Event-logging database for cache-hit assertions.
+
+    #[salsa::db]
+    #[derive(Clone)]
+    struct EventDb {
+        storage: salsa::Storage<Self>,
+        log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl EventDb {
+        fn new() -> Self {
+            Self {
+                storage: Default::default(),
+                log: Default::default(),
+            }
+        }
+
+        fn take_log(&self) -> Vec<String> {
+            std::mem::take(&mut self.log.lock().expect("lock poisoned"))
+        }
+    }
+
+    #[salsa::db]
+    impl salsa::Database for EventDb {
+        fn salsa_event(&self, event: &dyn Fn() -> salsa::Event) {
+            let event = event();
+            if let salsa::EventKind::WillExecute { .. } = event.kind {
+                self.log
+                    .lock()
+                    .expect("lock poisoned")
+                    .push(format!("{:?}", event.kind));
+            }
+        }
+    }
+
+    fn has_will_execute(log: &[String]) -> bool {
+        log.iter().any(|e| e.contains("WillExecute"))
+    }
+
+    #[test]
+    fn edit_file_a_does_not_reparse_file_b() {
+        let mut db = EventDb::new();
+        let file_a = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module a; endmodule".to_string(),
+        );
+        let file_b = SourceFile::new(
+            &db,
+            lyra_source::FileId(1),
+            "module b; endmodule".to_string(),
+        );
+
+        // Prime the cache for both files
+        let _ = parse_file(&db, file_a);
+        let _ = parse_file(&db, file_b);
+        db.take_log();
+
+        // Edit file_a only
+        update_file_text(&mut db, file_a, "module a2; endmodule".to_string());
+
+        // Re-query file_b -- should be a cache hit (no WillExecute)
+        let _ = parse_file(&db, file_b);
+        let log = db.take_log();
+        assert!(
+            !has_will_execute(&log),
+            "file_b should not re-execute after file_a edit: {log:?}",
+        );
+
+        // Re-query file_a -- should re-execute
+        let _ = parse_file(&db, file_a);
+        let log = db.take_log();
+        assert!(
+            has_will_execute(&log),
+            "file_a should re-execute after its text changed: {log:?}",
+        );
+    }
+
+    #[test]
+    fn line_index_invalidated_on_text_change() {
+        let mut db = EventDb::new();
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "line one\nline two".to_string(),
+        );
+        let idx = line_index(&db, file);
+        assert_eq!(idx.line_count(), 2);
+
+        // Add a third line
+        update_file_text(&mut db, file, "line one\nline two\nline three".to_string());
+        let idx = line_index(&db, file);
+        assert_eq!(idx.line_count(), 3);
+    }
+
+    #[test]
+    fn unchanged_text_is_cached() {
+        let db = EventDb::new();
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module m; endmodule".to_string(),
+        );
+
+        // Prime the cache
+        let _ = parse_file(&db, file);
+        db.take_log();
+
+        // Query again with no text change
+        let _ = parse_file(&db, file);
+        let log = db.take_log();
+        assert!(
+            !has_will_execute(&log),
+            "no re-execution expected when text unchanged: {log:?}",
+        );
     }
 }

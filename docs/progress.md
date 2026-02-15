@@ -19,7 +19,13 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Typed AST wrappers with AstId
 - [x] Parse error diagnostics with correct spans
 
-## M2: Source Model and Incremental -- not started
+## M2: Source Model and Incremental
+
+- [x] Line index (byte offset to line/col mapping)
+- [x] File text update with incremental invalidation
+- [x] Cache-hit tests (EventDb, per-file isolation, no-change caching)
+- [ ] Preprocess invalidation via include deps
+- [ ] Source map model for macro expansion
 
 ## M3: Names and Scopes -- not started
 

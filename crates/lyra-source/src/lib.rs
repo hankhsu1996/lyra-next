@@ -1,5 +1,8 @@
 pub use text_size::{TextRange, TextSize};
 
+mod line_index;
+pub use line_index::{LineCol, LineIndex};
+
 /// Opaque handle to a source file in the database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileId(pub u32);

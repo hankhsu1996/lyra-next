@@ -21,7 +21,6 @@ pub fn lex(src: &str) -> Vec<Token> {
         let (kind, consumed) = lex_one(rest);
         tokens.push(Token {
             kind,
-            #[allow(clippy::cast_possible_truncation)]
             len: TextSize::new(consumed as u32),
         });
         rest = &rest[consumed..];
