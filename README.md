@@ -1,8 +1,6 @@
 # Lyra Next
 
-Lyra Next is a Rust-based SystemVerilog semantic platform -- a shared foundation for tooling such as language servers, linters, formatters, compilers, simulators, and synthesis flows.
-
-Instead of building each tool independently, Lyra Next provides a single incremental semantic model of the codebase that all tools can query.
+Lyra Next is a Rust-based SystemVerilog parser and semantic analyzer. It provides an incremental semantic model of the codebase that language servers, linters, formatters, compilers, and simulators can share, instead of each tool reimplementing its own.
 
 ## What this project is
 
@@ -41,9 +39,9 @@ Rust toolchain is pinned via `rust-toolchain.toml`.
 
 ## Documentation
 
-- `docs/roadmap.md` -- milestone plan (M0--M5)
-- `docs/architecture.md` -- crate layering and design principles
-- `docs/working_method.md` -- how features go from LRM text to merged code
+- `docs/roadmap.md`: milestone plan (M0 through M5)
+- `docs/architecture.md`: crate layering and design principles
+- `docs/working_method.md`: how features go from LRM text to merged code
 
 ## Contributing
 
