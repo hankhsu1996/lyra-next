@@ -6,11 +6,11 @@ use lyra_parser::{Parse, SyntaxNode};
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
-use crate::def_index::{DefIndex, Exports, UseSite};
+use crate::def_index::{DefIndex, Exports, NamePath, UseSite};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
-use crate::resolve_index::ResolveIndex;
+use crate::resolve_index::{Resolution, ResolveIndex};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
-use crate::symbols::{Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
+use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
 
 pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> DefIndex {
     let mut ctx = DefContext::new(ast_id_map);
@@ -28,24 +28,12 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
     ctx.export_modules
         .sort_by(|a, b| symbols.get(*a).name.cmp(&symbols.get(*b).name));
 
-    // Detect duplicate definitions within each scope
+    // Detect duplicate definitions within each scope, per namespace
     let mut diagnostics = Vec::new();
-    for scope in 0..scopes.len() {
-        let s = scopes.get(ScopeId(scope as u32));
-        let bindings = &s.bindings;
-        for i in 1..bindings.len() {
-            let prev = &symbols.get(bindings[i - 1]);
-            let curr = &symbols.get(bindings[i]);
-            if prev.name == curr.name {
-                diagnostics.push(SemanticDiag {
-                    kind: SemanticDiagKind::DuplicateDefinition {
-                        name: curr.name.clone(),
-                        original: prev.def_range,
-                    },
-                    range: curr.def_range,
-                });
-            }
-        }
+    for scope_idx in 0..scopes.len() {
+        let s = scopes.get(ScopeId(scope_idx as u32));
+        detect_duplicates(&symbols, &s.value_ns, &mut diagnostics);
+        detect_duplicates(&symbols, &s.type_ns, &mut diagnostics);
     }
 
     DefIndex {
@@ -60,23 +48,51 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
     }
 }
 
+fn detect_duplicates(
+    symbols: &crate::symbols::SymbolTable,
+    bindings: &[SymbolId],
+    diagnostics: &mut Vec<SemanticDiag>,
+) {
+    for i in 1..bindings.len() {
+        let prev = symbols.get(bindings[i - 1]);
+        let curr = symbols.get(bindings[i]);
+        if prev.name == curr.name {
+            diagnostics.push(SemanticDiag {
+                kind: SemanticDiagKind::DuplicateDefinition {
+                    name: curr.name.clone(),
+                    original: prev.def_range,
+                },
+                range: curr.def_range,
+            });
+        }
+    }
+}
+
 pub fn build_resolve_index(def: &DefIndex) -> ResolveIndex {
     let mut resolutions = HashMap::new();
     let mut diagnostics = Vec::new();
 
     for use_site in &def.use_sites {
-        if let Some(sym_id) = def
-            .scopes
-            .resolve(&def.symbols, use_site.scope, &use_site.name)
-        {
-            resolutions.insert(use_site.ast_id, sym_id);
-        } else {
-            diagnostics.push(SemanticDiag {
-                kind: SemanticDiagKind::UnresolvedName {
-                    name: use_site.name.clone(),
-                },
-                range: use_site.range,
-            });
+        match &use_site.path {
+            NamePath::Simple(name) => {
+                if let Some(sym_id) =
+                    def.scopes
+                        .resolve(&def.symbols, use_site.scope, use_site.expected_ns, name)
+                {
+                    resolutions.insert(
+                        use_site.ast_id,
+                        Resolution {
+                            symbol: sym_id,
+                            namespace: def.symbols.get(sym_id).kind.namespace(),
+                        },
+                    );
+                } else {
+                    diagnostics.push(SemanticDiag {
+                        kind: SemanticDiagKind::UnresolvedName { name: name.clone() },
+                        range: use_site.range,
+                    });
+                }
+            }
         }
     }
 
@@ -119,7 +135,7 @@ impl<'a> DefContext<'a> {
             def_range,
             scope,
         });
-        self.scopes.add_binding(scope, id);
+        self.scopes.add_binding(scope, id, kind);
         id
     }
 }
@@ -335,7 +351,8 @@ fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
             {
                 ctx.use_sites.push(UseSite {
-                    name: SmolStr::new(ident.text()),
+                    path: NamePath::Simple(SmolStr::new(ident.text())),
+                    expected_ns: Namespace::Value,
                     range: name_ref.text_range(),
                     scope,
                     ast_id: ast_id.erase(),
@@ -366,7 +383,8 @@ fn collect_name_refs_from_expr(ctx: &mut DefContext<'_>, node: &SyntaxNode, scop
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
         {
             ctx.use_sites.push(UseSite {
-                name: SmolStr::new(ident.text()),
+                path: NamePath::Simple(SmolStr::new(ident.text())),
+                expected_ns: Namespace::Value,
                 range: name_ref.text_range(),
                 scope,
                 ast_id: ast_id.erase(),
