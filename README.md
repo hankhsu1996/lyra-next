@@ -31,19 +31,9 @@ cargo test
 
 Rust toolchain is pinned via `rust-toolchain.toml`.
 
-## Documentation
-
-- `docs/roadmap.md`: milestone plan (M0 through M5)
-- `docs/architecture.md`: crate layering and design principles
-- `docs/working_method.md`: how features go from LRM text to merged code
-
 ## Contributing
 
-If you want to contribute:
-
-- Read `docs/working_method.md` for the development workflow
-- Look at `docs/roadmap.md` to see what's next
-- Discuss larger design ideas before implementing
+Design docs and the project roadmap live in `docs/`. Read through them before making changes, and discuss larger design ideas before implementing.
 
 ## License
 
