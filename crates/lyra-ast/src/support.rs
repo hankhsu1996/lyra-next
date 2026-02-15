@@ -5,7 +5,6 @@ use lyra_parser::{SyntaxNode, SyntaxToken};
 use rowan::SyntaxNodeChildren;
 
 use crate::node::AstNode;
-use crate::tokens::{Ident, Keyword, LiteralToken};
 
 /// Iterator over typed child nodes of a given type.
 pub struct AstChildren<N: AstNode> {
@@ -42,32 +41,10 @@ pub(crate) fn token(parent: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxToken
         .find(|tok| tok.kind() == kind)
 }
 
-/// Find the first `Ident` token child.
-pub(crate) fn ident(parent: &SyntaxNode) -> Option<Ident> {
-    token(parent, SyntaxKind::Ident).map(|t| Ident { token: t })
-}
-
-/// Find a keyword token from a set of possible keyword kinds.
-pub(crate) fn keyword(parent: &SyntaxNode, kinds: &[SyntaxKind]) -> Option<Keyword> {
+/// Find a token from a set of possible kinds.
+pub(crate) fn token_in(parent: &SyntaxNode, kinds: &[SyntaxKind]) -> Option<SyntaxToken> {
     parent
         .children_with_tokens()
         .filter_map(rowan::NodeOrToken::into_token)
         .find(|tok| kinds.contains(&tok.kind()))
-        .map(|t| Keyword { token: t })
-}
-
-/// Find the first literal token child.
-pub(crate) fn literal_token(parent: &SyntaxNode) -> Option<LiteralToken> {
-    let literal_kinds = [
-        SyntaxKind::IntLiteral,
-        SyntaxKind::RealLiteral,
-        SyntaxKind::BasedLiteral,
-        SyntaxKind::UnbasedUnsizedLiteral,
-        SyntaxKind::StringLiteral,
-    ];
-    parent
-        .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .find(|tok| literal_kinds.contains(&tok.kind()))
-        .map(|t| LiteralToken { token: t })
 }
