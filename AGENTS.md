@@ -35,6 +35,7 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - `docs/id-model.md` -- FileId, AstId, SymbolId, ScopeId stable identity strategy
 - `docs/incremental.md` -- Salsa integration, query design, caching
 - `docs/cst-ast.md` -- rowan green/red tree, trivia handling, typed AST wrappers
+- `docs/parser-design.md` -- parser invariants, decisions, known improvements
 - `docs/roadmap.md` -- milestone-based capability plan and exit demos
 - `docs/progress.md` -- milestone completion checklist
 
