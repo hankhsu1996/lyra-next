@@ -1,7 +1,9 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use lyra_db::{IncludeMap, LyraDatabase, SourceFile, parse_file};
+use lyra_db::{
+    CompilationUnit, IncludeMap, LyraDatabase, SourceFile, new_compilation_unit, parse_file,
+};
 use lyra_parser::{ParseError, SyntaxElement, SyntaxNode};
 use lyra_source::FileId;
 
@@ -55,6 +57,17 @@ impl TestWorkspace {
             ws.add_file(name, &text);
         }
         Ok(ws)
+    }
+
+    /// Access the underlying database.
+    pub fn db(&self) -> &LyraDatabase {
+        &self.db
+    }
+
+    /// Build a `CompilationUnit` from all files in the workspace.
+    pub fn compilation_unit(&self) -> CompilationUnit {
+        let sources: Vec<SourceFile> = self.files.iter().map(|(_, s)| *s).collect();
+        new_compilation_unit(&self.db, sources)
     }
 
     /// Dump the parse tree and diagnostics for all files as a single

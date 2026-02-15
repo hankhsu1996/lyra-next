@@ -1,3 +1,4 @@
+use lyra_source::FileId;
 use smol_str::SmolStr;
 
 use crate::def_index::{DefIndex, NamePath};
@@ -10,8 +11,10 @@ use crate::symbols::{Namespace, SymbolId, SymbolKind};
 /// scope tree, and use-site semantic keys. No `TextRange`, no `ErasedAstId`.
 /// `PartialEq` compares equal across whitespace-only edits, enabling Salsa
 /// to backdate and skip re-running expensive resolution logic downstream.
+/// `FileId` is offset-independent and does not affect backdating.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameGraph {
+    pub(crate) file: FileId,
     pub(crate) symbol_names: Box<[SmolStr]>,
     pub(crate) symbol_kinds: Box<[SymbolKind]>,
     pub(crate) scopes: ScopeTree,
@@ -54,6 +57,7 @@ impl NameGraph {
             .collect();
 
         Self {
+            file: def.file,
             symbol_names,
             symbol_kinds,
             scopes: def.scopes.clone(),

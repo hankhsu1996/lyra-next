@@ -48,10 +48,17 @@ impl<N: AstNode> AstId<N> {
 
 /// Type-erased AST node identity, for use in heterogeneous collections
 /// (e.g. symbol tables that store ids for different node types).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ErasedAstId(RawAstId);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+impl ErasedAstId {
+    /// The file this AST node belongs to.
+    pub fn file(self) -> FileId {
+        self.0.file
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct RawAstId {
     file: FileId,
     index: u32,

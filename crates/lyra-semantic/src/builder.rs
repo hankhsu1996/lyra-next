@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lyra_ast::{AstIdMap, AstNode, NameRef};
+use lyra_ast::{AstIdMap, AstNode, ModuleInstantiation, NameRef};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
 use lyra_source::{FileId, TextRange};
@@ -8,10 +8,11 @@ use smol_str::SmolStr;
 
 use crate::def_index::{DefIndex, Exports, NamePath, UseSite};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::global_index::GlobalDefIndex;
 use crate::name_graph::NameGraph;
-use crate::resolve_index::{Resolution, ResolveIndex};
+use crate::resolve_index::{CoreResolution, Resolution, ResolveIndex};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
-use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
+use crate::symbols::{GlobalSymbolId, Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
 
 pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> DefIndex {
     let mut ctx = DefContext::new(ast_id_map);
@@ -45,6 +46,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
             modules: ctx.export_modules.into_boxed_slice(),
         },
         use_sites: ctx.use_sites.into_boxed_slice(),
+        decl_to_symbol: ctx.decl_to_symbol,
         diagnostics: diagnostics.into_boxed_slice(),
     }
 }
@@ -74,20 +76,37 @@ fn detect_duplicates(
 /// Returns one entry per use-site (same order as `NameGraph.use_entries`).
 /// `None` means unresolved. No diagnostics -- those are produced later
 /// in `build_resolve_index` where ranges are available.
-pub fn build_resolve_core(graph: &NameGraph) -> Box<[Option<Resolution>]> {
+///
+/// Resolution is directed by `expected_ns` with no fallback:
+/// - `Value | Type` -> lexical `ScopeTree::resolve` only
+/// - `Definition` -> `GlobalDefIndex::resolve_module` only
+pub fn build_resolve_core(
+    graph: &NameGraph,
+    global: &GlobalDefIndex,
+) -> Box<[Option<CoreResolution>]> {
     graph
         .use_entries
         .iter()
         .map(|entry| match &entry.path {
-            NamePath::Simple(name) => {
-                let sym_id = graph
-                    .scopes
-                    .resolve(graph, entry.scope, entry.expected_ns, name)?;
-                Some(Resolution {
-                    symbol: sym_id,
-                    namespace: graph.symbol_kinds[sym_id.0 as usize].namespace(),
-                })
-            }
+            NamePath::Simple(name) => match entry.expected_ns {
+                Namespace::Value | Namespace::Type => {
+                    let sym_id =
+                        graph
+                            .scopes
+                            .resolve(graph, entry.scope, entry.expected_ns, name)?;
+                    Some(CoreResolution::Local {
+                        symbol: sym_id,
+                        namespace: graph.symbol_kinds[sym_id.0 as usize].namespace(),
+                    })
+                }
+                Namespace::Definition => {
+                    let decl = global.resolve_module(name)?;
+                    Some(CoreResolution::Global {
+                        decl,
+                        namespace: Namespace::Definition,
+                    })
+                }
+            },
         })
         .collect()
 }
@@ -97,20 +116,56 @@ pub fn build_resolve_core(graph: &NameGraph) -> Box<[Option<Resolution>]> {
 /// Zips `def.use_sites` (for `ast_ids` and ranges) with `core` (for
 /// resolutions), builds the `HashMap` and diagnostics. O(n) with no
 /// resolve logic.
-pub fn build_resolve_index(def: &DefIndex, core: &[Option<Resolution>]) -> ResolveIndex {
+///
+/// `lookup_decl` maps an `ErasedAstId` (from `CoreResolution::Global`)
+/// to a `SymbolId` in the target file. Provided by `lyra-db` which can
+/// query other files' `def_index_file`.
+pub fn build_resolve_index(
+    def: &DefIndex,
+    core: &[Option<CoreResolution>],
+    lookup_decl: &dyn Fn(lyra_ast::ErasedAstId) -> Option<SymbolId>,
+) -> ResolveIndex {
     let mut resolutions = HashMap::new();
     let mut diagnostics = Vec::new();
 
     for (use_site, resolution) in def.use_sites.iter().zip(core.iter()) {
-        if let Some(res) = resolution {
-            resolutions.insert(use_site.ast_id, *res);
-        } else if let Some(name) = use_site.path.as_simple() {
-            diagnostics.push(SemanticDiag {
-                kind: SemanticDiagKind::UnresolvedName {
-                    name: SmolStr::new(name),
-                },
-                range: use_site.range,
-            });
+        match resolution {
+            Some(CoreResolution::Local { symbol, namespace }) => {
+                resolutions.insert(
+                    use_site.ast_id,
+                    Resolution {
+                        symbol: GlobalSymbolId {
+                            file: def.file,
+                            local: *symbol,
+                        },
+                        namespace: *namespace,
+                    },
+                );
+            }
+            Some(CoreResolution::Global { decl, namespace }) => {
+                if let Some(local) = lookup_decl(*decl) {
+                    resolutions.insert(
+                        use_site.ast_id,
+                        Resolution {
+                            symbol: GlobalSymbolId {
+                                file: decl.file(),
+                                local,
+                            },
+                            namespace: *namespace,
+                        },
+                    );
+                }
+            }
+            None => {
+                if let Some(name) = use_site.path.as_simple() {
+                    diagnostics.push(SemanticDiag {
+                        kind: SemanticDiagKind::UnresolvedName {
+                            name: SmolStr::new(name),
+                        },
+                        range: use_site.range,
+                    });
+                }
+            }
         }
     }
 
@@ -126,6 +181,7 @@ struct DefContext<'a> {
     symbols: SymbolTableBuilder,
     scopes: ScopeTreeBuilder,
     export_modules: Vec<SymbolId>,
+    decl_to_symbol: HashMap<lyra_ast::ErasedAstId, SymbolId>,
     use_sites: Vec<UseSite>,
 }
 
@@ -136,6 +192,7 @@ impl<'a> DefContext<'a> {
             symbols: SymbolTableBuilder::new(),
             scopes: ScopeTreeBuilder::new(),
             export_modules: Vec::new(),
+            decl_to_symbol: HashMap::new(),
             use_sites: Vec::new(),
         }
     }
@@ -181,6 +238,13 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
             scope: module_scope,
         });
         ctx.export_modules.push(sym_id);
+
+        // Record decl_to_symbol for cross-file resolution
+        if let Some(module_decl) = lyra_ast::ModuleDecl::cast(node.clone())
+            && let Some(ast_id) = ctx.ast_id_map.ast_id(&module_decl)
+        {
+            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+        }
 
         // Visit parameter port list
         for child in node.children() {
@@ -256,7 +320,24 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         SyntaxKind::ParamDecl => {
             collect_param_decl(ctx, node, scope);
         }
-        SyntaxKind::ContinuousAssign | SyntaxKind::ModuleInstantiation => {
+        SyntaxKind::ContinuousAssign => {
+            collect_name_refs(ctx, node, scope);
+        }
+        SyntaxKind::ModuleInstantiation => {
+            // Record the module type name as a Definition-namespace use-site
+            if let Some(inst) = ModuleInstantiation::cast(node.clone())
+                && let Some(name_tok) = inst.module_name()
+                && let Some(ast_id) = ctx.ast_id_map.ast_id(&inst)
+            {
+                ctx.use_sites.push(UseSite {
+                    path: NamePath::Simple(SmolStr::new(name_tok.text())),
+                    expected_ns: Namespace::Definition,
+                    range: name_tok.text_range(),
+                    scope,
+                    ast_id: ast_id.erase(),
+                });
+            }
+            // Still collect NameRefs in port connection expressions
             collect_name_refs(ctx, node, scope);
         }
         SyntaxKind::AlwaysBlock | SyntaxKind::InitialBlock => {

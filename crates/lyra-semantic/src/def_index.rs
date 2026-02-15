@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
@@ -17,6 +19,10 @@ pub struct DefIndex {
     pub scopes: ScopeTree,
     pub exports: Exports,
     pub use_sites: Box<[UseSite]>,
+    /// Reverse map from exported declaration `ErasedAstId` to `SymbolId`.
+    /// Used by cross-file resolution to convert `ErasedAstId` (from
+    /// `GlobalDefIndex`) back to a `SymbolId` in this file.
+    pub decl_to_symbol: HashMap<ErasedAstId, SymbolId>,
     pub diagnostics: Box<[SemanticDiag]>,
 }
 

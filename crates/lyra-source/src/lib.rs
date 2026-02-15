@@ -7,7 +7,7 @@ mod line_index;
 pub use line_index::{LineCol, LineIndex};
 
 /// Opaque handle to a source file in the database.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
 
 /// A span within a single file.
