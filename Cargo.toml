@@ -38,3 +38,5 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+# TextSize is u32; usize-to-u32 casts are safe for source-file-sized data.
+cast_possible_truncation = "allow"
