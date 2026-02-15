@@ -11,7 +11,11 @@ impl Language for SvLanguage {
     type Kind = SyntaxKind;
 
     fn kind_from_raw(raw: rowan::SyntaxKind) -> SyntaxKind {
-        assert!(raw.0 <= SyntaxKind::ParamDecl as u16);
+        assert!(
+            raw.0 <= SyntaxKind::ParamDecl as u16,
+            "invalid SyntaxKind value: {}",
+            raw.0
+        );
         // SAFETY: SyntaxKind is repr(u16) with contiguous variants.
         unsafe { std::mem::transmute(raw.0) }
     }

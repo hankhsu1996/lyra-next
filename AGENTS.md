@@ -42,7 +42,7 @@ Design docs live in `docs/`. Read these before making architectural changes:
 
 - **Salsa lives only in `lyra-db`** --no `#[salsa::*]` annotations in any other crate. Other crates define types and algorithms; `lyra-db` wires them into the incremental framework.
 - **Diagnostics are plain data** --`Vec<Diagnostic>`, no mutable global sink, no side-channel error reporting.
-- **SyntaxKind is stable** --tokens `0..NODE_START`, nodes `NODE_START..`. Never reorder, never renumber existing variants. Append only.
+- **SyntaxKind is stable** --never reorder or remove existing variants. New tokens go before `__NodeStart`; new nodes go after it. Token ordinals are stable across releases. Adding tokens shifts `NODE_START` and node ordinals, which is expected (node ordinals are workspace-internal, never serialized).
 - **Lexer produces trivia** --whitespace and comments are tokens. The parser consumes them into the green tree. Roundtrip fidelity is mandatory.
 - **AstId = FileId + (kind, offset)** --stable identity for AST nodes across incremental runs.
 - **Frozen stores in semantic** --symbol tables, scope trees are built once per analysis pass, keyed by stable IDs, no direct references.
