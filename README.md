@@ -1,7 +1,5 @@
 # Lyra Next
 
-SystemVerilog tooling is fragmented. Every language server, linter, simulator, and compiler implements its own parser and semantic analysis.
-
 Lyra Next is a unified SystemVerilog toolchain built in Rust. A single incremental semantic core handles parsing, name resolution, type checking, and diagnostics. Tools like the LSP, linter, formatter, and simulator are all clients of that core.
 
 The semantic core provides:
