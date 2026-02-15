@@ -2,7 +2,6 @@
 name: merged
 description: Clean up after PR is merged
 disable-model-invocation: true
-allowed-tools: Bash(git switch:*), Bash(git pull:*), Bash(git branch:*)
 ---
 
 # Merged
