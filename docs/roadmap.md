@@ -37,12 +37,15 @@ capabilities. Current status lives in `docs/progress.md`.
 - `lyra-parser` builds rowan green trees. Roundtrip fidelity: green tree
   text equals original source, byte for byte.
 - `lyra-ast` provides typed wrappers with `AstId` (stable node identity).
-- `lyra-preprocess` handles basic preprocessor directives (`define`,
-  `ifdef`, `include`).
+- `lyra-preprocess` defines the preprocessing stage contract: token
+  stream output, source map (expanded span -> original file/range),
+  and include dependency graph. Identity (passthrough) implementation
+  with correct spans.
 - Parse error diagnostics with correct spans.
 
 **Demo:** Parse a multi-module SV file, dump the CST, verify roundtrip.
-Parse errors shown with line/column.
+Parse errors shown with line/column. Preprocess pipeline shape is wired
+through `lyra-db` queries.
 
 ## M2: Source Model and Incremental Story
 
@@ -55,6 +58,10 @@ caching.
 - Line index for efficient offset-to-line/column conversion.
 - Incremental reparse: editing a file invalidates only affected queries.
 - `AstIdMap` per file, stable across incremental runs.
+- Preprocess stage participates in Salsa invalidation via include
+  dependency graph.
+- Source map model defined so macro expansion can plug in without
+  changing downstream queries.
 - Cache-hit tests: edit file A, verify file B's queries are not
   re-evaluated.
 

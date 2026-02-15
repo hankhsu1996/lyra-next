@@ -93,6 +93,14 @@ Do not introduce circular dependencies. Do not add dependencies that violate thi
   submodules in a matching directory). Do not use separate top-level test
   files with a shared `common/mod.rs` -- each top-level file compiles as
   its own binary, causing dead_code warnings on shared helpers.
+  - **Per-crate tests**: each crate owns integration tests for its public API
+    in its own `tests/` directory. Organize submodules by domain (e.g.
+    `identity`, `operators`) not by type/struct.
+  - **Cross-crate tests**: `lyra-tests` holds end-to-end snapshot tests that
+    exercise the full pipeline (lex -> preprocess -> parse -> DB). Use
+    `TestWorkspace` for multi-file scenarios.
+  - **DB tests**: `lyra-db` inline `#[cfg(test)]` tests are the exception --
+    they test Salsa query wiring which requires access to `LyraDatabase`.
 - **Lint suppression**: do not use `#[allow(...)]` to silence warnings.
   Fix the root cause or restructure to eliminate the warning.
 - **Visibility**: prefer `pub(crate)` over `pub` unless the item is part of the crate's public API.

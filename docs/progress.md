@@ -11,11 +11,11 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Snapshot test framework
 - [x] CI (fmt, clippy, test, policy checks)
 
-## M1: Syntax Core -- in progress
+## M1: Syntax Core -- done
 
 - [x] Lexer (full IEEE 1800-2023 token set)
 - [x] Parser (grammar rules, rowan green trees)
-- [ ] Preprocessor (`define`, `ifdef`, `include`)
+- [x] Preprocess stage contract (source map, include dep graph, DB queries)
 - [x] Typed AST wrappers with AstId
 - [x] Parse error diagnostics with correct spans
 
