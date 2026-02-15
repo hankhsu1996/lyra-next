@@ -26,6 +26,7 @@ pub type SyntaxToken = rowan::SyntaxToken<SvLanguage>;
 pub type SyntaxElement = rowan::SyntaxElement<SvLanguage>;
 
 /// Result of parsing a source file.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parse {
     pub green: rowan::GreenNode,
     pub errors: Vec<lyra_diag::Diagnostic>,

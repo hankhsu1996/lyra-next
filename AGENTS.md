@@ -44,6 +44,7 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - **AstId = FileId + (kind, offset)** --stable identity for AST nodes across incremental runs.
 - **Frozen stores in semantic** --symbol tables, scope trees are built once per analysis pass, keyed by stable IDs, no direct references.
 - **`lyra-source` has no arena dependency** --spans and text primitives are independent of allocation strategy.
+- **Design docs use semantic terms, not tool terms** --the core provides queries (`resolve`, `type_of`); tools (LSP, linter) consume them. Say "resolve a name to its declaration," not "go-to-definition."
 
 ## Crate Dependency Graph
 
@@ -104,6 +105,11 @@ After debugging and finding the immediate cause:
 4. **Avoid band-aids** -- don't just add a control branch; address the fundamental issue
 
 The goal: leave the codebase stronger, not just patched.
+
+### Capturing Learnings
+
+When work reveals a reusable principle or a recurring mistake, update this file.
+Design docs capture what to build; this file captures how to work.
 
 ## Before Submitting Changes
 
