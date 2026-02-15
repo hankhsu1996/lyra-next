@@ -27,3 +27,8 @@ Suggested shape:
   tracking separate
 - slipped: none
 - next: move M1 items in order and keep progress notes short
+
+2026-02-15
+- shipped: full lexer expansion (IEEE 1800-2023 Ch 5), domain-split test layout
+- slipped: none
+- next: parser grammar, preprocessor

@@ -10,7 +10,7 @@ Lyra Next is not a compiler frontend, not a simulator, and not an LSP.
 
 It is a semantic database for SystemVerilog:
 
-- Lossless CST (trivia-preserving syntax tree)
+- Hand-written recursive-descent parser producing a lossless CST
 - Normalized typed AST
 - Symbol and scope resolution with stable IDs
 - Type system and constant evaluation foundations
@@ -32,27 +32,6 @@ Lyra Next explores a new architecture in Rust focused on:
 
 Over time, Lyra Next is expected to become the primary implementation of Lyra.
 
-## Current status
-
-This repository is in the early scaffold stage.
-
-Implemented:
-- Workspace structure
-- Core crate layout
-- Arena wrapper
-- Source model primitives
-- Salsa database wiring
-- Rowan CST foundation
-
-Not implemented yet:
-- Full lexer
-- SystemVerilog grammar
-- Name resolution
-- Type system
-- Elaboration
-
-Expect rapid architectural changes.
-
 ## Building
 
 ```bash
@@ -62,15 +41,19 @@ cargo test
 
 Rust toolchain is pinned via `rust-toolchain.toml`.
 
-## Contributing
+## Documentation
 
-This project is currently in active design phase.
+- `docs/roadmap.md` -- milestone plan (M0--M5)
+- `docs/architecture.md` -- crate layering and design principles
+- `docs/working_method.md` -- how features go from LRM text to merged code
+
+## Contributing
 
 If you want to contribute:
 
-* Read `docs/architecture.md`
-* Look for issues labeled `good-first-layer`
-* Discuss larger design ideas before implementing
+- Read `docs/working_method.md` for the development workflow
+- Look at `docs/roadmap.md` to see what's next
+- Discuss larger design ideas before implementing
 
 ## License
 
