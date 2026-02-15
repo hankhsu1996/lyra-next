@@ -22,9 +22,8 @@ impl TestWorkspace {
 
     /// Add a source file to the workspace.
     pub fn add_file(&mut self, path: &str, text: &str) -> &mut Self {
-        #[allow(clippy::cast_possible_truncation)]
         let file_id = FileId(self.files.len() as u32);
-        let source = SourceFile::new(&self.db, file_id, text.to_owned());
+        let source = SourceFile::new(&self.db, file_id, text.to_owned(), vec![]);
         self.files.push((path.to_owned(), source));
         self
     }
