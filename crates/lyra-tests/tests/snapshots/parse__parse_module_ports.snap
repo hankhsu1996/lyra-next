@@ -1,0 +1,103 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..146
+  ModuleDecl@0..145
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..12 "adder"
+    ParamPortList@12..39
+      Whitespace@12..13 " "
+      Hash@13..14 "#"
+      LParen@14..15 "("
+      ParamDecl@15..37
+        Whitespace@15..18 "\n  "
+        ParameterKw@18..27 "parameter"
+        Whitespace@27..28 " "
+        Ident@28..33 "WIDTH"
+        Whitespace@33..34 " "
+        Assign@34..35 "="
+        Literal@35..37
+          Whitespace@35..36 " "
+          IntLiteral@36..37 "8"
+      Whitespace@37..38 "\n"
+      RParen@38..39 ")"
+    PortList@39..134
+      Whitespace@39..40 " "
+      LParen@40..41 "("
+      Port@41..70
+        Whitespace@41..44 "\n  "
+        InputKw@44..49 "input"
+        TypeSpec@49..68
+          Whitespace@49..51 "  "
+          LogicKw@51..56 "logic"
+          PackedDimension@56..68
+            Whitespace@56..57 " "
+            LBracket@57..58 "["
+            BinExpr@58..65
+              NameRef@58..63
+                Ident@58..63 "WIDTH"
+              Minus@63..64 "-"
+              Literal@64..65
+                IntLiteral@64..65 "1"
+            Colon@65..66 ":"
+            Literal@66..67
+              IntLiteral@66..67 "0"
+            RBracket@67..68 "]"
+        Whitespace@68..69 " "
+        Ident@69..70 "a"
+      Comma@70..71 ","
+      Port@71..100
+        Whitespace@71..74 "\n  "
+        InputKw@74..79 "input"
+        TypeSpec@79..98
+          Whitespace@79..81 "  "
+          LogicKw@81..86 "logic"
+          PackedDimension@86..98
+            Whitespace@86..87 " "
+            LBracket@87..88 "["
+            BinExpr@88..95
+              NameRef@88..93
+                Ident@88..93 "WIDTH"
+              Minus@93..94 "-"
+              Literal@94..95
+                IntLiteral@94..95 "1"
+            Colon@95..96 ":"
+            Literal@96..97
+              IntLiteral@96..97 "0"
+            RBracket@97..98 "]"
+        Whitespace@98..99 " "
+        Ident@99..100 "b"
+      Comma@100..101 ","
+      Port@101..132
+        Whitespace@101..104 "\n  "
+        OutputKw@104..110 "output"
+        TypeSpec@110..128
+          Whitespace@110..111 " "
+          LogicKw@111..116 "logic"
+          PackedDimension@116..128
+            Whitespace@116..117 " "
+            LBracket@117..118 "["
+            BinExpr@118..125
+              NameRef@118..123
+                Ident@118..123 "WIDTH"
+              Minus@123..124 "-"
+              Literal@124..125
+                IntLiteral@124..125 "1"
+            Colon@125..126 ":"
+            Literal@126..127
+              IntLiteral@126..127 "0"
+            RBracket@127..128 "]"
+        Whitespace@128..129 " "
+        Ident@129..132 "sum"
+      Whitespace@132..133 "\n"
+      RParen@133..134 ")"
+    Semicolon@134..135 ";"
+    ModuleBody@135..135
+    Whitespace@135..136 "\n"
+    EndmoduleKw@136..145 "endmodule"
+  Whitespace@145..146 "\n"
+---
+no diagnostics

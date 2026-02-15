@@ -1,0 +1,99 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..118
+  ModuleDecl@0..117
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..16 "expr_test"
+    PortList@16..80
+      LParen@16..17 "("
+      Port@17..36
+        InputKw@17..22 "input"
+        TypeSpec@22..34
+          Whitespace@22..23 " "
+          LogicKw@23..28 "logic"
+          PackedDimension@28..34
+            Whitespace@28..29 " "
+            LBracket@29..30 "["
+            Literal@30..31
+              IntLiteral@30..31 "7"
+            Colon@31..32 ":"
+            Literal@32..33
+              IntLiteral@32..33 "0"
+            RBracket@33..34 "]"
+        Whitespace@34..35 " "
+        Ident@35..36 "a"
+      Comma@36..37 ","
+      Port@37..57
+        Whitespace@37..38 " "
+        InputKw@38..43 "input"
+        TypeSpec@43..55
+          Whitespace@43..44 " "
+          LogicKw@44..49 "logic"
+          PackedDimension@49..55
+            Whitespace@49..50 " "
+            LBracket@50..51 "["
+            Literal@51..52
+              IntLiteral@51..52 "7"
+            Colon@52..53 ":"
+            Literal@53..54
+              IntLiteral@53..54 "0"
+            RBracket@54..55 "]"
+        Whitespace@55..56 " "
+        Ident@56..57 "b"
+      Comma@57..58 ","
+      Port@58..79
+        Whitespace@58..59 " "
+        OutputKw@59..65 "output"
+        TypeSpec@65..77
+          Whitespace@65..66 " "
+          LogicKw@66..71 "logic"
+          PackedDimension@71..77
+            Whitespace@71..72 " "
+            LBracket@72..73 "["
+            Literal@73..74
+              IntLiteral@73..74 "7"
+            Colon@74..75 ":"
+            Literal@75..76
+              IntLiteral@75..76 "0"
+            RBracket@76..77 "]"
+        Whitespace@77..78 " "
+        Ident@78..79 "y"
+      RParen@79..80 ")"
+    Semicolon@80..81 ";"
+    ModuleBody@81..107
+      ContinuousAssign@81..107
+        Whitespace@81..84 "\n  "
+        AssignKw@84..90 "assign"
+        NameRef@90..92
+          Whitespace@90..91 " "
+          Ident@91..92 "y"
+        Whitespace@92..93 " "
+        Assign@93..94 "="
+        BinExpr@94..106
+          ParenExpr@94..102
+            Whitespace@94..95 " "
+            LParen@95..96 "("
+            BinExpr@96..101
+              NameRef@96..97
+                Ident@96..97 "a"
+              Whitespace@97..98 " "
+              Plus@98..99 "+"
+              NameRef@99..101
+                Whitespace@99..100 " "
+                Ident@100..101 "b"
+            RParen@101..102 ")"
+          Whitespace@102..103 " "
+          Star@103..104 "*"
+          Literal@104..106
+            Whitespace@104..105 " "
+            IntLiteral@105..106 "2"
+        Semicolon@106..107 ";"
+    Whitespace@107..108 "\n"
+    EndmoduleKw@108..117 "endmodule"
+  Whitespace@117..118 "\n"
+---
+no diagnostics

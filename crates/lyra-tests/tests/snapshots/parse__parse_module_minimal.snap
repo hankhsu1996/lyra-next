@@ -4,12 +4,14 @@ expression: ws.dump_parse()
 ---
 // file: main.sv
 SourceFile@0..22
-  ModuleKw@0..6 "module"
-  Whitespace@6..7 " "
-  Ident@7..10 "top"
-  Semicolon@10..11 ";"
-  Whitespace@11..12 " "
-  EndmoduleKw@12..21 "endmodule"
+  ModuleDecl@0..21
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..10 "top"
+    Semicolon@10..11 ";"
+    ModuleBody@11..11
+    Whitespace@11..12 " "
+    EndmoduleKw@12..21 "endmodule"
   Whitespace@21..22 "\n"
 ---
 no diagnostics

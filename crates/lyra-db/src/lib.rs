@@ -22,7 +22,7 @@ pub fn preprocess_file(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_l
 #[salsa::tracked(return_ref)]
 pub fn parse_file(db: &dyn salsa::Database, file: SourceFile) -> lyra_parser::Parse {
     let tokens = preprocess_file(db, file);
-    lyra_parser::parse(file.file_id(db), tokens, file.text(db))
+    lyra_parser::parse(tokens, file.text(db))
 }
 
 /// The central Salsa database for Lyra.
