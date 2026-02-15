@@ -1,0 +1,11 @@
+[package]
+name = "lyra-source"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+text-size.workspace = true

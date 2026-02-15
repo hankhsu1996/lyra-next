@@ -1,0 +1,19 @@
+[package]
+name = "lyra-db"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lyra-source.workspace = true
+lyra-diag.workspace = true
+lyra-lexer.workspace = true
+lyra-preprocess.workspace = true
+lyra-parser.workspace = true
+lyra-ast.workspace = true
+lyra-semantic.workspace = true
+lyra-arena.workspace = true
+salsa.workspace = true

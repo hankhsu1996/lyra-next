@@ -1,0 +1,11 @@
+[package]
+name = "lyra-arena"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bumpalo.workspace = true

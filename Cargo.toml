@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.0.1"
+
+[workspace.dependencies]
+# internal
+lyra-arena = { path = "crates/lyra-arena" }
+lyra-source = { path = "crates/lyra-source" }
+lyra-diag = { path = "crates/lyra-diag" }
+lyra-lexer = { path = "crates/lyra-lexer" }
+lyra-preprocess = { path = "crates/lyra-preprocess" }
+lyra-parser = { path = "crates/lyra-parser" }
+lyra-ast = { path = "crates/lyra-ast" }
+lyra-semantic = { path = "crates/lyra-semantic" }
+lyra-db = { path = "crates/lyra-db" }
+
+# external
+bumpalo = { version = "3", features = ["collections"] }
+text-size = "1"
+rowan = "0.16"
+salsa = "0.19"
+
+[workspace.lints.rust]
+unused_must_use = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Allow common pedantic exceptions
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

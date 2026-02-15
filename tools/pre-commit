@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Pre-commit hook: runs formatting, linting, and policy checks.
+# Install: ln -sf ../../tools/pre-commit .git/hooks/pre-commit
+
+set -e
+
+echo "pre-commit: cargo fmt --check"
+cargo fmt --check
+
+echo "pre-commit: cargo clippy"
+cargo clippy -- -D warnings
+
+echo "pre-commit: policy checks"
+python3 tools/policy/check_errors.py --staged
+python3 tools/policy/check_ascii.py --staged
+
+echo "pre-commit: all checks passed"
