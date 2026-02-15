@@ -21,6 +21,7 @@ Lyra Next is a Rust-based SystemVerilog **semantic platform** --a single increme
 | `lyra-ast` | Typed AST wrappers, `AstId` (stable node identity), `AstIdMap` |
 | `lyra-semantic` | Symbol tables, scope trees, type representation, const evaluation |
 | `lyra-db` | Salsa incremental database --the only crate that touches salsa |
+| `lyra-tests` | Snapshot test harness: `TestWorkspace` builder and tree/diagnostic dump utilities |
 
 ### Data Flow
 
@@ -34,6 +35,8 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - `docs/id-model.md` -- FileId, AstId, SymbolId, ScopeId stable identity strategy
 - `docs/incremental.md` -- Salsa integration, query design, caching
 - `docs/cst-ast.md` -- rowan green/red tree, trivia handling, typed AST wrappers
+- `docs/roadmap.md` -- milestone-based capability plan and exit demos
+- `docs/progress.md` -- dated shipped/slipped execution log
 
 ## Architecture Rules
 
@@ -58,6 +61,7 @@ lyra-parser      -> lyra-source, lyra-lexer, lyra-diag, rowan
 lyra-ast         -> lyra-source, lyra-lexer, lyra-parser, rowan
 lyra-semantic    -> lyra-source, lyra-ast, lyra-diag, lyra-arena
 lyra-db          -> salsa + all above
+lyra-tests       -> lyra-source, lyra-lexer, lyra-preprocess, lyra-parser, lyra-diag, lyra-db
 ```
 
 Do not introduce circular dependencies. Do not add dependencies that violate this graph without discussion.
@@ -111,6 +115,16 @@ The goal: leave the codebase stronger, not just patched.
 When work reveals a reusable principle or a recurring mistake, update this file.
 Design docs capture what to build; this file captures how to work.
 
+## Planning and Execution
+
+- Keep planning lightweight with two docs only: `docs/roadmap.md` and
+  `docs/progress.md`.
+- `docs/roadmap.md` is future-facing milestone planning. Do not put dated
+  execution logs there.
+- `docs/progress.md` is past-facing. Add short shipped/slipped notes only for
+  meaningful changes.
+- Update roadmap only when priorities change.
+
 ## Before Submitting Changes
 
 ```bash
@@ -128,6 +142,8 @@ Library code (everything under `crates/`) must not panic at runtime:
 
 - No `.unwrap()` or `.expect()` -- use `Result`/`Option` propagation. Tests are exempt.
 - No `panic!()` in library code. Tests are exempt.
+- Utility crates under `crates/` are still library code and must not use
+  panic-based error handling.
 - Every `unsafe` block must have a `// SAFETY:` comment on the preceding line.
 - No `dbg!()` or `println!()` -- use structured diagnostics.
 - No section-header comments (e.g. `// --- Foo ---` or `// ### Bar ###`). Use plain `// Foo` instead.

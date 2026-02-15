@@ -84,9 +84,13 @@ def is_in_test_context(lines: list[str], lineno: int) -> bool:
         line = lines[i]
         if RE_TEST_ATTR.search(line):
             return True
-        # If we hit a top-level fn/impl/mod without test attr, stop
+        # If we hit a top-level fn/impl/mod, check if it has a test attr
+        # on the preceding line(s) before giving up
         stripped = line.lstrip()
         if stripped.startswith("pub fn ") or stripped.startswith("fn "):
+            for j in range(i - 1, max(0, i - 3) - 1, -1):
+                if RE_TEST_ATTR.search(lines[j]):
+                    return True
             return False
         if stripped.startswith("impl ") or stripped.startswith("pub mod "):
             return False

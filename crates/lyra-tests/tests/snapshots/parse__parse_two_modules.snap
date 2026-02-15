@@ -1,0 +1,24 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: a.sv
+SourceFile@0..20
+  ModuleKw@0..6 "module"
+  Whitespace@6..7 " "
+  Ident@7..8 "a"
+  Semicolon@8..9 ";"
+  Whitespace@9..10 " "
+  EndmoduleKw@10..19 "endmodule"
+  Whitespace@19..20 "\n"
+// file: b.sv
+SourceFile@0..20
+  ModuleKw@0..6 "module"
+  Whitespace@6..7 " "
+  Ident@7..8 "b"
+  Semicolon@8..9 ";"
+  Whitespace@9..10 " "
+  EndmoduleKw@10..19 "endmodule"
+  Whitespace@19..20 "\n"
+---
+no diagnostics

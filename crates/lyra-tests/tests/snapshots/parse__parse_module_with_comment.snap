@@ -1,0 +1,17 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..36
+  LineComment@0..13 "// top module"
+  Whitespace@13..14 "\n"
+  ModuleKw@14..20 "module"
+  Whitespace@20..21 " "
+  Ident@21..24 "top"
+  Semicolon@24..25 ";"
+  Whitespace@25..26 " "
+  EndmoduleKw@26..35 "endmodule"
+  Whitespace@35..36 "\n"
+---
+no diagnostics
