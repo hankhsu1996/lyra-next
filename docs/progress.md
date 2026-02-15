@@ -1,34 +1,28 @@
-# Progress Log
+# Progress
 
-Quick notes on what happened each week.
+Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 
-Keep it simple:
+## M0: Harness -- done
 
-- Add one entry per week.
-- Write short bullets only.
-- Keep roadmap-style planning in `docs/roadmap.md`.
+- [x] Workspace with all crates compiling
+- [x] Salsa database with placeholder queries
+- [x] Diagnostics as plain data
+- [x] Source model primitives (FileId, Span, TextSize)
+- [x] Snapshot test framework
+- [x] CI (fmt, clippy, test, policy checks)
 
-Suggested shape:
+## M1: Syntax Core -- in progress
 
-`YYYY-MM-DD`
-- shipped:
-- slipped:
-- next:
+- [x] Lexer (full IEEE 1800-2023 token set)
+- [ ] Parser (grammar rules, rowan green trees)
+- [ ] Preprocessor (`define`, `ifdef`, `include`)
+- [ ] Typed AST wrappers with AstId
+- [ ] Parse error diagnostics with correct spans
 
-## Entries
+## M2: Source Model and Incremental -- not started
 
-2026-02-15
-- shipped: simplified planning to roadmap + progress only
-- slipped: panic-based handling in `crates/lyra-tests` still needs fix
-- next: replace panic/expect paths with fallible handling
+## M3: Names and Scopes -- not started
 
-2026-02-15
-- shipped: restored detailed milestone roadmap (M0--M5) while keeping progress
-  tracking separate
-- slipped: none
-- next: move M1 items in order and keep progress notes short
+## M4: Type Skeleton -- not started
 
-2026-02-15
-- shipped: full lexer expansion (IEEE 1800-2023 Ch 5), domain-split test layout
-- slipped: none
-- next: parser grammar, preprocessor
+## M5: Tool-Grade Foundation -- not started
