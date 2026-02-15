@@ -26,7 +26,10 @@ fn identity_source_map() {
     let tokens = lyra_lexer::lex(text);
     let output = preprocess_identity(FileId(7), &tokens, text);
     let range = TextRange::new(TextSize::new(0), TextSize::new(6));
-    let span = output.source_map.map_span(range);
+    let span = output
+        .source_map
+        .map_span(range)
+        .expect("in-bounds should map");
     assert_eq!(span.file, FileId(7));
 }
 

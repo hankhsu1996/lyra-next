@@ -1,5 +1,8 @@
 pub use text_size::{TextRange, TextSize};
 
+mod expansion;
+pub use expansion::{ExpansionFrame, ExpansionKind, FileLoc};
+
 mod line_index;
 pub use line_index::{LineCol, LineIndex};
 

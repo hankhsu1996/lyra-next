@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use lyra_lexer::SyntaxKind;
 use lyra_preprocess::{IncludeProvider, ResolvedInclude, preprocess, scan_includes};
-use lyra_source::{FileId, TextSize};
+use lyra_source::{ExpansionKind, FileId, TextRange, TextSize};
 
 struct MapProvider {
-    files: HashMap<String, (FileId, String)>,
+    files: HashMap<String, (FileId, String, Vec<lyra_lexer::Token>)>,
 }
 
 impl MapProvider {
@@ -16,18 +16,19 @@ impl MapProvider {
     }
 
     fn add(&mut self, path: &str, file_id: FileId, text: &str) {
+        let tokens = lyra_lexer::lex(text);
         self.files
-            .insert(path.to_string(), (file_id, text.to_string()));
+            .insert(path.to_string(), (file_id, text.to_string(), tokens));
     }
 }
 
 impl IncludeProvider for MapProvider {
-    fn resolve(&self, path: &str) -> Option<ResolvedInclude> {
-        let (file_id, text) = self.files.get(path)?;
+    fn resolve(&self, path: &str) -> Option<ResolvedInclude<'_>> {
+        let (file_id, text, tokens) = self.files.get(path)?;
         Some(ResolvedInclude {
             file_id: *file_id,
-            tokens: lyra_lexer::lex(text),
-            text: text.clone(),
+            tokens,
+            text,
         })
     }
 }
@@ -223,4 +224,103 @@ fn multiple_includes() {
     assert!(output.expanded_text.contains("wire a;"));
     assert!(output.expanded_text.contains("wire b;"));
     assert!(!output.expanded_text.contains("`include"));
+}
+
+#[test]
+fn resolve_file_loc_main_file() {
+    let mut provider = MapProvider::new();
+    provider.add("b.sv", FileId(1), "wire w;");
+
+    let text = "module top; `include \"b.sv\"\nendmodule";
+    let tokens = lyra_lexer::lex(text);
+    let output = preprocess(FileId(0), &tokens, text, &provider);
+
+    // Offset 0 is in the main file
+    let loc = output
+        .source_map
+        .resolve_file_loc(TextSize::new(0))
+        .expect("in-bounds offset should resolve");
+    assert_eq!(loc.file, FileId(0));
+    assert_eq!(loc.offset, TextSize::new(0));
+}
+
+#[test]
+fn resolve_file_loc_included_range() {
+    let mut provider = MapProvider::new();
+    provider.add("b.sv", FileId(1), "wire w;");
+
+    let text = "module top; `include \"b.sv\"\nendmodule";
+    let tokens = lyra_lexer::lex(text);
+    let output = preprocess(FileId(0), &tokens, text, &provider);
+
+    // "module top; " is 12 bytes, included content starts at offset 12
+    let loc = output
+        .source_map
+        .resolve_file_loc(TextSize::new(12))
+        .expect("in-bounds offset should resolve");
+    assert_eq!(loc.file, FileId(1));
+    assert_eq!(loc.offset, TextSize::new(0));
+}
+
+#[test]
+fn expansion_frame_identity_returns_none() {
+    let mut provider = MapProvider::new();
+    provider.add("b.sv", FileId(1), "wire w;");
+
+    let text = "module top; `include \"b.sv\"\nendmodule";
+    let tokens = lyra_lexer::lex(text);
+    let output = preprocess(FileId(0), &tokens, text, &provider);
+
+    // Offset 0 is identity-mapped (main file), no expansion frame
+    assert!(
+        output
+            .source_map
+            .expansion_frame(TextSize::new(0))
+            .is_none()
+    );
+}
+
+#[test]
+fn expansion_frame_included_position() {
+    let mut provider = MapProvider::new();
+    provider.add("b.sv", FileId(1), "wire w;");
+
+    let text = "module top; `include \"b.sv\"\nendmodule";
+    let tokens = lyra_lexer::lex(text);
+    let output = preprocess(FileId(0), &tokens, text, &provider);
+
+    // Offset 12 is in the included range
+    let frame = output
+        .source_map
+        .expansion_frame(TextSize::new(12))
+        .expect("included offset should have expansion frame");
+    assert_eq!(frame.kind, ExpansionKind::Include);
+    assert_eq!(frame.call_site.file, FileId(0));
+    assert_eq!(frame.spelling.file, FileId(1));
+    assert_eq!(frame.spelling.offset, TextSize::new(0));
+}
+
+#[test]
+fn expansion_frame_call_site_covers_directive() {
+    let mut provider = MapProvider::new();
+    provider.add("b.sv", FileId(1), "wire w;");
+
+    let text = "module top; `include \"b.sv\"\nendmodule";
+    let tokens = lyra_lexer::lex(text);
+    let output = preprocess(FileId(0), &tokens, text, &provider);
+
+    let frame = output
+        .source_map
+        .expansion_frame(TextSize::new(12))
+        .expect("included offset should have expansion frame");
+
+    // call_site should cover the entire `include "b.sv"` directive
+    // "module top; " = 12 bytes, then `include "b.sv"` = 15 bytes
+    // "`include" (8) + " " (1) + "\"b.sv\"" (6) = 15
+    let directive = "`include \"b.sv\"";
+    let expected_range = TextRange::new(
+        TextSize::new(12),
+        TextSize::new(12 + directive.len() as u32),
+    );
+    assert_eq!(frame.call_site.range, expected_range);
 }

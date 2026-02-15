@@ -79,3 +79,21 @@ This is verified by two `EventDb` tests:
 
 - `edit_included_file_invalidates_includer`: editing file B causes file A (which includes B) to re-execute its query chain.
 - `edit_included_file_does_not_invalidate_unrelated`: editing file B does not cause file C (which has no relationship to B) to re-execute.
+
+## Expansion Stack
+
+The expansion stack traces how any position in the expanded output arrived there -- through which chain of includes (and eventually macros). This powers "included from here" diagnostic note chains.
+
+### Per-file expansion frames
+
+Each file's `SourceMap` provides `expansion_frame(offset)` which returns `Option<ExpansionFrame>` -- at most one local frame per offset. The frame contains `call_site` (where the directive was in the including file, as a `Span` covering the full directive range) and `spelling` (a `FileLoc` pointing into the included file's raw text).
+
+The DB provides `full_expansion_stack(db, file, offset) -> Vec<ExpansionFrame>` which currently delegates to the single per-file frame. The `Vec` return type is forward-compatible with transitive chaining once the preprocessor gains recursive expansion.
+
+### One-level expansion constraint
+
+Currently, `preprocess()` splices raw file text (via `ResolvedInclude`), not recursively expanded output. This means each file's `SourceMap` only knows about its direct includes. Chasing `spelling` offsets across file boundaries would compare raw-text offsets against expanded-output source maps, producing incorrect provenance. Transitive multi-frame stacks will be added when the preprocessor expands nested includes.
+
+### Caching
+
+`full_expansion_stack` is not a tracked Salsa query. It is a thin wrapper around the tracked `source_map` result, which benefits from Salsa caching.
