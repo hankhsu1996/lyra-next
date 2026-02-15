@@ -1,0 +1,74 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..122
+  ModuleDecl@0..121
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..11 "flop"
+    PortList@11..59
+      LParen@11..12 "("
+      Port@12..27
+        InputKw@12..17 "input"
+        TypeSpec@17..23
+          Whitespace@17..18 " "
+          LogicKw@18..23 "logic"
+        Whitespace@23..24 " "
+        Ident@24..27 "clk"
+      Comma@27..28 ","
+      Port@28..42
+        Whitespace@28..29 " "
+        InputKw@29..34 "input"
+        TypeSpec@34..40
+          Whitespace@34..35 " "
+          LogicKw@35..40 "logic"
+        Whitespace@40..41 " "
+        Ident@41..42 "d"
+      Comma@42..43 ","
+      Port@43..58
+        Whitespace@43..44 " "
+        OutputKw@44..50 "output"
+        TypeSpec@50..56
+          Whitespace@50..51 " "
+          LogicKw@51..56 "logic"
+        Whitespace@56..57 " "
+        Ident@57..58 "q"
+      RParen@58..59 ")"
+    Semicolon@59..60 ";"
+    ModuleBody@60..111
+      AlwaysBlock@60..111
+        Whitespace@60..63 "\n  "
+        AlwaysFfKw@63..72 "always_ff"
+        TimingControl@72..111
+          EventExpr@72..87
+            Whitespace@72..73 " "
+            At@73..74 "@"
+            LParen@74..75 "("
+            EventItem@75..86
+              PosedgeKw@75..82 "posedge"
+              NameRef@82..86
+                Whitespace@82..83 " "
+                Ident@83..86 "clk"
+            RParen@86..87 ")"
+          BlockStmt@87..111
+            Whitespace@87..88 " "
+            BeginKw@88..93 "begin"
+            AssignStmt@93..105
+              NameRef@93..99
+                Whitespace@93..98 "\n    "
+                Ident@98..99 "q"
+              Whitespace@99..100 " "
+              LtEq@100..102 "<="
+              NameRef@102..104
+                Whitespace@102..103 " "
+                Ident@103..104 "d"
+              Semicolon@104..105 ";"
+            Whitespace@105..108 "\n  "
+            EndKw@108..111 "end"
+    Whitespace@111..112 "\n"
+    EndmoduleKw@112..121 "endmodule"
+  Whitespace@121..122 "\n"
+---
+no diagnostics

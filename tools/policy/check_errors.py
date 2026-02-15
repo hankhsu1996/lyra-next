@@ -24,7 +24,7 @@ INCLUDE_PATHS = ("crates/",)
 EXTENSIONS = frozenset({".rs"})
 
 # Patterns
-RE_UNWRAP = re.compile(r'\.(unwrap|expect)\s*\(')
+RE_UNWRAP = re.compile(r'\.unwrap\s*\(|\.expect\s*\(\s*"')
 RE_PANIC = re.compile(r'\bpanic!\s*\(')
 RE_UNSAFE = re.compile(r'\bunsafe\b')
 RE_SAFETY_COMMENT = re.compile(r'//\s*SAFETY:')

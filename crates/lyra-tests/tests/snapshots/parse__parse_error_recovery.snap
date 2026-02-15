@@ -1,0 +1,41 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..56
+  ModuleDecl@0..55
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..13 "broken"
+    PortList@13..27
+      LParen@13..14 "("
+      Port@14..27
+        InputKw@14..19 "input"
+        TypeSpec@19..25
+          Whitespace@19..20 " "
+          LogicKw@20..25 "logic"
+        Whitespace@25..26 " "
+        Ident@26..27 "a"
+    Semicolon@27..28 ";"
+    ModuleBody@28..45
+      ContinuousAssign@28..45
+        Whitespace@28..31 "\n  "
+        AssignKw@31..37 "assign"
+        NameRef@37..39
+          Whitespace@37..38 " "
+          Ident@38..39 "y"
+        Whitespace@39..40 " "
+        Assign@40..41 "="
+        BinExpr@41..45
+          NameRef@41..43
+            Whitespace@41..42 " "
+            Ident@42..43 "a"
+          Whitespace@43..44 " "
+          Amp@44..45 "&"
+    Whitespace@45..46 "\n"
+    EndmoduleKw@46..55 "endmodule"
+  Whitespace@55..56 "\n"
+---
+error[file=0 27..28]: expected `)`
+error[file=0 46..55]: expected `;`

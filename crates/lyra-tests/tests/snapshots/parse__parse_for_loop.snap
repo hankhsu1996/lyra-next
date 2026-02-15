@@ -1,0 +1,114 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+ModuleDecl@0..194
+  ModuleKw@0..6 "module"
+  Whitespace@6..7 " "
+  Ident@7..14 "counter"
+  PortList@14..74
+    LParen@14..15 "("
+    Port@15..30
+      InputKw@15..20 "input"
+      TypeSpec@20..26
+        Whitespace@20..21 " "
+        LogicKw@21..26 "logic"
+      Whitespace@26..27 " "
+      Ident@27..30 "clk"
+    Comma@30..31 ","
+    Port@31..47
+      Whitespace@31..32 " "
+      InputKw@32..37 "input"
+      TypeSpec@37..43
+        Whitespace@37..38 " "
+        LogicKw@38..43 "logic"
+      Whitespace@43..44 " "
+      Ident@44..47 "rst"
+    Comma@47..48 ","
+    Port@48..73
+      Whitespace@48..49 " "
+      OutputKw@49..55 "output"
+      TypeSpec@55..67
+        Whitespace@55..56 " "
+        LogicKw@56..61 "logic"
+        PackedDimension@61..67
+          Whitespace@61..62 " "
+          LBracket@62..63 "["
+          Literal@63..64
+            IntLiteral@63..64 "7"
+          Colon@64..65 ":"
+          Literal@65..66
+            IntLiteral@65..66 "0"
+          RBracket@66..67 "]"
+      Whitespace@67..68 " "
+      Ident@68..73 "count"
+    RParen@73..74 ")"
+  Semicolon@74..75 ";"
+  ModuleBody@75..193
+    AlwaysBlock@75..183
+      Whitespace@75..78 "\n  "
+      AlwaysFfKw@78..87 "always_ff"
+      TimingControl@87..183
+        EventExpr@87..102
+          Whitespace@87..88 " "
+          At@88..89 "@"
+          LParen@89..90 "("
+          EventItem@90..101
+            PosedgeKw@90..97 "posedge"
+            NameRef@97..101
+              Whitespace@97..98 " "
+              Ident@98..101 "clk"
+          RParen@101..102 ")"
+        BlockStmt@102..183
+          Whitespace@102..103 " "
+          BeginKw@103..108 "begin"
+          IfStmt@108..138
+            Whitespace@108..113 "\n    "
+            IfKw@113..115 "if"
+            Whitespace@115..116 " "
+            LParen@116..117 "("
+            NameRef@117..120
+              Ident@117..120 "rst"
+            RParen@120..121 ")"
+            AssignStmt@121..138
+              NameRef@121..133
+                Whitespace@121..128 "\n      "
+                Ident@128..133 "count"
+              Whitespace@133..134 " "
+              LtEq@134..136 "<="
+              Literal@136..138
+                Whitespace@136..137 " "
+                IntLiteral@137..138 "8"
+          AssignStmt@138..142
+            Literal@138..141
+              BasedLiteral@138..141 "'h0"
+            Semicolon@141..142 ";"
+          ErrorNode@142..183
+            ErrorNode@142..151
+              Whitespace@142..147 "\n    "
+              ElseKw@147..151 "else"
+            AssignStmt@151..177
+              NameRef@151..163
+                Whitespace@151..158 "\n      "
+                Ident@158..163 "count"
+              Whitespace@163..164 " "
+              LtEq@164..166 "<="
+              BinExpr@166..176
+                NameRef@166..172
+                  Whitespace@166..167 " "
+                  Ident@167..172 "count"
+                Whitespace@172..173 " "
+                Plus@173..174 "+"
+                Literal@174..176
+                  Whitespace@174..175 " "
+                  IntLiteral@175..176 "1"
+              Semicolon@176..177 ";"
+            Whitespace@177..180 "\n  "
+            EndKw@180..183 "end"
+    Whitespace@183..184 "\n"
+    EndmoduleKw@184..193 "endmodule"
+  Whitespace@193..194 "\n"
+---
+error[file=0 138..141]: expected `;`
+error[file=0 147..151]: expected statement

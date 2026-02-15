@@ -1,0 +1,133 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..211
+  ModuleDecl@0..210
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..14 "decoder"
+    PortList@14..61
+      LParen@14..15 "("
+      Port@15..36
+        InputKw@15..20 "input"
+        TypeSpec@20..32
+          Whitespace@20..21 " "
+          LogicKw@21..26 "logic"
+          PackedDimension@26..32
+            Whitespace@26..27 " "
+            LBracket@27..28 "["
+            Literal@28..29
+              IntLiteral@28..29 "1"
+            Colon@29..30 ":"
+            Literal@30..31
+              IntLiteral@30..31 "0"
+            RBracket@31..32 "]"
+        Whitespace@32..33 " "
+        Ident@33..36 "sel"
+      Comma@36..37 ","
+      Port@37..60
+        Whitespace@37..38 " "
+        OutputKw@38..44 "output"
+        TypeSpec@44..56
+          Whitespace@44..45 " "
+          LogicKw@45..50 "logic"
+          PackedDimension@50..56
+            Whitespace@50..51 " "
+            LBracket@51..52 "["
+            Literal@52..53
+              IntLiteral@52..53 "3"
+            Colon@53..54 ":"
+            Literal@54..55
+              IntLiteral@54..55 "0"
+            RBracket@55..56 "]"
+        Whitespace@56..57 " "
+        Ident@57..60 "out"
+      RParen@60..61 ")"
+    Semicolon@61..62 ";"
+    ModuleBody@62..200
+      AlwaysBlock@62..200
+        Whitespace@62..65 "\n  "
+        AlwaysCombKw@65..76 "always_comb"
+        BlockStmt@76..200
+          Whitespace@76..77 " "
+          BeginKw@77..82 "begin"
+          CaseStmt@82..194
+            Whitespace@82..87 "\n    "
+            UniqueKw@87..93 "unique"
+            Whitespace@93..94 " "
+            CaseKw@94..98 "case"
+            Whitespace@98..99 " "
+            LParen@99..100 "("
+            NameRef@100..103
+              Ident@100..103 "sel"
+            RParen@103..104 ")"
+            CaseItem@104..122
+              Literal@104..112
+                Whitespace@104..111 "\n      "
+                IntLiteral@111..112 "0"
+              Colon@112..113 ":"
+              AssignStmt@113..122
+                NameRef@113..117
+                  Whitespace@113..114 " "
+                  Ident@114..117 "out"
+                Whitespace@117..118 " "
+                Assign@118..119 "="
+                Literal@119..121
+                  Whitespace@119..120 " "
+                  IntLiteral@120..121 "1"
+                Semicolon@121..122 ";"
+            CaseItem@122..140
+              Literal@122..130
+                Whitespace@122..129 "\n      "
+                IntLiteral@129..130 "1"
+              Colon@130..131 ":"
+              AssignStmt@131..140
+                NameRef@131..135
+                  Whitespace@131..132 " "
+                  Ident@132..135 "out"
+                Whitespace@135..136 " "
+                Assign@136..137 "="
+                Literal@137..139
+                  Whitespace@137..138 " "
+                  IntLiteral@138..139 "2"
+                Semicolon@139..140 ";"
+            CaseItem@140..158
+              Literal@140..148
+                Whitespace@140..147 "\n      "
+                IntLiteral@147..148 "2"
+              Colon@148..149 ":"
+              AssignStmt@149..158
+                NameRef@149..153
+                  Whitespace@149..150 " "
+                  Ident@150..153 "out"
+                Whitespace@153..154 " "
+                Assign@154..155 "="
+                Literal@155..157
+                  Whitespace@155..156 " "
+                  IntLiteral@156..157 "4"
+                Semicolon@157..158 ";"
+            CaseItem@158..182
+              Whitespace@158..165 "\n      "
+              DefaultKw@165..172 "default"
+              Colon@172..173 ":"
+              AssignStmt@173..182
+                NameRef@173..177
+                  Whitespace@173..174 " "
+                  Ident@174..177 "out"
+                Whitespace@177..178 " "
+                Assign@178..179 "="
+                Literal@179..181
+                  Whitespace@179..180 " "
+                  IntLiteral@180..181 "8"
+                Semicolon@181..182 ";"
+            Whitespace@182..187 "\n    "
+            EndcaseKw@187..194 "endcase"
+          Whitespace@194..197 "\n  "
+          EndKw@197..200 "end"
+    Whitespace@200..201 "\n"
+    EndmoduleKw@201..210 "endmodule"
+  Whitespace@210..211 "\n"
+---
+no diagnostics

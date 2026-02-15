@@ -35,8 +35,9 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - `docs/id-model.md` -- FileId, AstId, SymbolId, ScopeId stable identity strategy
 - `docs/incremental.md` -- Salsa integration, query design, caching
 - `docs/cst-ast.md` -- rowan green/red tree, trivia handling, typed AST wrappers
+- `docs/parser-design.md` -- parser invariants, decisions, known improvements
 - `docs/roadmap.md` -- milestone-based capability plan and exit demos
-- `docs/progress.md` -- dated shipped/slipped execution log
+- `docs/progress.md` -- milestone completion checklist
 
 ## Architecture Rules
 
@@ -134,10 +135,9 @@ it probably belongs in that crate's docs instead.
 
 - Keep planning lightweight with two docs only: `docs/roadmap.md` and
   `docs/progress.md`.
-- `docs/roadmap.md` is future-facing milestone planning. Do not put dated
-  execution logs there.
-- `docs/progress.md` is past-facing. Add short shipped/slipped notes only for
-  meaningful changes.
+- `docs/roadmap.md` is future-facing milestone planning.
+- `docs/progress.md` tracks where we are against the roadmap. Check off items
+  when they ship. No dates or logs -- git history has that.
 - Update roadmap only when priorities change.
 
 ## Before Submitting Changes
@@ -155,7 +155,9 @@ All four must pass.
 
 Library code (everything under `crates/`) must not panic at runtime:
 
-- No `.unwrap()` or `.expect()` -- use `Result`/`Option` propagation. Tests are exempt.
+- No `.unwrap()` or `.expect("msg")` -- use `Result`/`Option` propagation.
+  Tests are exempt. The checker flags `.expect("` (string arg) but not
+  `.expect(SyntaxKind::...)` or similar non-panic method calls.
 - No `panic!()` in library code. Tests are exempt.
 - Utility crates under `crates/` are still library code and must not use
   panic-based error handling.

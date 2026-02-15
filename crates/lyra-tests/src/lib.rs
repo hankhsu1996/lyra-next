@@ -2,8 +2,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 use lyra_db::{LyraDatabase, SourceFile, parse_file};
-use lyra_diag::Diagnostic;
-use lyra_parser::{SyntaxElement, SyntaxNode};
+use lyra_parser::{ParseError, SyntaxElement, SyntaxNode};
 use lyra_source::FileId;
 
 /// A test workspace that holds multiple source files and provides
@@ -63,7 +62,7 @@ impl TestWorkspace {
     /// deterministic string suitable for snapshot comparison.
     pub fn dump_parse(&self) -> String {
         let mut out = String::new();
-        let mut all_diags: Vec<(u32, &Diagnostic)> = Vec::new();
+        let mut all_errors: Vec<(u32, &ParseError)> = Vec::new();
 
         for (path, source) in &self.files {
             let parse = parse_file(&self.db, *source);
@@ -71,24 +70,24 @@ impl TestWorkspace {
             let _ = writeln!(out, "// file: {path}");
             dump_tree(&parse.syntax(), 0, &mut out);
 
-            for diag in &parse.errors {
-                all_diags.push((source.file_id(&self.db).0, diag));
+            for err in &parse.errors {
+                all_errors.push((source.file_id(&self.db).0, err));
             }
         }
 
         out.push_str("---\n");
 
-        if all_diags.is_empty() {
+        if all_errors.is_empty() {
             out.push_str("no diagnostics\n");
         } else {
             // Sort by (file_id, offset, message) for stability
-            all_diags.sort_by(|a, b| {
+            all_errors.sort_by(|a, b| {
                 a.0.cmp(&b.0)
-                    .then_with(|| a.1.span.range.start().cmp(&b.1.span.range.start()))
+                    .then_with(|| a.1.range.start().cmp(&b.1.range.start()))
                     .then_with(|| a.1.message.cmp(&b.1.message))
             });
-            for (file_id, diag) in &all_diags {
-                dump_diagnostic(*file_id, diag, &mut out);
+            for (file_id, err) in &all_errors {
+                dump_error(*file_id, err, &mut out);
             }
         }
 
@@ -136,18 +135,13 @@ fn dump_tree(node: &SyntaxNode, depth: usize, out: &mut String) {
     }
 }
 
-/// Format a single diagnostic line.
-fn dump_diagnostic(file_id: u32, diag: &Diagnostic, out: &mut String) {
-    let severity = match diag.severity {
-        lyra_diag::Severity::Error => "error",
-        lyra_diag::Severity::Warning => "warning",
-        lyra_diag::Severity::Info => "info",
-    };
+/// Format a single parse error line.
+fn dump_error(file_id: u32, err: &ParseError, out: &mut String) {
     let _ = writeln!(
         out,
-        "{severity}[file={file_id} {}..{}]: {}",
-        u32::from(diag.span.range.start()),
-        u32::from(diag.span.range.end()),
-        diag.message,
+        "error[file={file_id} {}..{}]: {}",
+        u32::from(err.range.start()),
+        u32::from(err.range.end()),
+        err.message,
     );
 }

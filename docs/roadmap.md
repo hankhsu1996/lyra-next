@@ -1,7 +1,7 @@
 # Roadmap
 
 Milestone-based plan for Lyra Next. Each milestone enables a set of
-capabilities. Progress history lives in `docs/progress.md`.
+capabilities. Current status lives in `docs/progress.md`.
 
 ## How Milestones Relate to Work
 
