@@ -12,8 +12,6 @@ The semantic core provides:
 - Structured diagnostics with precise source locations
 - Incremental analysis that only recomputes what changed
 
-The project grew out of [Lyra](https://github.com/nicovank/Lyra), a SystemVerilog compiler written in C++.
-
 ## Building
 
 ```bash
