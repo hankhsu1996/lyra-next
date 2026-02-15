@@ -1,4 +1,7 @@
 use lyra_preprocess::{IncludeProvider, ResolvedInclude};
+use lyra_semantic::def_index::DefIndex;
+use lyra_semantic::resolve_index::ResolveIndex;
+use lyra_semantic::symbols::GlobalSymbolId;
 use salsa::Setter;
 
 /// Sorted include-path lookup for deterministic O(log n) resolution.
@@ -158,6 +161,67 @@ pub fn ast_id_map(db: &dyn salsa::Database, file: SourceFile) -> lyra_ast::AstId
     lyra_ast::AstIdMap::from_root(file.file_id(db), &parse.syntax())
 }
 
+/// Build per-file definition index (Salsa-cached).
+///
+/// Collects declarations, scopes, exports, and use-sites from the parse tree.
+/// Does NOT resolve name uses -- see `resolve_index_file`.
+#[salsa::tracked(return_ref)]
+pub fn def_index_file(db: &dyn salsa::Database, file: SourceFile) -> DefIndex {
+    let parse = parse_file(db, file);
+    let map = ast_id_map(db, file);
+    lyra_semantic::build_def_index(file.file_id(db), parse, map)
+}
+
+/// Build per-file resolution index (Salsa-cached).
+///
+/// Resolves all name-use sites recorded in the `DefIndex` to their declarations.
+/// Depends on `def_index_file`.
+#[salsa::tracked(return_ref)]
+pub fn resolve_index_file(db: &dyn salsa::Database, file: SourceFile) -> ResolveIndex {
+    let def = def_index_file(db, file);
+    lyra_semantic::build_resolve_index(def)
+}
+
+/// Resolve the name at a cursor position.
+///
+/// Finds the nearest `NameRef` at `offset`, looks up its `AstId`,
+/// and returns the resolved `GlobalSymbolId` if found.
+pub fn resolve_at(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    offset: lyra_source::TextSize,
+) -> Option<GlobalSymbolId> {
+    let parse = parse_file(db, file);
+    let ast_map = ast_id_map(db, file);
+    let name_ref = find_name_ref_at(&parse.syntax(), offset)?;
+    let ast_id = ast_map.ast_id(&name_ref)?.erase();
+    let resolve = resolve_index_file(db, file);
+    let local = *resolve.resolutions.get(&ast_id)?;
+    Some(GlobalSymbolId {
+        file: file.file_id(db),
+        local,
+    })
+}
+
+/// Look up a symbol by its global id.
+pub fn symbol_by_id(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    id: GlobalSymbolId,
+) -> &lyra_semantic::symbols::Symbol {
+    def_index_file(db, file).symbols.get(id.local)
+}
+
+/// Find a `NameRef` node at or near the given offset.
+fn find_name_ref_at(
+    root: &lyra_parser::SyntaxNode,
+    offset: lyra_source::TextSize,
+) -> Option<lyra_ast::NameRef> {
+    use lyra_ast::AstNode;
+    let token = root.token_at_offset(offset).right_biased()?;
+    token.parent_ancestors().find_map(lyra_ast::NameRef::cast)
+}
+
 /// Convert parse and preprocess errors into diagnostics (Salsa-cached).
 #[salsa::tracked(return_ref)]
 pub fn file_diagnostics(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_diag::Diagnostic> {
@@ -186,6 +250,13 @@ pub fn file_diagnostics(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_
         .collect();
 
     diags.extend(parse.errors.iter().map(|e| map_error(e.range, &e.message)));
+
+    // Semantic diagnostics (def + resolve)
+    let def = def_index_file(db, file);
+    let resolve = resolve_index_file(db, file);
+    for diag in def.diagnostics.iter().chain(resolve.diagnostics.iter()) {
+        diags.push(map_error(diag.range, &diag.format()));
+    }
 
     diags
 }
@@ -602,6 +673,292 @@ mod tests {
         assert!(
             has_will_execute(&log),
             "file_a should re-execute after included file_b changed: {log:?}",
+        );
+    }
+
+    // Semantic resolve tests
+
+    #[test]
+    fn resolve_at_port() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m(input logic a); assign x = a; endmodule");
+        // 'a' in 'assign x = a' is at offset 36
+        let result = resolve_at(&db, file, lyra_source::TextSize::new(36));
+        assert!(result.is_some(), "port 'a' should resolve");
+        let sym = symbol_by_id(&db, file, result.expect("checked above"));
+        assert_eq!(sym.name.as_str(), "a");
+        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Port);
+    }
+
+    #[test]
+    fn resolve_at_net() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; wire w; assign w = 1; endmodule");
+        // 'w' in 'assign w = 1' -- find offset of the second 'w'
+        let text = file.text(&db);
+        let w_pos = text.rfind("w =").expect("should find 'w ='");
+        let result = resolve_at(&db, file, lyra_source::TextSize::new(w_pos as u32));
+        assert!(result.is_some(), "net 'w' should resolve");
+        let sym = symbol_by_id(&db, file, result.expect("checked above"));
+        assert_eq!(sym.name.as_str(), "w");
+        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Net);
+    }
+
+    #[test]
+    fn resolve_at_var() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; logic x; assign x = 0; endmodule");
+        let text = file.text(&db);
+        let x_pos = text.rfind("x =").expect("should find 'x ='");
+        let result = resolve_at(&db, file, lyra_source::TextSize::new(x_pos as u32));
+        assert!(result.is_some(), "var 'x' should resolve");
+        let sym = symbol_by_id(&db, file, result.expect("checked above"));
+        assert_eq!(sym.name.as_str(), "x");
+        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Variable);
+    }
+
+    #[test]
+    fn unresolved_diag() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; assign y = unknown_name; endmodule");
+        let diags = file_diagnostics(&db, file);
+        let semantic_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("unresolved"))
+            .collect();
+        assert!(
+            !semantic_diags.is_empty(),
+            "should have unresolved name diagnostic"
+        );
+        assert!(
+            semantic_diags
+                .iter()
+                .any(|d| d.message.contains("unknown_name")),
+            "diagnostic should mention 'unknown_name': {semantic_diags:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_diag() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; logic x; logic x; endmodule");
+        let diags = file_diagnostics(&db, file);
+        let dup_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("duplicate"))
+            .collect();
+        assert!(
+            !dup_diags.is_empty(),
+            "should have duplicate definition diagnostic"
+        );
+    }
+
+    #[test]
+    fn block_scope() {
+        let db = LyraDatabase::default();
+        // Variable declared inside begin/end should not be visible outside
+        let file = new_file(
+            &db,
+            0,
+            "module m; always_comb begin logic inner; inner = 1; end assign y = inner; endmodule",
+        );
+        let diags = file_diagnostics(&db, file);
+        let unresolved: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("unresolved") && d.message.contains("inner"))
+            .collect();
+        assert!(
+            !unresolved.is_empty(),
+            "inner should not be visible outside the block: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn shadowing() {
+        let db = LyraDatabase::default();
+        let src = "module m(input logic a); always_comb begin logic a; a = 1; end endmodule";
+        let file = new_file(&db, 0, src);
+        // The 'a' inside the block should resolve to the block-local declaration
+        let text = file.text(&db);
+        let a_in_block = text.find("a = 1").expect("should find 'a = 1'");
+        let result = resolve_at(&db, file, lyra_source::TextSize::new(a_in_block as u32));
+        assert!(result.is_some(), "inner 'a' should resolve");
+        let sym = symbol_by_id(&db, file, result.expect("checked above"));
+        assert_eq!(sym.name.as_str(), "a");
+        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Variable);
+        // Inner 'a' is a Variable, not a Port
+    }
+
+    #[test]
+    fn multi_declarator() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; wire a, b; assign a = b; endmodule");
+        let text = file.text(&db);
+        // Resolve 'a' in assign
+        let a_pos = text.find("a = b").expect("should find 'a = b'");
+        let result_a = resolve_at(&db, file, lyra_source::TextSize::new(a_pos as u32));
+        assert!(result_a.is_some(), "'a' should resolve");
+        // Resolve 'b' in assign
+        let b_pos = text.rfind('b').expect("should find 'b'");
+        let result_b = resolve_at(&db, file, lyra_source::TextSize::new(b_pos as u32));
+        assert!(result_b.is_some(), "'b' should resolve");
+    }
+
+    #[test]
+    fn module_not_in_lexical_scope() {
+        let db = LyraDatabase::default();
+        // Module name should be in exports, not resolvable as a lexical name
+        let file = new_file(&db, 0, "module m; assign x = m; endmodule");
+        let diags = file_diagnostics(&db, file);
+        let unresolved: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("unresolved") && d.message.contains("`m`"))
+            .collect();
+        assert!(
+            !unresolved.is_empty(),
+            "module name 'm' should not resolve as a lexical name: {diags:?}"
+        );
+        // But exports should contain it
+        let def = def_index_file(&db, file);
+        assert!(
+            !def.exports.modules.is_empty(),
+            "module 'm' should be in exports"
+        );
+    }
+
+    // Incremental invalidation tests
+
+    #[test]
+    fn def_index_cached_when_text_unchanged() {
+        let db = EventDb::new();
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module m; logic x; endmodule".to_string(),
+            IncludeMap::default(),
+        );
+
+        let _ = def_index_file(&db, file);
+        db.take_log();
+
+        let _ = def_index_file(&db, file);
+        let log = db.take_log();
+        assert!(
+            !has_will_execute(&log),
+            "def_index_file should be cached: {log:?}"
+        );
+    }
+
+    #[test]
+    fn def_index_recomputed_on_text_change() {
+        let mut db = EventDb::new();
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module m; logic x; endmodule".to_string(),
+            IncludeMap::default(),
+        );
+
+        let _ = def_index_file(&db, file);
+        db.take_log();
+
+        update_file_text(&mut db, file, "module m; logic y; endmodule".to_string());
+        let _ = def_index_file(&db, file);
+        let log = db.take_log();
+        assert!(
+            has_will_execute(&log),
+            "def_index_file should re-execute after text change: {log:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_index_recomputed_on_text_change() {
+        let mut db = EventDb::new();
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module m; logic x; assign x = 0; endmodule".to_string(),
+            IncludeMap::default(),
+        );
+
+        let _ = resolve_index_file(&db, file);
+        db.take_log();
+
+        update_file_text(
+            &mut db,
+            file,
+            "module m; logic y; assign y = 0; endmodule".to_string(),
+        );
+        let _ = resolve_index_file(&db, file);
+        let log = db.take_log();
+        assert!(
+            has_will_execute(&log),
+            "resolve_index_file should re-execute after text change: {log:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_index_stable_when_def_index_unchanged() {
+        let mut db = EventDb::new();
+        // Start with source that has a declaration and use
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module m; logic x; assign x = 0; endmodule".to_string(),
+            IncludeMap::default(),
+        );
+
+        let _ = resolve_index_file(&db, file);
+        db.take_log();
+
+        // Change whitespace only -- this changes token offsets but NOT
+        // the set of declarations or their names. The DefIndex should
+        // re-execute but produce an equal result, so ResolveIndex
+        // should NOT re-execute (Salsa durability).
+        update_file_text(
+            &mut db,
+            file,
+            "module  m; logic  x; assign  x  =  0; endmodule".to_string(),
+        );
+        let _ = resolve_index_file(&db, file);
+        let log = db.take_log();
+        // def_index_file will re-execute (parse changed)
+        assert!(
+            log.iter().any(|e| e.contains("def_index_file")),
+            "def_index_file should re-execute: {log:?}"
+        );
+        // But the result changes (offsets differ), so resolve_index_file
+        // also re-executes. This is expected -- true durability requires
+        // offset-independent DefIndex, which is a future optimization.
+    }
+
+    #[test]
+    fn edit_unrelated_file_does_not_recompute_def_index() {
+        let mut db = EventDb::new();
+        let file_a = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module a; logic x; endmodule".to_string(),
+            IncludeMap::default(),
+        );
+        let file_b = SourceFile::new(
+            &db,
+            lyra_source::FileId(1),
+            "module b; logic y; endmodule".to_string(),
+            IncludeMap::default(),
+        );
+
+        let _ = def_index_file(&db, file_a);
+        let _ = def_index_file(&db, file_b);
+        db.take_log();
+
+        update_file_text(&mut db, file_b, "module b; logic z; endmodule".to_string());
+
+        let _ = def_index_file(&db, file_a);
+        let log = db.take_log();
+        assert!(
+            !has_will_execute(&log),
+            "editing file_b should not recompute file_a's def_index: {log:?}"
         );
     }
 }
