@@ -1,3 +1,5 @@
+mod lower_diag;
+
 use lyra_preprocess::{IncludeProvider, ResolvedInclude};
 use lyra_semantic::def_index::DefIndex;
 use lyra_semantic::name_graph::NameGraph;
@@ -244,43 +246,14 @@ fn find_name_ref_at(
     token.parent_ancestors().find_map(lyra_ast::NameRef::cast)
 }
 
-/// Convert parse and preprocess errors into diagnostics (Salsa-cached).
+/// Convert parse, preprocess, and semantic errors into structured diagnostics (Salsa-cached).
 #[salsa::tracked(return_ref)]
 pub fn file_diagnostics(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_diag::Diagnostic> {
     let pp = preprocess_file(db, file);
     let parse = parse_file(db, file);
-
-    let map_error = |range: lyra_source::TextRange, message: &str| -> lyra_diag::Diagnostic {
-        if let Some(span) = pp.source_map.map_span(range) {
-            lyra_diag::Diagnostic::error(span, message)
-        } else {
-            // Unmappable range: attach the file but use an empty span
-            // at offset 0, and annotate the message so the mapping gap
-            // is visible rather than silently hidden.
-            let span = lyra_source::Span {
-                file: file.file_id(db),
-                range: lyra_source::TextRange::empty(lyra_source::TextSize::new(0)),
-            };
-            lyra_diag::Diagnostic::error(span, format!("{message} [unmapped range {range:?}]"))
-        }
-    };
-
-    let mut diags: Vec<lyra_diag::Diagnostic> = pp
-        .errors
-        .iter()
-        .map(|e| map_error(e.range, &e.message))
-        .collect();
-
-    diags.extend(parse.errors.iter().map(|e| map_error(e.range, &e.message)));
-
-    // Semantic diagnostics (def + resolve)
     let def = def_index_file(db, file);
     let resolve = resolve_index_file(db, file);
-    for diag in def.diagnostics.iter().chain(resolve.diagnostics.iter()) {
-        diags.push(map_error(diag.range, &diag.format()));
-    }
-
-    diags
+    lower_diag::lower_file_diagnostics(file.file_id(db), pp, parse, def, resolve)
 }
 
 /// The central Salsa database for Lyra.
@@ -411,7 +384,7 @@ mod tests {
         let diags = file_diagnostics(&db, file);
         assert!(!diags.is_empty());
         for d in diags {
-            assert_eq!(d.span.file, lyra_source::FileId(42));
+            assert_eq!(d.span().expect("has span").file, lyra_source::FileId(42));
             assert_eq!(d.severity, lyra_diag::Severity::Error);
         }
     }
@@ -746,7 +719,7 @@ mod tests {
         let diags = file_diagnostics(&db, file);
         let semantic_diags: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("unresolved"))
+            .filter(|d| d.render_message().contains("unresolved"))
             .collect();
         assert!(
             !semantic_diags.is_empty(),
@@ -755,7 +728,7 @@ mod tests {
         assert!(
             semantic_diags
                 .iter()
-                .any(|d| d.message.contains("unknown_name")),
+                .any(|d| d.render_message().contains("unknown_name")),
             "diagnostic should mention 'unknown_name': {semantic_diags:?}"
         );
     }
@@ -767,7 +740,7 @@ mod tests {
         let diags = file_diagnostics(&db, file);
         let dup_diags: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("duplicate"))
+            .filter(|d| d.render_message().contains("duplicate"))
             .collect();
         assert!(
             !dup_diags.is_empty(),
@@ -787,7 +760,10 @@ mod tests {
         let diags = file_diagnostics(&db, file);
         let unresolved: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("unresolved") && d.message.contains("inner"))
+            .filter(|d| {
+                let msg = d.render_message();
+                msg.contains("unresolved") && msg.contains("inner")
+            })
             .collect();
         assert!(
             !unresolved.is_empty(),
@@ -834,7 +810,10 @@ mod tests {
         let diags = file_diagnostics(&db, file);
         let unresolved: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("unresolved") && d.message.contains("`m`"))
+            .filter(|d| {
+                let msg = d.render_message();
+                msg.contains("unresolved") && msg.contains("`m`")
+            })
             .collect();
         assert!(
             !unresolved.is_empty(),
@@ -1010,6 +989,50 @@ mod tests {
         assert!(
             !has_will_execute(&log),
             "editing file_b should not recompute file_a's def_index: {log:?}"
+        );
+    }
+
+    // Structured diagnostic tests
+
+    #[test]
+    fn duplicate_diag_has_secondary_label() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; logic x; logic x; endmodule");
+        let diags = file_diagnostics(&db, file);
+        let dup = diags
+            .iter()
+            .find(|d| d.code == lyra_diag::DiagnosticCode::DUPLICATE_DEFINITION)
+            .expect("should have duplicate diagnostic");
+        assert_eq!(dup.labels.len(), 2, "primary + secondary labels");
+        assert_eq!(dup.labels[0].kind, lyra_diag::LabelKind::Primary);
+        assert_eq!(dup.labels[1].kind, lyra_diag::LabelKind::Secondary);
+    }
+
+    #[test]
+    fn unresolved_diag_has_code() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; assign y = unknown_name; endmodule");
+        let diags = file_diagnostics(&db, file);
+        let unresolved = diags
+            .iter()
+            .find(|d| {
+                d.code == lyra_diag::DiagnosticCode::UNRESOLVED_NAME
+                    && d.render_message().contains("unknown_name")
+            })
+            .expect("should have unresolved name diagnostic for unknown_name");
+        assert_eq!(unresolved.severity, lyra_diag::Severity::Error);
+    }
+
+    #[test]
+    fn parse_error_has_code() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module top;");
+        let diags = file_diagnostics(&db, file);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == lyra_diag::DiagnosticCode::PARSE_ERROR),
+            "should have parse error diagnostic with PARSE_ERROR code"
         );
     }
 }
