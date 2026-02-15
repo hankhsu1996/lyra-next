@@ -52,7 +52,7 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 ## Cross-cutting infrastructure
 
 - [x] Salsa query granularity: NameGraph decouples offset-dependent parse from offset-independent resolution
-- [ ] Diagnostic codes, labels, and fixits
+- [x] Diagnostic codes, labels, and fixits
 - [ ] AST API extensibility (reduce hand-written boilerplate)
 - [ ] Test harness: snapshot corpus runner
 
