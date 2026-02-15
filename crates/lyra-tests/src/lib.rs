@@ -1,7 +1,7 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use lyra_db::{LyraDatabase, SourceFile, parse_file};
+use lyra_db::{IncludeMap, LyraDatabase, SourceFile, parse_file};
 use lyra_parser::{ParseError, SyntaxElement, SyntaxNode};
 use lyra_source::FileId;
 
@@ -23,7 +23,7 @@ impl TestWorkspace {
     /// Add a source file to the workspace.
     pub fn add_file(&mut self, path: &str, text: &str) -> &mut Self {
         let file_id = FileId(self.files.len() as u32);
-        let source = SourceFile::new(&self.db, file_id, text.to_owned(), vec![]);
+        let source = SourceFile::new(&self.db, file_id, text.to_owned(), IncludeMap::default());
         self.files.push((path.to_owned(), source));
         self
     }

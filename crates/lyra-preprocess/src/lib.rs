@@ -1,26 +1,25 @@
 use lyra_lexer::{SyntaxKind, Token};
-use lyra_source::{FileId, Span, TextRange, TextSize};
+use lyra_source::{ExpansionFrame, ExpansionKind, FileId, FileLoc, Span, TextRange, TextSize};
 
 /// A resolved include file returned by an [`IncludeProvider`].
 ///
-/// Fields are owned to avoid lifetime tangles between the provider
-/// trait and Salsa's borrow model. The DB provider clones from Salsa
-/// cache, which is acceptable for now (includes re-resolve only on
-/// invalidation). Future optimization: use `Arc<[Token]>` / `Arc<str>`
-/// to share data without copying.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedInclude {
+/// Borrows tokens and text from the provider, avoiding copies on the
+/// hot path. The DB provider returns references into Salsa-cached
+/// data; test providers return references to pre-lexed storage.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedInclude<'a> {
     pub file_id: FileId,
-    pub tokens: Vec<Token>,
-    pub text: String,
+    pub tokens: &'a [Token],
+    pub text: &'a str,
 }
 
 /// Callback for resolving `` `include `` paths to file contents.
 ///
 /// The DB layer implements this by reading through Salsa queries,
-/// which establishes incremental dependencies.
+/// which establishes incremental dependencies. The borrowed return
+/// type ensures the provider contract does not force allocations.
 pub trait IncludeProvider {
-    fn resolve(&self, path: &str) -> Option<ResolvedInclude>;
+    fn resolve(&self, path: &str) -> Option<ResolvedInclude<'_>>;
 }
 
 /// A preprocess error (e.g., unresolved include).
@@ -52,6 +51,10 @@ pub struct PreprocOutput {
 struct Segment {
     expanded_range: TextRange,
     origin: Span,
+    /// The full span of the include directive in the original source
+    /// (e.g., `` `include "x.sv" ``). Used to populate
+    /// `ExpansionFrame::call_site` for "included from here" notes.
+    call_site: Span,
 }
 
 /// Maps expanded-output positions back to original source spans.
@@ -73,6 +76,18 @@ pub struct SourceMap {
 
 impl SourceMap {
     pub(crate) fn new(file: FileId, segments: Vec<Segment>, expanded_len: TextSize) -> Self {
+        debug_assert!(
+            segments
+                .windows(2)
+                .all(|w| w[0].expanded_range.end() <= w[1].expanded_range.start()),
+            "segments must be sorted and non-overlapping",
+        );
+        debug_assert!(
+            segments
+                .iter()
+                .all(|s| s.expanded_range.len() == s.origin.range.len()),
+            "segment expanded length must match origin length",
+        );
         Self {
             file,
             segments,
@@ -152,12 +167,37 @@ impl SourceMap {
     /// original range -- it identifies the origin file and start offset
     /// only.
     ///
-    /// Returns an identity span at offset 0 if the offset is out of
-    /// bounds (defensive fallback for diagnostic display).
-    pub fn map_span(&self, range: TextRange) -> Span {
-        self.map_point(range.start()).unwrap_or(Span {
-            file: self.file,
-            range: TextRange::empty(TextSize::new(0)),
+    /// Returns `None` if the offset is out of bounds.
+    pub fn map_span(&self, range: TextRange) -> Option<Span> {
+        self.map_point(range.start())
+    }
+
+    /// Resolve an expanded-output offset to its physical file location.
+    pub fn resolve_file_loc(&self, offset: TextSize) -> Option<FileLoc> {
+        let span = self.map_point(offset)?;
+        Some(FileLoc {
+            file: span.file,
+            offset: span.range.start(),
+        })
+    }
+
+    /// Return the local expansion frame for an offset.
+    ///
+    /// Returns `None` for identity-mapped positions (text from the
+    /// primary file). Returns `Some` for positions from included files.
+    /// Each per-file `SourceMap` produces at most one frame (the
+    /// direct include). Transitive chaining is a DB-layer concern
+    /// once the preprocessor gains recursive expansion.
+    pub fn expansion_frame(&self, offset: TextSize) -> Option<ExpansionFrame> {
+        let seg = self.find_segment(offset)?;
+        let delta = offset - seg.expanded_range.start();
+        Some(ExpansionFrame {
+            kind: ExpansionKind::Include,
+            call_site: seg.call_site,
+            spelling: FileLoc {
+                file: seg.origin.file,
+                offset: seg.origin.range.start() + delta,
+            },
         })
     }
 
@@ -200,7 +240,7 @@ impl IncludeGraph {
 struct NoOpProvider;
 
 impl IncludeProvider for NoOpProvider {
-    fn resolve(&self, _path: &str) -> Option<ResolvedInclude> {
+    fn resolve(&self, _path: &str) -> Option<ResolvedInclude<'_>> {
         None
     }
 }
@@ -219,8 +259,8 @@ pub fn preprocess(
     text: &str,
     provider: &dyn IncludeProvider,
 ) -> PreprocOutput {
-    let mut out_tokens: Vec<Token> = Vec::new();
-    let mut expanded_text = String::new();
+    let mut out_tokens: Vec<Token> = Vec::with_capacity(tokens.len());
+    let mut expanded_text = String::with_capacity(text.len());
     let mut segments: Vec<Segment> = Vec::new();
     let mut includes = IncludeGraph::default();
     let mut errors: Vec<PreprocError> = Vec::new();
@@ -262,31 +302,40 @@ pub fn preprocess(
                 let inc_len = resolved.text.len();
 
                 // Append included tokens (excluding Eof)
-                for inc_tok in &resolved.tokens {
+                for inc_tok in resolved.tokens {
                     if inc_tok.kind == SyntaxKind::Eof {
                         break;
                     }
                     out_tokens.push(*inc_tok);
                 }
-                expanded_text.push_str(&resolved.text);
+                expanded_text.push_str(resolved.text);
 
                 let inc_end = TextSize::new((exp_cursor + inc_len) as u32);
+
+                // Compute the call site: full span of the include directive
+                let skip_bytes: usize = tokens[i..i + skip_count]
+                    .iter()
+                    .map(|t| usize::from(t.len))
+                    .sum();
+                let call_site = Span {
+                    file,
+                    range: TextRange::new(
+                        TextSize::new(src_cursor as u32),
+                        TextSize::new((src_cursor + skip_bytes) as u32),
+                    ),
+                };
+
                 segments.push(Segment {
                     expanded_range: TextRange::new(inc_start, inc_end),
                     origin: Span {
                         file: resolved.file_id,
                         range: TextRange::new(TextSize::new(0), TextSize::new(inc_len as u32)),
                     },
+                    call_site,
                 });
                 exp_cursor += inc_len;
 
                 includes.deps.push(resolved.file_id);
-
-                // Advance past all the include tokens
-                let skip_bytes: usize = tokens[i..i + skip_count]
-                    .iter()
-                    .map(|t| usize::from(t.len))
-                    .sum();
                 src_cursor += skip_bytes;
                 flush_start = src_cursor;
                 i += skip_count;

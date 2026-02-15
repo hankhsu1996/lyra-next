@@ -1,6 +1,41 @@
 use lyra_preprocess::{IncludeProvider, ResolvedInclude};
 use salsa::Setter;
 
+/// Sorted include-path lookup for deterministic O(log n) resolution.
+///
+/// Stored as a sorted `Vec` to satisfy Salsa input constraints
+/// (`Clone + Eq + Hash`). Construction sorts entries by path;
+/// lookup uses binary search.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct IncludeMap {
+    entries: Vec<(String, SourceFile)>,
+}
+
+impl IncludeMap {
+    /// Build an `IncludeMap` from unsorted entries. Sorts by path.
+    pub fn new(mut entries: Vec<(String, SourceFile)>) -> Self {
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        Self { entries }
+    }
+
+    /// Look up a path in O(log n).
+    pub fn lookup(&self, path: &str) -> Option<SourceFile> {
+        let idx = self
+            .entries
+            .binary_search_by(|(p, _)| p.as_str().cmp(path))
+            .ok()?;
+        Some(self.entries[idx].1)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &(String, SourceFile)> {
+        self.entries.iter()
+    }
+}
+
 /// A source file input for the Salsa database.
 ///
 /// The `include_map` field carries resolution metadata: which include
@@ -13,7 +48,7 @@ pub struct SourceFile {
     #[return_ref]
     pub text: String,
     #[return_ref]
-    pub include_map: Vec<(String, SourceFile)>,
+    pub include_map: IncludeMap,
 }
 
 /// Lex a source file into tokens (including trivia and EOF).
@@ -25,16 +60,16 @@ pub fn lex_file(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_lexer::T
 /// Include provider that resolves paths via Salsa queries.
 struct DbIncludeProvider<'a> {
     db: &'a dyn salsa::Database,
-    include_map: &'a [(String, SourceFile)],
+    include_map: &'a IncludeMap,
 }
 
 impl IncludeProvider for DbIncludeProvider<'_> {
-    fn resolve(&self, path: &str) -> Option<ResolvedInclude> {
-        let (_, file) = self.include_map.iter().find(|(p, _)| p == path)?;
+    fn resolve(&self, path: &str) -> Option<ResolvedInclude<'_>> {
+        let file = self.include_map.lookup(path)?;
         Some(ResolvedInclude {
             file_id: file.file_id(self.db),
-            tokens: lex_file(self.db, *file).clone(),
-            text: file.text(self.db).clone(),
+            tokens: lex_file(self.db, file),
+            text: file.text(self.db),
         })
     }
 }
@@ -84,6 +119,29 @@ pub fn include_graph(db: &dyn salsa::Database, file: SourceFile) -> &lyra_prepro
     &preprocess_file(db, file).includes
 }
 
+/// Return the expansion frame for an offset in a file's expanded output.
+///
+/// Returns a single-element `Vec` if the offset falls in an included
+/// region, or an empty `Vec` for identity-mapped (non-included)
+/// positions. The `Vec` return type is forward-compatible with
+/// recursive include expansion, which will produce multi-frame
+/// stacks.
+///
+/// Currently, `preprocess()` only performs one level of include
+/// expansion (splicing raw file text, not recursively expanded
+/// output). Chasing `spelling` offsets across file boundaries would
+/// compare raw-text offsets against expanded-output source maps,
+/// producing incorrect provenance. Transitive chaining will be
+/// added when the preprocessor gains recursive expansion.
+pub fn full_expansion_stack(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    offset: lyra_source::TextSize,
+) -> Vec<lyra_source::ExpansionFrame> {
+    let sm = source_map(db, file);
+    sm.expansion_frame(offset).into_iter().collect()
+}
+
 /// Return a typed `SourceFile` AST root for the given file.
 ///
 /// Returns `None` if the root node cannot be cast to `SourceFile` (should
@@ -106,18 +164,28 @@ pub fn file_diagnostics(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_
     let pp = preprocess_file(db, file);
     let parse = parse_file(db, file);
 
+    let map_error = |range: lyra_source::TextRange, message: &str| -> lyra_diag::Diagnostic {
+        if let Some(span) = pp.source_map.map_span(range) {
+            lyra_diag::Diagnostic::error(span, message)
+        } else {
+            // Unmappable range: attach the file but use an empty span
+            // at offset 0, and annotate the message so the mapping gap
+            // is visible rather than silently hidden.
+            let span = lyra_source::Span {
+                file: file.file_id(db),
+                range: lyra_source::TextRange::empty(lyra_source::TextSize::new(0)),
+            };
+            lyra_diag::Diagnostic::error(span, format!("{message} [unmapped range {range:?}]"))
+        }
+    };
+
     let mut diags: Vec<lyra_diag::Diagnostic> = pp
         .errors
         .iter()
-        .map(|e| lyra_diag::Diagnostic::error(pp.source_map.map_span(e.range), &e.message))
+        .map(|e| map_error(e.range, &e.message))
         .collect();
 
-    diags.extend(
-        parse
-            .errors
-            .iter()
-            .map(|e| lyra_diag::Diagnostic::error(pp.source_map.map_span(e.range), &e.message)),
-    );
+    diags.extend(parse.errors.iter().map(|e| map_error(e.range, &e.message)));
 
     diags
 }
@@ -141,7 +209,12 @@ mod tests {
     use super::*;
 
     fn new_file(db: &dyn salsa::Database, id: u32, text: &str) -> SourceFile {
-        SourceFile::new(db, lyra_source::FileId(id), text.to_string(), vec![])
+        SourceFile::new(
+            db,
+            lyra_source::FileId(id),
+            text.to_string(),
+            IncludeMap::default(),
+        )
     }
 
     #[test]
@@ -209,13 +282,18 @@ mod tests {
     fn source_map_identity() {
         let db = LyraDatabase::default();
         let fid = lyra_source::FileId(5);
-        let file = SourceFile::new(&db, fid, "module m; endmodule".to_string(), vec![]);
+        let file = SourceFile::new(
+            &db,
+            fid,
+            "module m; endmodule".to_string(),
+            IncludeMap::default(),
+        );
         let sm = source_map(&db, file);
         let range = lyra_source::TextRange::new(
             lyra_source::TextSize::new(0),
             lyra_source::TextSize::new(6),
         );
-        let span = sm.map_span(range);
+        let span = sm.map_span(range).expect("in-bounds should map");
         assert_eq!(span.file, fid);
     }
 
@@ -235,7 +313,7 @@ mod tests {
             &db,
             lyra_source::FileId(42),
             "module top;".to_string(),
-            vec![],
+            IncludeMap::default(),
         );
         let diags = file_diagnostics(&db, file);
         assert!(!diags.is_empty());
@@ -257,12 +335,17 @@ mod tests {
     #[test]
     fn roundtrip_expanded_text_with_include() {
         let db = LyraDatabase::default();
-        let file_b = SourceFile::new(&db, lyra_source::FileId(1), "wire w;".to_string(), vec![]);
+        let file_b = SourceFile::new(
+            &db,
+            lyra_source::FileId(1),
+            "wire w;".to_string(),
+            IncludeMap::default(),
+        );
         let file_a = SourceFile::new(
             &db,
             lyra_source::FileId(0),
             "module top; `include \"b.sv\"\nendmodule".to_string(),
-            vec![("b.sv".to_string(), file_b)],
+            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
         );
         let pp = preprocess_file(&db, file_a);
         let parse = parse_file(&db, file_a);
@@ -315,13 +398,13 @@ mod tests {
             &db,
             lyra_source::FileId(0),
             "module a; endmodule".to_string(),
-            vec![],
+            IncludeMap::default(),
         );
         let file_b = SourceFile::new(
             &db,
             lyra_source::FileId(1),
             "module b; endmodule".to_string(),
-            vec![],
+            IncludeMap::default(),
         );
 
         let _ = parse_file(&db, file_a);
@@ -352,7 +435,7 @@ mod tests {
             &db,
             lyra_source::FileId(0),
             "line one\nline two".to_string(),
-            vec![],
+            IncludeMap::default(),
         );
         let idx = line_index(&db, file);
         assert_eq!(idx.line_count(), 2);
@@ -369,7 +452,7 @@ mod tests {
             &db,
             lyra_source::FileId(0),
             "module m; endmodule".to_string(),
-            vec![],
+            IncludeMap::default(),
         );
 
         let _ = parse_file(&db, file);
@@ -386,12 +469,17 @@ mod tests {
     #[test]
     fn edit_included_file_invalidates_includer() {
         let mut db = EventDb::new();
-        let file_b = SourceFile::new(&db, lyra_source::FileId(1), "wire w;".to_string(), vec![]);
+        let file_b = SourceFile::new(
+            &db,
+            lyra_source::FileId(1),
+            "wire w;".to_string(),
+            IncludeMap::default(),
+        );
         let file_a = SourceFile::new(
             &db,
             lyra_source::FileId(0),
             "module top; `include \"b.sv\"\nendmodule".to_string(),
-            vec![("b.sv".to_string(), file_b)],
+            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
         );
 
         let _ = parse_file(&db, file_a);
@@ -408,20 +496,92 @@ mod tests {
     }
 
     #[test]
-    fn edit_included_file_does_not_invalidate_unrelated() {
-        let mut db = EventDb::new();
-        let file_b = SourceFile::new(&db, lyra_source::FileId(1), "wire w;".to_string(), vec![]);
+    fn full_expansion_stack_identity() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module top; endmodule");
+        let stack = full_expansion_stack(&db, file, lyra_source::TextSize::new(0));
+        assert!(stack.is_empty(), "no includes -> empty stack");
+    }
+
+    #[test]
+    fn full_expansion_stack_single_include() {
+        let db = LyraDatabase::default();
+        let file_b = SourceFile::new(
+            &db,
+            lyra_source::FileId(1),
+            "wire w;".to_string(),
+            IncludeMap::default(),
+        );
         let file_a = SourceFile::new(
             &db,
             lyra_source::FileId(0),
             "module top; `include \"b.sv\"\nendmodule".to_string(),
-            vec![("b.sv".to_string(), file_b)],
+            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
+        );
+
+        // Offset 12 is in the included range
+        let stack = full_expansion_stack(&db, file_a, lyra_source::TextSize::new(12));
+        assert_eq!(stack.len(), 1);
+        assert_eq!(stack[0].kind, lyra_source::ExpansionKind::Include);
+        assert_eq!(stack[0].call_site.file, lyra_source::FileId(0));
+        assert_eq!(stack[0].spelling.file, lyra_source::FileId(1));
+        assert_eq!(stack[0].spelling.offset, lyra_source::TextSize::new(0));
+    }
+
+    #[test]
+    fn full_expansion_stack_nested_is_single_frame() {
+        let db = LyraDatabase::default();
+        // C has plain content
+        let file_c = SourceFile::new(
+            &db,
+            lyra_source::FileId(2),
+            "wire c;".to_string(),
+            IncludeMap::default(),
+        );
+        // B includes C
+        let file_b = SourceFile::new(
+            &db,
+            lyra_source::FileId(1),
+            "`include \"c.sv\"".to_string(),
+            IncludeMap::new(vec![("c.sv".to_string(), file_c)]),
+        );
+        // A includes B
+        let file_a = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module top; `include \"b.sv\"\nendmodule".to_string(),
+            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
+        );
+
+        // preprocess() only does one level of expansion, so A splices
+        // B's raw text (which contains `include "c.sv"). The offset
+        // maps to B, not transitively to C.
+        let stack = full_expansion_stack(&db, file_a, lyra_source::TextSize::new(12));
+        assert_eq!(stack.len(), 1, "one-level expansion -> 1 frame");
+        assert_eq!(stack[0].call_site.file, lyra_source::FileId(0));
+        assert_eq!(stack[0].spelling.file, lyra_source::FileId(1));
+    }
+
+    #[test]
+    fn edit_included_file_does_not_invalidate_unrelated() {
+        let mut db = EventDb::new();
+        let file_b = SourceFile::new(
+            &db,
+            lyra_source::FileId(1),
+            "wire w;".to_string(),
+            IncludeMap::default(),
+        );
+        let file_a = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module top; `include \"b.sv\"\nendmodule".to_string(),
+            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
         );
         let file_c = SourceFile::new(
             &db,
             lyra_source::FileId(2),
             "module c; endmodule".to_string(),
-            vec![],
+            IncludeMap::default(),
         );
 
         let _ = parse_file(&db, file_a);
