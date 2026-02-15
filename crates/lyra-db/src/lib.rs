@@ -14,15 +14,28 @@ pub fn lex_file(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_lexer::T
 
 /// Run the preprocessor over lexed tokens.
 #[salsa::tracked(return_ref)]
-pub fn preprocess_file(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_lexer::Token> {
-    lyra_preprocess::preprocess(lex_file(db, file))
+pub fn preprocess_file(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+) -> lyra_preprocess::PreprocOutput {
+    lyra_preprocess::preprocess(file.file_id(db), lex_file(db, file))
 }
 
 /// Parse a source file into a lossless green tree with diagnostics.
 #[salsa::tracked(return_ref)]
 pub fn parse_file(db: &dyn salsa::Database, file: SourceFile) -> lyra_parser::Parse {
-    let tokens = preprocess_file(db, file);
-    lyra_parser::parse(tokens, file.text(db))
+    let pp = preprocess_file(db, file);
+    lyra_parser::parse(&pp.tokens, file.text(db))
+}
+
+/// Access the source map for a preprocessed file.
+pub fn source_map(db: &dyn salsa::Database, file: SourceFile) -> &lyra_preprocess::SourceMap {
+    &preprocess_file(db, file).source_map
+}
+
+/// Access the include graph for a preprocessed file.
+pub fn include_graph(db: &dyn salsa::Database, file: SourceFile) -> &lyra_preprocess::IncludeGraph {
+    &preprocess_file(db, file).includes
 }
 
 /// Return a typed `SourceFile` AST root for the given file.
@@ -171,6 +184,34 @@ mod tests {
         // Resolving file_b's id against file_a's root via map_a returns None
         // because the id carries file_b's FileId which doesn't match map_a.
         assert!(map_a.get(&parse_a.syntax(), id_b).is_none());
+    }
+
+    #[test]
+    fn source_map_identity() {
+        let db = LyraDatabase::default();
+        let fid = lyra_source::FileId(5);
+        let file = SourceFile::new(&db, fid, "module m; endmodule".to_string());
+        let sm = source_map(&db, file);
+        let range = lyra_source::TextRange::new(
+            lyra_source::TextSize::new(0),
+            lyra_source::TextSize::new(6),
+        );
+        let span = sm.map_span(range);
+        assert_eq!(span.file, fid);
+        assert_eq!(span.range, range);
+    }
+
+    #[test]
+    fn include_graph_empty() {
+        let db = LyraDatabase::default();
+        let file = SourceFile::new(
+            &db,
+            lyra_source::FileId(0),
+            "module m; endmodule".to_string(),
+        );
+        let ig = include_graph(&db, file);
+        assert!(ig.is_empty());
+        assert!(ig.dependencies().is_empty());
     }
 
     #[test]
