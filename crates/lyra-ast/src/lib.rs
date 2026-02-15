@@ -2,7 +2,6 @@ mod ast_id;
 mod node;
 mod nodes;
 mod support;
-mod tokens;
 
 pub use ast_id::{AstId, AstIdMap, ErasedAstId};
 pub use node::AstNode;
@@ -15,4 +14,3 @@ pub use nodes::{
     SourceFile, TimingControl, TypeSpec, UnpackedDimension, VarDecl, WhileStmt,
 };
 pub use support::AstChildren;
-pub use tokens::{Ident, Keyword, LiteralToken};
