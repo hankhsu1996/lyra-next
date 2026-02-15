@@ -1,0 +1,17 @@
+name: Policy Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 tools/policy/check_errors.py
+      - run: python3 tools/policy/check_ascii.py
