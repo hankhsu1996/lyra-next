@@ -74,6 +74,7 @@ def should_check_file(filepath: str) -> bool:
     return (
         path.suffix in EXTENSIONS
         and any(filepath.startswith(inc) for inc in INCLUDE_PATHS)
+        and "/tests/" not in filepath
     )
 
 

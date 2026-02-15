@@ -42,7 +42,7 @@ Design docs live in `docs/`. Read these before making architectural changes:
 
 - **Salsa lives only in `lyra-db`** --no `#[salsa::*]` annotations in any other crate. Other crates define types and algorithms; `lyra-db` wires them into the incremental framework.
 - **Diagnostics are plain data** --`Vec<Diagnostic>`, no mutable global sink, no side-channel error reporting.
-- **SyntaxKind is stable** --never reorder or remove existing variants. New tokens go before `__NodeStart`; new nodes go after it. Token ordinals are stable across releases. Adding tokens shifts `NODE_START` and node ordinals, which is expected (node ordinals are workspace-internal, never serialized).
+- **SyntaxKind is append-only** --never reorder or remove existing variants.
 - **Lexer produces trivia** --whitespace and comments are tokens. The parser consumes them into the green tree. Roundtrip fidelity is mandatory.
 - **AstId = FileId + (kind, offset)** --stable identity for AST nodes across incremental runs.
 - **Frozen stores in semantic** --symbol tables, scope trees are built once per analysis pass, keyed by stable IDs, no direct references.
@@ -83,7 +83,17 @@ Do not introduce circular dependencies. Do not add dependencies that violate thi
   - Iterators and combinators over manual loops where clearer
   - `enum` over boolean flags or stringly-typed values
   - Derive standard traits (`Debug`, `Clone`, `PartialEq`, etc.) where appropriate
-- **Tests**: every new behavior needs a test. Prefer unit tests in-crate (`#[cfg(test)]` module). Integration tests go in the crate's `tests/` directory.
+- **File size**: keep files under 1000 lines. 1200 is the hard limit. When a
+  file grows past 1000 lines, split it into focused modules. Plan for file
+  organization up front -- do not let files bloat and refactor later.
+- **Tests**: every new behavior needs a test. Unit tests in `#[cfg(test)]`
+  only for testing private helpers. Integration tests go in `tests/` as a
+  single binary with domain submodules (one top-level `.rs` entry point,
+  submodules in a matching directory). Do not use separate top-level test
+  files with a shared `common/mod.rs` -- each top-level file compiles as
+  its own binary, causing dead_code warnings on shared helpers.
+- **Lint suppression**: do not use `#[allow(...)]` to silence warnings.
+  Fix the root cause or restructure to eliminate the warning.
 - **Visibility**: prefer `pub(crate)` over `pub` unless the item is part of the crate's public API.
 
 ## Philosophy
@@ -114,6 +124,11 @@ The goal: leave the codebase stronger, not just patched.
 
 When work reveals a reusable principle or a recurring mistake, update this file.
 Design docs capture what to build; this file captures how to work.
+
+Keep entries general -- this file guides all future work, not just the feature
+that taught the lesson. Write principles and patterns, not feature-specific
+examples. If an entry only makes sense in the context of one crate or feature,
+it probably belongs in that crate's docs instead.
 
 ## Planning and Execution
 
