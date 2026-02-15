@@ -1,6 +1,8 @@
 # Lyra Next
 
-Lyra Next is a Rust-based SystemVerilog parser and semantic analyzer. It provides an incremental semantic model of the codebase that language servers, linters, formatters, compilers, and simulators can share, instead of each tool reimplementing its own.
+SystemVerilog tooling is fragmented. Every language server, linter, simulator, and compiler implements its own parser and semantic analysis.
+
+Lyra Next is a unified SystemVerilog toolchain built in Rust. A single incremental semantic core handles parsing, name resolution, type checking, and diagnostics. Tools like the LSP, linter, formatter, and simulator are all clients of that core.
 
 - Hand-written recursive-descent parser producing a lossless CST
 - Normalized typed AST
