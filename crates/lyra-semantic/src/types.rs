@@ -14,9 +14,11 @@ pub enum ConstInt {
 pub enum ConstEvalError {
     NonConstant,
     DivideByZero,
-    NegativeWidth,
+    InvalidArgument,
     Overflow,
     Unresolved,
+    Cycle,
+    Unsupported,
 }
 
 /// A packed dimension with msb and lsb bounds, e.g. `[7:0]`.
@@ -444,9 +446,11 @@ mod tests {
     fn const_eval_error_variants() {
         let _ = ConstEvalError::NonConstant;
         let _ = ConstEvalError::DivideByZero;
-        let _ = ConstEvalError::NegativeWidth;
+        let _ = ConstEvalError::InvalidArgument;
         let _ = ConstEvalError::Overflow;
         let _ = ConstEvalError::Unresolved;
+        let _ = ConstEvalError::Cycle;
+        let _ = ConstEvalError::Unsupported;
     }
 
     #[test]

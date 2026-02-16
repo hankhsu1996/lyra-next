@@ -239,27 +239,21 @@ pub fn global_def_index(db: &dyn salsa::Database, unit: CompilationUnit) -> Glob
         // Collect all definition-namespace constructs (module, interface, program, primitive, config)
         for &sym_id in &*def.exports.definitions {
             let sym = def.symbols.get(sym_id);
-            if let Some(def_kind) = DefinitionKind::from_symbol_kind(sym.kind) {
-                for (ast_id, &sid) in &def.decl_to_symbol {
-                    if sid == sym_id {
-                        entries.push((sym.name.clone(), GlobalDefId::new(*ast_id), def_kind));
-                        break;
-                    }
-                }
+            if let Some(def_kind) = DefinitionKind::from_symbol_kind(sym.kind)
+                && let Some(&Some(ast_id)) = def.symbol_to_decl.get(sym_id.index())
+            {
+                entries.push((sym.name.clone(), GlobalDefId::new(ast_id), def_kind));
             }
         }
         // Collect packages (separate namespace per LRM 3.13(b))
         for &sym_id in &*def.exports.packages {
             let sym = def.symbols.get(sym_id);
-            for (ast_id, &sid) in &def.decl_to_symbol {
-                if sid == sym_id {
-                    entries.push((
-                        sym.name.clone(),
-                        GlobalDefId::new(*ast_id),
-                        DefinitionKind::Package,
-                    ));
-                    break;
-                }
+            if let Some(&Some(ast_id)) = def.symbol_to_decl.get(sym_id.index()) {
+                entries.push((
+                    sym.name.clone(),
+                    GlobalDefId::new(ast_id),
+                    DefinitionKind::Package,
+                ));
             }
         }
     }
@@ -289,23 +283,16 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
             // Collect Value-namespace symbols from this package scope
             for &child_sym_id in &*scope_data.value_ns {
                 let child_sym = def.symbols.get(child_sym_id);
-                // Look up the GlobalDefId for this symbol
-                for (ast_id, &sid) in &def.decl_to_symbol {
-                    if sid == child_sym_id {
-                        value_ns.push((child_sym.name.clone(), GlobalDefId::new(*ast_id)));
-                        break;
-                    }
+                if let Some(&Some(ast_id)) = def.symbol_to_decl.get(child_sym_id.index()) {
+                    value_ns.push((child_sym.name.clone(), GlobalDefId::new(ast_id)));
                 }
             }
 
             // Collect Type-namespace symbols
             for &child_sym_id in &*scope_data.type_ns {
                 let child_sym = def.symbols.get(child_sym_id);
-                for (ast_id, &sid) in &def.decl_to_symbol {
-                    if sid == child_sym_id {
-                        type_ns.push((child_sym.name.clone(), GlobalDefId::new(*ast_id)));
-                        break;
-                    }
+                if let Some(&Some(ast_id)) = def.symbol_to_decl.get(child_sym_id.index()) {
+                    type_ns.push((child_sym.name.clone(), GlobalDefId::new(ast_id)));
                 }
             }
 
@@ -359,6 +346,105 @@ pub fn resolve_index_file(
         target_def.decl_to_symbol.get(&def_id.ast_id()).copied()
     };
     lyra_semantic::build_resolve_index(def, core, &lookup_decl)
+}
+
+/// Identifies a constant expression for evaluation.
+///
+/// Const-eval depends on the compilation unit because name resolution
+/// (imports, global definitions, package visibility) is unit-scoped.
+#[salsa::interned]
+pub struct ConstExprRef<'db> {
+    pub unit: CompilationUnit,
+    pub expr_ast_id: lyra_ast::ErasedAstId,
+}
+
+/// Evaluate a constant integer expression (Salsa-tracked with cycle recovery).
+///
+/// Returns `ConstInt::Known(v)` on success, `ConstInt::Error(e)` on failure.
+/// Cycles (e.g. `parameter A = B; parameter B = A;`) are detected by Salsa
+/// and recovered via `const_eval_recover`.
+#[salsa::tracked(recovery_fn = const_eval_recover)]
+pub fn eval_const_int<'db>(
+    db: &'db dyn salsa::Database,
+    expr_ref: ConstExprRef<'db>,
+) -> lyra_semantic::types::ConstInt {
+    use lyra_semantic::types::{ConstEvalError, ConstInt};
+
+    let unit = expr_ref.unit(db);
+    let expr_ast_id = expr_ref.expr_ast_id(db);
+    let file_id = expr_ast_id.file();
+
+    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
+        return ConstInt::Error(ConstEvalError::Unresolved);
+    };
+
+    let parse = parse_file(db, source_file);
+    let map = ast_id_map(db, source_file);
+
+    let Some(node) = map.get_node(&parse.syntax(), expr_ast_id) else {
+        return ConstInt::Error(ConstEvalError::Unresolved);
+    };
+
+    let resolve_name = |name_node: &lyra_parser::SyntaxNode| -> Result<i64, ConstEvalError> {
+        // Look up the NameRef/QualifiedName's AstId
+        let name_ast_id = map
+            .erased_ast_id(name_node)
+            .ok_or(ConstEvalError::Unresolved)?;
+
+        // Resolve the name to a GlobalSymbolId
+        let resolve = resolve_index_file(db, source_file, unit);
+        let resolution = resolve
+            .resolutions
+            .get(&name_ast_id)
+            .ok_or(ConstEvalError::Unresolved)?;
+
+        // Look up target symbol -- only parameters are allowed
+        let target_file_id = resolution.symbol.file;
+        let target_local = resolution.symbol.local;
+        let target_file =
+            source_file_by_id(db, unit, target_file_id).ok_or(ConstEvalError::Unresolved)?;
+        let target_def = def_index_file(db, target_file);
+        let target_sym = target_def.symbols.get(target_local);
+
+        if target_sym.kind != lyra_semantic::symbols::SymbolKind::Parameter {
+            return Err(ConstEvalError::NonConstant);
+        }
+
+        // Look up declarator AstId via symbol_to_decl
+        let decl_ast_id = target_def
+            .symbol_to_decl
+            .get(target_local.index())
+            .and_then(|opt| *opt)
+            .ok_or(ConstEvalError::Unresolved)?;
+
+        // Look up init expression AstId
+        let init_ast_id = target_def
+            .decl_to_init_expr
+            .get(&decl_ast_id)
+            .ok_or(ConstEvalError::Unresolved)?
+            .ok_or(ConstEvalError::Unresolved)?;
+
+        // Recursively evaluate via Salsa (cycle detection here)
+        let init_ref = ConstExprRef::new(db, unit, init_ast_id);
+        match eval_const_int(db, init_ref) {
+            ConstInt::Known(v) => Ok(v),
+            ConstInt::Error(e) => Err(e),
+            ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
+        }
+    };
+
+    match lyra_semantic::const_eval::eval_const_expr(&node, &resolve_name) {
+        Ok(v) => ConstInt::Known(v),
+        Err(e) => ConstInt::Error(e),
+    }
+}
+
+fn const_eval_recover<'db>(
+    _db: &'db dyn salsa::Database,
+    _cycle: &salsa::Cycle,
+    _expr_ref: ConstExprRef<'db>,
+) -> lyra_semantic::types::ConstInt {
+    lyra_semantic::types::ConstInt::Error(lyra_semantic::types::ConstEvalError::Cycle)
 }
 
 /// Resolve the name at a cursor position.
@@ -1875,6 +1961,150 @@ mod tests {
             lyra_source::FileId(1),
             "local typedef should shadow import"
         );
+    }
+
+    // Const-eval integration tests
+
+    /// Helper: find the first parameter's init expression AstId and evaluate it.
+    fn eval_first_param(
+        db: &dyn salsa::Database,
+        file: SourceFile,
+        unit: CompilationUnit,
+    ) -> lyra_semantic::types::ConstInt {
+        let def = def_index_file(db, file);
+        // Find the first parameter symbol
+        let (sym_id, _sym) = def
+            .symbols
+            .iter()
+            .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Parameter)
+            .expect("should have a parameter");
+        let decl_ast_id = def.symbol_to_decl[sym_id.index()].expect("parameter should have decl");
+        let init_ast_id = def
+            .decl_to_init_expr
+            .get(&decl_ast_id)
+            .expect("parameter should be tracked")
+            .expect("parameter should have init");
+        let expr_ref = ConstExprRef::new(db, unit, init_ast_id);
+        eval_const_int(db, expr_ref)
+    }
+
+    /// Helper: find a named parameter's init expression AstId and evaluate it.
+    fn eval_named_param(
+        db: &dyn salsa::Database,
+        file: SourceFile,
+        unit: CompilationUnit,
+        name: &str,
+    ) -> lyra_semantic::types::ConstInt {
+        let def = def_index_file(db, file);
+        let (sym_id, _sym) = def
+            .symbols
+            .iter()
+            .find(|(_, s)| {
+                s.kind == lyra_semantic::symbols::SymbolKind::Parameter && s.name.as_str() == name
+            })
+            .expect("should have named parameter");
+        let decl_ast_id = def.symbol_to_decl[sym_id.index()].expect("parameter should have decl");
+        let init_ast_id = def
+            .decl_to_init_expr
+            .get(&decl_ast_id)
+            .expect("parameter should be tracked")
+            .expect("parameter should have init");
+        let expr_ref = ConstExprRef::new(db, unit, init_ast_id);
+        eval_const_int(db, expr_ref)
+    }
+
+    #[test]
+    fn const_eval_simple_literal() {
+        use lyra_semantic::types::ConstInt;
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; parameter P = 42; endmodule");
+        let unit = single_file_unit(&db, file);
+        assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(42));
+    }
+
+    #[test]
+    fn const_eval_arithmetic() {
+        use lyra_semantic::types::ConstInt;
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; parameter P = 3 + 4; endmodule");
+        let unit = single_file_unit(&db, file);
+        assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(7));
+    }
+
+    #[test]
+    fn const_eval_param_chain() {
+        use lyra_semantic::types::ConstInt;
+        let db = LyraDatabase::default();
+        let file = new_file(
+            &db,
+            0,
+            "module m; parameter A = 8; parameter B = A - 1; endmodule",
+        );
+        let unit = single_file_unit(&db, file);
+        assert_eq!(eval_named_param(&db, file, unit, "B"), ConstInt::Known(7));
+    }
+
+    #[test]
+    fn const_eval_qualified_param() {
+        use lyra_semantic::types::ConstInt;
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package pkg; parameter W = 8; endpackage");
+        let file_b = new_file(&db, 1, "module m; parameter P = pkg::W; endmodule");
+        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
+        assert_eq!(eval_first_param(&db, file_b, unit), ConstInt::Known(8));
+    }
+
+    #[test]
+    fn const_eval_cycle() {
+        use lyra_semantic::types::{ConstEvalError, ConstInt};
+        let db = LyraDatabase::default();
+        let file = new_file(
+            &db,
+            0,
+            "module m; parameter A = B + 1; parameter B = A + 1; endmodule",
+        );
+        let unit = single_file_unit(&db, file);
+        let result = eval_named_param(&db, file, unit, "A");
+        assert_eq!(result, ConstInt::Error(ConstEvalError::Cycle));
+    }
+
+    #[test]
+    fn const_eval_clog2() {
+        use lyra_semantic::types::ConstInt;
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; parameter P = $clog2(256); endmodule");
+        let unit = single_file_unit(&db, file);
+        assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(8));
+    }
+
+    #[test]
+    fn const_eval_no_initializer() {
+        use lyra_semantic::types::ConstInt;
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; parameter P; endmodule");
+        let unit = single_file_unit(&db, file);
+        let def = def_index_file(&db, file);
+        let (sym_id, _) = def
+            .symbols
+            .iter()
+            .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Parameter)
+            .expect("should have parameter");
+        let decl_ast_id = def.symbol_to_decl[sym_id.index()].expect("parameter should have decl");
+        let init_opt = def.decl_to_init_expr.get(&decl_ast_id);
+        // Parameter with no initializer should have None value
+        match init_opt {
+            Some(None) => {} // Expected: tracked but no init
+            None => {}       // Also acceptable: not tracked at all
+            Some(Some(init_id)) => {
+                // If it has an init_id, evaluating should give Unresolved
+                let expr_ref = ConstExprRef::new(&db, unit, *init_id);
+                let result = eval_const_int(&db, expr_ref);
+                assert!(
+                    matches!(result, ConstInt::Error(_)),
+                    "no-init parameter should error: {result:?}"
+                );
+            }
+        }
     }
 
     // Top-level construct tests

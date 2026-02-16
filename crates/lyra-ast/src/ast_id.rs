@@ -162,6 +162,57 @@ impl AstIdMap {
         N::cast(current)
     }
 
+    /// Look up the `ErasedAstId` for a raw `SyntaxNode`. O(1) hash lookup.
+    ///
+    /// This is the untyped counterpart of `ast_id<N>`. It accepts any
+    /// node kind recorded during the preorder traversal.
+    pub fn erased_ast_id(&self, node: &SyntaxNode) -> Option<ErasedAstId> {
+        let kind = node.kind();
+        let range = node.text_range();
+        let key = (kind, u32::from(range.start()), u32::from(range.end()));
+        let indices = self.node_to_id.get(&key)?;
+        if indices.len() == 1 {
+            return Some(ErasedAstId(RawAstId {
+                file: self.file,
+                index: indices[0],
+            }));
+        }
+        let node_path = compute_path(node);
+        for &index in indices {
+            if let Some(entry) = self.entries.get(index as usize)
+                && entry.path == node_path
+            {
+                return Some(ErasedAstId(RawAstId {
+                    file: self.file,
+                    index,
+                }));
+            }
+        }
+        None
+    }
+
+    /// Resolve an `ErasedAstId` back to an untyped `SyntaxNode`.
+    ///
+    /// Same walk logic as `get<N>` but returns `SyntaxNode` without casting.
+    /// O(depth) walk from root, where each step is `O(children_count)` via
+    /// `children().nth()`. Acceptable for expression trees (depth < 10,
+    /// children < 5 per node). Not a hot path -- called once per const-eval
+    /// query invocation.
+    pub fn get_node(&self, root: &SyntaxNode, id: ErasedAstId) -> Option<SyntaxNode> {
+        if id.0.file != self.file {
+            return None;
+        }
+        let entry = self.entries.get(id.0.index as usize)?;
+        let mut current = root.clone();
+        for &child_idx in &entry.path {
+            current = current.children().nth(child_idx as usize)?;
+        }
+        if current.kind() != entry.kind || current.text_range() != entry.range {
+            return None;
+        }
+        Some(current)
+    }
+
     /// File this map belongs to.
     pub fn file(&self) -> FileId {
         self.file
