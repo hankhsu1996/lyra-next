@@ -19,7 +19,7 @@ impl Language for SvLanguage {
 
     fn kind_from_raw(raw: rowan::SyntaxKind) -> SyntaxKind {
         assert!(
-            raw.0 <= SyntaxKind::Declarator as u16,
+            raw.0 <= SyntaxKind::QualifiedName as u16,
             "invalid SyntaxKind value: {}",
             raw.0
         );

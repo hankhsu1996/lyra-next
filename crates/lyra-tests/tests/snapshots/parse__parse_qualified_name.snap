@@ -1,0 +1,56 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..94
+  PackageDecl@0..36
+    PackageKw@0..7 "package"
+    Whitespace@7..8 " "
+    Ident@8..11 "pkg"
+    Semicolon@11..12 ";"
+    PackageBody@12..25
+      VarDecl@12..25
+        TypeSpec@12..20
+          Whitespace@12..15 "\n  "
+          LogicKw@15..20 "logic"
+        Declarator@20..24
+          Whitespace@20..21 " "
+          Ident@21..24 "val"
+        Semicolon@24..25 ";"
+    Whitespace@25..26 "\n"
+    EndpackageKw@26..36 "endpackage"
+  ModuleDecl@36..93
+    Whitespace@36..38 "\n\n"
+    ModuleKw@38..44 "module"
+    Whitespace@44..45 " "
+    Ident@45..48 "top"
+    Semicolon@48..49 ";"
+    ModuleBody@49..83
+      VarDecl@49..60
+        TypeSpec@49..57
+          Whitespace@49..52 "\n  "
+          LogicKw@52..57 "logic"
+        Declarator@57..59
+          Whitespace@57..58 " "
+          Ident@58..59 "y"
+        Semicolon@59..60 ";"
+      ContinuousAssign@60..83
+        Whitespace@60..63 "\n  "
+        AssignKw@63..69 "assign"
+        NameRef@69..71
+          Whitespace@69..70 " "
+          Ident@70..71 "y"
+        Whitespace@71..72 " "
+        Assign@72..73 "="
+        QualifiedName@73..82
+          Whitespace@73..74 " "
+          Ident@74..77 "pkg"
+          ColonColon@77..79 "::"
+          Ident@79..82 "val"
+        Semicolon@82..83 ";"
+    Whitespace@83..84 "\n"
+    EndmoduleKw@84..93 "endmodule"
+  Whitespace@93..94 "\n"
+---
+no diagnostics

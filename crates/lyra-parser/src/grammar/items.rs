@@ -7,6 +7,113 @@ use super::expressions;
 use super::ports;
 use super::statements;
 
+// Parse a package declaration: `package [lifetime] name ; { item } endpackage [: name]`
+pub(crate) fn package_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // package
+
+    // Optional lifetime: automatic | static
+    if p.at(SyntaxKind::AutomaticKw) || p.at(SyntaxKind::StaticKw) {
+        p.bump();
+    }
+
+    // Package name
+    p.expect(SyntaxKind::Ident);
+    p.expect(SyntaxKind::Semicolon);
+
+    // Package body
+    let body = p.start();
+    while !p.at(SyntaxKind::EndpackageKw) && !p.at_end() {
+        if !package_item(p) {
+            break;
+        }
+    }
+    body.complete(p, SyntaxKind::PackageBody);
+
+    if !p.eat(SyntaxKind::EndpackageKw) {
+        p.error("expected `endpackage`");
+    }
+
+    // Optional `: name`
+    if p.eat(SyntaxKind::Colon) && p.at(SyntaxKind::Ident) {
+        p.bump();
+    }
+
+    m.complete(p, SyntaxKind::PackageDecl);
+}
+
+// Parse one package item. Returns false if no progress was made.
+fn package_item(p: &mut Parser) -> bool {
+    match p.current() {
+        SyntaxKind::ParameterKw | SyntaxKind::LocalparamKw => {
+            declarations::param_decl(p);
+            true
+        }
+        k if is_net_type(k) => {
+            declarations::net_decl(p);
+            true
+        }
+        k if declarations::is_data_type_keyword(k) => {
+            declarations::var_decl(p);
+            true
+        }
+        SyntaxKind::ImportKw => {
+            import_decl(p);
+            true
+        }
+        _ => {
+            p.error_bump("unexpected token in package body");
+            !p.at_end()
+        }
+    }
+}
+
+// Parse an import declaration: `import pkg::sym, pkg::* ;`
+pub(crate) fn import_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // import
+
+    import_item(p);
+    while p.eat(SyntaxKind::Comma) {
+        import_item(p);
+    }
+
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::ImportDecl);
+}
+
+fn import_item(p: &mut Parser) {
+    let m = p.start();
+    if !p.at(SyntaxKind::Ident) {
+        // Malformed: sync to semicolon
+        while !p.at(SyntaxKind::Semicolon) && !p.at_end() {
+            p.error_bump("expected package name");
+        }
+        m.complete(p, SyntaxKind::ImportItem);
+        return;
+    }
+
+    // Check if this is `pkg :: sym` (non-wildcard) or `pkg :: *` (wildcard)
+    if p.nth(1) == SyntaxKind::ColonColon && p.nth(2) == SyntaxKind::Star {
+        // Wildcard: pkg :: *
+        p.bump(); // pkg
+        p.bump(); // ::
+        p.bump(); // *
+    } else if p.nth(1) == SyntaxKind::ColonColon && p.nth(2) == SyntaxKind::Ident {
+        // Non-wildcard: wrap in QualifiedName
+        let qn = p.start();
+        p.bump(); // pkg
+        p.bump(); // ::
+        p.bump(); // sym
+        qn.complete(p, SyntaxKind::QualifiedName);
+    } else {
+        // Malformed: just consume the ident and sync
+        p.error_bump("expected `::` after package name");
+    }
+
+    m.complete(p, SyntaxKind::ImportItem);
+}
+
 // Parse a module declaration: `module name [#(params)] [(ports)] ; { item } endmodule`
 pub(crate) fn module_decl(p: &mut Parser) {
     let m = p.start();
@@ -85,6 +192,10 @@ fn module_item(p: &mut Parser) -> bool {
         }
         SyntaxKind::InputKw | SyntaxKind::OutputKw | SyntaxKind::InoutKw => {
             declarations::var_decl(p);
+            true
+        }
+        SyntaxKind::ImportKw => {
+            import_decl(p);
             true
         }
         SyntaxKind::Ident => {

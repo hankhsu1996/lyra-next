@@ -13,8 +13,27 @@ pub struct SemanticDiag {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticDiagKind {
-    UnresolvedName { name: SmolStr },
-    DuplicateDefinition { name: SmolStr, original: TextRange },
+    UnresolvedName {
+        name: SmolStr,
+    },
+    DuplicateDefinition {
+        name: SmolStr,
+        original: TextRange,
+    },
+    PackageNotFound {
+        package: SmolStr,
+    },
+    MemberNotFound {
+        package: SmolStr,
+        member: SmolStr,
+    },
+    AmbiguousWildcardImport {
+        name: SmolStr,
+        candidates: Box<[SmolStr]>,
+    },
+    UnsupportedQualifiedPath {
+        path: SmolStr,
+    },
 }
 
 impl SemanticDiag {
@@ -26,6 +45,19 @@ impl SemanticDiag {
             }
             SemanticDiagKind::DuplicateDefinition { name, .. } => {
                 format!("duplicate definition of `{name}`")
+            }
+            SemanticDiagKind::PackageNotFound { package } => {
+                format!("package `{package}` not found")
+            }
+            SemanticDiagKind::MemberNotFound { package, member } => {
+                format!("member `{member}` not found in package `{package}`")
+            }
+            SemanticDiagKind::AmbiguousWildcardImport { name, candidates } => {
+                let pkgs = candidates.join("`, `");
+                format!("name `{name}` is ambiguous: imported from packages `{pkgs}`")
+            }
+            SemanticDiagKind::UnsupportedQualifiedPath { path } => {
+                format!("qualified path `{path}` is not supported")
             }
         }
     }

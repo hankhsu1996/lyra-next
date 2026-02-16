@@ -1,0 +1,46 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..70
+  PackageDecl@0..69
+    PackageKw@0..7 "package"
+    Whitespace@7..8 " "
+    Ident@8..14 "my_pkg"
+    Semicolon@14..15 ";"
+    PackageBody@15..58
+      VarDecl@15..35
+        TypeSpec@15..29
+          Whitespace@15..18 "\n  "
+          LogicKw@18..23 "logic"
+          PackedDimension@23..29
+            Whitespace@23..24 " "
+            LBracket@24..25 "["
+            Literal@25..26
+              IntLiteral@25..26 "7"
+            Colon@26..27 ":"
+            Literal@27..28
+              IntLiteral@27..28 "0"
+            RBracket@28..29 "]"
+        Declarator@29..34
+          Whitespace@29..30 " "
+          Ident@30..34 "data"
+        Semicolon@34..35 ";"
+      ParamDecl@35..58
+        Whitespace@35..38 "\n  "
+        ParameterKw@38..47 "parameter"
+        Declarator@47..57
+          Whitespace@47..48 " "
+          Ident@48..53 "WIDTH"
+          Whitespace@53..54 " "
+          Assign@54..55 "="
+          Literal@55..57
+            Whitespace@55..56 " "
+            IntLiteral@56..57 "8"
+        Semicolon@57..58 ";"
+    Whitespace@58..59 "\n"
+    EndpackageKw@59..69 "endpackage"
+  Whitespace@69..70 "\n"
+---
+no diagnostics

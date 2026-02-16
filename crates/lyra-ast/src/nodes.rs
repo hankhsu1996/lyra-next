@@ -139,9 +139,22 @@ ast_nodes! {
     InstancePort(SyntaxKind::InstancePort) {}
 
     TypeSpec(SyntaxKind::TypeSpec) { @custom }
+
+    // Package declarations
+    PackageDecl(SyntaxKind::PackageDecl) { @custom }
+    PackageBody(SyntaxKind::PackageBody) { @custom }
+    ImportDecl(SyntaxKind::ImportDecl) { @custom }
+    ImportItem(SyntaxKind::ImportItem) { @custom }
+    QualifiedName(SyntaxKind::QualifiedName) { @custom }
 }
 
 // Custom accessors
+
+impl SourceFile {
+    pub fn packages(&self) -> AstChildren<PackageDecl> {
+        support::children(&self.syntax)
+    }
+}
 
 impl BinExpr {
     pub fn op_token(&self) -> Option<SyntaxToken> {
@@ -196,5 +209,62 @@ impl TypeSpec {
 
     pub fn packed_dimensions(&self) -> AstChildren<PackedDimension> {
         support::children(&self.syntax)
+    }
+}
+
+impl PackageDecl {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Ident)
+    }
+
+    pub fn body(&self) -> Option<PackageBody> {
+        support::child(&self.syntax)
+    }
+}
+
+impl PackageBody {
+    pub fn var_decls(&self) -> AstChildren<VarDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn net_decls(&self) -> AstChildren<NetDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn param_decls(&self) -> AstChildren<ParamDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn import_decls(&self) -> AstChildren<ImportDecl> {
+        support::children(&self.syntax)
+    }
+}
+
+impl ImportDecl {
+    pub fn items(&self) -> AstChildren<ImportItem> {
+        support::children(&self.syntax)
+    }
+}
+
+impl ImportItem {
+    pub fn qualified_name(&self) -> Option<QualifiedName> {
+        support::child(&self.syntax)
+    }
+
+    pub fn package_name(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Ident)
+    }
+
+    pub fn is_wildcard(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::Star).is_some()
+    }
+}
+
+impl QualifiedName {
+    pub fn segments(&self) -> impl Iterator<Item = SyntaxToken> + '_ {
+        self.syntax
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .filter(|tok| tok.kind() == SyntaxKind::Ident)
     }
 }

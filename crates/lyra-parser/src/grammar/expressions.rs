@@ -86,6 +86,19 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
             Some(m.complete(p, SyntaxKind::Literal))
         }
         SyntaxKind::Ident | SyntaxKind::SystemIdent | SyntaxKind::EscapedIdent => {
+            // Check for qualified name: Ident :: Ident [:: Ident]*
+            if p.current() == SyntaxKind::Ident
+                && p.nth(1) == SyntaxKind::ColonColon
+                && p.nth(2) == SyntaxKind::Ident
+            {
+                let m = p.start();
+                p.bump(); // first segment
+                while p.at(SyntaxKind::ColonColon) && p.nth(1) == SyntaxKind::Ident {
+                    p.bump(); // ::
+                    p.bump(); // segment
+                }
+                return Some(m.complete(p, SyntaxKind::QualifiedName));
+            }
             let m = p.start();
             p.bump();
             Some(m.complete(p, SyntaxKind::NameRef))

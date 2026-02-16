@@ -1,7 +1,7 @@
 use lyra_diag::{Arg, Diagnostic, DiagnosticCode, Label, LabelKind, Message, MessageId, Severity};
 use lyra_preprocess::PreprocOutput;
 use lyra_semantic::def_index::DefIndex;
-use lyra_semantic::diagnostic::SemanticDiagKind;
+use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
 use lyra_semantic::resolve_index::ResolveIndex;
 use lyra_source::{FileId, Span, TextRange, TextSize};
 use smol_str::SmolStr;
@@ -16,7 +16,6 @@ pub(crate) fn lower_file_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
-    // Preprocess errors
     for e in &pp.errors {
         let (span, extra) = map_span_or_fallback(file_id, &pp.source_map, e.range);
         let text = freeform_text(&e.message, extra);
@@ -34,7 +33,6 @@ pub(crate) fn lower_file_diagnostics(
         );
     }
 
-    // Parse errors
     for e in &parse.errors {
         let (span, extra) = map_span_or_fallback(file_id, &pp.source_map, e.range);
         let text = freeform_text(&e.message, extra);
@@ -52,51 +50,115 @@ pub(crate) fn lower_file_diagnostics(
         );
     }
 
-    // Semantic diagnostics
     for diag in def.diagnostics.iter().chain(resolve.diagnostics.iter()) {
         let (primary_span, _) = map_span_or_fallback(file_id, &pp.source_map, diag.range);
-        match &diag.kind {
-            SemanticDiagKind::UnresolvedName { name } => {
-                diags.push(
-                    Diagnostic::new(
-                        Severity::Error,
-                        DiagnosticCode::UNRESOLVED_NAME,
-                        Message::new(MessageId::UnresolvedName, vec![Arg::Name(name.clone())]),
-                    )
-                    .with_label(Label {
-                        kind: LabelKind::Primary,
-                        span: primary_span,
-                        message: Message::simple(MessageId::NotFoundInScope),
-                    }),
-                );
-            }
-            SemanticDiagKind::DuplicateDefinition { name, original } => {
-                let mut d = Diagnostic::new(
-                    Severity::Error,
-                    DiagnosticCode::DUPLICATE_DEFINITION,
-                    Message::new(
-                        MessageId::DuplicateDefinition,
-                        vec![Arg::Name(name.clone())],
-                    ),
-                )
-                .with_label(Label {
-                    kind: LabelKind::Primary,
-                    span: primary_span,
-                    message: Message::simple(MessageId::RedefinedHere),
-                });
-                if let Some(orig_span) = pp.source_map.map_span(*original) {
-                    d = d.with_label(Label {
-                        kind: LabelKind::Secondary,
-                        span: orig_span,
-                        message: Message::simple(MessageId::FirstDefinedHere),
-                    });
-                }
-                diags.push(d);
-            }
-        }
+        diags.push(lower_semantic_diag(diag, primary_span, &pp.source_map));
     }
 
     diags
+}
+
+fn lower_semantic_diag(
+    diag: &SemanticDiag,
+    primary_span: Span,
+    source_map: &lyra_preprocess::SourceMap,
+) -> Diagnostic {
+    match &diag.kind {
+        SemanticDiagKind::UnresolvedName { name } => Diagnostic::new(
+            Severity::Error,
+            DiagnosticCode::UNRESOLVED_NAME,
+            Message::new(MessageId::UnresolvedName, vec![Arg::Name(name.clone())]),
+        )
+        .with_label(Label {
+            kind: LabelKind::Primary,
+            span: primary_span,
+            message: Message::simple(MessageId::NotFoundInScope),
+        }),
+        SemanticDiagKind::DuplicateDefinition { name, original } => {
+            let mut d = Diagnostic::new(
+                Severity::Error,
+                DiagnosticCode::DUPLICATE_DEFINITION,
+                Message::new(
+                    MessageId::DuplicateDefinition,
+                    vec![Arg::Name(name.clone())],
+                ),
+            )
+            .with_label(Label {
+                kind: LabelKind::Primary,
+                span: primary_span,
+                message: Message::simple(MessageId::RedefinedHere),
+            });
+            if let Some(orig_span) = source_map.map_span(*original) {
+                d = d.with_label(Label {
+                    kind: LabelKind::Secondary,
+                    span: orig_span,
+                    message: Message::simple(MessageId::FirstDefinedHere),
+                });
+            }
+            d
+        }
+        SemanticDiagKind::PackageNotFound { package } => Diagnostic::new(
+            Severity::Error,
+            DiagnosticCode::PACKAGE_NOT_FOUND,
+            Message::new(MessageId::PackageNotFound, vec![Arg::Name(package.clone())]),
+        )
+        .with_label(Label {
+            kind: LabelKind::Primary,
+            span: primary_span,
+            message: Message::new(MessageId::PackageNotFound, vec![Arg::Name(package.clone())]),
+        }),
+        SemanticDiagKind::MemberNotFound { package, member } => Diagnostic::new(
+            Severity::Error,
+            DiagnosticCode::MEMBER_NOT_FOUND,
+            Message::new(
+                MessageId::MemberNotFound,
+                vec![Arg::Name(package.clone()), Arg::Name(member.clone())],
+            ),
+        )
+        .with_label(Label {
+            kind: LabelKind::Primary,
+            span: primary_span,
+            message: Message::new(
+                MessageId::MemberNotFound,
+                vec![Arg::Name(package.clone()), Arg::Name(member.clone())],
+            ),
+        }),
+        SemanticDiagKind::AmbiguousWildcardImport { name, candidates } => {
+            let pkgs = candidates.join("`, `");
+            Diagnostic::new(
+                Severity::Error,
+                DiagnosticCode::AMBIGUOUS_IMPORT,
+                Message::new(
+                    MessageId::AmbiguousWildcardImport,
+                    vec![
+                        Arg::Name(name.clone()),
+                        Arg::Name(SmolStr::new(format!("`{pkgs}`"))),
+                    ],
+                ),
+            )
+            .with_label(Label {
+                kind: LabelKind::Primary,
+                span: primary_span,
+                message: Message::simple(MessageId::AmbiguousWildcardImport),
+            })
+        }
+        SemanticDiagKind::UnsupportedQualifiedPath { path } => Diagnostic::new(
+            Severity::Error,
+            DiagnosticCode::UNSUPPORTED_QUALIFIED_PATH,
+            Message::new(
+                MessageId::UnsupportedQualifiedPath,
+                vec![Arg::Name(path.clone())],
+            ),
+        )
+        .with_label(Label {
+            kind: LabelKind::Primary,
+            span: primary_span,
+            message: Message::new(
+                MessageId::UnsupportedQualifiedPath,
+                vec![Arg::Name(path.clone())],
+            ),
+        }),
+    }
 }
 
 /// Map an expanded-text range to a `Span` via the source map.

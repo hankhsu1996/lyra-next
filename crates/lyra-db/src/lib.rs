@@ -2,10 +2,13 @@ mod lower_diag;
 
 use lyra_preprocess::{IncludeProvider, ResolvedInclude};
 use lyra_semantic::def_index::DefIndex;
-use lyra_semantic::global_index::GlobalDefIndex;
+use lyra_semantic::global_index::{
+    DefinitionKind, GlobalDefIndex, PackageScope, PackageScopeIndex,
+};
 use lyra_semantic::name_graph::NameGraph;
-use lyra_semantic::resolve_index::{CoreResolution, ResolveIndex};
-use lyra_semantic::symbols::GlobalSymbolId;
+use lyra_semantic::resolve_index::{CoreResolveOutput, ResolveIndex};
+use lyra_semantic::scopes::ScopeKind;
+use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId};
 use salsa::Setter;
 use smol_str::SmolStr;
 
@@ -225,20 +228,38 @@ pub fn name_graph_file(db: &dyn salsa::Database, file: SourceFile) -> NameGraph 
 
 /// Build the global definition index for a compilation unit (Salsa-cached).
 ///
-/// Aggregates module names and `ErasedAstId`s from all files' `DefIndex`
-/// exports. On whitespace-only edits, `ErasedAstId` values are topology-stable,
-/// so the result backdates correctly.
+/// Aggregates module and package names with `GlobalDefId`s from all files'
+/// `DefIndex` exports. On whitespace-only edits, `ErasedAstId` values are
+/// topology-stable, so the result backdates correctly.
 #[salsa::tracked(return_ref)]
 pub fn global_def_index(db: &dyn salsa::Database, unit: CompilationUnit) -> GlobalDefIndex {
-    let mut entries: Vec<(SmolStr, lyra_ast::ErasedAstId)> = Vec::new();
+    let mut entries: Vec<(SmolStr, GlobalDefId, DefinitionKind)> = Vec::new();
     for file in unit.files(db) {
         let def = def_index_file(db, *file);
+        // Collect modules
         for &sym_id in &*def.exports.modules {
             let sym = def.symbols.get(sym_id);
-            // Find the ErasedAstId for this module symbol via decl_to_symbol reverse lookup
             for (ast_id, &sid) in &def.decl_to_symbol {
                 if sid == sym_id {
-                    entries.push((sym.name.clone(), *ast_id));
+                    entries.push((
+                        sym.name.clone(),
+                        GlobalDefId::new(*ast_id),
+                        DefinitionKind::Module,
+                    ));
+                    break;
+                }
+            }
+        }
+        // Collect packages
+        for &sym_id in &*def.exports.packages {
+            let sym = def.symbols.get(sym_id);
+            for (ast_id, &sid) in &def.decl_to_symbol {
+                if sid == sym_id {
+                    entries.push((
+                        sym.name.clone(),
+                        GlobalDefId::new(*ast_id),
+                        DefinitionKind::Package,
+                    ));
                     break;
                 }
             }
@@ -247,19 +268,77 @@ pub fn global_def_index(db: &dyn salsa::Database, unit: CompilationUnit) -> Glob
     lyra_semantic::global_index::build_global_def_index(&entries)
 }
 
+/// Build the package scope index for a compilation unit (Salsa-cached).
+///
+/// Extracts symbols from package scopes in all files, split by namespace.
+#[salsa::tracked(return_ref)]
+pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> PackageScopeIndex {
+    let mut packages = Vec::new();
+    for file in unit.files(db) {
+        let def = def_index_file(db, *file);
+        // Find package symbols and their scopes
+        for &sym_id in &*def.exports.packages {
+            let pkg_sym = def.symbols.get(sym_id);
+            let pkg_scope = pkg_sym.scope;
+            let scope_data = def.scopes.get(pkg_scope);
+            if scope_data.kind != ScopeKind::Package {
+                continue;
+            }
+
+            let mut value_ns: Vec<(SmolStr, GlobalDefId)> = Vec::new();
+            let mut type_ns: Vec<(SmolStr, GlobalDefId)> = Vec::new();
+
+            // Collect Value-namespace symbols from this package scope
+            for &child_sym_id in &*scope_data.value_ns {
+                let child_sym = def.symbols.get(child_sym_id);
+                // Look up the GlobalDefId for this symbol
+                for (ast_id, &sid) in &def.decl_to_symbol {
+                    if sid == child_sym_id {
+                        value_ns.push((child_sym.name.clone(), GlobalDefId::new(*ast_id)));
+                        break;
+                    }
+                }
+            }
+
+            // Collect Type-namespace symbols
+            for &child_sym_id in &*scope_data.type_ns {
+                let child_sym = def.symbols.get(child_sym_id);
+                for (ast_id, &sid) in &def.decl_to_symbol {
+                    if sid == child_sym_id {
+                        type_ns.push((child_sym.name.clone(), GlobalDefId::new(*ast_id)));
+                        break;
+                    }
+                }
+            }
+
+            value_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
+            type_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+            packages.push(PackageScope {
+                name: pkg_sym.name.clone(),
+                value_ns: value_ns.into_boxed_slice(),
+                type_ns: type_ns.into_boxed_slice(),
+            });
+        }
+    }
+    lyra_semantic::global_index::build_package_scope_index(packages)
+}
+
 /// Resolve all use-sites using only offset-independent data (Salsa-cached).
 ///
-/// Depends on `name_graph_file` and `global_def_index`. When both are
-/// backdated (e.g. whitespace edit), this query is NOT re-executed.
+/// Depends on `name_graph_file`, `global_def_index`, and
+/// `package_scope_index`. When all are backdated (e.g. whitespace edit),
+/// this query is NOT re-executed.
 #[salsa::tracked(return_ref)]
 pub fn resolve_core_file(
     db: &dyn salsa::Database,
     file: SourceFile,
     unit: CompilationUnit,
-) -> Box<[Option<CoreResolution>]> {
+) -> CoreResolveOutput {
     let graph = name_graph_file(db, file);
     let global = global_def_index(db, unit);
-    lyra_semantic::build_resolve_core(graph, global)
+    let pkg_scope = package_scope_index(db, unit);
+    lyra_semantic::build_resolve_core(graph, global, pkg_scope)
 }
 
 /// Build per-file resolution index (Salsa-cached).
@@ -275,11 +354,11 @@ pub fn resolve_index_file(
 ) -> ResolveIndex {
     let def = def_index_file(db, file);
     let core = resolve_core_file(db, file, unit);
-    let lookup_decl = |ast_id: lyra_ast::ErasedAstId| -> Option<lyra_semantic::symbols::SymbolId> {
-        let target_file_id = ast_id.file();
+    let lookup_decl = |def_id: GlobalDefId| -> Option<lyra_semantic::symbols::SymbolId> {
+        let target_file_id = def_id.file();
         let target_file = source_file_by_id(db, unit, target_file_id)?;
         let target_def = def_index_file(db, target_file);
-        target_def.decl_to_symbol.get(&ast_id).copied()
+        target_def.decl_to_symbol.get(&def_id.ast_id()).copied()
     };
     lyra_semantic::build_resolve_index(def, core, &lookup_decl)
 }
@@ -289,7 +368,7 @@ pub fn resolve_index_file(
 /// Finds the nearest `NameRef` at `offset`, looks up its `AstId`,
 /// and returns the resolved `GlobalSymbolId` if found.
 /// Also handles module instantiation type names (e.g. `adder` in
-/// `adder u1(...)`) which are not `NameRef` nodes.
+/// `adder u1(...)`) and qualified names (`pkg::sym`).
 pub fn resolve_at(
     db: &dyn salsa::Database,
     file: SourceFile,
@@ -306,6 +385,11 @@ pub fn resolve_at(
         && let Some(resolution) = resolve.resolutions.get(&ast_id.erase())
     {
         return Some(resolution.symbol);
+    }
+
+    // Try qualified name (pkg::sym)
+    if let Some(result) = find_qualified_name_at(db, file, unit, &parse.syntax(), offset) {
+        return Some(result);
     }
 
     // Fallback: module instantiation type name
@@ -337,6 +421,54 @@ fn find_name_ref_at(
     use lyra_ast::AstNode;
     let token = root.token_at_offset(offset).right_biased()?;
     token.parent_ancestors().find_map(lyra_ast::NameRef::cast)
+}
+
+/// Find a qualified name at the cursor position and resolve it.
+///
+/// When on the package name part: resolve to the package declaration.
+/// When on the member name part: look up the `QualifiedName`'s `AstId`
+/// in the resolve index.
+fn find_qualified_name_at(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+    root: &lyra_parser::SyntaxNode,
+    offset: lyra_source::TextSize,
+) -> Option<GlobalSymbolId> {
+    use lyra_ast::AstNode;
+    let token = root.token_at_offset(offset).right_biased()?;
+    let qn = token
+        .parent_ancestors()
+        .find_map(lyra_ast::QualifiedName::cast)?;
+
+    let segments: Vec<_> = qn.segments().collect();
+    if segments.len() < 2 {
+        return None;
+    }
+
+    // Determine if cursor is on the package name or member name
+    let on_package = segments[0].text_range().contains(offset);
+
+    if on_package {
+        // Resolve to the package declaration
+        let pkg_name = segments[0].text();
+        let global = global_def_index(db, unit);
+        let def_id = global.resolve_package(pkg_name.as_ref())?;
+        let target_file = source_file_by_id(db, unit, def_id.file())?;
+        let target_def = def_index_file(db, target_file);
+        let local = target_def.decl_to_symbol.get(&def_id.ast_id()).copied()?;
+        Some(GlobalSymbolId {
+            file: def_id.file(),
+            local,
+        })
+    } else {
+        // Resolve via the QualifiedName's AstId in the resolve index
+        let ast_map = ast_id_map(db, file);
+        let resolve = resolve_index_file(db, file, unit);
+        let ast_id = ast_map.ast_id(&qn)?;
+        let resolution = resolve.resolutions.get(&ast_id.erase())?;
+        Some(resolution.symbol)
+    }
 }
 
 /// Find a `ModuleInstantiation` node where the cursor is on the module
@@ -373,33 +505,34 @@ pub fn file_diagnostics(
     lower_diag::lower_file_diagnostics(file.file_id(db), pp, parse, def, resolve)
 }
 
-/// Unit-level diagnostics: duplicate global module definitions.
+/// Unit-level diagnostics: duplicate definitions in the definitions namespace.
 ///
-/// Walks `GlobalDefIndex.modules()`, finds adjacent entries with the
-/// same name, and emits one diagnostic per duplicate.
+/// Walks `GlobalDefIndex.definitions()`, finds adjacent entries with the
+/// same name, and emits one diagnostic per duplicate. Catches module/module,
+/// package/package, and module/package name collisions.
 #[salsa::tracked(return_ref)]
 pub fn unit_diagnostics(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
 ) -> Box<[lyra_diag::Diagnostic]> {
     let global = global_def_index(db, unit);
-    let modules = global.modules();
+    let defs = global.definitions();
     let mut diags = Vec::new();
 
     let mut i = 0;
-    while i < modules.len() {
-        let (name, _first_id) = &modules[i];
+    while i < defs.len() {
+        let (name, _, _) = &defs[i];
         let mut j = i + 1;
-        while j < modules.len() && modules[j].0 == *name {
+        while j < defs.len() && defs[j].0 == *name {
             j += 1;
         }
         if j - i > 1 {
             // Duplicate group: emit diagnostics for entries [i+1..j]
-            for (_, dup_ast_id) in &modules[(i + 1)..j] {
-                let dup_file_id = dup_ast_id.file();
+            for (_, dup_def_id, _) in &defs[(i + 1)..j] {
+                let dup_file_id = dup_def_id.file();
                 if let Some(dup_file) = source_file_by_id(db, unit, dup_file_id) {
                     let dup_def = def_index_file(db, dup_file);
-                    if let Some(&sym_id) = dup_def.decl_to_symbol.get(dup_ast_id) {
+                    if let Some(&sym_id) = dup_def.decl_to_symbol.get(&dup_def_id.ast_id()) {
                         let sym = dup_def.symbols.get(sym_id);
                         let pp = preprocess_file(db, dup_file);
                         if let Some(span) = pp.source_map.map_span(sym.def_range) {
@@ -408,7 +541,7 @@ pub fn unit_diagnostics(
                                     lyra_diag::Severity::Error,
                                     lyra_diag::DiagnosticCode::DUPLICATE_DEFINITION,
                                     lyra_diag::Message::new(
-                                        lyra_diag::MessageId::DuplicateModuleDefinition,
+                                        lyra_diag::MessageId::DuplicateDefinitionInUnit,
                                         vec![lyra_diag::Arg::Name(name.clone())],
                                     ),
                                 )
@@ -1331,11 +1464,11 @@ mod tests {
         let diags = unit_diagnostics(&db, unit);
         let dup_diags: Vec<_> = diags
             .iter()
-            .filter(|d| d.render_message().contains("duplicate module"))
+            .filter(|d| d.render_message().contains("duplicate definition"))
             .collect();
         assert!(
             !dup_diags.is_empty(),
-            "should have duplicate module definition diagnostic: {diags:?}"
+            "should have duplicate definition diagnostic: {diags:?}"
         );
     }
 
@@ -1368,5 +1501,229 @@ mod tests {
             unresolved.is_empty(),
             "adder should resolve after adding file_a: {diags2:?}"
         );
+    }
+
+    // Package resolution tests
+
+    #[test]
+    fn import_explicit_resolves_cross_file() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package pkg; logic x; endpackage");
+        let file_b = new_file(&db, 1, "module m; import pkg::x; assign y = x; endmodule");
+        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
+        let text = file_b.text(&db);
+        let x_pos = text.rfind("x;").expect("should find 'x;'");
+        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(x_pos as u32));
+        assert!(result.is_some(), "'x' should resolve via explicit import");
+        let sym_id = result.expect("checked above");
+        assert_eq!(
+            sym_id.file,
+            lyra_source::FileId(0),
+            "should resolve to pkg file"
+        );
+        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
+        assert_eq!(sym.name.as_str(), "x");
+    }
+
+    #[test]
+    fn qualified_name_resolves_cross_file() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package pkg; logic val; endpackage");
+        let file_b = new_file(&db, 1, "module m; assign y = pkg::val; endmodule");
+        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
+        // Cursor on 'val' in 'pkg::val'
+        let text = file_b.text(&db);
+        let val_pos = text.find("val").expect("should find 'val'");
+        let result = resolve_at(
+            &db,
+            file_b,
+            unit,
+            lyra_source::TextSize::new(val_pos as u32),
+        );
+        assert!(result.is_some(), "'val' in pkg::val should resolve");
+        let sym_id = result.expect("checked above");
+        assert_eq!(sym_id.file, lyra_source::FileId(0));
+        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
+        assert_eq!(sym.name.as_str(), "val");
+    }
+
+    #[test]
+    fn wildcard_import_resolves() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package pkg; logic x; endpackage");
+        let file_b = new_file(&db, 1, "module m; import pkg::*; assign y = x; endmodule");
+        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
+        let text = file_b.text(&db);
+        let x_pos = text.rfind("x;").expect("should find 'x;'");
+        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(x_pos as u32));
+        assert!(result.is_some(), "'x' should resolve via wildcard import");
+        let sym_id = result.expect("checked above");
+        assert_eq!(sym_id.file, lyra_source::FileId(0));
+    }
+
+    #[test]
+    fn local_shadows_import() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package pkg; logic x; endpackage");
+        let file_b = new_file(
+            &db,
+            1,
+            "module m; import pkg::*; logic x; assign y = x; endmodule",
+        );
+        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
+        let text = file_b.text(&db);
+        let x_pos = text.rfind("x;").expect("should find 'x;'");
+        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(x_pos as u32));
+        assert!(result.is_some(), "'x' should resolve to local declaration");
+        let sym_id = result.expect("checked above");
+        // Local declaration is in file_b
+        assert_eq!(
+            sym_id.file,
+            lyra_source::FileId(1),
+            "local should shadow import"
+        );
+    }
+
+    #[test]
+    fn explicit_import_shadows_wildcard() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package p1; logic x; endpackage");
+        let file_b = new_file(&db, 1, "package p2; logic x; endpackage");
+        let file_c = new_file(
+            &db,
+            2,
+            "module m; import p1::*; import p2::x; assign y = x; endmodule",
+        );
+        let unit = new_compilation_unit(&db, vec![file_a, file_b, file_c]);
+        let text = file_c.text(&db);
+        let x_pos = text.rfind("x;").expect("should find 'x;'");
+        let result = resolve_at(&db, file_c, unit, lyra_source::TextSize::new(x_pos as u32));
+        assert!(result.is_some(), "'x' should resolve via explicit import");
+        let sym_id = result.expect("checked above");
+        assert_eq!(
+            sym_id.file,
+            lyra_source::FileId(1),
+            "explicit import from p2 should shadow wildcard from p1"
+        );
+    }
+
+    #[test]
+    fn unresolved_import_package_not_found() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "module m; import nonexistent::x; endmodule");
+        let unit = single_file_unit(&db, file);
+        let diags = file_diagnostics(&db, file, unit);
+        assert!(
+            diags.iter().any(|d| {
+                let msg = d.render_message();
+                msg.contains("nonexistent") && msg.contains("not found")
+            }),
+            "should have package not found diagnostic: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn import_member_not_found() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package pkg; logic x; endpackage");
+        let file_b = new_file(&db, 1, "module m; import pkg::z; endmodule");
+        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
+        let diags = file_diagnostics(&db, file_b, unit);
+        assert!(
+            diags.iter().any(|d| {
+                let msg = d.render_message();
+                msg.contains("z") && msg.contains("not found")
+            }),
+            "should have member not found diagnostic: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn wildcard_ambiguity() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package p1; logic x; endpackage");
+        let file_b = new_file(&db, 1, "package p2; logic x; endpackage");
+        let file_c = new_file(
+            &db,
+            2,
+            "module m; import p1::*; import p2::*; assign y = x; endmodule",
+        );
+        let unit = new_compilation_unit(&db, vec![file_a, file_b, file_c]);
+        let diags = file_diagnostics(&db, file_c, unit);
+        assert!(
+            diags.iter().any(|d| {
+                let msg = d.render_message();
+                msg.contains("ambiguous") || msg.contains("x")
+            }),
+            "should have ambiguous import diagnostic: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn module_package_name_collision() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "module foo; endmodule");
+        let file_b = new_file(&db, 1, "package foo; endpackage");
+        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
+        let diags = unit_diagnostics(&db, unit);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.render_message().contains("duplicate definition")),
+            "module and package 'foo' should collide: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn qualified_name_cursor_on_package() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package pkg; logic val; endpackage");
+        let file_b = new_file(&db, 1, "module m; assign y = pkg::val; endmodule");
+        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
+        // Cursor on 'pkg' in 'pkg::val'
+        let text = file_b.text(&db);
+        let pkg_pos = text.find("pkg::").expect("should find 'pkg::'");
+        let result = resolve_at(
+            &db,
+            file_b,
+            unit,
+            lyra_source::TextSize::new(pkg_pos as u32),
+        );
+        assert!(
+            result.is_some(),
+            "cursor on 'pkg' should resolve to package"
+        );
+        let sym_id = result.expect("checked above");
+        assert_eq!(sym_id.file, lyra_source::FileId(0));
+        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
+        assert_eq!(sym.name.as_str(), "pkg");
+        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Package);
+    }
+
+    #[test]
+    fn package_symbols_in_exports() {
+        let db = LyraDatabase::default();
+        let file = new_file(&db, 0, "package my_pkg; logic x; endpackage");
+        let def = def_index_file(&db, file);
+        assert!(
+            !def.exports.packages.is_empty(),
+            "package should be in exports"
+        );
+    }
+
+    #[test]
+    fn qualified_name_resolves_parameter() {
+        let db = LyraDatabase::default();
+        let file_a = new_file(&db, 0, "package pkg; parameter WIDTH = 8; endpackage");
+        let file_b = new_file(&db, 1, "module m; assign y = pkg::WIDTH; endmodule");
+        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
+        let text = file_b.text(&db);
+        let pos = text.find("WIDTH").expect("should find 'WIDTH'");
+        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(pos as u32));
+        assert!(result.is_some(), "'WIDTH' in pkg::WIDTH should resolve");
+        let sym_id = result.expect("checked above");
+        assert_eq!(sym_id.file, lyra_source::FileId(0));
+        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
+        assert_eq!(sym.name.as_str(), "WIDTH");
     }
 }

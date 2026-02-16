@@ -414,6 +414,11 @@ pub enum SyntaxKind {
     Literal,
     ErrorNode,
     Declarator,
+    PackageDecl,
+    PackageBody,
+    ImportDecl,
+    ImportItem,
+    QualifiedName,
 }
 
 /// First node kind value -- tokens are `< NODE_START`, nodes `>= NODE_START`.
