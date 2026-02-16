@@ -1,11 +1,15 @@
+pub mod annotation;
+
 use std::fmt::Write;
 use std::path::Path;
 
 use lyra_db::{
-    CompilationUnit, IncludeMap, LyraDatabase, SourceFile, new_compilation_unit, parse_file,
+    CompilationUnit, IncludeMap, LyraDatabase, SourceFile, file_diagnostics, new_compilation_unit,
+    parse_file, unit_diagnostics,
 };
+use lyra_diag::Severity;
 use lyra_parser::{ParseError, SyntaxElement, SyntaxNode};
-use lyra_source::FileId;
+use lyra_source::{FileId, LineIndex};
 
 /// A test workspace that holds multiple source files and provides
 /// dump utilities for snapshot testing.
@@ -64,10 +68,148 @@ impl TestWorkspace {
         &self.db
     }
 
+    /// The `SourceFile` at the given index.
+    pub fn source_file(&self, index: usize) -> SourceFile {
+        self.files[index].1
+    }
+
+    /// Source text of the file at the given index.
+    pub fn file_text(&self, index: usize) -> &str {
+        self.files[index].1.text(&self.db)
+    }
+
+    /// Path (name) of the file at the given index.
+    pub fn file_path(&self, index: usize) -> &str {
+        &self.files[index].0
+    }
+
+    /// Number of files.
+    pub fn file_count(&self) -> usize {
+        self.files.len()
+    }
+
+    /// Map a `FileId` back to the file's index in this workspace.
+    pub fn file_index_for_id(&self, id: FileId) -> Option<usize> {
+        self.files
+            .iter()
+            .position(|(_, s)| s.file_id(&self.db) == id)
+    }
+
     /// Build a `CompilationUnit` from all files in the workspace.
     pub fn compilation_unit(&self) -> CompilationUnit {
         let sources: Vec<SourceFile> = self.files.iter().map(|(_, s)| *s).collect();
         new_compilation_unit(&self.db, sources)
+    }
+
+    /// Dump diagnostics summary for all files + unit diagnostics.
+    ///
+    /// Format:
+    /// ```text
+    /// // file: main.sv (2 diagnostics)
+    ///   error[lyra.semantic[1]] 0:14..0:15: unresolved name `x`
+    /// ---
+    /// unit (0 diagnostics)
+    /// ```
+    pub fn dump_diagnostics(&self) -> String {
+        let unit = self.compilation_unit();
+        let mut out = String::new();
+
+        // Collect and format per-file diagnostics
+        for (i, (path, source)) in self.files.iter().enumerate() {
+            let diags = file_diagnostics(&self.db, *source, unit);
+            let line_index = LineIndex::new(self.file_text(i));
+            let _ = writeln!(
+                out,
+                "// file: {path} ({} diagnostic{})",
+                diags.len(),
+                if diags.len() == 1 { "" } else { "s" }
+            );
+
+            let mut entries: Vec<_> = diags
+                .iter()
+                .filter_map(|d| {
+                    let span = d.primary_span()?;
+                    let start = line_index.line_col(span.range.start());
+                    let end = line_index.line_col(span.range.end());
+                    let msg = d.render_message();
+                    let code = d.code.as_str();
+                    let sev = severity_str(d.severity);
+                    Some((
+                        start.line,
+                        start.col,
+                        code.clone(),
+                        sev,
+                        msg.clone(),
+                        format!(
+                            "  {sev}[{code}] {}:{}..{}:{}: {msg}",
+                            start.line, start.col, end.line, end.col,
+                        ),
+                    ))
+                })
+                .collect();
+            entries.sort_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.1.cmp(&b.1))
+                    .then_with(|| a.2.cmp(&b.2))
+                    .then_with(|| a.3.cmp(b.3))
+                    .then_with(|| a.4.cmp(&b.4))
+            });
+            for (_, _, _, _, _, line) in &entries {
+                let _ = writeln!(out, "{line}");
+            }
+        }
+
+        out.push_str("---\n");
+
+        // Unit diagnostics
+        let unit_diags = unit_diagnostics(&self.db, unit);
+        let _ = writeln!(
+            out,
+            "unit ({} diagnostic{})",
+            unit_diags.len(),
+            if unit_diags.len() == 1 { "" } else { "s" }
+        );
+        let mut unit_entries: Vec<_> = unit_diags
+            .iter()
+            .map(|d| {
+                let code = d.code.as_str();
+                let sev = severity_str(d.severity);
+                let msg = d.render_message();
+                // Unit diagnostics may have a span (for the duplicate location)
+                let loc = d.primary_span().map(|span| {
+                    let file_idx = self.file_index_for_id(span.file);
+                    let file_path = file_idx.map_or("?", |i| self.file_path(i));
+                    let li = file_idx.map(|i| LineIndex::new(self.file_text(i)));
+                    if let Some(li) = li {
+                        let start = li.line_col(span.range.start());
+                        let end = li.line_col(span.range.end());
+                        format!(
+                            " {file_path} {}:{}..{}:{}",
+                            start.line, start.col, end.line, end.col
+                        )
+                    } else {
+                        String::new()
+                    }
+                });
+                let loc = loc.unwrap_or_default();
+                (
+                    code.clone(),
+                    sev,
+                    msg.clone(),
+                    format!("  {sev}[{code}]{loc}: {msg}"),
+                )
+            })
+            .collect();
+        unit_entries.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.cmp(b.1))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+        for (_, _, _, line) in &unit_entries {
+            let _ = writeln!(out, "{line}");
+        }
+
+        out
     }
 
     /// Dump the parse tree and diagnostics for all files as a single
@@ -156,4 +298,12 @@ fn dump_error(file_id: u32, err: &ParseError, out: &mut String) {
         u32::from(err.range.end()),
         err.message,
     );
+}
+
+fn severity_str(sev: Severity) -> &'static str {
+    match sev {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => "info",
+    }
 }

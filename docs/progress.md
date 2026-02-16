@@ -54,7 +54,7 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Salsa query granularity: NameGraph decouples offset-dependent parse from offset-independent resolution
 - [x] Diagnostic codes, labels, and fixits
 - [x] AST API extensibility (reduce hand-written boilerplate)
-- [ ] Test harness: snapshot corpus runner
+- [x] Test harness: snapshot corpus runner
 
 ## M4: Type Skeleton -- not started
 
