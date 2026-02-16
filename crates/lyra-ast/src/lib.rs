@@ -12,6 +12,6 @@ pub use nodes::{
     InstancePortList, Literal, ModuleBody, ModuleDecl, ModuleInstantiation, NameRef, NetDecl,
     PackageBody, PackageDecl, PackedDimension, ParamDecl, ParamPortList, ParenExpr, Port, PortList,
     PrefixExpr, QualifiedName, RangeExpr, RepeatStmt, ReplicExpr, SourceFile, TimingControl,
-    TypeSpec, UnpackedDimension, VarDecl, WhileStmt,
+    TypeSpec, TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
 };
 pub use support::AstChildren;

@@ -50,8 +50,11 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] CoreResolveResult with typed UnresolvedReason codes (PackageNotFound, MemberNotFound, AmbiguousWildcardImport, UnsupportedQualifiedPath)
 - [x] Import validation: package existence and member existence checks with diagnostics
 - [x] Cursor resolution for qualified names (package part -> package decl, member part -> member symbol)
-- [ ] Scope graph with scope kinds (module/block/generate) and parent chain
-- [ ] Multi-namespace name tables (value vs type)
+- [x] Typedef declarations: parse, AST, SymbolKind::Typedef in type_ns
+- [x] ExpectedNs enum: TypeThenValue for type-position names, Exact for expression names
+- [x] TypeSpec user-defined names wrapped in NameRef/QualifiedName (parser fix)
+- [x] collect_type_spec_refs: type-position references with TypeThenValue
+- [x] Multi-namespace resolver: ns_list iteration, full pipeline per namespace
 - [ ] Cross-file resolution for primitives, programs, interfaces
 
 ## Cross-cutting infrastructure

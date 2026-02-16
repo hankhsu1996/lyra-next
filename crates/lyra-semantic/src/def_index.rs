@@ -8,6 +8,20 @@ use crate::diagnostic::SemanticDiag;
 use crate::scopes::{ScopeId, ScopeTree};
 use crate::symbols::{Namespace, SymbolId, SymbolTable};
 
+/// Lookup strategy for a use-site.
+///
+/// Determines which namespace(s) to search and in what order.
+/// Lives on use-sites and resolution requests only -- never on
+/// symbol storage or scope bindings (those stay `Namespace`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExpectedNs {
+    /// Look up in exactly one namespace.
+    Exact(Namespace),
+    /// Type position: try Type first, fall back to Value.
+    /// Used for user-defined type names in `TypeSpec`.
+    TypeThenValue,
+}
+
 /// Per-file definition index: symbols, scopes, exports.
 ///
 /// Depends only on the parse result. Does NOT resolve uses.
@@ -63,7 +77,7 @@ impl NamePath {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UseSite {
     pub path: NamePath,
-    pub expected_ns: Namespace,
+    pub expected_ns: ExpectedNs,
     pub range: TextRange,
     pub scope: ScopeId,
     pub ast_id: ErasedAstId,

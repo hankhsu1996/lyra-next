@@ -63,6 +63,7 @@ pub enum SymbolKind {
     Net,
     Variable,
     Parameter,
+    Typedef,
 }
 
 impl SymbolKind {
@@ -75,6 +76,7 @@ impl SymbolKind {
         match self {
             Self::Module | Self::Package => Namespace::Definition,
             Self::Port | Self::Net | Self::Variable | Self::Parameter => Namespace::Value,
+            Self::Typedef => Namespace::Type,
         }
     }
 }

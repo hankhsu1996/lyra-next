@@ -146,6 +146,11 @@ ast_nodes! {
     ImportDecl(SyntaxKind::ImportDecl) { @custom }
     ImportItem(SyntaxKind::ImportItem) { @custom }
     QualifiedName(SyntaxKind::QualifiedName) { @custom }
+
+    TypedefDecl(SyntaxKind::TypedefDecl) {
+        name: token(Ident),
+        type_spec: TypeSpec,
+    }
 }
 
 // Custom accessors
