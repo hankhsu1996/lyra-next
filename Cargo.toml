@@ -39,5 +39,7 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+# rowan NodeOrToken not directly in scope for method reference syntax
+redundant_closure_for_method_calls = "allow"
 # TextSize is u32; usize-to-u32 casts are safe for source-file-sized data.
 cast_possible_truncation = "allow"

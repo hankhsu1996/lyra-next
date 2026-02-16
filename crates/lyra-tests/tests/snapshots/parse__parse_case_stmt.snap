@@ -61,89 +61,72 @@ SourceFile@0..240
             NameRef@93..96
               Ident@93..96 "sel"
             RParen@96..97 ")"
-            CaseItem@97..109
-              Literal@97..105
+            CaseItem@97..125
+              Literal@97..109
                 Whitespace@97..104 "\n      "
                 IntLiteral@104..105 "2"
-              AssignStmt@105..109
-                Literal@105..109
-                  BasedLiteral@105..109 "'b00"
-            CaseItem@109..118
+                BasedLiteral@105..109 "'b00"
               Colon@109..110 ":"
-              AssignStmt@110..118
+              AssignStmt@110..125
                 NameRef@110..114
                   Whitespace@110..111 " "
                   Ident@111..114 "out"
                 Whitespace@114..115 " "
                 Assign@115..116 "="
-                Literal@116..118
+                Literal@116..124
                   Whitespace@116..117 " "
                   IntLiteral@117..118 "4"
-            CaseItem@118..125
-              Literal@118..124
-                BasedLiteral@118..124 "'b0001"
-              Semicolon@124..125 ";"
-            CaseItem@125..137
-              Literal@125..133
+                  BasedLiteral@118..124 "'b0001"
+                Semicolon@124..125 ";"
+            CaseItem@125..153
+              Literal@125..137
                 Whitespace@125..132 "\n      "
                 IntLiteral@132..133 "2"
-              AssignStmt@133..137
-                Literal@133..137
-                  BasedLiteral@133..137 "'b01"
-            CaseItem@137..146
+                BasedLiteral@133..137 "'b01"
               Colon@137..138 ":"
-              AssignStmt@138..146
+              AssignStmt@138..153
                 NameRef@138..142
                   Whitespace@138..139 " "
                   Ident@139..142 "out"
                 Whitespace@142..143 " "
                 Assign@143..144 "="
-                Literal@144..146
+                Literal@144..152
                   Whitespace@144..145 " "
                   IntLiteral@145..146 "4"
-            CaseItem@146..153
-              Literal@146..152
-                BasedLiteral@146..152 "'b0010"
-              Semicolon@152..153 ";"
-            CaseItem@153..165
-              Literal@153..161
+                  BasedLiteral@146..152 "'b0010"
+                Semicolon@152..153 ";"
+            CaseItem@153..181
+              Literal@153..165
                 Whitespace@153..160 "\n      "
                 IntLiteral@160..161 "2"
-              AssignStmt@161..165
-                Literal@161..165
-                  BasedLiteral@161..165 "'b10"
-            CaseItem@165..174
+                BasedLiteral@161..165 "'b10"
               Colon@165..166 ":"
-              AssignStmt@166..174
+              AssignStmt@166..181
                 NameRef@166..170
                   Whitespace@166..167 " "
                   Ident@167..170 "out"
                 Whitespace@170..171 " "
                 Assign@171..172 "="
-                Literal@172..174
+                Literal@172..180
                   Whitespace@172..173 " "
                   IntLiteral@173..174 "4"
-            CaseItem@174..181
-              Literal@174..180
-                BasedLiteral@174..180 "'b0100"
-              Semicolon@180..181 ";"
-            CaseItem@181..204
+                  BasedLiteral@174..180 "'b0100"
+                Semicolon@180..181 ";"
+            CaseItem@181..211
               Whitespace@181..188 "\n      "
               DefaultKw@188..195 "default"
               Colon@195..196 ":"
-              AssignStmt@196..204
+              AssignStmt@196..211
                 NameRef@196..200
                   Whitespace@196..197 " "
                   Ident@197..200 "out"
                 Whitespace@200..201 " "
                 Assign@201..202 "="
-                Literal@202..204
+                Literal@202..210
                   Whitespace@202..203 " "
                   IntLiteral@203..204 "4"
-            CaseItem@204..211
-              Literal@204..210
-                BasedLiteral@204..210 "'b1000"
-              Semicolon@210..211 ";"
+                  BasedLiteral@204..210 "'b1000"
+                Semicolon@210..211 ";"
             Whitespace@211..216 "\n    "
             EndcaseKw@216..223 "endcase"
           Whitespace@223..226 "\n  "
@@ -152,17 +135,4 @@ SourceFile@0..240
     EndmoduleKw@230..239 "endmodule"
   Whitespace@239..240 "\n"
 ---
-error[file=0 105..109]: expected `:`
-error[file=0 109..110]: expected `;`
-error[file=0 118..124]: expected `;`
-error[file=0 124..125]: expected `:`
-error[file=0 133..137]: expected `:`
-error[file=0 137..138]: expected `;`
-error[file=0 146..152]: expected `;`
-error[file=0 152..153]: expected `:`
-error[file=0 161..165]: expected `:`
-error[file=0 165..166]: expected `;`
-error[file=0 174..180]: expected `;`
-error[file=0 180..181]: expected `:`
-error[file=0 204..210]: expected `;`
-error[file=0 210..211]: expected `:`
+no diagnostics

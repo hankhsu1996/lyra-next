@@ -76,8 +76,19 @@ fn lhs(p: &mut Parser, mode: ExprMode) -> Option<CompletedMarker> {
 
 fn atom(p: &mut Parser) -> Option<CompletedMarker> {
     match p.current() {
-        SyntaxKind::IntLiteral
-        | SyntaxKind::RealLiteral
+        SyntaxKind::IntLiteral => {
+            let m = p.start();
+            p.bump();
+            // Sized based literal: IntLiteral immediately followed by BasedLiteral
+            // e.g. `8` `'hFF` forms `8'hFF`. No trivia allowed between them
+            // per IEEE 1800-2023 section 5.7.1. Use raw_current() to reject
+            // cases like `8 'hFF` where whitespace separates the tokens.
+            if p.raw_current() == SyntaxKind::BasedLiteral {
+                p.bump();
+            }
+            Some(m.complete(p, SyntaxKind::Literal))
+        }
+        SyntaxKind::RealLiteral
         | SyntaxKind::BasedLiteral
         | SyntaxKind::UnbasedUnsizedLiteral
         | SyntaxKind::StringLiteral => {

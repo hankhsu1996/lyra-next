@@ -51,6 +51,8 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         use_sites: ctx.use_sites.into_boxed_slice(),
         imports: ctx.imports.into_boxed_slice(),
         decl_to_symbol: ctx.decl_to_symbol,
+        symbol_to_decl: ctx.symbol_to_decl.into_boxed_slice(),
+        decl_to_init_expr: ctx.decl_to_init_expr,
         diagnostics: diagnostics.into_boxed_slice(),
     }
 }
@@ -82,6 +84,8 @@ struct DefContext<'a> {
     export_definitions: Vec<SymbolId>,
     export_packages: Vec<SymbolId>,
     decl_to_symbol: HashMap<lyra_ast::ErasedAstId, SymbolId>,
+    symbol_to_decl: Vec<Option<lyra_ast::ErasedAstId>>,
+    decl_to_init_expr: HashMap<lyra_ast::ErasedAstId, Option<lyra_ast::ErasedAstId>>,
     use_sites: Vec<UseSite>,
     imports: Vec<Import>,
 }
@@ -95,6 +99,8 @@ impl<'a> DefContext<'a> {
             export_definitions: Vec::new(),
             export_packages: Vec::new(),
             decl_to_symbol: HashMap::new(),
+            symbol_to_decl: Vec::new(),
+            decl_to_init_expr: HashMap::new(),
             use_sites: Vec::new(),
             imports: Vec::new(),
         }
@@ -113,6 +119,8 @@ impl<'a> DefContext<'a> {
             def_range,
             scope,
         });
+        // Keep symbol_to_decl in sync (filled with None; callers populate it)
+        self.symbol_to_decl.push(None);
         self.scopes.add_binding(scope, id, kind);
         id
     }
@@ -158,13 +166,16 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
             def_range: range,
             scope: module_scope,
         });
+        ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
 
-        // Record decl_to_symbol for cross-file resolution
+        // Record decl_to_symbol and symbol_to_decl for cross-file resolution
         if let Some(module_decl) = lyra_ast::ModuleDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&module_decl)
         {
-            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+            let erased = ast_id.erase();
+            ctx.decl_to_symbol.insert(erased, sym_id);
+            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
 
         // Visit parameter port list
@@ -197,13 +208,16 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
             def_range: range,
             scope: package_scope,
         });
+        ctx.symbol_to_decl.push(None);
         ctx.export_packages.push(sym_id);
 
-        // Record decl_to_symbol for cross-file resolution
+        // Record decl_to_symbol and symbol_to_decl for cross-file resolution
         if let Some(pkg_decl) = lyra_ast::PackageDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&pkg_decl)
         {
-            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+            let erased = ast_id.erase();
+            ctx.decl_to_symbol.insert(erased, sym_id);
+            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
 
         // Visit package body
@@ -227,12 +241,15 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             def_range: range,
             scope: iface_scope,
         });
+        ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
 
         if let Some(iface_decl) = InterfaceDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&iface_decl)
         {
-            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+            let erased = ast_id.erase();
+            ctx.decl_to_symbol.insert(erased, sym_id);
+            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
 
         for child in node.children() {
@@ -264,12 +281,15 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             def_range: range,
             scope: prog_scope,
         });
+        ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
 
         if let Some(prog_decl) = ProgramDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&prog_decl)
         {
-            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+            let erased = ast_id.erase();
+            ctx.decl_to_symbol.insert(erased, sym_id);
+            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
 
         for child in node.children() {
@@ -301,12 +321,15 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             def_range: range,
             scope: prim_scope,
         });
+        ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
 
         if let Some(prim_decl) = PrimitiveDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&prim_decl)
         {
-            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+            let erased = ast_id.erase();
+            ctx.decl_to_symbol.insert(erased, sym_id);
+            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
     }
 }
@@ -325,12 +348,15 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             def_range: range,
             scope: cfg_scope,
         });
+        ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
 
         if let Some(cfg_decl) = ConfigDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&cfg_decl)
         {
-            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+            let erased = ast_id.erase();
+            ctx.decl_to_symbol.insert(erased, sym_id);
+            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
     }
 }
@@ -486,11 +512,20 @@ fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeI
                     name_tok.text_range(),
                     scope,
                 );
-                // Record decl_to_symbol for package member resolution
+                // Record decl_to_symbol and symbol_to_decl
                 if let Some(decl) = lyra_ast::Declarator::cast(child.clone())
                     && let Some(ast_id) = ctx.ast_id_map.ast_id(&decl)
                 {
-                    ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+                    let erased = ast_id.erase();
+                    ctx.decl_to_symbol.insert(erased, sym_id);
+                    ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+
+                    // Find init expression (first expression-like child node)
+                    let init_id = child
+                        .children()
+                        .find(|c| is_expression_kind(c.kind()))
+                        .and_then(|expr| ctx.ast_id_map.erased_ast_id(&expr));
+                    ctx.decl_to_init_expr.insert(erased, init_id);
                 }
             }
             // Collect name refs in default value expressions
@@ -516,11 +551,13 @@ fn collect_declarators(
                     name_tok.text_range(),
                     scope,
                 );
-                // Record decl_to_symbol for package member resolution
+                // Record decl_to_symbol and symbol_to_decl
                 if let Some(decl) = lyra_ast::Declarator::cast(child.clone())
                     && let Some(ast_id) = ctx.ast_id_map.ast_id(&decl)
                 {
-                    ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+                    let erased = ast_id.erase();
+                    ctx.decl_to_symbol.insert(erased, sym_id);
+                    ctx.symbol_to_decl[sym_id.index()] = Some(erased);
                 }
             }
             // Collect name refs in initializer expressions
@@ -645,7 +682,9 @@ fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) 
             scope,
         );
         if let Some(ast_id) = ctx.ast_id_map.ast_id(&td) {
-            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+            let erased = ast_id.erase();
+            ctx.decl_to_symbol.insert(erased, sym_id);
+            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
     }
 }

@@ -38,6 +38,13 @@ pub struct DefIndex {
     /// Used by cross-file resolution to convert `ErasedAstId` (from
     /// `GlobalDefIndex`) back to a `SymbolId` in this file.
     pub decl_to_symbol: HashMap<ErasedAstId, SymbolId>,
+    /// Dense reverse map from `SymbolId` index to its `Declarator` `ErasedAstId`.
+    /// `None` for symbols without a `Declarator` node (e.g. module/package names).
+    pub symbol_to_decl: Box<[Option<ErasedAstId>]>,
+    /// Maps parameter `Declarator` `ErasedAstId` to its initializer `Expression`
+    /// `ErasedAstId`. Key present with `None` = parameter with no default value.
+    /// Key absent = not a parameter declarator (not tracked).
+    pub decl_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
     pub diagnostics: Box<[SemanticDiag]>,
 }
 

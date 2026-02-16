@@ -1,4 +1,5 @@
 mod builder;
+pub mod const_eval;
 pub mod def_index;
 pub mod diagnostic;
 pub mod global_index;

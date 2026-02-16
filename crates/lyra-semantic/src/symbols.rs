@@ -26,6 +26,13 @@ pub enum Namespace {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SymbolId(pub(crate) u32);
 
+impl SymbolId {
+    /// Raw index for array-based lookups.
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 /// Global identity across files. All public APIs use this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GlobalSymbolId {
