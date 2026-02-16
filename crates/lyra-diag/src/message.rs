@@ -11,6 +11,11 @@ pub enum MessageId {
     UnresolvedName,
     DuplicateDefinition,
     DuplicateModuleDefinition,
+    DuplicateDefinitionInUnit,
+    PackageNotFound,
+    MemberNotFound,
+    AmbiguousWildcardImport,
+    UnsupportedQualifiedPath,
     // Label messages
     NotFoundInScope,
     RedefinedHere,
@@ -66,6 +71,21 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::UnresolvedName => format!("unresolved name `{}`", name()),
         MessageId::DuplicateDefinition => format!("duplicate definition of `{}`", name()),
         MessageId::DuplicateModuleDefinition => format!("duplicate module definition `{}`", name()),
+        MessageId::DuplicateDefinitionInUnit => format!("duplicate definition `{}`", name()),
+        MessageId::PackageNotFound => format!("package `{}` not found", name()),
+        MessageId::MemberNotFound => {
+            let pkg = name();
+            let member = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("member `{member}` not found in package `{pkg}`")
+        }
+        MessageId::AmbiguousWildcardImport => {
+            let sym_name = name();
+            let pkgs = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("name `{sym_name}` is ambiguous: imported from packages {pkgs}")
+        }
+        MessageId::UnsupportedQualifiedPath => {
+            format!("qualified path `{}` is not supported", name())
+        }
         MessageId::NotFoundInScope => "not found in this scope".into(),
         MessageId::RedefinedHere => "redefined here".into(),
         MessageId::FirstDefinedHere => "first defined here".into(),

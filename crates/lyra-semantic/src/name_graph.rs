@@ -1,7 +1,7 @@
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
-use crate::def_index::{DefIndex, NamePath};
+use crate::def_index::{DefIndex, ImportName, NamePath};
 use crate::scopes::{ScopeId, ScopeTree, SymbolNameLookup};
 use crate::symbols::{Namespace, SymbolId, SymbolKind};
 
@@ -19,6 +19,7 @@ pub struct NameGraph {
     pub(crate) symbol_kinds: Box<[SymbolKind]>,
     pub(crate) scopes: ScopeTree,
     pub(crate) use_entries: Box<[UseEntry]>,
+    pub(crate) imports: Box<[ImportEntry]>,
 }
 
 /// Offset-independent use-site key.
@@ -26,6 +27,14 @@ pub struct NameGraph {
 pub(crate) struct UseEntry {
     pub(crate) path: NamePath,
     pub(crate) expected_ns: Namespace,
+    pub(crate) scope: ScopeId,
+}
+
+/// Offset-independent import entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ImportEntry {
+    pub(crate) package: SmolStr,
+    pub(crate) name: ImportName,
     pub(crate) scope: ScopeId,
 }
 
@@ -56,12 +65,23 @@ impl NameGraph {
             })
             .collect();
 
+        let imports: Box<[ImportEntry]> = def
+            .imports
+            .iter()
+            .map(|imp| ImportEntry {
+                package: imp.package.clone(),
+                name: imp.name.clone(),
+                scope: imp.scope,
+            })
+            .collect();
+
         Self {
             file: def.file,
             symbol_names,
             symbol_kinds,
             scopes: def.scopes.clone(),
             use_entries,
+            imports,
         }
     }
 }

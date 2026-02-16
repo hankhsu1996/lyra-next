@@ -1,0 +1,73 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..128
+  PackageDecl@0..37
+    PackageKw@0..7 "package"
+    Whitespace@7..8 " "
+    Ident@8..14 "my_pkg"
+    Semicolon@14..15 ";"
+    PackageBody@15..26
+      VarDecl@15..26
+        TypeSpec@15..23
+          Whitespace@15..18 "\n  "
+          LogicKw@18..23 "logic"
+        Declarator@23..25
+          Whitespace@23..24 " "
+          Ident@24..25 "x"
+        Semicolon@25..26 ";"
+    Whitespace@26..27 "\n"
+    EndpackageKw@27..37 "endpackage"
+  ModuleDecl@37..127
+    Whitespace@37..39 "\n\n"
+    ModuleKw@39..45 "module"
+    Whitespace@45..46 " "
+    Ident@46..49 "top"
+    Semicolon@49..50 ";"
+    ModuleBody@50..117
+      ImportDecl@50..70
+        Whitespace@50..53 "\n  "
+        ImportKw@53..59 "import"
+        ImportItem@59..69
+          QualifiedName@59..69
+            Whitespace@59..60 " "
+            Ident@60..66 "my_pkg"
+            ColonColon@66..68 "::"
+            Ident@68..69 "x"
+        Semicolon@69..70 ";"
+      ImportDecl@70..90
+        Whitespace@70..73 "\n  "
+        ImportKw@73..79 "import"
+        ImportItem@79..89
+          Whitespace@79..80 " "
+          Ident@80..86 "my_pkg"
+          ColonColon@86..88 "::"
+          Star@88..89 "*"
+        Semicolon@89..90 ";"
+      VarDecl@90..101
+        TypeSpec@90..98
+          Whitespace@90..93 "\n  "
+          LogicKw@93..98 "logic"
+        Declarator@98..100
+          Whitespace@98..99 " "
+          Ident@99..100 "y"
+        Semicolon@100..101 ";"
+      ContinuousAssign@101..117
+        Whitespace@101..104 "\n  "
+        AssignKw@104..110 "assign"
+        NameRef@110..112
+          Whitespace@110..111 " "
+          Ident@111..112 "y"
+        Whitespace@112..113 " "
+        Assign@113..114 "="
+        NameRef@114..116
+          Whitespace@114..115 " "
+          Ident@115..116 "x"
+        Semicolon@116..117 ";"
+    Whitespace@117..118 "\n"
+    EndmoduleKw@118..127 "endmodule"
+  Whitespace@127..128 "\n"
+---
+no diagnostics

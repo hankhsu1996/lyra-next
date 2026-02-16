@@ -19,6 +19,7 @@ pub struct DefIndex {
     pub scopes: ScopeTree,
     pub exports: Exports,
     pub use_sites: Box<[UseSite]>,
+    pub imports: Box<[Import]>,
     /// Reverse map from exported declaration `ErasedAstId` to `SymbolId`.
     /// Used by cross-file resolution to convert `ErasedAstId` (from
     /// `GlobalDefIndex`) back to a `SymbolId` in this file.
@@ -26,20 +27,34 @@ pub struct DefIndex {
     pub diagnostics: Box<[SemanticDiag]>,
 }
 
-/// A name path: simple identifier or (future) qualified/hierarchical path.
+/// A name path: simple identifier or qualified path.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NamePath {
     /// Simple identifier: `foo`
     Simple(SmolStr),
-    // Future variants:
-    // Qualified { package: SmolStr, name: SmolStr },  // pkg::sym
-    // Hierarchical(Box<[SmolStr]>),                   // a.b.c
+    /// Qualified path: `a::b::c`. Segments are the identifiers.
+    Qualified { segments: Box<[SmolStr]> },
 }
 
 impl NamePath {
     pub fn as_simple(&self) -> Option<&str> {
         match self {
             Self::Simple(s) => Some(s.as_str()),
+            Self::Qualified { .. } => None,
+        }
+    }
+
+    pub fn as_qualified(&self) -> Option<&[SmolStr]> {
+        match self {
+            Self::Simple(_) => None,
+            Self::Qualified { segments } => Some(segments),
+        }
+    }
+
+    pub fn display_name(&self) -> String {
+        match self {
+            Self::Simple(s) => s.to_string(),
+            Self::Qualified { segments } => segments.join("::"),
         }
     }
 }
@@ -54,6 +69,27 @@ pub struct UseSite {
     pub ast_id: ErasedAstId,
 }
 
+/// An import declaration record.
+///
+/// Carries no namespace: the namespace is determined at the use-site
+/// when the import is consulted during resolution. This matches LRM
+/// semantics where `import pkg::x` makes `x` visible for whatever
+/// namespace the use-site needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    pub package: SmolStr,
+    pub name: ImportName,
+    pub scope: ScopeId,
+    pub range: TextRange,
+}
+
+/// Whether an import is explicit (`pkg::sym`) or wildcard (`pkg::*`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ImportName {
+    Explicit(SmolStr),
+    Wildcard,
+}
+
 /// Module/package names exported to compilation-unit namespace.
 ///
 /// Separate from lexical `ScopeTree`. Entries sorted by
@@ -61,4 +97,5 @@ pub struct UseSite {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Exports {
     pub modules: Box<[SymbolId]>,
+    pub packages: Box<[SymbolId]>,
 }

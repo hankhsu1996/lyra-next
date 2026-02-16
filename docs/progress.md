@@ -42,11 +42,16 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Offset-independent NameGraph query (whitespace edits skip resolve_core via Salsa backdating)
 - [x] Cross-file module instantiation resolution (CompilationUnit, GlobalDefIndex, Definition namespace)
 - [x] Cursor resolution for module instantiation type names (find_module_instantiation_name_at fallback)
-- [x] Unit-level diagnostics for duplicate global module definitions
+- [x] Unit-level diagnostics for duplicate global definitions (module/package collisions)
+- [x] Package declarations: parse, AST, semantic collection, cross-file resolution
+- [x] Import declarations: explicit (pkg::sym) and wildcard (pkg::*), with LRM precedence
+- [x] Qualified name references (pkg::sym) in expressions with cross-file resolution
+- [x] PackageScopeIndex: namespace-aware (value_ns/type_ns) package member resolution
+- [x] CoreResolveResult with typed UnresolvedReason codes (PackageNotFound, MemberNotFound, AmbiguousWildcardImport, UnsupportedQualifiedPath)
+- [x] Import validation: package existence and member existence checks with diagnostics
+- [x] Cursor resolution for qualified names (package part -> package decl, member part -> member symbol)
 - [ ] Scope graph with scope kinds (module/block/generate) and parent chain
 - [ ] Multi-namespace name tables (value vs type)
-- [ ] Path model for hierarchical/qualified names (pkg::sym, a.b.c)
-- [ ] Richer resolve result (namespace, ambiguity info)
 - [ ] Cross-file resolution for primitives, programs, interfaces
 
 ## Cross-cutting infrastructure

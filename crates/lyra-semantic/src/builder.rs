@@ -1,18 +1,23 @@
 use std::collections::HashMap;
 
-use lyra_ast::{AstIdMap, AstNode, ModuleInstantiation, NameRef};
+use lyra_ast::{AstIdMap, AstNode, ModuleInstantiation, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
-use crate::def_index::{DefIndex, Exports, NamePath, UseSite};
+use crate::def_index::{DefIndex, Exports, Import, ImportName, NamePath, UseSite};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
-use crate::global_index::GlobalDefIndex;
+use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
 use crate::name_graph::NameGraph;
-use crate::resolve_index::{CoreResolution, Resolution, ResolveIndex};
+use crate::resolve_index::{
+    CoreResolution, CoreResolveOutput, CoreResolveResult, ImportError, Resolution, ResolveIndex,
+    UnresolvedReason,
+};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
-use crate::symbols::{GlobalSymbolId, Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
+use crate::symbols::{
+    GlobalDefId, GlobalSymbolId, Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder,
+};
 
 pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> DefIndex {
     let mut ctx = DefContext::new(ast_id_map);
@@ -26,8 +31,10 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
     let symbols = ctx.symbols.freeze();
     let scopes = ctx.scopes.freeze(&symbols);
 
-    // Sort export module ids by symbol name
+    // Sort export module/package ids by symbol name
     ctx.export_modules
+        .sort_by(|a, b| symbols.get(*a).name.cmp(&symbols.get(*b).name));
+    ctx.export_packages
         .sort_by(|a, b| symbols.get(*a).name.cmp(&symbols.get(*b).name));
 
     // Detect duplicate definitions within each scope, per namespace
@@ -44,8 +51,10 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         scopes,
         exports: Exports {
             modules: ctx.export_modules.into_boxed_slice(),
+            packages: ctx.export_packages.into_boxed_slice(),
         },
         use_sites: ctx.use_sites.into_boxed_slice(),
+        imports: ctx.imports.into_boxed_slice(),
         decl_to_symbol: ctx.decl_to_symbol,
         diagnostics: diagnostics.into_boxed_slice(),
     }
@@ -73,64 +82,248 @@ fn detect_duplicates(
 
 /// Resolve all use-sites using only offset-independent data.
 ///
-/// Returns one entry per use-site (same order as `NameGraph.use_entries`).
-/// `None` means unresolved. No diagnostics -- those are produced later
-/// in `build_resolve_index` where ranges are available.
+/// Returns `CoreResolveOutput` with reason codes for unresolved names.
 ///
-/// Resolution is directed by `expected_ns` with no fallback:
-/// - `Value | Type` -> lexical `ScopeTree::resolve` only
-/// - `Definition` -> `GlobalDefIndex::resolve_module` only
+/// Resolution precedence for `Value`/`Type` namespace (LRM 26.3):
+/// 1. Lexical scope (local declarations)
+/// 2. Explicit imports in scope chain
+/// 3. Wildcard imports in scope chain
+///
+/// `Definition` namespace: `GlobalDefIndex::resolve_definition`.
+/// `Qualified` paths: resolved via `GlobalDefIndex` + `PackageScopeIndex`.
 pub fn build_resolve_core(
     graph: &NameGraph,
     global: &GlobalDefIndex,
-) -> Box<[Option<CoreResolution>]> {
-    graph
+    pkg_scope: &PackageScopeIndex,
+) -> CoreResolveOutput {
+    // Validate imports first
+    let mut import_errors = Vec::new();
+    for (idx, imp) in graph.imports.iter().enumerate() {
+        if !pkg_scope.has_package(&imp.package) {
+            import_errors.push(ImportError {
+                import_idx: idx as u32,
+                reason: UnresolvedReason::PackageNotFound {
+                    package: imp.package.clone(),
+                },
+            });
+            continue;
+        }
+        if let ImportName::Explicit(ref member) = imp.name
+            && pkg_scope.resolve_any_ns(&imp.package, member).is_none()
+        {
+            import_errors.push(ImportError {
+                import_idx: idx as u32,
+                reason: UnresolvedReason::MemberNotFound {
+                    package: imp.package.clone(),
+                    member: member.clone(),
+                },
+            });
+        }
+    }
+
+    let resolutions: Box<[CoreResolveResult]> = graph
         .use_entries
         .iter()
         .map(|entry| match &entry.path {
             NamePath::Simple(name) => match entry.expected_ns {
                 Namespace::Value | Namespace::Type => {
-                    let sym_id =
+                    // 1. Lexical scope
+                    if let Some(sym_id) =
                         graph
                             .scopes
-                            .resolve(graph, entry.scope, entry.expected_ns, name)?;
-                    Some(CoreResolution::Local {
-                        symbol: sym_id,
-                        namespace: graph.symbol_kinds[sym_id.0 as usize].namespace(),
-                    })
+                            .resolve(graph, entry.scope, entry.expected_ns, name)
+                    {
+                        return CoreResolveResult::Resolved(CoreResolution::Local {
+                            symbol: sym_id,
+                            namespace: graph.symbol_kinds[sym_id.0 as usize].namespace(),
+                        });
+                    }
+                    // 2. Explicit imports in scope chain
+                    if let Some(resolution) = resolve_via_explicit_import(
+                        graph,
+                        pkg_scope,
+                        entry.scope,
+                        name,
+                        entry.expected_ns,
+                    ) {
+                        return CoreResolveResult::Resolved(resolution);
+                    }
+                    // 3. Wildcard imports in scope chain
+                    match resolve_via_wildcard_import(
+                        graph,
+                        pkg_scope,
+                        entry.scope,
+                        name,
+                        entry.expected_ns,
+                    ) {
+                        WildcardResult::Found(resolution) => {
+                            CoreResolveResult::Resolved(resolution)
+                        }
+                        WildcardResult::Ambiguous(candidates) => CoreResolveResult::Unresolved(
+                            UnresolvedReason::AmbiguousWildcardImport { candidates },
+                        ),
+                        WildcardResult::NotFound => {
+                            CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
+                        }
+                    }
                 }
                 Namespace::Definition => {
-                    let decl = global.resolve_module(name)?;
-                    Some(CoreResolution::Global {
-                        decl,
-                        namespace: Namespace::Definition,
-                    })
+                    if let Some((def_id, _)) = global.resolve_definition(name) {
+                        CoreResolveResult::Resolved(CoreResolution::Global {
+                            decl: def_id,
+                            namespace: Namespace::Definition,
+                        })
+                    } else {
+                        CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
+                    }
                 }
             },
+            NamePath::Qualified { segments } => {
+                resolve_qualified(segments, global, pkg_scope, entry.expected_ns)
+            }
         })
-        .collect()
+        .collect();
+
+    CoreResolveOutput {
+        resolutions,
+        import_errors: import_errors.into_boxed_slice(),
+    }
+}
+
+fn resolve_qualified(
+    segments: &[SmolStr],
+    global: &GlobalDefIndex,
+    pkg_scope: &PackageScopeIndex,
+    use_ns: Namespace,
+) -> CoreResolveResult {
+    if segments.len() != 2 {
+        return CoreResolveResult::Unresolved(UnresolvedReason::UnsupportedQualifiedPath {
+            len: segments.len(),
+        });
+    }
+    let pkg_name = &segments[0];
+    let member_name = &segments[1];
+
+    if global.resolve_package(pkg_name).is_none() {
+        return CoreResolveResult::Unresolved(UnresolvedReason::PackageNotFound {
+            package: pkg_name.clone(),
+        });
+    }
+
+    // Try requested namespace first, fall back to Value for expression context
+    let ns = if use_ns == Namespace::Definition {
+        Namespace::Value
+    } else {
+        use_ns
+    };
+    if let Some(def_id) = pkg_scope.resolve(pkg_name, member_name, ns) {
+        return CoreResolveResult::Resolved(CoreResolution::Global {
+            decl: def_id,
+            namespace: ns,
+        });
+    }
+    CoreResolveResult::Unresolved(UnresolvedReason::MemberNotFound {
+        package: pkg_name.clone(),
+        member: member_name.clone(),
+    })
+}
+
+fn resolve_via_explicit_import(
+    graph: &NameGraph,
+    pkg_scope: &PackageScopeIndex,
+    scope: ScopeId,
+    name: &str,
+    ns: Namespace,
+) -> Option<CoreResolution> {
+    // Walk scope chain looking for explicit imports
+    let mut current = Some(scope);
+    while let Some(sid) = current {
+        for imp in &*graph.imports {
+            if imp.scope == sid
+                && let ImportName::Explicit(ref member) = imp.name
+                && member.as_str() == name
+                && let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns)
+            {
+                return Some(CoreResolution::Global {
+                    decl: def_id,
+                    namespace: ns,
+                });
+            }
+        }
+        current = graph.scopes.get(sid).parent;
+    }
+    None
+}
+
+enum WildcardResult {
+    Found(CoreResolution),
+    Ambiguous(Box<[SmolStr]>),
+    NotFound,
+}
+
+fn resolve_via_wildcard_import(
+    graph: &NameGraph,
+    pkg_scope: &PackageScopeIndex,
+    scope: ScopeId,
+    name: &str,
+    ns: Namespace,
+) -> WildcardResult {
+    let mut current = Some(scope);
+    while let Some(sid) = current {
+        let mut found: Option<(GlobalDefId, SmolStr)> = None;
+        let mut ambiguous_pkgs: Vec<SmolStr> = Vec::new();
+
+        for imp in &*graph.imports {
+            if imp.scope == sid
+                && imp.name == ImportName::Wildcard
+                && let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns)
+            {
+                if let Some((existing_id, _)) = &found {
+                    if *existing_id != def_id {
+                        if ambiguous_pkgs.is_empty() {
+                            ambiguous_pkgs
+                                .push(found.as_ref().map(|(_, p)| p.clone()).unwrap_or_default());
+                        }
+                        ambiguous_pkgs.push(imp.package.clone());
+                    }
+                } else {
+                    found = Some((def_id, imp.package.clone()));
+                }
+            }
+        }
+
+        if !ambiguous_pkgs.is_empty() {
+            return WildcardResult::Ambiguous(ambiguous_pkgs.into_boxed_slice());
+        }
+        if let Some((def_id, _)) = found {
+            return WildcardResult::Found(CoreResolution::Global {
+                decl: def_id,
+                namespace: ns,
+            });
+        }
+        current = graph.scopes.get(sid).parent;
+    }
+    WildcardResult::NotFound
 }
 
 /// Build the per-file resolution index from pre-computed core results.
 ///
-/// Zips `def.use_sites` (for `ast_ids` and ranges) with `core` (for
-/// resolutions), builds the `HashMap` and diagnostics. O(n) with no
-/// resolve logic.
+/// Zips `def.use_sites` with `core.resolutions`, builds the `HashMap`
+/// and diagnostics. Import errors are also mapped to diagnostics.
 ///
-/// `lookup_decl` maps an `ErasedAstId` (from `CoreResolution::Global`)
-/// to a `SymbolId` in the target file. Provided by `lyra-db` which can
-/// query other files' `def_index_file`.
+/// `lookup_decl` maps a `GlobalDefId` (from `CoreResolution::Global`)
+/// to a `SymbolId` in the target file.
 pub fn build_resolve_index(
     def: &DefIndex,
-    core: &[Option<CoreResolution>],
-    lookup_decl: &dyn Fn(lyra_ast::ErasedAstId) -> Option<SymbolId>,
+    core: &CoreResolveOutput,
+    lookup_decl: &dyn Fn(GlobalDefId) -> Option<SymbolId>,
 ) -> ResolveIndex {
     let mut resolutions = HashMap::new();
     let mut diagnostics = Vec::new();
 
-    for (use_site, resolution) in def.use_sites.iter().zip(core.iter()) {
-        match resolution {
-            Some(CoreResolution::Local { symbol, namespace }) => {
+    for (use_site, result) in def.use_sites.iter().zip(core.resolutions.iter()) {
+        match result {
+            CoreResolveResult::Resolved(CoreResolution::Local { symbol, namespace }) => {
                 resolutions.insert(
                     use_site.ast_id,
                     Resolution {
@@ -142,7 +335,7 @@ pub fn build_resolve_index(
                     },
                 );
             }
-            Some(CoreResolution::Global { decl, namespace }) => {
+            CoreResolveResult::Resolved(CoreResolution::Global { decl, namespace }) => {
                 if let Some(local) = lookup_decl(*decl) {
                     resolutions.insert(
                         use_site.ast_id,
@@ -156,17 +349,24 @@ pub fn build_resolve_index(
                     );
                 }
             }
-            None => {
-                if let Some(name) = use_site.path.as_simple() {
-                    diagnostics.push(SemanticDiag {
-                        kind: SemanticDiagKind::UnresolvedName {
-                            name: SmolStr::new(name),
-                        },
-                        range: use_site.range,
-                    });
-                }
+            CoreResolveResult::Unresolved(reason) => {
+                let diag = reason_to_diagnostic(reason, &use_site.path, use_site.range);
+                diagnostics.push(diag);
             }
         }
+    }
+
+    // Map import errors to diagnostics
+    for err in &core.import_errors {
+        let imp = &def.imports[err.import_idx as usize];
+        let path = match &imp.name {
+            ImportName::Explicit(member) => NamePath::Qualified {
+                segments: Box::new([imp.package.clone(), member.clone()]),
+            },
+            ImportName::Wildcard => NamePath::Simple(SmolStr::new(format!("{}::*", imp.package))),
+        };
+        let diag = reason_to_diagnostic(&err.reason, &path, imp.range);
+        diagnostics.push(diag);
     }
 
     ResolveIndex {
@@ -176,13 +376,56 @@ pub fn build_resolve_index(
     }
 }
 
+fn reason_to_diagnostic(
+    reason: &UnresolvedReason,
+    path: &NamePath,
+    range: TextRange,
+) -> SemanticDiag {
+    match reason {
+        UnresolvedReason::NotFound => SemanticDiag {
+            kind: SemanticDiagKind::UnresolvedName {
+                name: SmolStr::new(path.display_name()),
+            },
+            range,
+        },
+        UnresolvedReason::PackageNotFound { package } => SemanticDiag {
+            kind: SemanticDiagKind::PackageNotFound {
+                package: package.clone(),
+            },
+            range,
+        },
+        UnresolvedReason::MemberNotFound { package, member } => SemanticDiag {
+            kind: SemanticDiagKind::MemberNotFound {
+                package: package.clone(),
+                member: member.clone(),
+            },
+            range,
+        },
+        UnresolvedReason::AmbiguousWildcardImport { candidates } => SemanticDiag {
+            kind: SemanticDiagKind::AmbiguousWildcardImport {
+                name: SmolStr::new(path.display_name()),
+                candidates: candidates.clone(),
+            },
+            range,
+        },
+        UnresolvedReason::UnsupportedQualifiedPath { .. } => SemanticDiag {
+            kind: SemanticDiagKind::UnsupportedQualifiedPath {
+                path: SmolStr::new(path.display_name()),
+            },
+            range,
+        },
+    }
+}
+
 struct DefContext<'a> {
     ast_id_map: &'a AstIdMap,
     symbols: SymbolTableBuilder,
     scopes: ScopeTreeBuilder,
     export_modules: Vec<SymbolId>,
+    export_packages: Vec<SymbolId>,
     decl_to_symbol: HashMap<lyra_ast::ErasedAstId, SymbolId>,
     use_sites: Vec<UseSite>,
+    imports: Vec<Import>,
 }
 
 impl<'a> DefContext<'a> {
@@ -192,8 +435,10 @@ impl<'a> DefContext<'a> {
             symbols: SymbolTableBuilder::new(),
             scopes: ScopeTreeBuilder::new(),
             export_modules: Vec::new(),
+            export_packages: Vec::new(),
             decl_to_symbol: HashMap::new(),
             use_sites: Vec::new(),
+            imports: Vec::new(),
         }
     }
 
@@ -217,8 +462,14 @@ impl<'a> DefContext<'a> {
 
 fn collect_source_file(ctx: &mut DefContext<'_>, root: &SyntaxNode, file_scope: ScopeId) {
     for child in root.children() {
-        if child.kind() == SyntaxKind::ModuleDecl {
-            collect_module(ctx, &child, file_scope);
+        match child.kind() {
+            SyntaxKind::ModuleDecl => {
+                collect_module(ctx, &child, file_scope);
+            }
+            SyntaxKind::PackageDecl => {
+                collect_package(ctx, &child, file_scope);
+            }
+            _ => {}
         }
     }
 }
@@ -264,6 +515,42 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
     }
 }
 
+fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: ScopeId) {
+    let package_name = first_ident_token(node);
+    if let Some(name_tok) = &package_name {
+        let name = SmolStr::new(name_tok.text());
+        let range = name_tok.text_range();
+        let package_scope = ctx.scopes.push(ScopeKind::Package, None);
+        let sym_id = ctx.symbols.push(Symbol {
+            name,
+            kind: SymbolKind::Package,
+            def_range: range,
+            scope: package_scope,
+        });
+        ctx.export_packages.push(sym_id);
+
+        // Record decl_to_symbol for cross-file resolution
+        if let Some(pkg_decl) = lyra_ast::PackageDecl::cast(node.clone())
+            && let Some(ast_id) = ctx.ast_id_map.ast_id(&pkg_decl)
+        {
+            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+        }
+
+        // Visit package body
+        for child in node.children() {
+            if child.kind() == SyntaxKind::PackageBody {
+                collect_package_body(ctx, &child, package_scope);
+            }
+        }
+    }
+}
+
+fn collect_package_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    for child in node.children() {
+        collect_module_item(ctx, &child, scope);
+    }
+}
+
 fn collect_param_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
         if child.kind() == SyntaxKind::ParamDecl {
@@ -280,8 +567,6 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
             // The first Ident in a Port might be a type name if the port
             // has an explicit type. We need the *last* Ident that is a
             // direct child token (not inside a child node like TypeSpec).
-            // Ports use typed accessors: the port name is the bare Ident
-            // token that is NOT inside a TypeSpec child.
             let name = port_name_ident(&child);
             if let Some(name_tok) = name {
                 ctx.add_symbol(
@@ -323,6 +608,9 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         SyntaxKind::ContinuousAssign => {
             collect_name_refs(ctx, node, scope);
         }
+        SyntaxKind::ImportDecl => {
+            collect_import_decl(ctx, node, scope);
+        }
         SyntaxKind::ModuleInstantiation => {
             // Record the module type name as a Definition-namespace use-site
             if let Some(inst) = ModuleInstantiation::cast(node.clone())
@@ -347,16 +635,68 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
     }
 }
 
+fn collect_import_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    for child in node.children() {
+        if child.kind() == SyntaxKind::ImportItem {
+            collect_import_item(ctx, &child, scope);
+        }
+    }
+}
+
+fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    // Determine if wildcard or explicit
+    let has_star = node
+        .children_with_tokens()
+        .filter_map(lyra_parser::SyntaxElement::into_token)
+        .any(|tok| tok.kind() == SyntaxKind::Star);
+
+    if has_star {
+        // Wildcard: first Ident is the package name
+        if let Some(pkg_tok) = first_ident_token(node) {
+            ctx.imports.push(Import {
+                package: SmolStr::new(pkg_tok.text()),
+                name: ImportName::Wildcard,
+                scope,
+                range: node.text_range(),
+            });
+        }
+    } else if let Some(qn) = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::QualifiedName)
+    {
+        // Non-wildcard: QualifiedName child with [pkg, sym]
+        let idents: Vec<_> = qn
+            .children_with_tokens()
+            .filter_map(lyra_parser::SyntaxElement::into_token)
+            .filter(|tok| tok.kind() == SyntaxKind::Ident)
+            .collect();
+        if idents.len() >= 2 {
+            ctx.imports.push(Import {
+                package: SmolStr::new(idents[0].text()),
+                name: ImportName::Explicit(SmolStr::new(idents[1].text())),
+                scope,
+                range: node.text_range(),
+            });
+        }
+    }
+}
+
 fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
         if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = first_ident_token(&child) {
-                ctx.add_symbol(
+                let sym_id = ctx.add_symbol(
                     SmolStr::new(name_tok.text()),
                     SymbolKind::Parameter,
                     name_tok.text_range(),
                     scope,
                 );
+                // Record decl_to_symbol for package member resolution
+                if let Some(decl) = lyra_ast::Declarator::cast(child.clone())
+                    && let Some(ast_id) = ctx.ast_id_map.ast_id(&decl)
+                {
+                    ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+                }
             }
             // Collect name refs in default value expressions
             collect_name_refs(ctx, &child, scope);
@@ -373,12 +713,18 @@ fn collect_declarators(
     for child in node.children() {
         if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = first_ident_token(&child) {
-                ctx.add_symbol(
+                let sym_id = ctx.add_symbol(
                     SmolStr::new(name_tok.text()),
                     kind,
                     name_tok.text_range(),
                     scope,
                 );
+                // Record decl_to_symbol for package member resolution
+                if let Some(decl) = lyra_ast::Declarator::cast(child.clone())
+                    && let Some(ast_id) = ctx.ast_id_map.ast_id(&decl)
+                {
+                    ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+                }
             }
             // Collect name refs in initializer expressions
             collect_name_refs(ctx, &child, scope);
@@ -457,6 +803,24 @@ fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                     ast_id: ast_id.erase(),
                 });
             }
+        } else if child.kind() == SyntaxKind::QualifiedName {
+            if let Some(qn) = QualifiedName::cast(child.clone())
+                && let Some(ast_id) = ctx.ast_id_map.ast_id(&qn)
+            {
+                let segments: Box<[SmolStr]> = qn
+                    .segments()
+                    .map(|ident| SmolStr::new(ident.text()))
+                    .collect();
+                if !segments.is_empty() {
+                    ctx.use_sites.push(UseSite {
+                        path: NamePath::Qualified { segments },
+                        expected_ns: Namespace::Value,
+                        range: qn.text_range(),
+                        scope,
+                        ast_id: ast_id.erase(),
+                    });
+                }
+            }
         } else if child.kind() == SyntaxKind::Declarator {
             // Skip declarator names but collect refs in their initializers
             // (already handled by collect_declarators)
@@ -469,7 +833,10 @@ fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
 fn collect_direct_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     // Collect name refs from direct expression children only (not structural children)
     for child in node.children() {
-        if is_expression_kind(child.kind()) || child.kind() == SyntaxKind::NameRef {
+        if is_expression_kind(child.kind())
+            || child.kind() == SyntaxKind::NameRef
+            || child.kind() == SyntaxKind::QualifiedName
+        {
             collect_name_refs_from_expr(ctx, &child, scope);
         }
     }
@@ -488,6 +855,26 @@ fn collect_name_refs_from_expr(ctx: &mut DefContext<'_>, node: &SyntaxNode, scop
                 scope,
                 ast_id: ast_id.erase(),
             });
+        }
+        return;
+    }
+    if node.kind() == SyntaxKind::QualifiedName {
+        if let Some(qn) = QualifiedName::cast(node.clone())
+            && let Some(ast_id) = ctx.ast_id_map.ast_id(&qn)
+        {
+            let segments: Box<[SmolStr]> = qn
+                .segments()
+                .map(|ident| SmolStr::new(ident.text()))
+                .collect();
+            if !segments.is_empty() {
+                ctx.use_sites.push(UseSite {
+                    path: NamePath::Qualified { segments },
+                    expected_ns: Namespace::Value,
+                    range: qn.text_range(),
+                    scope,
+                    ast_id: ast_id.erase(),
+                });
+            }
         }
         return;
     }
@@ -513,6 +900,7 @@ fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::ArgList
             | SyntaxKind::NameRef
             | SyntaxKind::Literal
+            | SyntaxKind::QualifiedName
     )
 }
 
@@ -574,5 +962,81 @@ mod tests {
 
         // Ranges and ast_ids differ, confirming DefIndex is NOT equal
         assert_ne!(def_a, def_b, "DefIndex should differ (offsets changed)");
+    }
+
+    #[test]
+    fn package_symbols_collected() {
+        let src = "package pkg; logic x; parameter P = 1; endpackage";
+        let (parse, map) = parse_source(src);
+        let def = build_def_index(FileId(0), &parse, &map);
+
+        assert_eq!(def.exports.packages.len(), 1);
+        let pkg_sym = def.symbols.get(def.exports.packages[0]);
+        assert_eq!(pkg_sym.name.as_str(), "pkg");
+        assert_eq!(pkg_sym.kind, SymbolKind::Package);
+
+        // Check that internal symbols were collected
+        let has_x = def
+            .symbols
+            .iter()
+            .any(|(_, s)| s.name.as_str() == "x" && s.kind == SymbolKind::Variable);
+        assert!(has_x, "variable 'x' should be collected in package");
+    }
+
+    #[test]
+    fn import_recorded_in_def_index() {
+        let src = "module m; import pkg::x; import pkg2::*; endmodule";
+        let (parse, map) = parse_source(src);
+        let def = build_def_index(FileId(0), &parse, &map);
+
+        assert_eq!(def.imports.len(), 2);
+        assert_eq!(def.imports[0].package.as_str(), "pkg");
+        assert_eq!(def.imports[0].name, ImportName::Explicit(SmolStr::new("x")));
+        assert_eq!(def.imports[1].package.as_str(), "pkg2");
+        assert_eq!(def.imports[1].name, ImportName::Wildcard);
+
+        // Imports should NOT appear as use-sites
+        let import_use_sites: Vec<_> = def
+            .use_sites
+            .iter()
+            .filter(|u| {
+                u.path
+                    .as_simple()
+                    .is_some_and(|s| s == "pkg" || s == "pkg2")
+            })
+            .collect();
+        assert!(
+            import_use_sites.is_empty(),
+            "imports should not be recorded as use-sites"
+        );
+    }
+
+    #[test]
+    fn qualified_name_use_site() {
+        let src = "module m; assign y = pkg::x; endmodule";
+        let (parse, map) = parse_source(src);
+        let def = build_def_index(FileId(0), &parse, &map);
+
+        let qualified_sites: Vec<_> = def
+            .use_sites
+            .iter()
+            .filter(|u| u.path.as_qualified().is_some())
+            .collect();
+        assert_eq!(qualified_sites.len(), 1);
+        let segs = qualified_sites[0].path.as_qualified().unwrap();
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].as_str(), "pkg");
+        assert_eq!(segs[1].as_str(), "x");
+    }
+
+    #[test]
+    fn name_graph_includes_imports() {
+        let src = "module m; import pkg::x; endmodule";
+        let (parse, map) = parse_source(src);
+        let def = build_def_index(FileId(0), &parse, &map);
+        let graph = NameGraph::from_def_index(&def);
+
+        assert_eq!(graph.imports.len(), 1);
+        assert_eq!(graph.imports[0].package.as_str(), "pkg");
     }
 }

@@ -27,6 +27,22 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 2,
     };
+    pub const PACKAGE_NOT_FOUND: Self = Self {
+        namespace: "lyra.semantic",
+        number: 3,
+    };
+    pub const MEMBER_NOT_FOUND: Self = Self {
+        namespace: "lyra.semantic",
+        number: 4,
+    };
+    pub const AMBIGUOUS_IMPORT: Self = Self {
+        namespace: "lyra.semantic",
+        number: 5,
+    };
+    pub const UNSUPPORTED_QUALIFIED_PATH: Self = Self {
+        namespace: "lyra.semantic",
+        number: 6,
+    };
 
     /// Format as `"namespace[number]"`, e.g. `"lyra.semantic[1]"`.
     pub fn as_str(&self) -> String {

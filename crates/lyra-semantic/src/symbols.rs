@@ -1,3 +1,4 @@
+use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
@@ -32,9 +33,32 @@ pub struct GlobalSymbolId {
     pub local: SymbolId,
 }
 
+/// Cross-file definition identity.
+///
+/// Wraps `ErasedAstId` to make the "this is a global definition reference"
+/// intent explicit. All cross-file references use this instead of bare
+/// `ErasedAstId`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GlobalDefId(ErasedAstId);
+
+impl GlobalDefId {
+    pub fn new(ast_id: ErasedAstId) -> Self {
+        Self(ast_id)
+    }
+
+    pub fn file(self) -> FileId {
+        self.0.file()
+    }
+
+    pub fn ast_id(self) -> ErasedAstId {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolKind {
     Module,
+    Package,
     Port,
     Net,
     Variable,
@@ -44,13 +68,13 @@ pub enum SymbolKind {
 impl SymbolKind {
     /// The namespace this symbol kind belongs to.
     ///
-    /// Modules live in the Definition namespace (IEEE 1800 section 3.13(a)),
-    /// resolved via `GlobalDefIndex`, not lexical scopes.
+    /// Modules and packages live in the Definition namespace
+    /// (IEEE 1800 section 3.13(a)), resolved via `GlobalDefIndex`,
+    /// not lexical scopes.
     pub(crate) fn namespace(self) -> Namespace {
         match self {
-            Self::Module => Namespace::Definition,
+            Self::Module | Self::Package => Namespace::Definition,
             Self::Port | Self::Net | Self::Variable | Self::Parameter => Namespace::Value,
-            // Future: Self::Typedef | Self::Class => Namespace::Type,
         }
     }
 }

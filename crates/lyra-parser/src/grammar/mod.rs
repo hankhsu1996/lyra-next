@@ -13,8 +13,10 @@ pub(crate) fn source_file(p: &mut Parser) {
     while !p.at_end() {
         if p.at(SyntaxKind::ModuleKw) {
             items::module_decl(p);
+        } else if p.at(SyntaxKind::PackageKw) {
+            items::package_decl(p);
         } else {
-            p.error_bump("expected module declaration");
+            p.error_bump("expected module or package declaration");
         }
     }
     // Trailing trivia must be inside the root node for a valid rowan tree.
