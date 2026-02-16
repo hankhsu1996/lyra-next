@@ -1,0 +1,17 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..28
+  ProgramDecl@0..27
+    ProgramKw@0..7 "program"
+    Whitespace@7..8 " "
+    Ident@8..15 "my_prog"
+    Semicolon@15..16 ";"
+    ProgramBody@16..16
+    Whitespace@16..17 "\n"
+    EndprogramKw@17..27 "endprogram"
+  Whitespace@27..28 "\n"
+---
+no diagnostics

@@ -52,7 +52,7 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Cursor resolution for qualified names (package part -> package decl, member part -> member symbol)
 - [x] Typedef declarations with type namespace resolution (local, cross-file, import)
 - [x] Multi-namespace resolution: type-position names try Type then Value
-- [ ] Cross-file resolution for primitives, programs, interfaces
+- [x] Cross-file resolution for all top-level constructs (interface, program, primitive, config)
 
 ## Cross-cutting infrastructure
 

@@ -7,6 +7,26 @@ use crate::symbols::{GlobalDefId, Namespace};
 pub enum DefinitionKind {
     Module,
     Package,
+    Interface,
+    Program,
+    Primitive,
+    Config,
+}
+
+impl DefinitionKind {
+    /// Derive `DefinitionKind` from a `SymbolKind` for definition-namespace symbols.
+    /// Returns `None` for symbol kinds that are not in the definition namespace.
+    pub fn from_symbol_kind(kind: crate::symbols::SymbolKind) -> Option<Self> {
+        match kind {
+            crate::symbols::SymbolKind::Module => Some(Self::Module),
+            crate::symbols::SymbolKind::Package => Some(Self::Package),
+            crate::symbols::SymbolKind::Interface => Some(Self::Interface),
+            crate::symbols::SymbolKind::Program => Some(Self::Program),
+            crate::symbols::SymbolKind::Primitive => Some(Self::Primitive),
+            crate::symbols::SymbolKind::Config => Some(Self::Config),
+            _ => None,
+        }
+    }
 }
 
 /// Global definition index for the definitions name space

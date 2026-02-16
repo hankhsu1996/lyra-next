@@ -151,12 +151,54 @@ ast_nodes! {
         name: token(Ident),
         type_spec: TypeSpec,
     }
+
+    InterfaceDecl(SyntaxKind::InterfaceDecl) {
+        name: token(Ident),
+        param_port_list: ParamPortList,
+        port_list: PortList,
+        body: InterfaceBody,
+    }
+
+    InterfaceBody(SyntaxKind::InterfaceBody) {}
+
+    ProgramDecl(SyntaxKind::ProgramDecl) {
+        name: token(Ident),
+        param_port_list: ParamPortList,
+        port_list: PortList,
+        body: ProgramBody,
+    }
+
+    ProgramBody(SyntaxKind::ProgramBody) {}
+
+    PrimitiveDecl(SyntaxKind::PrimitiveDecl) {
+        name: token(Ident),
+    }
+
+    ConfigDecl(SyntaxKind::ConfigDecl) {
+        name: token(Ident),
+    }
 }
 
 // Custom accessors
 
 impl SourceFile {
     pub fn packages(&self) -> AstChildren<PackageDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn interfaces(&self) -> AstChildren<InterfaceDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn programs(&self) -> AstChildren<ProgramDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn primitives(&self) -> AstChildren<PrimitiveDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn configs(&self) -> AstChildren<ConfigDecl> {
         support::children(&self.syntax)
     }
 }

@@ -368,6 +368,156 @@ fn param_override(p: &mut Parser) {
     m.complete(p, SyntaxKind::InstancePort);
 }
 
+// Parse an interface declaration: `interface [lifetime] name [#(params)] [(ports)] ; { item } endinterface [: name]`
+pub(crate) fn interface_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // interface
+
+    // Optional lifetime: automatic | static
+    if p.at(SyntaxKind::AutomaticKw) || p.at(SyntaxKind::StaticKw) {
+        p.bump();
+    }
+
+    // Interface name
+    p.expect(SyntaxKind::Ident);
+
+    // Optional parameter port list #(...)
+    if p.at(SyntaxKind::Hash) && p.nth(1) == SyntaxKind::LParen {
+        ports::param_port_list(p);
+    }
+
+    // Optional port list (...)
+    if p.at(SyntaxKind::LParen) {
+        ports::port_decl_list(p);
+    }
+
+    p.expect(SyntaxKind::Semicolon);
+
+    // Interface body: items until endinterface
+    let body = p.start();
+    while !p.at(SyntaxKind::EndinterfaceKw) && !p.at_end() {
+        if !module_item(p) {
+            break;
+        }
+    }
+    body.complete(p, SyntaxKind::InterfaceBody);
+
+    if !p.eat(SyntaxKind::EndinterfaceKw) {
+        p.error("expected `endinterface`");
+    }
+
+    // Optional `: name`
+    if p.eat(SyntaxKind::Colon) && p.at(SyntaxKind::Ident) {
+        p.bump();
+    }
+
+    m.complete(p, SyntaxKind::InterfaceDecl);
+}
+
+// Parse a program declaration: `program [lifetime] name [#(params)] [(ports)] ; { item } endprogram [: name]`
+pub(crate) fn program_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // program
+
+    // Optional lifetime: automatic | static
+    if p.at(SyntaxKind::AutomaticKw) || p.at(SyntaxKind::StaticKw) {
+        p.bump();
+    }
+
+    // Program name
+    p.expect(SyntaxKind::Ident);
+
+    // Optional parameter port list #(...)
+    if p.at(SyntaxKind::Hash) && p.nth(1) == SyntaxKind::LParen {
+        ports::param_port_list(p);
+    }
+
+    // Optional port list (...)
+    if p.at(SyntaxKind::LParen) {
+        ports::port_decl_list(p);
+    }
+
+    p.expect(SyntaxKind::Semicolon);
+
+    // Program body: items until endprogram
+    let body = p.start();
+    while !p.at(SyntaxKind::EndprogramKw) && !p.at_end() {
+        if !module_item(p) {
+            break;
+        }
+    }
+    body.complete(p, SyntaxKind::ProgramBody);
+
+    if !p.eat(SyntaxKind::EndprogramKw) {
+        p.error("expected `endprogram`");
+    }
+
+    // Optional `: name`
+    if p.eat(SyntaxKind::Colon) && p.at(SyntaxKind::Ident) {
+        p.bump();
+    }
+
+    m.complete(p, SyntaxKind::ProgramDecl);
+}
+
+// Parse a primitive (UDP) declaration: `primitive name (ports) ; ... endprimitive [: name]`
+pub(crate) fn primitive_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // primitive
+
+    // Primitive name
+    p.expect(SyntaxKind::Ident);
+
+    // Port list (...)
+    if p.at(SyntaxKind::LParen) {
+        ports::port_decl_list(p);
+    }
+
+    p.expect(SyntaxKind::Semicolon);
+
+    // Opaque body: skip tokens until endprimitive
+    while !p.at(SyntaxKind::EndprimitiveKw) && !p.at_end() {
+        p.bump();
+    }
+
+    if !p.eat(SyntaxKind::EndprimitiveKw) {
+        p.error("expected `endprimitive`");
+    }
+
+    // Optional `: name`
+    if p.eat(SyntaxKind::Colon) && p.at(SyntaxKind::Ident) {
+        p.bump();
+    }
+
+    m.complete(p, SyntaxKind::PrimitiveDecl);
+}
+
+// Parse a config declaration: `config name ; ... endconfig [: name]`
+pub(crate) fn config_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // config
+
+    // Config name
+    p.expect(SyntaxKind::Ident);
+    p.expect(SyntaxKind::Semicolon);
+
+    // Opaque body: skip tokens until endconfig
+    while !p.at(SyntaxKind::EndconfigKw) && !p.at_end() {
+        p.bump();
+    }
+
+    if !p.eat(SyntaxKind::EndconfigKw) {
+        p.error("expected `endconfig`");
+    }
+
+    // Optional `: name`
+    if p.eat(SyntaxKind::Colon) && p.at(SyntaxKind::Ident) {
+        p.bump();
+    }
+
+    m.complete(p, SyntaxKind::ConfigDecl);
+}
+
 fn is_net_type(kind: SyntaxKind) -> bool {
     matches!(
         kind,
