@@ -19,40 +19,23 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Typed AST wrappers with AstId
 - [x] Parse error diagnostics with correct spans
 
-## M2: Source Model and Incremental
+## M2: Source Model and Incremental -- done
 
 - [x] Line index (byte offset to line/col mapping)
 - [x] File text update with incremental invalidation
-- [x] Cache-hit tests (EventDb, per-file isolation, no-change caching)
+- [x] Cache-hit tests (per-file isolation, no-change caching)
 - [x] Preprocess invalidation via include deps
 - [x] Source map model for macro expansion
 
-## M3: Names and Scopes
+## M3: Names and Scopes -- done
 
-- [x] Declarator AST node (parser wraps each declarator)
-- [x] Symbol/SymbolTable with SmolStr names, SymbolKind, TextRange def_range
-- [x] ScopeTree with sorted bindings, binary-search resolve, parent-chain walk
-- [x] Structured semantic diagnostics (SemanticDiagKind enum)
-- [x] DefIndex: per-file definition collection (symbols, scopes, exports, use sites)
-- [x] ResolveIndex: per-file name resolution (HashMap<ErasedAstId, SymbolId>)
-- [x] Builder: build_def_index, build_resolve_core, build_resolve_index
-- [x] Salsa queries: def_index_file, name_graph_file, resolve_core_file, resolve_index_file, resolve_at, symbol_global
-- [x] file_diagnostics includes semantic diagnostics
-- [x] Incremental invalidation tests (cache hit, recompute, cross-file isolation)
-- [x] Offset-independent NameGraph query (whitespace edits skip resolve_core via Salsa backdating)
-- [x] Cross-file module instantiation resolution (CompilationUnit, GlobalDefIndex, Definition namespace)
-- [x] Cursor resolution for module instantiation type names (find_module_instantiation_name_at fallback)
-- [x] Unit-level diagnostics for duplicate global definitions (module/package collisions)
-- [x] Package declarations: parse, AST, semantic collection, cross-file resolution
-- [x] Import declarations: explicit (pkg::sym) and wildcard (pkg::*), with LRM precedence
-- [x] Qualified name references (pkg::sym) in expressions with cross-file resolution
-- [x] PackageScopeIndex: namespace-aware (value_ns/type_ns) package member resolution
-- [x] CoreResolveResult with typed UnresolvedReason codes (PackageNotFound, MemberNotFound, AmbiguousWildcardImport, UnsupportedQualifiedPath)
-- [x] Import validation: package existence and member existence checks with diagnostics
-- [x] Cursor resolution for qualified names (package part -> package decl, member part -> member symbol)
-- [x] Typedef declarations with type namespace resolution (local, cross-file, import)
-- [x] Multi-namespace resolution: type-position names try Type then Value
-- [x] Cross-file resolution for all top-level constructs (interface, program, primitive, config)
+- [x] Symbol table and scope tree with parent-chain resolution
+- [x] Per-file definition collection and name resolution (DefIndex, ResolveIndex)
+- [x] Cross-file resolution (modules, packages, interfaces, programs, primitives, configs)
+- [x] Package imports (explicit and wildcard) with LRM precedence
+- [x] Typedef declarations with type namespace resolution
+- [x] Semantic diagnostics (unresolved names, duplicates, import errors)
+- [x] Salsa query wiring with offset-independent NameGraph for backdating
 
 ## Cross-cutting infrastructure
 
@@ -61,6 +44,13 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] AST API extensibility (reduce hand-written boilerplate)
 - [x] Test harness: snapshot corpus runner
 
-## M4: Type Skeleton -- not started
+## M4: Type Skeleton
+
+- [x] Type data model (Ty, Integral, ConstInt, dimensions, NetType)
+- [ ] Constant expression evaluation for dimension bounds
+- [ ] type_of_symbol query (declaration -> Ty)
+- [ ] type_of_expr query for simple expressions
+- [ ] Basic type-error diagnostics (width mismatch, undeclared type)
+- [ ] Enum and struct type representation
 
 ## M5: Tool-Grade Foundation -- not started
