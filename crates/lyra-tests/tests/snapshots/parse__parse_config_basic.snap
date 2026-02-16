@@ -1,0 +1,21 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..39
+  ConfigDecl@0..38
+    ConfigKw@0..6 "config"
+    Whitespace@6..7 " "
+    Ident@7..13 "my_cfg"
+    Semicolon@13..14 ";"
+    Whitespace@14..17 "\n  "
+    DesignKw@17..23 "design"
+    Whitespace@23..24 " "
+    Ident@24..27 "top"
+    Semicolon@27..28 ";"
+    Whitespace@28..29 "\n"
+    EndconfigKw@29..38 "endconfig"
+  Whitespace@38..39 "\n"
+---
+no diagnostics

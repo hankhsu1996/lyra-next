@@ -15,8 +15,16 @@ pub(crate) fn source_file(p: &mut Parser) {
             items::module_decl(p);
         } else if p.at(SyntaxKind::PackageKw) {
             items::package_decl(p);
+        } else if p.at(SyntaxKind::InterfaceKw) {
+            items::interface_decl(p);
+        } else if p.at(SyntaxKind::ProgramKw) {
+            items::program_decl(p);
+        } else if p.at(SyntaxKind::PrimitiveKw) {
+            items::primitive_decl(p);
+        } else if p.at(SyntaxKind::ConfigKw) {
+            items::config_decl(p);
         } else {
-            p.error_bump("expected module or package declaration");
+            p.error_bump("expected top-level declaration");
         }
     }
     // Trailing trivia must be inside the root node for a valid rowan tree.

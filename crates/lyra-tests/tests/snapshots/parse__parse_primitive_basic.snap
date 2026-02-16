@@ -1,0 +1,73 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..124
+  PrimitiveDecl@0..123
+    PrimitiveKw@0..9 "primitive"
+    Whitespace@9..10 " "
+    Ident@10..16 "my_udp"
+    PortList@16..38
+      LParen@16..17 "("
+      Port@17..25
+        OutputKw@17..23 "output"
+        Whitespace@23..24 " "
+        Ident@24..25 "y"
+      Comma@25..26 ","
+      Port@26..34
+        Whitespace@26..27 " "
+        InputKw@27..32 "input"
+        Whitespace@32..33 " "
+        Ident@33..34 "a"
+      Comma@34..35 ","
+      Port@35..37
+        Whitespace@35..36 " "
+        Ident@36..37 "b"
+      RParen@37..38 ")"
+    Semicolon@38..39 ";"
+    Whitespace@39..42 "\n  "
+    TableKw@42..47 "table"
+    Whitespace@47..52 "\n    "
+    IntLiteral@52..53 "0"
+    Whitespace@53..54 " "
+    IntLiteral@54..55 "0"
+    Whitespace@55..56 " "
+    Colon@56..57 ":"
+    Whitespace@57..58 " "
+    IntLiteral@58..59 "0"
+    Semicolon@59..60 ";"
+    Whitespace@60..65 "\n    "
+    IntLiteral@65..66 "0"
+    Whitespace@66..67 " "
+    IntLiteral@67..68 "1"
+    Whitespace@68..69 " "
+    Colon@69..70 ":"
+    Whitespace@70..71 " "
+    IntLiteral@71..72 "1"
+    Semicolon@72..73 ";"
+    Whitespace@73..78 "\n    "
+    IntLiteral@78..79 "1"
+    Whitespace@79..80 " "
+    IntLiteral@80..81 "0"
+    Whitespace@81..82 " "
+    Colon@82..83 ":"
+    Whitespace@83..84 " "
+    IntLiteral@84..85 "1"
+    Semicolon@85..86 ";"
+    Whitespace@86..91 "\n    "
+    IntLiteral@91..92 "1"
+    Whitespace@92..93 " "
+    IntLiteral@93..94 "1"
+    Whitespace@94..95 " "
+    Colon@95..96 ":"
+    Whitespace@96..97 " "
+    IntLiteral@97..98 "0"
+    Semicolon@98..99 ";"
+    Whitespace@99..102 "\n  "
+    EndtableKw@102..110 "endtable"
+    Whitespace@110..111 "\n"
+    EndprimitiveKw@111..123 "endprimitive"
+  Whitespace@123..124 "\n"
+---
+no diagnostics

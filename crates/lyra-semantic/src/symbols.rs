@@ -64,6 +64,10 @@ pub enum SymbolKind {
     Variable,
     Parameter,
     Typedef,
+    Interface,
+    Program,
+    Primitive,
+    Config,
 }
 
 impl SymbolKind {
@@ -74,7 +78,12 @@ impl SymbolKind {
     /// not lexical scopes.
     pub(crate) fn namespace(self) -> Namespace {
         match self {
-            Self::Module | Self::Package => Namespace::Definition,
+            Self::Module
+            | Self::Package
+            | Self::Interface
+            | Self::Program
+            | Self::Primitive
+            | Self::Config => Namespace::Definition,
             Self::Port | Self::Net | Self::Variable | Self::Parameter => Namespace::Value,
             Self::Typedef => Namespace::Type,
         }

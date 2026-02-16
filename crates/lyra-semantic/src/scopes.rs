@@ -30,6 +30,7 @@ pub enum ScopeKind {
     Task,
     Package,
     Interface,
+    Program,
     Class,
 }
 

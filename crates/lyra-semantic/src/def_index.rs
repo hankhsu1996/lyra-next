@@ -104,12 +104,17 @@ pub enum ImportName {
     Wildcard,
 }
 
-/// Module/package names exported to compilation-unit namespace.
+/// Definition-namespace and package names exported to compilation-unit namespace.
 ///
 /// Separate from lexical `ScopeTree`. Entries sorted by
 /// `symbols[id].name` for binary-search lookup.
+///
+/// `definitions` holds all definition-namespace constructs (module, interface,
+/// program, primitive, config) per LRM 3.13(a). Packages stay separate since
+/// they are in a distinct namespace (LRM 3.13(b)) and are used differently
+/// (package scope index).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Exports {
-    pub modules: Box<[SymbolId]>,
+    pub definitions: Box<[SymbolId]>,
     pub packages: Box<[SymbolId]>,
 }

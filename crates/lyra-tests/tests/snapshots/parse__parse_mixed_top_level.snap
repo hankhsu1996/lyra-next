@@ -1,0 +1,35 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..68
+  ModuleDecl@0..19
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..8 "m"
+    Semicolon@8..9 ";"
+    ModuleBody@9..9
+    Whitespace@9..10 " "
+    EndmoduleKw@10..19 "endmodule"
+  InterfaceDecl@19..45
+    Whitespace@19..20 "\n"
+    InterfaceKw@20..29 "interface"
+    Whitespace@29..30 " "
+    Ident@30..31 "i"
+    Semicolon@31..32 ";"
+    InterfaceBody@32..32
+    Whitespace@32..33 " "
+    EndinterfaceKw@33..45 "endinterface"
+  ProgramDecl@45..67
+    Whitespace@45..46 "\n"
+    ProgramKw@46..53 "program"
+    Whitespace@53..54 " "
+    Ident@54..55 "p"
+    Semicolon@55..56 ";"
+    ProgramBody@56..56
+    Whitespace@56..57 " "
+    EndprogramKw@57..67 "endprogram"
+  Whitespace@67..68 "\n"
+---
+no diagnostics

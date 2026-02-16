@@ -420,6 +420,12 @@ pub enum SyntaxKind {
     ImportItem,
     QualifiedName,
     TypedefDecl,
+    InterfaceDecl,
+    InterfaceBody,
+    ProgramDecl,
+    ProgramBody,
+    PrimitiveDecl,
+    ConfigDecl,
 }
 
 /// First node kind value -- tokens are `< NODE_START`, nodes `>= NODE_START`.

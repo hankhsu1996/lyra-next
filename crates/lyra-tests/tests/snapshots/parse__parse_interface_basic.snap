@@ -1,0 +1,17 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..30
+  InterfaceDecl@0..29
+    InterfaceKw@0..9 "interface"
+    Whitespace@9..10 " "
+    Ident@10..15 "my_if"
+    Semicolon@15..16 ";"
+    InterfaceBody@16..16
+    Whitespace@16..17 "\n"
+    EndinterfaceKw@17..29 "endinterface"
+  Whitespace@29..30 "\n"
+---
+no diagnostics
