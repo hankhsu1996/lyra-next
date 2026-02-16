@@ -419,6 +419,7 @@ pub enum SyntaxKind {
     ImportDecl,
     ImportItem,
     QualifiedName,
+    TypedefDecl,
 }
 
 /// First node kind value -- tokens are `< NODE_START`, nodes `>= NODE_START`.

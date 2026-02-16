@@ -50,8 +50,8 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] CoreResolveResult with typed UnresolvedReason codes (PackageNotFound, MemberNotFound, AmbiguousWildcardImport, UnsupportedQualifiedPath)
 - [x] Import validation: package existence and member existence checks with diagnostics
 - [x] Cursor resolution for qualified names (package part -> package decl, member part -> member symbol)
-- [ ] Scope graph with scope kinds (module/block/generate) and parent chain
-- [ ] Multi-namespace name tables (value vs type)
+- [x] Typedef declarations with type namespace resolution (local, cross-file, import)
+- [x] Multi-namespace resolution: type-position names try Type then Value
 - [ ] Cross-file resolution for primitives, programs, interfaces
 
 ## Cross-cutting infrastructure

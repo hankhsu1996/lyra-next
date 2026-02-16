@@ -1,9 +1,9 @@
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
-use crate::def_index::{DefIndex, ImportName, NamePath};
+use crate::def_index::{DefIndex, ExpectedNs, ImportName, NamePath};
 use crate::scopes::{ScopeId, ScopeTree, SymbolNameLookup};
-use crate::symbols::{Namespace, SymbolId, SymbolKind};
+use crate::symbols::{SymbolId, SymbolKind};
 
 /// Offset-independent projection of `DefIndex` for resolution.
 ///
@@ -26,7 +26,7 @@ pub struct NameGraph {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UseEntry {
     pub(crate) path: NamePath,
-    pub(crate) expected_ns: Namespace,
+    pub(crate) expected_ns: ExpectedNs,
     pub(crate) scope: ScopeId,
 }
 

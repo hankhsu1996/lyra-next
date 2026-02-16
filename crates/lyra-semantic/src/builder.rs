@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use lyra_ast::{AstIdMap, AstNode, ModuleInstantiation, NameRef, QualifiedName};
+use lyra_ast::{AstIdMap, AstNode, ModuleInstantiation, NameRef, QualifiedName, TypedefDecl};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
-use crate::def_index::{DefIndex, Exports, Import, ImportName, NamePath, UseSite};
+use crate::def_index::{DefIndex, ExpectedNs, Exports, Import, ImportName, NamePath, UseSite};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
 use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
 use crate::name_graph::NameGraph;
@@ -125,59 +125,14 @@ pub fn build_resolve_core(
         .use_entries
         .iter()
         .map(|entry| match &entry.path {
-            NamePath::Simple(name) => match entry.expected_ns {
-                Namespace::Value | Namespace::Type => {
-                    // 1. Lexical scope
-                    if let Some(sym_id) =
-                        graph
-                            .scopes
-                            .resolve(graph, entry.scope, entry.expected_ns, name)
-                    {
-                        return CoreResolveResult::Resolved(CoreResolution::Local {
-                            symbol: sym_id,
-                            namespace: graph.symbol_kinds[sym_id.0 as usize].namespace(),
-                        });
-                    }
-                    // 2. Explicit imports in scope chain
-                    if let Some(resolution) = resolve_via_explicit_import(
-                        graph,
-                        pkg_scope,
-                        entry.scope,
-                        name,
-                        entry.expected_ns,
-                    ) {
-                        return CoreResolveResult::Resolved(resolution);
-                    }
-                    // 3. Wildcard imports in scope chain
-                    match resolve_via_wildcard_import(
-                        graph,
-                        pkg_scope,
-                        entry.scope,
-                        name,
-                        entry.expected_ns,
-                    ) {
-                        WildcardResult::Found(resolution) => {
-                            CoreResolveResult::Resolved(resolution)
-                        }
-                        WildcardResult::Ambiguous(candidates) => CoreResolveResult::Unresolved(
-                            UnresolvedReason::AmbiguousWildcardImport { candidates },
-                        ),
-                        WildcardResult::NotFound => {
-                            CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
-                        }
-                    }
-                }
-                Namespace::Definition => {
-                    if let Some((def_id, _)) = global.resolve_definition(name) {
-                        CoreResolveResult::Resolved(CoreResolution::Global {
-                            decl: def_id,
-                            namespace: Namespace::Definition,
-                        })
-                    } else {
-                        CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
-                    }
-                }
-            },
+            NamePath::Simple(name) => resolve_simple(
+                graph,
+                global,
+                pkg_scope,
+                entry.scope,
+                name,
+                entry.expected_ns,
+            ),
             NamePath::Qualified { segments } => {
                 resolve_qualified(segments, global, pkg_scope, entry.expected_ns)
             }
@@ -190,11 +145,66 @@ pub fn build_resolve_core(
     }
 }
 
+fn ns_list(expected: ExpectedNs) -> ([Namespace; 2], usize) {
+    match expected {
+        ExpectedNs::Exact(ns) => ([ns, ns], 1),
+        ExpectedNs::TypeThenValue => ([Namespace::Type, Namespace::Value], 2),
+    }
+}
+
+fn resolve_simple(
+    graph: &NameGraph,
+    global: &GlobalDefIndex,
+    pkg_scope: &PackageScopeIndex,
+    scope: ScopeId,
+    name: &str,
+    expected: ExpectedNs,
+) -> CoreResolveResult {
+    if let ExpectedNs::Exact(Namespace::Definition) = expected {
+        return if let Some((def_id, _)) = global.resolve_definition(name) {
+            CoreResolveResult::Resolved(CoreResolution::Global {
+                decl: def_id,
+                namespace: Namespace::Definition,
+            })
+        } else {
+            CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
+        };
+    }
+
+    let (nss, len) = ns_list(expected);
+    for &ns in &nss[..len] {
+        // 1. Lexical scope
+        if let Some(sym_id) = graph.scopes.resolve(graph, scope, ns, name) {
+            return CoreResolveResult::Resolved(CoreResolution::Local {
+                symbol: sym_id,
+                namespace: graph.symbol_kinds[sym_id.0 as usize].namespace(),
+            });
+        }
+        // 2. Explicit imports in scope chain
+        if let Some(resolution) = resolve_via_explicit_import(graph, pkg_scope, scope, name, ns) {
+            return CoreResolveResult::Resolved(resolution);
+        }
+        // 3. Wildcard imports in scope chain
+        match resolve_via_wildcard_import(graph, pkg_scope, scope, name, ns) {
+            WildcardResult::Found(resolution) => {
+                return CoreResolveResult::Resolved(resolution);
+            }
+            WildcardResult::Ambiguous(candidates) => {
+                return CoreResolveResult::Unresolved(UnresolvedReason::AmbiguousWildcardImport {
+                    candidates,
+                });
+            }
+            WildcardResult::NotFound => {}
+        }
+    }
+    CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
+}
+
 fn resolve_qualified(
     segments: &[SmolStr],
     global: &GlobalDefIndex,
     pkg_scope: &PackageScopeIndex,
-    use_ns: Namespace,
+    expected: ExpectedNs,
 ) -> CoreResolveResult {
     if segments.len() != 2 {
         return CoreResolveResult::Unresolved(UnresolvedReason::UnsupportedQualifiedPath {
@@ -210,17 +220,17 @@ fn resolve_qualified(
         });
     }
 
-    // Try requested namespace first, fall back to Value for expression context
-    let ns = if use_ns == Namespace::Definition {
-        Namespace::Value
-    } else {
-        use_ns
-    };
-    if let Some(def_id) = pkg_scope.resolve(pkg_name, member_name, ns) {
-        return CoreResolveResult::Resolved(CoreResolution::Global {
-            decl: def_id,
-            namespace: ns,
-        });
+    let (nss, len) = ns_list(match expected {
+        ExpectedNs::Exact(Namespace::Definition) => ExpectedNs::Exact(Namespace::Value),
+        other => other,
+    });
+    for &ns in &nss[..len] {
+        if let Some(def_id) = pkg_scope.resolve(pkg_name, member_name, ns) {
+            return CoreResolveResult::Resolved(CoreResolution::Global {
+                decl: def_id,
+                namespace: ns,
+            });
+        }
     }
     CoreResolveResult::Unresolved(UnresolvedReason::MemberNotFound {
         package: pkg_name.clone(),
@@ -619,7 +629,7 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
             {
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Simple(SmolStr::new(name_tok.text())),
-                    expected_ns: Namespace::Definition,
+                    expected_ns: ExpectedNs::Exact(Namespace::Definition),
                     range: name_tok.text_range(),
                     scope,
                     ast_id: ast_id.erase(),
@@ -627,6 +637,9 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
             }
             // Still collect NameRefs in port connection expressions
             collect_name_refs(ctx, node, scope);
+        }
+        SyntaxKind::TypedefDecl => {
+            collect_typedef(ctx, node, scope);
         }
         SyntaxKind::AlwaysBlock | SyntaxKind::InitialBlock => {
             collect_procedural_block(ctx, node, scope);
@@ -683,7 +696,9 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
 
 fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
-        if child.kind() == SyntaxKind::Declarator {
+        if child.kind() == SyntaxKind::TypeSpec {
+            collect_type_spec_refs(ctx, &child, scope);
+        } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = first_ident_token(&child) {
                 let sym_id = ctx.add_symbol(
                     SmolStr::new(name_tok.text()),
@@ -711,7 +726,9 @@ fn collect_declarators(
     scope: ScopeId,
 ) {
     for child in node.children() {
-        if child.kind() == SyntaxKind::Declarator {
+        if child.kind() == SyntaxKind::TypeSpec {
+            collect_type_spec_refs(ctx, &child, scope);
+        } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = first_ident_token(&child) {
                 let sym_id = ctx.add_symbol(
                     SmolStr::new(name_tok.text()),
@@ -788,6 +805,71 @@ fn collect_statement(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
     }
 }
 
+fn collect_type_spec_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::NameRef => {
+                if let Some(name_ref) = NameRef::cast(child.clone())
+                    && let Some(ident) = name_ref.ident()
+                    && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
+                {
+                    ctx.use_sites.push(UseSite {
+                        path: NamePath::Simple(SmolStr::new(ident.text())),
+                        expected_ns: ExpectedNs::TypeThenValue,
+                        range: name_ref.text_range(),
+                        scope,
+                        ast_id: ast_id.erase(),
+                    });
+                }
+            }
+            SyntaxKind::QualifiedName => {
+                if let Some(qn) = QualifiedName::cast(child.clone())
+                    && let Some(ast_id) = ctx.ast_id_map.ast_id(&qn)
+                {
+                    let segments: Box<[SmolStr]> = qn
+                        .segments()
+                        .map(|ident| SmolStr::new(ident.text()))
+                        .collect();
+                    if !segments.is_empty() {
+                        ctx.use_sites.push(UseSite {
+                            path: NamePath::Qualified { segments },
+                            expected_ns: ExpectedNs::TypeThenValue,
+                            range: qn.text_range(),
+                            scope,
+                            ast_id: ast_id.erase(),
+                        });
+                    }
+                }
+            }
+            SyntaxKind::PackedDimension | SyntaxKind::UnpackedDimension => {
+                collect_name_refs(ctx, &child, scope);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    for child in node.children() {
+        if child.kind() == SyntaxKind::TypeSpec {
+            collect_type_spec_refs(ctx, &child, scope);
+        }
+    }
+    if let Some(td) = TypedefDecl::cast(node.clone())
+        && let Some(name_tok) = td.name()
+    {
+        let sym_id = ctx.add_symbol(
+            SmolStr::new(name_tok.text()),
+            SymbolKind::Typedef,
+            name_tok.text_range(),
+            scope,
+        );
+        if let Some(ast_id) = ctx.ast_id_map.ast_id(&td) {
+            ctx.decl_to_symbol.insert(ast_id.erase(), sym_id);
+        }
+    }
+}
+
 fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
         if child.kind() == SyntaxKind::NameRef {
@@ -797,7 +879,7 @@ fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
             {
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Simple(SmolStr::new(ident.text())),
-                    expected_ns: Namespace::Value,
+                    expected_ns: ExpectedNs::Exact(Namespace::Value),
                     range: name_ref.text_range(),
                     scope,
                     ast_id: ast_id.erase(),
@@ -814,13 +896,15 @@ fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 if !segments.is_empty() {
                     ctx.use_sites.push(UseSite {
                         path: NamePath::Qualified { segments },
-                        expected_ns: Namespace::Value,
+                        expected_ns: ExpectedNs::Exact(Namespace::Value),
                         range: qn.text_range(),
                         scope,
                         ast_id: ast_id.erase(),
                     });
                 }
             }
+        } else if child.kind() == SyntaxKind::TypeSpec {
+            // Handled by collect_type_spec_refs with TypeThenValue.
         } else if child.kind() == SyntaxKind::Declarator {
             // Skip declarator names but collect refs in their initializers
             // (already handled by collect_declarators)
@@ -850,7 +934,7 @@ fn collect_name_refs_from_expr(ctx: &mut DefContext<'_>, node: &SyntaxNode, scop
         {
             ctx.use_sites.push(UseSite {
                 path: NamePath::Simple(SmolStr::new(ident.text())),
-                expected_ns: Namespace::Value,
+                expected_ns: ExpectedNs::Exact(Namespace::Value),
                 range: name_ref.text_range(),
                 scope,
                 ast_id: ast_id.erase(),
@@ -869,7 +953,7 @@ fn collect_name_refs_from_expr(ctx: &mut DefContext<'_>, node: &SyntaxNode, scop
             if !segments.is_empty() {
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Qualified { segments },
-                    expected_ns: Namespace::Value,
+                    expected_ns: ExpectedNs::Exact(Namespace::Value),
                     range: qn.text_range(),
                     scope,
                     ast_id: ast_id.erase(),
@@ -1038,5 +1122,77 @@ mod tests {
 
         assert_eq!(graph.imports.len(), 1);
         assert_eq!(graph.imports[0].package.as_str(), "pkg");
+    }
+
+    #[test]
+    fn typedef_collected_as_type_ns() {
+        let src = "module m; typedef logic [7:0] byte_t; endmodule";
+        let (parse, map) = parse_source(src);
+        let def = build_def_index(FileId(0), &parse, &map);
+
+        let typedef_sym = def
+            .symbols
+            .iter()
+            .find(|(_, s)| s.name.as_str() == "byte_t")
+            .map(|(_, s)| s);
+        assert!(
+            typedef_sym.is_some(),
+            "typedef 'byte_t' should be collected"
+        );
+        assert_eq!(typedef_sym.expect("checked").kind, SymbolKind::Typedef);
+    }
+
+    #[test]
+    fn typedef_use_site_type_then_value() {
+        let src = "module m; typedef my_t other_t; endmodule";
+        let (parse, map) = parse_source(src);
+        let def = build_def_index(FileId(0), &parse, &map);
+
+        let my_t_use = def
+            .use_sites
+            .iter()
+            .find(|u| u.path.as_simple() == Some("my_t"));
+        assert!(my_t_use.is_some(), "'my_t' should be a use-site");
+        assert_eq!(
+            my_t_use.expect("checked").expected_ns,
+            ExpectedNs::TypeThenValue,
+            "type-position NameRef should have TypeThenValue"
+        );
+
+        let other_sym = def
+            .symbols
+            .iter()
+            .find(|(_, s)| s.name.as_str() == "other_t");
+        assert!(other_sym.is_some(), "'other_t' should be a typedef symbol");
+    }
+
+    #[test]
+    fn same_name_different_namespace_no_duplicate() {
+        let src = "module m; logic x; typedef int x; endmodule";
+        let (parse, map) = parse_source(src);
+        let def = build_def_index(FileId(0), &parse, &map);
+
+        assert!(
+            def.diagnostics.is_empty(),
+            "value 'x' and type 'x' should not conflict: {:?}",
+            def.diagnostics
+        );
+    }
+
+    #[test]
+    fn same_namespace_typedef_duplicate() {
+        let src = "module m; typedef int t; typedef logic t; endmodule";
+        let (parse, map) = parse_source(src);
+        let def = build_def_index(FileId(0), &parse, &map);
+
+        let dup_diags: Vec<_> = def
+            .diagnostics
+            .iter()
+            .filter(|d| matches!(d.kind, SemanticDiagKind::DuplicateDefinition { .. }))
+            .collect();
+        assert!(
+            !dup_diags.is_empty(),
+            "two typedefs with same name should produce duplicate diagnostic"
+        );
     }
 }

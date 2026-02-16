@@ -61,6 +61,10 @@ fn package_item(p: &mut Parser) -> bool {
             import_decl(p);
             true
         }
+        SyntaxKind::TypedefKw => {
+            declarations::typedef_decl(p);
+            true
+        }
         _ => {
             p.error_bump("unexpected token in package body");
             !p.at_end()
@@ -196,6 +200,10 @@ fn module_item(p: &mut Parser) -> bool {
         }
         SyntaxKind::ImportKw => {
             import_decl(p);
+            true
+        }
+        SyntaxKind::TypedefKw => {
+            declarations::typedef_decl(p);
             true
         }
         SyntaxKind::Ident => {

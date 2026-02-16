@@ -108,7 +108,19 @@ pub(crate) fn type_spec(p: &mut Parser) {
     if is_data_type_keyword(p.current()) {
         p.bump();
     } else if p.at(SyntaxKind::Ident) {
-        p.bump(); // user-defined type
+        if p.nth(1) == SyntaxKind::ColonColon && p.nth(2) == SyntaxKind::Ident {
+            let qn = p.start();
+            p.bump(); // pkg
+            while p.at(SyntaxKind::ColonColon) && p.nth(1) == SyntaxKind::Ident {
+                p.bump(); // ::
+                p.bump(); // segment
+            }
+            qn.complete(p, SyntaxKind::QualifiedName);
+        } else {
+            let nr = p.start();
+            p.bump();
+            nr.complete(p, SyntaxKind::NameRef);
+        }
     } else {
         p.error("expected type");
         m.abandon(p);
@@ -149,6 +161,16 @@ fn unpacked_dimension(p: &mut Parser) {
     }
     p.expect(SyntaxKind::RBracket);
     m.complete(p, SyntaxKind::UnpackedDimension);
+}
+
+// Parse a typedef declaration: `typedef <type> <name> ;`
+pub(crate) fn typedef_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // typedef
+    type_spec(p);
+    p.expect(SyntaxKind::Ident);
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::TypedefDecl);
 }
 
 pub(crate) fn is_data_type_keyword(kind: SyntaxKind) -> bool {
