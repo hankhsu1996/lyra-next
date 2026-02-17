@@ -13,5 +13,6 @@ cargo clippy -- -D warnings
 echo "pre-commit: policy checks"
 python3 tools/policy/check_errors.py --staged
 python3 tools/policy/check_ascii.py --staged
+python3 tools/policy/check_lines.py --staged
 
 echo "pre-commit: all checks passed"

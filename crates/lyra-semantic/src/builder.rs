@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use lyra_ast::{
-    AstIdMap, AstNode, ConfigDecl, InterfaceDecl, ModuleInstantiation, NameRef, PrimitiveDecl,
-    ProgramDecl, QualifiedName, TypedefDecl,
+    AstIdMap, AstNode, ConfigDecl, InterfaceDecl, ModuleInstantiation, NameRef, Port,
+    PrimitiveDecl, ProgramDecl, QualifiedName, TypedefDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
@@ -378,27 +378,30 @@ fn collect_param_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: S
 fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
         if child.kind() == SyntaxKind::Port
-            && let Some(name_tok) = first_ident_token(&child)
+            && let Some(fallback_tok) = first_ident_token(&child)
         {
-            // The first Ident in a Port might be a type name if the port
-            // has an explicit type. We need the *last* Ident that is a
-            // direct child token (not inside a child node like TypeSpec).
-            let name = port_name_ident(&child);
-            if let Some(name_tok) = name {
-                ctx.add_symbol(
-                    SmolStr::new(name_tok.text()),
-                    SymbolKind::Port,
-                    name_tok.text_range(),
-                    scope,
-                );
-            } else {
-                // Fallback: use first ident
-                ctx.add_symbol(
-                    SmolStr::new(name_tok.text()),
-                    SymbolKind::Port,
-                    name_tok.text_range(),
-                    scope,
-                );
+            // Prefer the port-name ident (last direct Ident child, after
+            // any TypeSpec type name). Fall back to the first Ident.
+            let name_tok = port_name_ident(&child).unwrap_or(fallback_tok);
+            let sym_id = ctx.add_symbol(
+                SmolStr::new(name_tok.text()),
+                SymbolKind::Port,
+                name_tok.text_range(),
+                scope,
+            );
+            // Store Port node AstId for type extraction
+            if let Some(port_node) = Port::cast(child.clone())
+                && let Some(ast_id) = ctx.ast_id_map.ast_id(&port_node)
+            {
+                let erased = ast_id.erase();
+                ctx.decl_to_symbol.insert(erased, sym_id);
+                ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            }
+            // Collect type-spec name refs for port typedef resolution
+            for port_child in child.children() {
+                if port_child.kind() == SyntaxKind::TypeSpec {
+                    collect_type_spec_refs(ctx, &port_child, scope);
+                }
             }
         }
     }
