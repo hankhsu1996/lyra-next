@@ -9,6 +9,7 @@ mod resolve;
 pub mod resolve_index;
 pub mod scopes;
 pub mod symbols;
+pub mod type_check;
 mod type_extract;
 pub mod type_infer;
 pub mod types;

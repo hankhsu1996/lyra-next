@@ -1,7 +1,12 @@
 use lyra_semantic::symbols::GlobalSymbolId;
+use lyra_semantic::type_infer::ExprType;
+use lyra_semantic::types::SymbolType;
+use smol_str::SmolStr;
 
+use crate::expr_queries::ExprRef;
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::semantic::{def_index_file, global_def_index, resolve_index_file};
+use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
 /// Resolve the name at a cursor position.
@@ -130,4 +135,76 @@ fn find_module_instantiation_name_at(
     } else {
         None
     }
+}
+
+/// Result of a `type_at` query: either a symbol's declared type or
+/// an expression's inferred type.
+pub enum TypeAtResult {
+    Expr(ExprType),
+    Symbol(SymbolType),
+}
+
+impl TypeAtResult {
+    pub fn pretty(&self) -> SmolStr {
+        match self {
+            TypeAtResult::Expr(et) => et.pretty(),
+            TypeAtResult::Symbol(st) => st.pretty(),
+        }
+    }
+}
+
+/// Return type information at a source position.
+///
+/// `offset` is in expanded-text space (post-preprocess), the same coordinate
+/// system used by `resolve_at` and `parse_file`. Tool layers that receive
+/// original-source positions must map through the source map first.
+///
+/// Not a Salsa query -- convenience function over cached queries.
+/// Priority: symbol > smallest enclosing expression > None.
+pub fn type_at(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+    offset: lyra_source::TextSize,
+) -> Option<TypeAtResult> {
+    let parse = parse_file(db, file);
+    let ast_map = ast_id_map(db, file);
+
+    // Priority 1: Symbol (NameRef / QualifiedName that resolves)
+    if let Some(gsym) = resolve_at(db, file, unit, offset) {
+        let sym_ref = SymbolRef::new(db, unit, gsym);
+        let st = type_of_symbol(db, sym_ref);
+        return Some(TypeAtResult::Symbol(st));
+    }
+
+    // Priority 2: Smallest enclosing "real" expression
+    let token = parse.syntax().token_at_offset(offset).right_biased()?;
+    for ancestor in token.parent_ancestors() {
+        if is_real_expression_kind(ancestor.kind()) {
+            let expr_ast_id = ast_map.erased_ast_id(&ancestor)?;
+            let expr_ref = ExprRef::new(db, unit, expr_ast_id);
+            let et = crate::expr_queries::type_of_expr(db, expr_ref);
+            return Some(TypeAtResult::Expr(et));
+        }
+    }
+
+    None
+}
+
+/// Expression kinds that are "real" (not transparent wrappers).
+fn is_real_expression_kind(kind: lyra_lexer::SyntaxKind) -> bool {
+    use lyra_lexer::SyntaxKind;
+    matches!(
+        kind,
+        SyntaxKind::BinExpr
+            | SyntaxKind::PrefixExpr
+            | SyntaxKind::CondExpr
+            | SyntaxKind::ConcatExpr
+            | SyntaxKind::ReplicExpr
+            | SyntaxKind::IndexExpr
+            | SyntaxKind::CallExpr
+            | SyntaxKind::Literal
+            | SyntaxKind::NameRef
+            | SyntaxKind::QualifiedName
+    )
 }

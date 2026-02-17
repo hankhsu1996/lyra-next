@@ -50,7 +50,8 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Constant expression evaluation for dimension bounds
 - [x] type_of_symbol query (declaration -> Ty)
 - [x] type_of_expr query for simple expressions
-- [ ] Basic type-error diagnostics (width mismatch, undeclared type)
+- [x] Basic type-error diagnostics (width mismatch)
+- [ ] Undeclared type diagnostics
 - [ ] Enum and struct type representation
 
 ## M5: Tool-Grade Foundation -- not started

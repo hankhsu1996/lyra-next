@@ -2,6 +2,8 @@ mod const_eval;
 mod exports;
 mod expr_type;
 mod resolve;
+mod type_at;
+mod type_diag;
 mod type_of;
 
 use lyra_ast::AstNode;
