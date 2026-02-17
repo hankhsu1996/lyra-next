@@ -3,12 +3,14 @@ pub mod const_eval;
 pub mod def_index;
 pub mod diagnostic;
 pub mod global_index;
+pub(crate) mod literal;
 pub mod name_graph;
 mod resolve;
 pub mod resolve_index;
 pub mod scopes;
 pub mod symbols;
 mod type_extract;
+pub mod type_infer;
 pub mod types;
 
 pub use builder::build_def_index;
