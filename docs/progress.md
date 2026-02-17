@@ -55,3 +55,12 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [ ] Enum and struct type representation
 
 ## M5: Tool-Grade Foundation -- not started
+
+- [ ] Module signature query (ports: name, direction, type)
+- [ ] Port connection resolve (named and positional)
+- [ ] Port connection width mismatch diagnostics
+- [ ] Context-determined typing (LRM 11.6)
+- [ ] Callable typing (function/task calls)
+- [ ] LSP crate with go-to-definition and hover
+- [ ] CLI batch diagnostics driver
+- [ ] Performance baseline (10K-line file under 1s)
