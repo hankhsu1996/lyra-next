@@ -1,5 +1,11 @@
-use crate::pipeline::preprocess_file;
+use lyra_semantic::type_check::{TypeCheckCtx, TypeCheckKind};
+use lyra_semantic::type_infer::ExprType;
+use lyra_semantic::types::SymbolType;
+
+use crate::expr_queries::ExprRef;
+use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
 use crate::semantic::{def_index_file, global_def_index, resolve_index_file};
+use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
 /// Convert parse, preprocess, and semantic errors into structured diagnostics (Salsa-cached).
@@ -10,10 +16,137 @@ pub fn file_diagnostics(
     unit: CompilationUnit,
 ) -> Vec<lyra_diag::Diagnostic> {
     let pp = preprocess_file(db, file);
-    let parse = crate::pipeline::parse_file(db, file);
+    let parse = parse_file(db, file);
     let def = def_index_file(db, file);
     let resolve = resolve_index_file(db, file, unit);
-    crate::lower_diag::lower_file_diagnostics(file.file_id(db), pp, parse, def, resolve)
+    let mut diags =
+        crate::lower_diag::lower_file_diagnostics(file.file_id(db), pp, parse, def, resolve);
+    diags.extend(type_diagnostics(db, file, unit).iter().cloned());
+    diags
+}
+
+/// Per-file type-check diagnostics (Salsa-cached).
+#[salsa::tracked(return_ref)]
+pub fn type_diagnostics(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+) -> Vec<lyra_diag::Diagnostic> {
+    let parse = parse_file(db, file);
+    let map = ast_id_map(db, file);
+    let pp = preprocess_file(db, file);
+
+    let ctx = DbTypeCheckCtx {
+        db,
+        unit,
+        source_file: file,
+        ast_id_map: map,
+    };
+
+    let items = lyra_semantic::type_check::check_types(&parse.syntax(), &ctx);
+
+    let mut seen = std::collections::HashSet::new();
+    let mut diags = Vec::new();
+    for item in &items {
+        match &item.kind {
+            TypeCheckKind::WidthMismatch {
+                lhs_width,
+                rhs_width,
+            } => {
+                let Some(assign_span) = pp.source_map.map_span(item.assign_range) else {
+                    continue;
+                };
+                // Dedup by (assign start, lhs range, rhs range, code) to prevent
+                // duplicate diagnostics if future walker paths overlap.
+                let key = (assign_span.range.start(), item.lhs_range, item.rhs_range);
+                if !seen.insert(key) {
+                    continue;
+                }
+                let lhs_span = pp
+                    .source_map
+                    .map_span(item.lhs_range)
+                    .unwrap_or(assign_span);
+                let rhs_span = pp
+                    .source_map
+                    .map_span(item.rhs_range)
+                    .unwrap_or(assign_span);
+
+                diags.push(
+                    lyra_diag::Diagnostic::new(
+                        lyra_diag::Severity::Warning,
+                        lyra_diag::DiagnosticCode::WIDTH_MISMATCH,
+                        lyra_diag::Message::new(
+                            lyra_diag::MessageId::WidthMismatch,
+                            vec![
+                                lyra_diag::Arg::Width(*lhs_width),
+                                lyra_diag::Arg::Width(*rhs_width),
+                            ],
+                        ),
+                    )
+                    .with_label(lyra_diag::Label {
+                        kind: lyra_diag::LabelKind::Primary,
+                        span: assign_span,
+                        message: lyra_diag::Message::new(
+                            lyra_diag::MessageId::WidthMismatch,
+                            vec![
+                                lyra_diag::Arg::Width(*lhs_width),
+                                lyra_diag::Arg::Width(*rhs_width),
+                            ],
+                        ),
+                    })
+                    .with_label(lyra_diag::Label {
+                        kind: lyra_diag::LabelKind::Secondary,
+                        span: lhs_span,
+                        message: lyra_diag::Message::new(
+                            lyra_diag::MessageId::BitsWide,
+                            vec![lyra_diag::Arg::Width(*lhs_width)],
+                        ),
+                    })
+                    .with_label(lyra_diag::Label {
+                        kind: lyra_diag::LabelKind::Secondary,
+                        span: rhs_span,
+                        message: lyra_diag::Message::new(
+                            lyra_diag::MessageId::BitsWide,
+                            vec![lyra_diag::Arg::Width(*rhs_width)],
+                        ),
+                    }),
+                );
+            }
+        }
+    }
+    diags
+}
+
+struct DbTypeCheckCtx<'a> {
+    db: &'a dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    ast_id_map: &'a lyra_ast::AstIdMap,
+}
+
+impl TypeCheckCtx for DbTypeCheckCtx<'_> {
+    fn expr_type(&self, node: &lyra_parser::SyntaxNode) -> ExprType {
+        let Some(ast_id) = self.ast_id_map.erased_ast_id(node) else {
+            return ExprType::Error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
+        };
+        let expr_ref = ExprRef::new(self.db, self.unit, ast_id);
+        crate::expr_queries::type_of_expr(self.db, expr_ref)
+    }
+
+    fn symbol_type_of_declarator(
+        &self,
+        declarator: &lyra_parser::SyntaxNode,
+    ) -> Option<SymbolType> {
+        let ast_id = self.ast_id_map.erased_ast_id(declarator)?;
+        let def = def_index_file(self.db, self.source_file);
+        let sym_id = def.decl_to_symbol.get(&ast_id).copied()?;
+        let gsym = lyra_semantic::symbols::GlobalSymbolId {
+            file: self.source_file.file_id(self.db),
+            local: sym_id,
+        };
+        let sym_ref = SymbolRef::new(self.db, self.unit, gsym);
+        Some(type_of_symbol(self.db, sym_ref))
+    }
 }
 
 /// Unit-level diagnostics: duplicate definitions in the definitions namespace.

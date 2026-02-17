@@ -43,6 +43,10 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 6,
     };
+    pub const WIDTH_MISMATCH: Self = Self {
+        namespace: "lyra.type",
+        number: 1,
+    };
 
     /// Format as `"namespace[number]"`, e.g. `"lyra.semantic[1]"`.
     pub fn as_str(&self) -> String {

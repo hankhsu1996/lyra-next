@@ -1,5 +1,6 @@
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
+use smol_str::SmolStr;
 
 use crate::literal::parse_literal_shape;
 use crate::types::{ConstEvalError, ConstInt, RealKw, SymbolType, Ty};
@@ -23,6 +24,28 @@ pub enum BitWidth {
 pub struct BitVecType {
     pub width: BitWidth,
     pub signed: Signedness,
+}
+
+impl BitVecType {
+    /// Human-readable representation. Always uses `logic` keyword since
+    /// expression results normalize to logic-like bitvec.
+    pub fn pretty(&self) -> SmolStr {
+        let mut s = String::from("logic");
+        if self.signed == Signedness::Signed {
+            s.push_str(" signed");
+        }
+        match self.width {
+            BitWidth::Known(1) => {}
+            BitWidth::Known(w) => {
+                use core::fmt::Write;
+                let _ = write!(s, " [{}:0]", w - 1);
+            }
+            BitWidth::Unknown => {
+                s.push_str(" [?:?]");
+            }
+        }
+        SmolStr::new(s)
+    }
 }
 
 /// Reasons an expression's type could not be determined.
@@ -109,6 +132,15 @@ impl ExprType {
     /// Single-bit unsigned (reduction/logical results).
     pub fn one_bit() -> ExprType {
         ExprType::bits(1, Signedness::Unsigned)
+    }
+
+    /// Human-readable type representation.
+    pub fn pretty(&self) -> SmolStr {
+        match self {
+            ExprType::BitVec(bv) => bv.pretty(),
+            ExprType::NonBit(ty) => ty.pretty(),
+            ExprType::Error(_) => SmolStr::new_static("<error>"),
+        }
     }
 }
 

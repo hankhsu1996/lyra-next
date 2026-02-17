@@ -16,6 +16,9 @@ pub enum MessageId {
     MemberNotFound,
     AmbiguousWildcardImport,
     UnsupportedQualifiedPath,
+    // Type check messages
+    WidthMismatch,
+    BitsWide,
     // Label messages
     NotFoundInScope,
     RedefinedHere,
@@ -26,6 +29,7 @@ pub enum MessageId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Arg {
     Name(SmolStr),
+    Width(u32),
 }
 
 impl Arg {
@@ -33,6 +37,15 @@ impl Arg {
     pub fn as_name(&self) -> Option<&str> {
         match self {
             Arg::Name(s) => Some(s.as_str()),
+            Arg::Width(_) => None,
+        }
+    }
+
+    /// Extract the inner `u32` if this is a `Width` variant.
+    pub fn as_width(&self) -> Option<u32> {
+        match self {
+            Arg::Width(w) => Some(*w),
+            Arg::Name(_) => None,
         }
     }
 }
@@ -85,6 +98,15 @@ pub fn render_message(msg: &Message) -> String {
         }
         MessageId::UnsupportedQualifiedPath => {
             format!("qualified path `{}` is not supported", name())
+        }
+        MessageId::WidthMismatch => {
+            let lhs_w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
+            let rhs_w = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
+            format!("width mismatch in assignment: LHS is {lhs_w} bits, RHS is {rhs_w} bits")
+        }
+        MessageId::BitsWide => {
+            let w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
+            format!("{w} bits")
         }
         MessageId::NotFoundInScope => "not found in this scope".into(),
         MessageId::RedefinedHere => "redefined here".into(),

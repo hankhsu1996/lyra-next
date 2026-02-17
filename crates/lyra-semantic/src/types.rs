@@ -316,6 +316,20 @@ pub enum SymbolType {
     Error(SymbolTypeError),
 }
 
+impl SymbolType {
+    /// Human-readable representation.
+    pub fn pretty(&self) -> SmolStr {
+        match self {
+            SymbolType::Value(ty) => ty.pretty(),
+            SymbolType::Net(net) => {
+                SmolStr::new(format!("{} {}", net.kind.keyword_str(), net.data.pretty()))
+            }
+            SymbolType::TypeAlias(ty) => SmolStr::new(format!("type = {}", ty.pretty())),
+            SymbolType::Error(_) => SmolStr::new_static("<error>"),
+        }
+    }
+}
+
 /// Reasons a symbol's type could not be extracted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolTypeError {
@@ -348,6 +362,23 @@ pub enum NetKind {
     Supply0,
     Supply1,
     Uwire,
+}
+
+impl NetKind {
+    pub fn keyword_str(self) -> &'static str {
+        match self {
+            Self::Wire => "wire",
+            Self::Tri => "tri",
+            Self::Wand => "wand",
+            Self::Wor => "wor",
+            Self::Tri0 => "tri0",
+            Self::Tri1 => "tri1",
+            Self::Trireg => "trireg",
+            Self::Supply0 => "supply0",
+            Self::Supply1 => "supply1",
+            Self::Uwire => "uwire",
+        }
+    }
 }
 
 /// A net type: kind keyword plus underlying data type.

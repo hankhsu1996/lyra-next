@@ -29,10 +29,10 @@ pub use type_queries::{SymbolRef, type_of_symbol, type_of_symbol_raw};
 pub use expr_queries::{ExprRef, type_of_expr};
 
 // Re-export resolve-at helpers
-pub use resolve_at::{resolve_at, symbol_global};
+pub use resolve_at::{TypeAtResult, resolve_at, symbol_global, type_at};
 
 // Re-export diagnostics
-pub use diagnostics::{file_diagnostics, unit_diagnostics};
+pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};
 
 /// Sorted include-path lookup for deterministic O(log n) resolution.
 ///
