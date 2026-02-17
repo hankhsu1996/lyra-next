@@ -242,6 +242,10 @@ fn extract_port(container: &SyntaxNode, ast_id_map: &AstIdMap) -> SymbolType {
                 return SymbolType::Value(Ty::Error);
             }
             let (base_ty, signed_override) = extract_typespec_base(&ts);
+            if base_ty.is_none() {
+                // TypeSpec present but no recognizable base type and no name ref
+                return SymbolType::Error(SymbolTypeError::PortTypeMissing);
+            }
             let packed = extract_packed_dims(&ts, ast_id_map);
             // Port unpacked dims are direct children of the Port node
             let unpacked = extract_unpacked_dims(container, ast_id_map);
@@ -267,11 +271,13 @@ fn extract_typedef_decl(container: &SyntaxNode, ast_id_map: &AstIdMap) -> Symbol
     }
     let (base_ty, signed_override) = extract_typespec_base(&ts);
     let packed = extract_packed_dims(&ts, ast_id_map);
+    // Typedef unpacked dims are direct children of TypedefDecl (e.g. `typedef logic [7:0] T [2];`)
+    let unpacked = extract_unpacked_dims(container, ast_id_map);
     SymbolType::TypeAlias(build_integral_ty(
         base_ty,
         signed_override,
         packed,
-        Vec::new(),
+        unpacked,
     ))
 }
 

@@ -1,0 +1,21 @@
+[package]
+name = "lyra-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lyra"
+path = "src/main.rs"
+
+[dependencies]
+lyra-source.workspace = true
+lyra-lexer.workspace = true
+lyra-preprocess.workspace = true
+lyra-parser.workspace = true
+lyra-ast.workspace = true
+lyra-semantic.workspace = true
+lyra-db.workspace = true
+
+[lints]
+workspace = true

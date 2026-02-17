@@ -169,6 +169,9 @@ pub(crate) fn typedef_decl(p: &mut Parser) {
     p.bump(); // typedef
     type_spec(p);
     p.expect(SyntaxKind::Ident);
+    while p.at(SyntaxKind::LBracket) {
+        unpacked_dimension(p);
+    }
     p.expect(SyntaxKind::Semicolon);
     m.complete(p, SyntaxKind::TypedefDecl);
 }

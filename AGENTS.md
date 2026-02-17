@@ -22,6 +22,7 @@ Lyra Next is a Rust-based SystemVerilog **semantic platform** --a single increme
 | `lyra-semantic` | Symbol tables, scope trees, type representation, const evaluation |
 | `lyra-db` | Salsa incremental database --the only crate that touches salsa |
 | `lyra-tests` | Snapshot test harness: `TestWorkspace` builder and tree/diagnostic dump utilities |
+| `lyra-cli` | Command-line driver: `dump-tree`, dev diagnostics (`cargo run -p lyra-cli -- <cmd>`) |
 
 ### Data Flow
 
@@ -63,6 +64,7 @@ lyra-ast         -> lyra-source, lyra-lexer, lyra-parser, rowan
 lyra-semantic    -> lyra-source, lyra-ast, lyra-diag, lyra-arena
 lyra-db          -> salsa + all above
 lyra-tests       -> lyra-source, lyra-lexer, lyra-preprocess, lyra-parser, lyra-diag, lyra-db
+lyra-cli         -> lyra-source, lyra-lexer, lyra-preprocess, lyra-parser, lyra-ast, lyra-semantic, lyra-db
 ```
 
 Do not introduce circular dependencies. Do not add dependencies that violate this graph without discussion.

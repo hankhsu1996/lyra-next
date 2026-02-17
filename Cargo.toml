@@ -18,6 +18,7 @@ lyra-parser = { path = "crates/lyra-parser" }
 lyra-ast = { path = "crates/lyra-ast" }
 lyra-semantic = { path = "crates/lyra-semantic" }
 lyra-db = { path = "crates/lyra-db" }
+lyra-cli = { path = "crates/lyra-cli" }
 
 # external
 bumpalo = { version = "3", features = ["collections"] }
