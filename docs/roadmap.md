@@ -109,14 +109,21 @@ Type errors shown with expected vs actual.
 
 ## M5: Tool-Grade Foundation
 
-**Objective:** Semantic core is stable enough to support real tools.
+**Objective:** Semantic core handles cross-module semantics and is stable
+enough to support real tools. Results look credible on real codebases.
 
 **Deliverables:**
 
+- Module signature query: extract port names, directions, types from module
+  declarations. Cross-file, cross-package resolution.
+- Port connection typing: resolve `.name(expr)` and positional connections
+  at instantiation sites. Port width mismatch diagnostics.
+- Context-determined typing (LRM 11.6): assignment context sizing, sign
+  extension/truncation rules. Width diagnostics become more complete.
+- Callable typing: resolve function/task calls to their declarations,
+  infer parameter types and return types (no overload resolution yet).
 - LSP crate (`lyra-lsp`): go-to-definition and hover queries, backed by
-  M3/M4 capabilities.
-- Lint framework: rules as queries over the semantic model, each producing
-  `Vec<Diagnostic>`.
+  M3/M4/M5 capabilities.
 - Batch driver crate (`lyra-cli`): load files, run queries, print
   diagnostics. Useful for CI integration.
 - Core remains a library. Tools are separate crates that depend on
@@ -124,8 +131,25 @@ Type errors shown with expected vs actual.
 - Performance baseline: parse + full semantic analysis of a 10K-line file
   under 1 second.
 
-**Demo:** Open a small SV project in an editor with the LSP. Go-to-definition
-and hover work. Diagnostics appear on save. CLI linter runs in CI.
+**Demo:** Open a multi-module SV project in an editor with the LSP.
+Go-to-definition and hover work across module boundaries. Port connection
+mismatches produce diagnostics. CLI linter runs in CI.
+
+## M6: Rich Types and Deeper SV Semantics
+
+**Objective:** Full struct/enum/union support, array semantics, and deeper
+LRM coverage for real-world SV patterns.
+
+**Deliverables:**
+
+- Struct/union/packed struct field access, assignment, and casting.
+- Full array semantics: packed/unpacked recursive dimensions, slicing,
+  streaming operators.
+- Enum rules: casting, comparisons, literal typing.
+- Interface/modport semantics (as needed by real codebases).
+
+**Demo:** Struct field access resolves and type-checks. Array dimension
+mismatches produce diagnostics. Enum casts are validated.
 
 ## Rules
 
