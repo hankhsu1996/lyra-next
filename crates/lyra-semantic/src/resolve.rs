@@ -278,6 +278,14 @@ pub fn build_resolve_index(
                         namespace: *namespace,
                     },
                 );
+                if let Some(diag) = check_type_mismatch(
+                    use_site.expected_ns,
+                    *namespace,
+                    &use_site.path,
+                    use_site.range,
+                ) {
+                    diagnostics.push(diag);
+                }
             }
             CoreResolveResult::Resolved(CoreResolution::Global { decl, namespace }) => {
                 if let Some(local) = lookup_decl(*decl) {
@@ -291,10 +299,23 @@ pub fn build_resolve_index(
                             namespace: *namespace,
                         },
                     );
+                    if let Some(diag) = check_type_mismatch(
+                        use_site.expected_ns,
+                        *namespace,
+                        &use_site.path,
+                        use_site.range,
+                    ) {
+                        diagnostics.push(diag);
+                    }
                 }
             }
             CoreResolveResult::Unresolved(reason) => {
-                let diag = reason_to_diagnostic(reason, &use_site.path, use_site.range);
+                let diag = reason_to_diagnostic(
+                    reason,
+                    use_site.expected_ns,
+                    &use_site.path,
+                    use_site.range,
+                );
                 diagnostics.push(diag);
             }
         }
@@ -309,7 +330,12 @@ pub fn build_resolve_index(
             },
             ImportName::Wildcard => NamePath::Simple(SmolStr::new(format!("{}::*", imp.package))),
         };
-        let diag = reason_to_diagnostic(&err.reason, &path, imp.range);
+        let diag = reason_to_diagnostic(
+            &err.reason,
+            ExpectedNs::Exact(Namespace::Value),
+            &path,
+            imp.range,
+        );
         diagnostics.push(diag);
     }
 
@@ -322,16 +348,23 @@ pub fn build_resolve_index(
 
 fn reason_to_diagnostic(
     reason: &UnresolvedReason,
+    expected_ns: ExpectedNs,
     path: &NamePath,
     range: TextRange,
 ) -> SemanticDiag {
     match reason {
-        UnresolvedReason::NotFound => SemanticDiag {
-            kind: SemanticDiagKind::UnresolvedName {
-                name: SmolStr::new(path.display_name()),
-            },
-            range,
-        },
+        UnresolvedReason::NotFound => {
+            let name = SmolStr::new(path.display_name());
+            let kind = if matches!(
+                expected_ns,
+                ExpectedNs::TypeThenValue | ExpectedNs::Exact(Namespace::Type)
+            ) {
+                SemanticDiagKind::UndeclaredType { name }
+            } else {
+                SemanticDiagKind::UnresolvedName { name }
+            };
+            SemanticDiag { kind, range }
+        }
         UnresolvedReason::PackageNotFound { package } => SemanticDiag {
             kind: SemanticDiagKind::PackageNotFound {
                 package: package.clone(),
@@ -358,5 +391,23 @@ fn reason_to_diagnostic(
             },
             range,
         },
+    }
+}
+
+fn check_type_mismatch(
+    expected_ns: ExpectedNs,
+    actual_ns: Namespace,
+    path: &NamePath,
+    range: TextRange,
+) -> Option<SemanticDiag> {
+    if matches!(expected_ns, ExpectedNs::TypeThenValue) && actual_ns == Namespace::Value {
+        Some(SemanticDiag {
+            kind: SemanticDiagKind::NotAType {
+                name: SmolStr::new(path.display_name()),
+            },
+            range,
+        })
+    } else {
+        None
     }
 }

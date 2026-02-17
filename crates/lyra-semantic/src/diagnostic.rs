@@ -34,6 +34,12 @@ pub enum SemanticDiagKind {
     UnsupportedQualifiedPath {
         path: SmolStr,
     },
+    UndeclaredType {
+        name: SmolStr,
+    },
+    NotAType {
+        name: SmolStr,
+    },
 }
 
 impl SemanticDiag {
@@ -58,6 +64,12 @@ impl SemanticDiag {
             }
             SemanticDiagKind::UnsupportedQualifiedPath { path } => {
                 format!("qualified path `{path}` is not supported")
+            }
+            SemanticDiagKind::UndeclaredType { name } => {
+                format!("undeclared type `{name}`")
+            }
+            SemanticDiagKind::NotAType { name } => {
+                format!("`{name}` is not a type")
             }
         }
     }

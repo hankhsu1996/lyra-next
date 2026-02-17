@@ -19,8 +19,12 @@ pub enum MessageId {
     // Type check messages
     WidthMismatch,
     BitsWide,
+    UndeclaredType,
+    NotAType,
     // Label messages
     NotFoundInScope,
+    NotFoundAsType,
+    ValueNotType,
     RedefinedHere,
     FirstDefinedHere,
 }
@@ -108,7 +112,11 @@ pub fn render_message(msg: &Message) -> String {
             let w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
             format!("{w} bits")
         }
+        MessageId::UndeclaredType => format!("undeclared type `{}`", name()),
+        MessageId::NotAType => format!("`{}` is not a type", name()),
         MessageId::NotFoundInScope => "not found in this scope".into(),
+        MessageId::NotFoundAsType => "not found as a type in this scope".into(),
+        MessageId::ValueNotType => "this is a value, not a type".into(),
         MessageId::RedefinedHere => "redefined here".into(),
         MessageId::FirstDefinedHere => "first defined here".into(),
         MessageId::ParseError | MessageId::PreprocessError => msg
