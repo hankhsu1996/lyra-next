@@ -48,7 +48,7 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 
 - [x] Type data model (Ty, Integral, ConstInt, dimensions, NetType)
 - [x] Constant expression evaluation for dimension bounds
-- [ ] type_of_symbol query (declaration -> Ty)
+- [x] type_of_symbol query (declaration -> Ty)
 - [ ] type_of_expr query for simple expressions
 - [ ] Basic type-error diagnostics (width mismatch, undeclared type)
 - [ ] Enum and struct type representation

@@ -278,6 +278,37 @@ impl Ty {
     }
 }
 
+/// The type of a symbol, as extracted from its declaration.
+///
+/// Distinguishes value-bearing declarations (variables, ports, parameters),
+/// type aliases (typedefs), and nets (which preserve `NetKind`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SymbolType {
+    /// Variables, ports, parameters -- anything with a data type value.
+    Value(Ty),
+    /// Typedefs -- the aliased underlying type.
+    TypeAlias(Ty),
+    /// Nets (wire, tri, etc.) -- preserves `NetKind` for tool queries.
+    Net(NetType),
+    /// Could not extract a type.
+    Error(SymbolTypeError),
+}
+
+/// Reasons a symbol's type could not be extracted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolTypeError {
+    /// `symbol_to_decl` returned None (index bug or unsupported node).
+    MissingDecl,
+    /// Module, package, interface, etc. -- no meaningful type.
+    UnsupportedSymbolKind,
+    /// Salsa cycle recovery for typedef chains.
+    TypedefCycle,
+    /// `parameter type T` -- not yet implemented.
+    TypeParameterUnsupported,
+    /// `NameRef` in `TypeSpec` could not be resolved or is not a typedef.
+    UserTypeUnresolved,
+}
+
 /// IEEE 1800-2023 net type keywords (LRM 6.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetKind {

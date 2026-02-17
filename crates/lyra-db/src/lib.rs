@@ -447,6 +447,284 @@ fn const_eval_recover<'db>(
     lyra_semantic::types::ConstInt::Error(lyra_semantic::types::ConstEvalError::Cycle)
 }
 
+/// Identifies a symbol for type extraction.
+///
+/// Includes the compilation unit because typedef resolution and
+/// const-eval depend on unit-scoped name resolution.
+#[salsa::interned]
+pub struct SymbolRef<'db> {
+    pub unit: CompilationUnit,
+    pub symbol: GlobalSymbolId,
+}
+
+/// Extract a symbol's raw type from its declaration AST (Salsa-tracked with cycle recovery).
+///
+/// Returns `SymbolType` with `Unevaluated` dims -- const-eval is NOT called.
+/// May call `resolve_index_file` for single-step typedef expansion.
+#[salsa::tracked(recovery_fn = type_of_symbol_raw_recover)]
+pub fn type_of_symbol_raw<'db>(
+    db: &'db dyn salsa::Database,
+    sym_ref: SymbolRef<'db>,
+) -> lyra_semantic::types::SymbolType {
+    use lyra_semantic::symbols::SymbolKind;
+    use lyra_semantic::types::{SymbolType, SymbolTypeError};
+    use lyra_semantic::{extract_type_from_container, typespec_name_ref};
+
+    let unit = sym_ref.unit(db);
+    let gsym = sym_ref.symbol(db);
+
+    let Some(source_file) = source_file_by_id(db, unit, gsym.file) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+
+    let def = def_index_file(db, source_file);
+    let sym = def.symbols.get(gsym.local);
+
+    // Definition-namespace symbols have no meaningful type
+    match sym.kind {
+        SymbolKind::Module
+        | SymbolKind::Package
+        | SymbolKind::Interface
+        | SymbolKind::Program
+        | SymbolKind::Primitive
+        | SymbolKind::Config => return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
+        _ => {}
+    }
+
+    let Some(decl_ast_id) = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+
+    let parse = parse_file(db, source_file);
+    let map = ast_id_map(db, source_file);
+
+    let Some(decl_node) = map.get_node(&parse.syntax(), decl_ast_id) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+
+    // For Port and TypedefDecl, the decl_ast_id points directly to the node.
+    // For Variable/Net/Parameter, it points to a Declarator -- find the container.
+    let (container, declarator) = match decl_node.kind() {
+        lyra_lexer::SyntaxKind::Port | lyra_lexer::SyntaxKind::TypedefDecl => {
+            (decl_node.clone(), None)
+        }
+        lyra_lexer::SyntaxKind::Declarator => {
+            let Some(parent) = closest_decl_container(&decl_node) else {
+                return SymbolType::Error(SymbolTypeError::MissingDecl);
+            };
+            (parent, Some(decl_node.clone()))
+        }
+        _ => return SymbolType::Error(SymbolTypeError::MissingDecl),
+    };
+
+    // Check for user-defined type (typedef expansion trigger)
+    let typespec = container
+        .children()
+        .find(|c| c.kind() == lyra_lexer::SyntaxKind::TypeSpec);
+
+    if let Some(ref ts) = typespec
+        && typespec_name_ref(ts).is_some()
+    {
+        // For Port nodes, unpacked dims are direct children of the Port node
+        // (not inside a Declarator), so pass the Port node as dim source.
+        let dim_source = if decl_node.kind() == lyra_lexer::SyntaxKind::Port {
+            Some(&decl_node)
+        } else {
+            declarator.as_ref()
+        };
+        return expand_typedef(db, unit, source_file, ts, dim_source, map, sym.kind);
+    }
+
+    // No user-defined type -- pure extraction
+    extract_type_from_container(&container, declarator.as_ref(), map)
+}
+
+/// Expand a user-defined type reference via single-step typedef resolution.
+///
+/// `dim_source` is the node whose children contain unpacked dims to merge
+/// (Declarator for variables, Port node for ports, None for typedefs).
+/// `caller_kind` is the symbol kind of the declaration being typed, used
+/// to preserve `TypeAlias` classification for typedef symbols.
+fn expand_typedef(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    typespec: &lyra_parser::SyntaxNode,
+    dim_source: Option<&lyra_parser::SyntaxNode>,
+    id_map: &lyra_ast::AstIdMap,
+    caller_kind: lyra_semantic::symbols::SymbolKind,
+) -> lyra_semantic::types::SymbolType {
+    use lyra_semantic::types::{SymbolType, SymbolTypeError, Ty, UnpackedDim};
+    use lyra_semantic::typespec_name_ref;
+
+    let Some(name_node) = typespec_name_ref(typespec) else {
+        return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
+    };
+
+    // Look up the name in the resolve index
+    let resolve = resolve_index_file(db, source_file, unit);
+    let Some(name_ast_id) = id_map.erased_ast_id(&name_node) else {
+        return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
+    };
+    let Some(resolution) = resolve.resolutions.get(&name_ast_id) else {
+        return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
+    };
+
+    let target_id = resolution.symbol;
+
+    // Look up target symbol kind
+    let Some(target_file) = source_file_by_id(db, unit, target_id.file) else {
+        return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
+    };
+    let target_def = def_index_file(db, target_file);
+    let target_info = target_def.symbols.get(target_id.local);
+
+    if target_info.kind != lyra_semantic::symbols::SymbolKind::Typedef {
+        return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
+    }
+
+    // Recursively get the typedef's type (Salsa cycle detection)
+    let typedef_ref = SymbolRef::new(db, unit, target_id);
+    let typedef_type = type_of_symbol_raw(db, typedef_ref);
+
+    // Extract the underlying Ty from the typedef result
+    let underlying_ty = match &typedef_type {
+        SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => ty.clone(),
+        SymbolType::Error(e) => return SymbolType::Error(*e),
+        SymbolType::Net(_) => return SymbolType::Error(SymbolTypeError::UserTypeUnresolved),
+    };
+
+    // Collect use-site unpacked dims from dim source node
+    let use_site_unpacked: Vec<UnpackedDim> = dim_source
+        .map(|d| extract_unpacked_dims_raw(d, id_map))
+        .unwrap_or_default();
+
+    // Wrap the result in the correct classification
+    let wrap = if caller_kind == lyra_semantic::symbols::SymbolKind::Typedef {
+        SymbolType::TypeAlias
+    } else {
+        SymbolType::Value
+    };
+
+    if use_site_unpacked.is_empty() {
+        return wrap(underlying_ty);
+    }
+
+    // Merge unpacked dims: typedef dims first, use-site dims appended after
+    match underlying_ty {
+        Ty::Integral(mut i) => {
+            let mut merged: Vec<UnpackedDim> = i.unpacked.to_vec();
+            merged.extend(use_site_unpacked);
+            i.unpacked = merged.into_boxed_slice();
+            wrap(Ty::Integral(i))
+        }
+        _ => SymbolType::Error(SymbolTypeError::UserTypeUnresolved),
+    }
+}
+
+/// Extract unpacked dims from a node (used during typedef expansion in db crate).
+fn extract_unpacked_dims_raw(
+    node: &lyra_parser::SyntaxNode,
+    ast_id_map: &lyra_ast::AstIdMap,
+) -> Vec<lyra_semantic::types::UnpackedDim> {
+    use lyra_semantic::types::{ConstEvalError, ConstInt, UnpackedDim};
+
+    let mut dims = Vec::new();
+    for child in node.children() {
+        if child.kind() == lyra_lexer::SyntaxKind::UnpackedDimension {
+            let exprs: Vec<_> = child
+                .children()
+                .filter(|c| is_expression_kind(c.kind()))
+                .collect();
+            match exprs.len() {
+                2 => {
+                    let msb = expr_to_const_int(&exprs[0], ast_id_map);
+                    let lsb = expr_to_const_int(&exprs[1], ast_id_map);
+                    dims.push(UnpackedDim::Range { msb, lsb });
+                }
+                1 => {
+                    let size = expr_to_const_int(&exprs[0], ast_id_map);
+                    dims.push(UnpackedDim::Size(size));
+                }
+                _ => {
+                    dims.push(UnpackedDim::Size(ConstInt::Error(
+                        ConstEvalError::Unsupported,
+                    )));
+                }
+            }
+        }
+    }
+    dims
+}
+
+fn expr_to_const_int(
+    expr: &lyra_parser::SyntaxNode,
+    ast_id_map: &lyra_ast::AstIdMap,
+) -> lyra_semantic::types::ConstInt {
+    use lyra_semantic::types::{ConstEvalError, ConstInt};
+    match ast_id_map.erased_ast_id(expr) {
+        Some(id) => ConstInt::Unevaluated(id),
+        None => ConstInt::Error(ConstEvalError::Unsupported),
+    }
+}
+
+fn is_expression_kind(kind: lyra_lexer::SyntaxKind) -> bool {
+    matches!(
+        kind,
+        lyra_lexer::SyntaxKind::Expression
+            | lyra_lexer::SyntaxKind::BinExpr
+            | lyra_lexer::SyntaxKind::PrefixExpr
+            | lyra_lexer::SyntaxKind::ParenExpr
+            | lyra_lexer::SyntaxKind::CondExpr
+            | lyra_lexer::SyntaxKind::ConcatExpr
+            | lyra_lexer::SyntaxKind::ReplicExpr
+            | lyra_lexer::SyntaxKind::IndexExpr
+            | lyra_lexer::SyntaxKind::RangeExpr
+            | lyra_lexer::SyntaxKind::FieldExpr
+            | lyra_lexer::SyntaxKind::CallExpr
+            | lyra_lexer::SyntaxKind::NameRef
+            | lyra_lexer::SyntaxKind::Literal
+            | lyra_lexer::SyntaxKind::QualifiedName
+    )
+}
+
+fn type_of_symbol_raw_recover<'db>(
+    _db: &'db dyn salsa::Database,
+    _cycle: &salsa::Cycle,
+    _sym_ref: SymbolRef<'db>,
+) -> lyra_semantic::types::SymbolType {
+    lyra_semantic::types::SymbolType::Error(lyra_semantic::types::SymbolTypeError::TypedefCycle)
+}
+
+/// Find the closest declaration container above a Declarator.
+fn closest_decl_container(node: &lyra_parser::SyntaxNode) -> Option<lyra_parser::SyntaxNode> {
+    node.ancestors().find(|n| {
+        matches!(
+            n.kind(),
+            lyra_lexer::SyntaxKind::VarDecl
+                | lyra_lexer::SyntaxKind::NetDecl
+                | lyra_lexer::SyntaxKind::ParamDecl
+        )
+    })
+}
+
+/// Extract the normalized type of a symbol (Salsa-tracked).
+///
+/// Calls `type_of_symbol_raw` then normalizes all `Unevaluated` dims
+/// via const-eval.
+#[salsa::tracked]
+pub fn type_of_symbol<'db>(
+    db: &'db dyn salsa::Database,
+    sym_ref: SymbolRef<'db>,
+) -> lyra_semantic::types::SymbolType {
+    let raw = type_of_symbol_raw(db, sym_ref);
+    let unit = sym_ref.unit(db);
+    lyra_semantic::normalize_symbol_type(&raw, &|expr_ast_id| {
+        let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
+        eval_const_int(db, expr_ref)
+    })
+}
+
 /// Resolve the name at a cursor position.
 ///
 /// Finds the nearest `NameRef` at `offset`, looks up its `AstId`,
@@ -661,1600 +939,4 @@ impl salsa::Database for LyraDatabase {
 }
 
 #[cfg(test)]
-mod tests {
-    use lyra_ast::AstNode;
-
-    use super::*;
-
-    fn new_file(db: &dyn salsa::Database, id: u32, text: &str) -> SourceFile {
-        SourceFile::new(
-            db,
-            lyra_source::FileId(id),
-            text.to_string(),
-            IncludeMap::default(),
-        )
-    }
-
-    /// Create a single-file compilation unit (convenience for tests).
-    fn single_file_unit(db: &dyn salsa::Database, file: SourceFile) -> CompilationUnit {
-        new_compilation_unit(db, vec![file])
-    }
-
-    #[test]
-    fn smoke_db_roundtrip() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module top; endmodule");
-        assert_eq!(file.text(&db), "module top; endmodule");
-    }
-
-    #[test]
-    fn end_to_end_parse() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module top; endmodule");
-        let parse = parse_file(&db, file);
-        assert!(parse.errors.is_empty());
-        assert_eq!(parse.syntax().text().to_string(), "module top; endmodule");
-    }
-
-    #[test]
-    fn ast_root_returns_typed_source_file() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module top; endmodule");
-        let root = ast_root(&db, file).expect("parser produces SourceFile root");
-        let modules: Vec<_> = root.modules().collect();
-        assert_eq!(modules.len(), 1);
-        assert_eq!(
-            modules[0].name().map(|n| n.text().to_string()),
-            Some("top".to_string()),
-        );
-    }
-
-    #[test]
-    fn ast_id_map_roundtrip() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module top; endmodule");
-        let root = ast_root(&db, file).expect("parser produces SourceFile root");
-        let map = ast_id_map(&db, file);
-        let parse = parse_file(&db, file);
-
-        for module in root.modules() {
-            let id = map.ast_id(&module).expect("module should have an id");
-            let recovered = map
-                .get(&parse.syntax(), id)
-                .expect("should recover module from id");
-            assert_eq!(module.text_range(), recovered.text_range());
-        }
-    }
-
-    #[test]
-    fn cross_file_get_returns_none() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "module a; endmodule");
-        let file_b = new_file(&db, 1, "module b; endmodule");
-        let root_b = ast_root(&db, file_b).expect("parser produces SourceFile root");
-        let map_a = ast_id_map(&db, file_a);
-        let map_b = ast_id_map(&db, file_b);
-        let parse_a = parse_file(&db, file_a);
-
-        let module_b = root_b.modules().next().expect("file b has a module");
-        let id_b = map_b.ast_id(&module_b).expect("module should have an id");
-        assert!(map_a.get(&parse_a.syntax(), id_b).is_none());
-    }
-
-    #[test]
-    fn source_map_identity() {
-        let db = LyraDatabase::default();
-        let fid = lyra_source::FileId(5);
-        let file = SourceFile::new(
-            &db,
-            fid,
-            "module m; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-        let sm = source_map(&db, file);
-        let range = lyra_source::TextRange::new(
-            lyra_source::TextSize::new(0),
-            lyra_source::TextSize::new(6),
-        );
-        let span = sm.map_span(range).expect("in-bounds should map");
-        assert_eq!(span.file, fid);
-    }
-
-    #[test]
-    fn include_graph_empty() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; endmodule");
-        let ig = include_graph(&db, file);
-        assert!(ig.is_empty());
-        assert!(ig.dependencies().is_empty());
-    }
-
-    #[test]
-    fn file_diagnostics_maps_parse_errors() {
-        let db = LyraDatabase::default();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(42),
-            "module top;".to_string(),
-            IncludeMap::default(),
-        );
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        assert!(!diags.is_empty());
-        for d in diags {
-            assert_eq!(d.span().expect("has span").file, lyra_source::FileId(42));
-            assert_eq!(d.severity, lyra_diag::Severity::Error);
-        }
-    }
-
-    #[test]
-    fn roundtrip_expanded_text() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module top; endmodule");
-        let pp = preprocess_file(&db, file);
-        let parse = parse_file(&db, file);
-        assert_eq!(parse.syntax().text().to_string(), pp.expanded_text);
-    }
-
-    #[test]
-    fn roundtrip_expanded_text_with_include() {
-        let db = LyraDatabase::default();
-        let file_b = SourceFile::new(
-            &db,
-            lyra_source::FileId(1),
-            "wire w;".to_string(),
-            IncludeMap::default(),
-        );
-        let file_a = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module top; `include \"b.sv\"\nendmodule".to_string(),
-            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
-        );
-        let pp = preprocess_file(&db, file_a);
-        let parse = parse_file(&db, file_a);
-        assert_eq!(parse.syntax().text().to_string(), pp.expanded_text);
-    }
-
-    // Event-logging database for cache-hit assertions.
-
-    #[salsa::db]
-    #[derive(Clone)]
-    struct EventDb {
-        storage: salsa::Storage<Self>,
-        log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-    }
-
-    impl EventDb {
-        fn new() -> Self {
-            Self {
-                storage: Default::default(),
-                log: Default::default(),
-            }
-        }
-
-        fn take_log(&self) -> Vec<String> {
-            std::mem::take(&mut self.log.lock().expect("lock poisoned"))
-        }
-    }
-
-    #[salsa::db]
-    impl salsa::Database for EventDb {
-        fn salsa_event(&self, event: &dyn Fn() -> salsa::Event) {
-            let event = event();
-            if let salsa::EventKind::WillExecute { .. } = event.kind {
-                self.log
-                    .lock()
-                    .expect("lock poisoned")
-                    .push(format!("{:?}", event.kind));
-            }
-        }
-    }
-
-    fn has_will_execute(log: &[String]) -> bool {
-        log.iter().any(|e| e.contains("WillExecute"))
-    }
-
-    #[test]
-    fn edit_file_a_does_not_reparse_file_b() {
-        let mut db = EventDb::new();
-        let file_a = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module a; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-        let file_b = SourceFile::new(
-            &db,
-            lyra_source::FileId(1),
-            "module b; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-
-        let _ = parse_file(&db, file_a);
-        let _ = parse_file(&db, file_b);
-        db.take_log();
-
-        update_file_text(&mut db, file_a, "module a2; endmodule".to_string());
-
-        let _ = parse_file(&db, file_b);
-        let log = db.take_log();
-        assert!(
-            !has_will_execute(&log),
-            "file_b should not re-execute after file_a edit: {log:?}",
-        );
-
-        let _ = parse_file(&db, file_a);
-        let log = db.take_log();
-        assert!(
-            has_will_execute(&log),
-            "file_a should re-execute after its text changed: {log:?}",
-        );
-    }
-
-    #[test]
-    fn line_index_invalidated_on_text_change() {
-        let mut db = EventDb::new();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "line one\nline two".to_string(),
-            IncludeMap::default(),
-        );
-        let idx = line_index(&db, file);
-        assert_eq!(idx.line_count(), 2);
-
-        update_file_text(&mut db, file, "line one\nline two\nline three".to_string());
-        let idx = line_index(&db, file);
-        assert_eq!(idx.line_count(), 3);
-    }
-
-    #[test]
-    fn unchanged_text_is_cached() {
-        let db = EventDb::new();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module m; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-
-        let _ = parse_file(&db, file);
-        db.take_log();
-
-        let _ = parse_file(&db, file);
-        let log = db.take_log();
-        assert!(
-            !has_will_execute(&log),
-            "no re-execution expected when text unchanged: {log:?}",
-        );
-    }
-
-    #[test]
-    fn edit_included_file_invalidates_includer() {
-        let mut db = EventDb::new();
-        let file_b = SourceFile::new(
-            &db,
-            lyra_source::FileId(1),
-            "wire w;".to_string(),
-            IncludeMap::default(),
-        );
-        let file_a = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module top; `include \"b.sv\"\nendmodule".to_string(),
-            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
-        );
-
-        let _ = parse_file(&db, file_a);
-        db.take_log();
-
-        update_file_text(&mut db, file_b, "wire x;".to_string());
-
-        let _ = parse_file(&db, file_a);
-        let log = db.take_log();
-        assert!(
-            has_will_execute(&log),
-            "file_a should re-execute after included file_b changed: {log:?}",
-        );
-    }
-
-    #[test]
-    fn full_expansion_stack_identity() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module top; endmodule");
-        let stack = full_expansion_stack(&db, file, lyra_source::TextSize::new(0));
-        assert!(stack.is_empty(), "no includes -> empty stack");
-    }
-
-    #[test]
-    fn full_expansion_stack_single_include() {
-        let db = LyraDatabase::default();
-        let file_b = SourceFile::new(
-            &db,
-            lyra_source::FileId(1),
-            "wire w;".to_string(),
-            IncludeMap::default(),
-        );
-        let file_a = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module top; `include \"b.sv\"\nendmodule".to_string(),
-            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
-        );
-
-        // Offset 12 is in the included range
-        let stack = full_expansion_stack(&db, file_a, lyra_source::TextSize::new(12));
-        assert_eq!(stack.len(), 1);
-        assert_eq!(stack[0].kind, lyra_source::ExpansionKind::Include);
-        assert_eq!(stack[0].call_site.file, lyra_source::FileId(0));
-        assert_eq!(stack[0].spelling.file, lyra_source::FileId(1));
-        assert_eq!(stack[0].spelling.offset, lyra_source::TextSize::new(0));
-    }
-
-    #[test]
-    fn full_expansion_stack_nested_is_single_frame() {
-        let db = LyraDatabase::default();
-        // C has plain content
-        let file_c = SourceFile::new(
-            &db,
-            lyra_source::FileId(2),
-            "wire c;".to_string(),
-            IncludeMap::default(),
-        );
-        // B includes C
-        let file_b = SourceFile::new(
-            &db,
-            lyra_source::FileId(1),
-            "`include \"c.sv\"".to_string(),
-            IncludeMap::new(vec![("c.sv".to_string(), file_c)]),
-        );
-        // A includes B
-        let file_a = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module top; `include \"b.sv\"\nendmodule".to_string(),
-            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
-        );
-
-        // preprocess() only does one level of expansion, so A splices
-        // B's raw text (which contains `include "c.sv"). The offset
-        // maps to B, not transitively to C.
-        let stack = full_expansion_stack(&db, file_a, lyra_source::TextSize::new(12));
-        assert_eq!(stack.len(), 1, "one-level expansion -> 1 frame");
-        assert_eq!(stack[0].call_site.file, lyra_source::FileId(0));
-        assert_eq!(stack[0].spelling.file, lyra_source::FileId(1));
-    }
-
-    #[test]
-    fn edit_included_file_does_not_invalidate_unrelated() {
-        let mut db = EventDb::new();
-        let file_b = SourceFile::new(
-            &db,
-            lyra_source::FileId(1),
-            "wire w;".to_string(),
-            IncludeMap::default(),
-        );
-        let file_a = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module top; `include \"b.sv\"\nendmodule".to_string(),
-            IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
-        );
-        let file_c = SourceFile::new(
-            &db,
-            lyra_source::FileId(2),
-            "module c; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-
-        let _ = parse_file(&db, file_a);
-        let _ = parse_file(&db, file_c);
-        db.take_log();
-
-        update_file_text(&mut db, file_b, "wire x;".to_string());
-
-        let _ = parse_file(&db, file_c);
-        let log = db.take_log();
-        assert!(
-            !has_will_execute(&log),
-            "file_c should not re-execute after file_b changed: {log:?}",
-        );
-
-        let _ = parse_file(&db, file_a);
-        let log = db.take_log();
-        assert!(
-            has_will_execute(&log),
-            "file_a should re-execute after included file_b changed: {log:?}",
-        );
-    }
-
-    // Semantic resolve tests
-
-    #[test]
-    fn resolve_at_port() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m(input logic a); assign x = a; endmodule");
-        let unit = single_file_unit(&db, file);
-        // 'a' in 'assign x = a' is at offset 36
-        let result = resolve_at(&db, file, unit, lyra_source::TextSize::new(36));
-        assert!(result.is_some(), "port 'a' should resolve");
-        let sym =
-            symbol_global(&db, unit, result.expect("checked above")).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "a");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Port);
-    }
-
-    #[test]
-    fn resolve_at_net() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; wire w; assign w = 1; endmodule");
-        let unit = single_file_unit(&db, file);
-        // 'w' in 'assign w = 1' -- find offset of the second 'w'
-        let text = file.text(&db);
-        let w_pos = text.rfind("w =").expect("should find 'w ='");
-        let result = resolve_at(&db, file, unit, lyra_source::TextSize::new(w_pos as u32));
-        assert!(result.is_some(), "net 'w' should resolve");
-        let sym =
-            symbol_global(&db, unit, result.expect("checked above")).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "w");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Net);
-    }
-
-    #[test]
-    fn resolve_at_var() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; logic x; assign x = 0; endmodule");
-        let unit = single_file_unit(&db, file);
-        let text = file.text(&db);
-        let x_pos = text.rfind("x =").expect("should find 'x ='");
-        let result = resolve_at(&db, file, unit, lyra_source::TextSize::new(x_pos as u32));
-        assert!(result.is_some(), "var 'x' should resolve");
-        let sym =
-            symbol_global(&db, unit, result.expect("checked above")).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "x");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Variable);
-    }
-
-    #[test]
-    fn unresolved_diag() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; assign y = unknown_name; endmodule");
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let semantic_diags: Vec<_> = diags
-            .iter()
-            .filter(|d| d.render_message().contains("unresolved"))
-            .collect();
-        assert!(
-            !semantic_diags.is_empty(),
-            "should have unresolved name diagnostic"
-        );
-        assert!(
-            semantic_diags
-                .iter()
-                .any(|d| d.render_message().contains("unknown_name")),
-            "diagnostic should mention 'unknown_name': {semantic_diags:?}"
-        );
-    }
-
-    #[test]
-    fn duplicate_diag() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; logic x; logic x; endmodule");
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let dup_diags: Vec<_> = diags
-            .iter()
-            .filter(|d| d.render_message().contains("duplicate"))
-            .collect();
-        assert!(
-            !dup_diags.is_empty(),
-            "should have duplicate definition diagnostic"
-        );
-    }
-
-    #[test]
-    fn block_scope() {
-        let db = LyraDatabase::default();
-        // Variable declared inside begin/end should not be visible outside
-        let file = new_file(
-            &db,
-            0,
-            "module m; always_comb begin logic inner; inner = 1; end assign y = inner; endmodule",
-        );
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let unresolved: Vec<_> = diags
-            .iter()
-            .filter(|d| {
-                let msg = d.render_message();
-                msg.contains("unresolved") && msg.contains("inner")
-            })
-            .collect();
-        assert!(
-            !unresolved.is_empty(),
-            "inner should not be visible outside the block: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn shadowing() {
-        let db = LyraDatabase::default();
-        let src = "module m(input logic a); always_comb begin logic a; a = 1; end endmodule";
-        let file = new_file(&db, 0, src);
-        let unit = single_file_unit(&db, file);
-        // The 'a' inside the block should resolve to the block-local declaration
-        let text = file.text(&db);
-        let a_in_block = text.find("a = 1").expect("should find 'a = 1'");
-        let result = resolve_at(
-            &db,
-            file,
-            unit,
-            lyra_source::TextSize::new(a_in_block as u32),
-        );
-        assert!(result.is_some(), "inner 'a' should resolve");
-        let sym =
-            symbol_global(&db, unit, result.expect("checked above")).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "a");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Variable);
-        // Inner 'a' is a Variable, not a Port
-    }
-
-    #[test]
-    fn multi_declarator() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; wire a, b; assign a = b; endmodule");
-        let unit = single_file_unit(&db, file);
-        let text = file.text(&db);
-        // Resolve 'a' in assign
-        let a_pos = text.find("a = b").expect("should find 'a = b'");
-        let result_a = resolve_at(&db, file, unit, lyra_source::TextSize::new(a_pos as u32));
-        assert!(result_a.is_some(), "'a' should resolve");
-        // Resolve 'b' in assign
-        let b_pos = text.rfind('b').expect("should find 'b'");
-        let result_b = resolve_at(&db, file, unit, lyra_source::TextSize::new(b_pos as u32));
-        assert!(result_b.is_some(), "'b' should resolve");
-    }
-
-    #[test]
-    fn module_not_in_lexical_scope() {
-        let db = LyraDatabase::default();
-        // Module name should be in exports, not resolvable as a lexical name
-        let file = new_file(&db, 0, "module m; assign x = m; endmodule");
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let unresolved: Vec<_> = diags
-            .iter()
-            .filter(|d| {
-                let msg = d.render_message();
-                msg.contains("unresolved") && msg.contains("`m`")
-            })
-            .collect();
-        assert!(
-            !unresolved.is_empty(),
-            "module name 'm' should not resolve as a lexical name: {diags:?}"
-        );
-        // But exports should contain it
-        let def = def_index_file(&db, file);
-        assert!(
-            !def.exports.definitions.is_empty(),
-            "module 'm' should be in exports"
-        );
-    }
-
-    // Incremental invalidation tests
-
-    #[test]
-    fn def_index_cached_when_text_unchanged() {
-        let db = EventDb::new();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module m; logic x; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-
-        let _ = def_index_file(&db, file);
-        db.take_log();
-
-        let _ = def_index_file(&db, file);
-        let log = db.take_log();
-        assert!(
-            !has_will_execute(&log),
-            "def_index_file should be cached: {log:?}"
-        );
-    }
-
-    #[test]
-    fn def_index_recomputed_on_text_change() {
-        let mut db = EventDb::new();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module m; logic x; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-
-        let _ = def_index_file(&db, file);
-        db.take_log();
-
-        update_file_text(&mut db, file, "module m; logic y; endmodule".to_string());
-        let _ = def_index_file(&db, file);
-        let log = db.take_log();
-        assert!(
-            has_will_execute(&log),
-            "def_index_file should re-execute after text change: {log:?}"
-        );
-    }
-
-    #[test]
-    fn resolve_index_recomputed_on_text_change() {
-        let mut db = EventDb::new();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module m; logic x; assign x = 0; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-        let unit = single_file_unit(&db, file);
-
-        let _ = resolve_index_file(&db, file, unit);
-        db.take_log();
-
-        update_file_text(
-            &mut db,
-            file,
-            "module m; logic y; assign y = 0; endmodule".to_string(),
-        );
-        let _ = resolve_index_file(&db, file, unit);
-        let log = db.take_log();
-        assert!(
-            has_will_execute(&log),
-            "resolve_index_file should re-execute after text change: {log:?}"
-        );
-    }
-
-    #[test]
-    fn whitespace_edit_skips_resolve_core() {
-        let mut db = EventDb::new();
-        let file = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module m; logic x; assign x = 0; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-        let unit = single_file_unit(&db, file);
-
-        // Prime cache and extract stable scalars before mutable borrow
-        let res_count_before = resolve_index_file(&db, file, unit).resolutions.len();
-        let diag_count_before = file_diagnostics(&db, file, unit).len();
-        // Spot-check: 'x' in 'assign x = 0' at offset 25
-        let x_sym_before = resolve_at(&db, file, unit, lyra_source::TextSize::new(25));
-        db.take_log();
-
-        // Whitespace-only edit: changes offsets but not names/scopes
-        update_file_text(
-            &mut db,
-            file,
-            "module  m;  logic  x;  assign  x  =  0;  endmodule".to_string(),
-        );
-        let res_count_after = resolve_index_file(&db, file, unit).resolutions.len();
-        let log = db.take_log();
-
-        // def_index_file re-executes (parse changed, offsets differ)
-        assert!(
-            log.iter().any(|e| e.contains("def_index_file")),
-            "def_index_file should re-execute: {log:?}"
-        );
-        // name_graph_file re-executes but produces equal result -> backdated
-        assert!(
-            log.iter().any(|e| e.contains("name_graph_file")),
-            "name_graph_file should re-execute: {log:?}"
-        );
-        // resolve_core_file should NOT re-execute (backdated input)
-        assert!(
-            !log.iter().any(|e| e.contains("resolve_core_file")),
-            "resolve_core_file should be skipped (backdated): {log:?}"
-        );
-
-        // Functional equivalence via stable projections
-        assert_eq!(
-            res_count_before, res_count_after,
-            "resolution count should match"
-        );
-        assert_eq!(
-            diag_count_before,
-            file_diagnostics(&db, file, unit).len(),
-            "diagnostic count should match"
-        );
-
-        // Spot-check: 'x' in 'assign  x  =  0' resolves to same SymbolId
-        let text = file.text(&db);
-        let x_pos = text.rfind("x  =").expect("should find 'x  ='");
-        let x_sym_after = resolve_at(&db, file, unit, lyra_source::TextSize::new(x_pos as u32));
-        assert_eq!(
-            x_sym_before.map(|g| g.local),
-            x_sym_after.map(|g| g.local),
-            "same SymbolId before and after whitespace edit"
-        );
-    }
-
-    #[test]
-    fn edit_unrelated_file_does_not_recompute_def_index() {
-        let mut db = EventDb::new();
-        let file_a = SourceFile::new(
-            &db,
-            lyra_source::FileId(0),
-            "module a; logic x; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-        let file_b = SourceFile::new(
-            &db,
-            lyra_source::FileId(1),
-            "module b; logic y; endmodule".to_string(),
-            IncludeMap::default(),
-        );
-
-        let _ = def_index_file(&db, file_a);
-        let _ = def_index_file(&db, file_b);
-        db.take_log();
-
-        update_file_text(&mut db, file_b, "module b; logic z; endmodule".to_string());
-
-        let _ = def_index_file(&db, file_a);
-        let log = db.take_log();
-        assert!(
-            !has_will_execute(&log),
-            "editing file_b should not recompute file_a's def_index: {log:?}"
-        );
-    }
-
-    // Structured diagnostic tests
-
-    #[test]
-    fn duplicate_diag_has_secondary_label() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; logic x; logic x; endmodule");
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let dup = diags
-            .iter()
-            .find(|d| d.code == lyra_diag::DiagnosticCode::DUPLICATE_DEFINITION)
-            .expect("should have duplicate diagnostic");
-        assert_eq!(dup.labels.len(), 2, "primary + secondary labels");
-        assert_eq!(dup.labels[0].kind, lyra_diag::LabelKind::Primary);
-        assert_eq!(dup.labels[1].kind, lyra_diag::LabelKind::Secondary);
-    }
-
-    #[test]
-    fn unresolved_diag_has_code() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; assign y = unknown_name; endmodule");
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let unresolved = diags
-            .iter()
-            .find(|d| {
-                d.code == lyra_diag::DiagnosticCode::UNRESOLVED_NAME
-                    && d.render_message().contains("unknown_name")
-            })
-            .expect("should have unresolved name diagnostic for unknown_name");
-        assert_eq!(unresolved.severity, lyra_diag::Severity::Error);
-    }
-
-    #[test]
-    fn parse_error_has_code() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module top;");
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.code == lyra_diag::DiagnosticCode::PARSE_ERROR),
-            "should have parse error diagnostic with PARSE_ERROR code"
-        );
-    }
-
-    // Cross-file resolution tests
-
-    #[test]
-    fn cross_file_module_instantiation() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(
-            &db,
-            0,
-            "module adder(input logic a, input logic b, output logic sum); assign sum = a + b; endmodule",
-        );
-        let file_b = new_file(
-            &db,
-            1,
-            "module top; logic x, y, s; adder u1(.a(x), .b(y), .sum(s)); endmodule",
-        );
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-
-        // Cursor on 'adder' in file_b's instantiation
-        let text_b = file_b.text(&db);
-        let adder_pos = text_b.find("adder").expect("should find 'adder'");
-        let result = resolve_at(
-            &db,
-            file_b,
-            unit,
-            lyra_source::TextSize::new(adder_pos as u32),
-        );
-        assert!(result.is_some(), "'adder' should resolve cross-file");
-        let sym_id = result.expect("checked above");
-        assert_eq!(
-            sym_id.file,
-            lyra_source::FileId(0),
-            "should resolve to file_a"
-        );
-        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "adder");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Module);
-    }
-
-    #[test]
-    fn unresolved_module_instantiation() {
-        let db = LyraDatabase::default();
-        let file = new_file(
-            &db,
-            0,
-            "module top; logic x; nonexistent u1(.a(x)); endmodule",
-        );
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let unresolved: Vec<_> = diags
-            .iter()
-            .filter(|d| {
-                d.render_message().contains("unresolved")
-                    && d.render_message().contains("nonexistent")
-            })
-            .collect();
-        assert!(
-            !unresolved.is_empty(),
-            "should have unresolved name diagnostic for 'nonexistent': {diags:?}"
-        );
-    }
-
-    #[test]
-    fn no_lexical_fallback_for_definition_ns() {
-        let db = LyraDatabase::default();
-        // Local variable named 'adder' should NOT shadow a module instantiation
-        let file = new_file(&db, 0, "module top; logic adder; adder u1(); endmodule");
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        // The instantiation 'adder u1()' should be unresolved (no module 'adder' in unit)
-        let unresolved: Vec<_> = diags
-            .iter()
-            .filter(|d| {
-                let msg = d.render_message();
-                msg.contains("unresolved") && msg.contains("adder")
-            })
-            .collect();
-        assert!(
-            !unresolved.is_empty(),
-            "module instantiation should not fall back to lexical scope: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn duplicate_module_definition() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "module foo; endmodule");
-        let file_b = new_file(&db, 1, "module foo; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let diags = unit_diagnostics(&db, unit);
-        let dup_diags: Vec<_> = diags
-            .iter()
-            .filter(|d| d.render_message().contains("duplicate definition"))
-            .collect();
-        assert!(
-            !dup_diags.is_empty(),
-            "should have duplicate definition diagnostic: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn file_addition_triggers_resolution() {
-        let db = LyraDatabase::default();
-        // Initially, file_b has unresolved 'adder'
-        let file_b = new_file(&db, 1, "module top; logic x; adder u1(.a(x)); endmodule");
-        let unit = new_compilation_unit(&db, vec![file_b]);
-        let diags = file_diagnostics(&db, file_b, unit);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.render_message().contains("unresolved")),
-            "adder should be unresolved initially"
-        );
-
-        // Add file_a with module adder
-        let file_a = new_file(&db, 0, "module adder(input logic a); endmodule");
-        let unit2 = new_compilation_unit(&db, vec![file_a, file_b]);
-        let diags2 = file_diagnostics(&db, file_b, unit2);
-        let unresolved: Vec<_> = diags2
-            .iter()
-            .filter(|d| {
-                let msg = d.render_message();
-                msg.contains("unresolved") && msg.contains("adder")
-            })
-            .collect();
-        assert!(
-            unresolved.is_empty(),
-            "adder should resolve after adding file_a: {diags2:?}"
-        );
-    }
-
-    // Package resolution tests
-
-    #[test]
-    fn import_explicit_resolves_cross_file() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package pkg; logic x; endpackage");
-        let file_b = new_file(&db, 1, "module m; import pkg::x; assign y = x; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let text = file_b.text(&db);
-        let x_pos = text.rfind("x;").expect("should find 'x;'");
-        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(x_pos as u32));
-        assert!(result.is_some(), "'x' should resolve via explicit import");
-        let sym_id = result.expect("checked above");
-        assert_eq!(
-            sym_id.file,
-            lyra_source::FileId(0),
-            "should resolve to pkg file"
-        );
-        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "x");
-    }
-
-    #[test]
-    fn qualified_name_resolves_cross_file() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package pkg; logic val; endpackage");
-        let file_b = new_file(&db, 1, "module m; assign y = pkg::val; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        // Cursor on 'val' in 'pkg::val'
-        let text = file_b.text(&db);
-        let val_pos = text.find("val").expect("should find 'val'");
-        let result = resolve_at(
-            &db,
-            file_b,
-            unit,
-            lyra_source::TextSize::new(val_pos as u32),
-        );
-        assert!(result.is_some(), "'val' in pkg::val should resolve");
-        let sym_id = result.expect("checked above");
-        assert_eq!(sym_id.file, lyra_source::FileId(0));
-        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "val");
-    }
-
-    #[test]
-    fn wildcard_import_resolves() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package pkg; logic x; endpackage");
-        let file_b = new_file(&db, 1, "module m; import pkg::*; assign y = x; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let text = file_b.text(&db);
-        let x_pos = text.rfind("x;").expect("should find 'x;'");
-        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(x_pos as u32));
-        assert!(result.is_some(), "'x' should resolve via wildcard import");
-        let sym_id = result.expect("checked above");
-        assert_eq!(sym_id.file, lyra_source::FileId(0));
-    }
-
-    #[test]
-    fn local_shadows_import() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package pkg; logic x; endpackage");
-        let file_b = new_file(
-            &db,
-            1,
-            "module m; import pkg::*; logic x; assign y = x; endmodule",
-        );
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let text = file_b.text(&db);
-        let x_pos = text.rfind("x;").expect("should find 'x;'");
-        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(x_pos as u32));
-        assert!(result.is_some(), "'x' should resolve to local declaration");
-        let sym_id = result.expect("checked above");
-        // Local declaration is in file_b
-        assert_eq!(
-            sym_id.file,
-            lyra_source::FileId(1),
-            "local should shadow import"
-        );
-    }
-
-    #[test]
-    fn explicit_import_shadows_wildcard() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package p1; logic x; endpackage");
-        let file_b = new_file(&db, 1, "package p2; logic x; endpackage");
-        let file_c = new_file(
-            &db,
-            2,
-            "module m; import p1::*; import p2::x; assign y = x; endmodule",
-        );
-        let unit = new_compilation_unit(&db, vec![file_a, file_b, file_c]);
-        let text = file_c.text(&db);
-        let x_pos = text.rfind("x;").expect("should find 'x;'");
-        let result = resolve_at(&db, file_c, unit, lyra_source::TextSize::new(x_pos as u32));
-        assert!(result.is_some(), "'x' should resolve via explicit import");
-        let sym_id = result.expect("checked above");
-        assert_eq!(
-            sym_id.file,
-            lyra_source::FileId(1),
-            "explicit import from p2 should shadow wildcard from p1"
-        );
-    }
-
-    #[test]
-    fn unresolved_import_package_not_found() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; import nonexistent::x; endmodule");
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        assert!(
-            diags.iter().any(|d| {
-                let msg = d.render_message();
-                msg.contains("nonexistent") && msg.contains("not found")
-            }),
-            "should have package not found diagnostic: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn import_member_not_found() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package pkg; logic x; endpackage");
-        let file_b = new_file(&db, 1, "module m; import pkg::z; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let diags = file_diagnostics(&db, file_b, unit);
-        assert!(
-            diags.iter().any(|d| {
-                let msg = d.render_message();
-                msg.contains("z") && msg.contains("not found")
-            }),
-            "should have member not found diagnostic: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn wildcard_ambiguity() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package p1; logic x; endpackage");
-        let file_b = new_file(&db, 1, "package p2; logic x; endpackage");
-        let file_c = new_file(
-            &db,
-            2,
-            "module m; import p1::*; import p2::*; assign y = x; endmodule",
-        );
-        let unit = new_compilation_unit(&db, vec![file_a, file_b, file_c]);
-        let diags = file_diagnostics(&db, file_c, unit);
-        assert!(
-            diags.iter().any(|d| {
-                let msg = d.render_message();
-                msg.contains("ambiguous") || msg.contains("x")
-            }),
-            "should have ambiguous import diagnostic: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn module_package_name_collision() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "module foo; endmodule");
-        let file_b = new_file(&db, 1, "package foo; endpackage");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let diags = unit_diagnostics(&db, unit);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.render_message().contains("duplicate definition")),
-            "module and package 'foo' should collide: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn qualified_name_cursor_on_package() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package pkg; logic val; endpackage");
-        let file_b = new_file(&db, 1, "module m; assign y = pkg::val; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        // Cursor on 'pkg' in 'pkg::val'
-        let text = file_b.text(&db);
-        let pkg_pos = text.find("pkg::").expect("should find 'pkg::'");
-        let result = resolve_at(
-            &db,
-            file_b,
-            unit,
-            lyra_source::TextSize::new(pkg_pos as u32),
-        );
-        assert!(
-            result.is_some(),
-            "cursor on 'pkg' should resolve to package"
-        );
-        let sym_id = result.expect("checked above");
-        assert_eq!(sym_id.file, lyra_source::FileId(0));
-        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "pkg");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Package);
-    }
-
-    #[test]
-    fn package_symbols_in_exports() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "package my_pkg; logic x; endpackage");
-        let def = def_index_file(&db, file);
-        assert!(
-            !def.exports.packages.is_empty(),
-            "package should be in exports"
-        );
-    }
-
-    #[test]
-    fn qualified_name_resolves_parameter() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package pkg; parameter WIDTH = 8; endpackage");
-        let file_b = new_file(&db, 1, "module m; assign y = pkg::WIDTH; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let text = file_b.text(&db);
-        let pos = text.find("WIDTH").expect("should find 'WIDTH'");
-        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(pos as u32));
-        assert!(result.is_some(), "'WIDTH' in pkg::WIDTH should resolve");
-        let sym_id = result.expect("checked above");
-        assert_eq!(sym_id.file, lyra_source::FileId(0));
-        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "WIDTH");
-    }
-
-    // Typedef tests
-
-    #[test]
-    fn typedef_resolves_locally() {
-        let db = LyraDatabase::default();
-        let file = new_file(
-            &db,
-            0,
-            "module m; typedef logic [7:0] byte_t; byte_t x; endmodule",
-        );
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let unresolved: Vec<_> = diags
-            .iter()
-            .filter(|d| d.render_message().contains("unresolved"))
-            .collect();
-        assert!(
-            unresolved.is_empty(),
-            "byte_t should resolve locally: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn typedef_value_type_coexist() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; logic x; typedef int x; endmodule");
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let dup_diags: Vec<_> = diags
-            .iter()
-            .filter(|d| d.render_message().contains("duplicate"))
-            .collect();
-        assert!(
-            dup_diags.is_empty(),
-            "value 'x' and type 'x' should not conflict: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn typedef_same_namespace_duplicate() {
-        let db = LyraDatabase::default();
-        let file = new_file(
-            &db,
-            0,
-            "module m; typedef int t; typedef logic t; endmodule",
-        );
-        let unit = single_file_unit(&db, file);
-        let diags = file_diagnostics(&db, file, unit);
-        let dup_diags: Vec<_> = diags
-            .iter()
-            .filter(|d| d.render_message().contains("duplicate"))
-            .collect();
-        assert!(
-            !dup_diags.is_empty(),
-            "two typedefs with same name should be duplicate: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn package_typedef_via_qualified_name() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(
-            &db,
-            0,
-            "package pkg; typedef logic [7:0] my_type; endpackage",
-        );
-        let file_b = new_file(&db, 1, "module m; typedef pkg::my_type local_t; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let diags = file_diagnostics(&db, file_b, unit);
-        let unresolved: Vec<_> = diags
-            .iter()
-            .filter(|d| d.render_message().contains("unresolved"))
-            .collect();
-        assert!(
-            unresolved.is_empty(),
-            "pkg::my_type should resolve: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn package_typedef_via_explicit_import() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(
-            &db,
-            0,
-            "package pkg; typedef logic [7:0] my_type; endpackage",
-        );
-        let file_b = new_file(
-            &db,
-            1,
-            "module m; import pkg::my_type; my_type x; endmodule",
-        );
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let diags = file_diagnostics(&db, file_b, unit);
-        let unresolved: Vec<_> = diags
-            .iter()
-            .filter(|d| d.render_message().contains("unresolved"))
-            .collect();
-        assert!(
-            unresolved.is_empty(),
-            "my_type via explicit import should resolve: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn package_typedef_via_wildcard_import() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(
-            &db,
-            0,
-            "package pkg; typedef logic [7:0] my_type; endpackage",
-        );
-        let file_b = new_file(&db, 1, "module m; import pkg::*; my_type x; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let diags = file_diagnostics(&db, file_b, unit);
-        let unresolved: Vec<_> = diags
-            .iter()
-            .filter(|d| d.render_message().contains("unresolved"))
-            .collect();
-        assert!(
-            unresolved.is_empty(),
-            "my_type via wildcard import should resolve: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn local_typedef_shadows_imported() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(
-            &db,
-            0,
-            "package pkg; typedef logic [7:0] my_type; endpackage",
-        );
-        let file_b = new_file(
-            &db,
-            1,
-            "module m; import pkg::*; typedef int my_type; my_type x; endmodule",
-        );
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        // 'my_type' in 'my_type x' should resolve to file_b's local typedef
-        let text = file_b.text(&db);
-        let pos = text.rfind("my_type x").expect("should find 'my_type x'");
-        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(pos as u32));
-        assert!(result.is_some(), "my_type should resolve");
-        let sym_id = result.expect("checked");
-        assert_eq!(
-            sym_id.file,
-            lyra_source::FileId(1),
-            "local typedef should shadow import"
-        );
-    }
-
-    // Const-eval integration tests
-
-    /// Helper: find the first parameter's init expression AstId and evaluate it.
-    fn eval_first_param(
-        db: &dyn salsa::Database,
-        file: SourceFile,
-        unit: CompilationUnit,
-    ) -> lyra_semantic::types::ConstInt {
-        let def = def_index_file(db, file);
-        // Find the first parameter symbol
-        let (sym_id, _sym) = def
-            .symbols
-            .iter()
-            .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Parameter)
-            .expect("should have a parameter");
-        let decl_ast_id = def.symbol_to_decl[sym_id.index()].expect("parameter should have decl");
-        let init_ast_id = def
-            .decl_to_init_expr
-            .get(&decl_ast_id)
-            .expect("parameter should be tracked")
-            .expect("parameter should have init");
-        let expr_ref = ConstExprRef::new(db, unit, init_ast_id);
-        eval_const_int(db, expr_ref)
-    }
-
-    /// Helper: find a named parameter's init expression AstId and evaluate it.
-    fn eval_named_param(
-        db: &dyn salsa::Database,
-        file: SourceFile,
-        unit: CompilationUnit,
-        name: &str,
-    ) -> lyra_semantic::types::ConstInt {
-        let def = def_index_file(db, file);
-        let (sym_id, _sym) = def
-            .symbols
-            .iter()
-            .find(|(_, s)| {
-                s.kind == lyra_semantic::symbols::SymbolKind::Parameter && s.name.as_str() == name
-            })
-            .expect("should have named parameter");
-        let decl_ast_id = def.symbol_to_decl[sym_id.index()].expect("parameter should have decl");
-        let init_ast_id = def
-            .decl_to_init_expr
-            .get(&decl_ast_id)
-            .expect("parameter should be tracked")
-            .expect("parameter should have init");
-        let expr_ref = ConstExprRef::new(db, unit, init_ast_id);
-        eval_const_int(db, expr_ref)
-    }
-
-    #[test]
-    fn const_eval_simple_literal() {
-        use lyra_semantic::types::ConstInt;
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; parameter P = 42; endmodule");
-        let unit = single_file_unit(&db, file);
-        assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(42));
-    }
-
-    #[test]
-    fn const_eval_arithmetic() {
-        use lyra_semantic::types::ConstInt;
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; parameter P = 3 + 4; endmodule");
-        let unit = single_file_unit(&db, file);
-        assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(7));
-    }
-
-    #[test]
-    fn const_eval_param_chain() {
-        use lyra_semantic::types::ConstInt;
-        let db = LyraDatabase::default();
-        let file = new_file(
-            &db,
-            0,
-            "module m; parameter A = 8; parameter B = A - 1; endmodule",
-        );
-        let unit = single_file_unit(&db, file);
-        assert_eq!(eval_named_param(&db, file, unit, "B"), ConstInt::Known(7));
-    }
-
-    #[test]
-    fn const_eval_qualified_param() {
-        use lyra_semantic::types::ConstInt;
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "package pkg; parameter W = 8; endpackage");
-        let file_b = new_file(&db, 1, "module m; parameter P = pkg::W; endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        assert_eq!(eval_first_param(&db, file_b, unit), ConstInt::Known(8));
-    }
-
-    #[test]
-    fn const_eval_cycle() {
-        use lyra_semantic::types::{ConstEvalError, ConstInt};
-        let db = LyraDatabase::default();
-        let file = new_file(
-            &db,
-            0,
-            "module m; parameter A = B + 1; parameter B = A + 1; endmodule",
-        );
-        let unit = single_file_unit(&db, file);
-        let result = eval_named_param(&db, file, unit, "A");
-        assert_eq!(result, ConstInt::Error(ConstEvalError::Cycle));
-    }
-
-    #[test]
-    fn const_eval_clog2() {
-        use lyra_semantic::types::ConstInt;
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; parameter P = $clog2(256); endmodule");
-        let unit = single_file_unit(&db, file);
-        assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(8));
-    }
-
-    #[test]
-    fn const_eval_no_initializer() {
-        use lyra_semantic::types::ConstInt;
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "module m; parameter P; endmodule");
-        let unit = single_file_unit(&db, file);
-        let def = def_index_file(&db, file);
-        let (sym_id, _) = def
-            .symbols
-            .iter()
-            .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Parameter)
-            .expect("should have parameter");
-        let decl_ast_id = def.symbol_to_decl[sym_id.index()].expect("parameter should have decl");
-        let init_opt = def.decl_to_init_expr.get(&decl_ast_id);
-        // Parameter with no initializer should have None value
-        match init_opt {
-            Some(None) => {} // Expected: tracked but no init
-            None => {}       // Also acceptable: not tracked at all
-            Some(Some(init_id)) => {
-                // If it has an init_id, evaluating should give Unresolved
-                let expr_ref = ConstExprRef::new(&db, unit, *init_id);
-                let result = eval_const_int(&db, expr_ref);
-                assert!(
-                    matches!(result, ConstInt::Error(_)),
-                    "no-init parameter should error: {result:?}"
-                );
-            }
-        }
-    }
-
-    // Top-level construct tests
-
-    #[test]
-    fn interface_in_exports() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "interface my_if; endinterface");
-        let def = def_index_file(&db, file);
-        assert_eq!(def.exports.definitions.len(), 1);
-        let sym = def.symbols.get(def.exports.definitions[0]);
-        assert_eq!(sym.name.as_str(), "my_if");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Interface);
-    }
-
-    #[test]
-    fn program_in_exports() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "program my_prog; endprogram");
-        let def = def_index_file(&db, file);
-        assert_eq!(def.exports.definitions.len(), 1);
-        let sym = def.symbols.get(def.exports.definitions[0]);
-        assert_eq!(sym.name.as_str(), "my_prog");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Program);
-    }
-
-    #[test]
-    fn primitive_in_exports() {
-        let db = LyraDatabase::default();
-        let file = new_file(
-            &db,
-            0,
-            "primitive my_udp(output y, input a); table 0 : 0; endtable endprimitive",
-        );
-        let def = def_index_file(&db, file);
-        assert_eq!(def.exports.definitions.len(), 1);
-        let sym = def.symbols.get(def.exports.definitions[0]);
-        assert_eq!(sym.name.as_str(), "my_udp");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Primitive);
-    }
-
-    #[test]
-    fn config_in_exports() {
-        let db = LyraDatabase::default();
-        let file = new_file(&db, 0, "config my_cfg; design top; endconfig");
-        let def = def_index_file(&db, file);
-        assert_eq!(def.exports.definitions.len(), 1);
-        let sym = def.symbols.get(def.exports.definitions[0]);
-        assert_eq!(sym.name.as_str(), "my_cfg");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Config);
-    }
-
-    #[test]
-    fn cross_file_interface_instantiation() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "interface my_bus; endinterface");
-        let file_b = new_file(&db, 1, "module top; my_bus u_bus(); endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-
-        let text = file_b.text(&db);
-        let pos = text.find("my_bus").expect("should find 'my_bus'");
-        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(pos as u32));
-        assert!(result.is_some(), "'my_bus' should resolve cross-file");
-        let sym_id = result.expect("checked");
-        assert_eq!(sym_id.file, lyra_source::FileId(0));
-        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "my_bus");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Interface);
-    }
-
-    #[test]
-    fn cross_file_program_instantiation() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "program my_prog; endprogram");
-        let file_b = new_file(&db, 1, "module top; my_prog u_prog(); endmodule");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-
-        let text = file_b.text(&db);
-        let pos = text.find("my_prog").expect("should find 'my_prog'");
-        let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(pos as u32));
-        assert!(result.is_some(), "'my_prog' should resolve cross-file");
-        let sym_id = result.expect("checked");
-        assert_eq!(sym_id.file, lyra_source::FileId(0));
-        let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-        assert_eq!(sym.name.as_str(), "my_prog");
-        assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Program);
-    }
-
-    #[test]
-    fn duplicate_module_interface() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "module foo; endmodule");
-        let file_b = new_file(&db, 1, "interface foo; endinterface");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let diags = unit_diagnostics(&db, unit);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.render_message().contains("duplicate definition")),
-            "module and interface 'foo' should collide: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn duplicate_interface() {
-        let db = LyraDatabase::default();
-        let file_a = new_file(&db, 0, "interface bar; endinterface");
-        let file_b = new_file(&db, 1, "interface bar; endinterface");
-        let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-        let diags = unit_diagnostics(&db, unit);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.render_message().contains("duplicate definition")),
-            "two interfaces 'bar' should collide: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn all_def_types_in_global_index() {
-        let db = LyraDatabase::default();
-        let file = new_file(
-            &db,
-            0,
-            "module m; endmodule\n\
-             interface i; endinterface\n\
-             program p; endprogram\n\
-             primitive u(output y, input a); table 0 : 0; endtable endprimitive\n\
-             config c; design m; endconfig",
-        );
-        let unit = single_file_unit(&db, file);
-        let global = global_def_index(&db, unit);
-        assert!(global.resolve_definition("m").is_some());
-        assert!(global.resolve_definition("i").is_some());
-        assert!(global.resolve_definition("p").is_some());
-        assert!(global.resolve_definition("u").is_some());
-        assert!(global.resolve_definition("c").is_some());
-    }
-
-    #[test]
-    fn mixed_file_roundtrip() {
-        let db = LyraDatabase::default();
-        let src = "module m; endmodule\ninterface i; endinterface\nprogram p; endprogram\n";
-        let file = new_file(&db, 0, src);
-        let parse = parse_file(&db, file);
-        assert!(
-            parse.errors.is_empty(),
-            "no parse errors: {:?}",
-            parse.errors
-        );
-        assert_eq!(parse.syntax().text().to_string(), src);
-    }
-}
+mod tests;

@@ -84,8 +84,8 @@ Do not introduce circular dependencies. Do not add dependencies that violate thi
   - Iterators and combinators over manual loops where clearer
   - `enum` over boolean flags or stringly-typed values
   - Derive standard traits (`Debug`, `Clone`, `PartialEq`, etc.) where appropriate
-- **File size**: keep files under 1000 lines. 1200 is the hard limit. When a
-  file grows past 1000 lines, split it into focused modules. Plan for file
+- **File size**: keep files under 800 lines. 1200 is the hard limit. When a
+  file grows past 800 lines, split it into focused modules. Plan for file
   organization up front -- do not let files bloat and refactor later.
 - **Tests**: every new behavior needs a test. Unit tests in `#[cfg(test)]`
   only for testing private helpers. Integration tests go in `tests/` as a
@@ -191,6 +191,17 @@ Run the checker:
 ```bash
 python3 tools/policy/check_ascii.py
 python3 tools/policy/check_ascii.py --staged    # staged files only
+```
+
+## File Size Policy
+
+Rust source files under `crates/` must stay under 800 lines (soft limit). 1200 lines is the hard limit. When a file grows past 800, split it into focused modules.
+
+Run the checker:
+
+```bash
+python3 tools/policy/check_lines.py
+python3 tools/policy/check_lines.py --staged    # staged files only
 ```
 
 ## What Not To Do

@@ -24,3 +24,12 @@ jobs:
         with:
           fetch-depth: 0
       - run: python3 tools/policy/check_ascii.py
+
+  lines:
+    name: Line count
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 tools/policy/check_lines.py
