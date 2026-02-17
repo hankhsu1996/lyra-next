@@ -307,6 +307,10 @@ pub enum SymbolTypeError {
     TypeParameterUnsupported,
     /// `NameRef` in `TypeSpec` could not be resolved or is not a typedef.
     UserTypeUnresolved,
+    /// Typedef resolved but underlying type is not value-usable (net, error, etc.).
+    TypedefUnderlyingUnsupported,
+    /// Port AST node is structurally broken (cannot read type info at all).
+    PortTypeMissing,
 }
 
 /// IEEE 1800-2023 net type keywords (LRM 6.7).

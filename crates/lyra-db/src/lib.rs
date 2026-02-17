@@ -591,7 +591,9 @@ fn expand_typedef(
     let underlying_ty = match &typedef_type {
         SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => ty.clone(),
         SymbolType::Error(e) => return SymbolType::Error(*e),
-        SymbolType::Net(_) => return SymbolType::Error(SymbolTypeError::UserTypeUnresolved),
+        SymbolType::Net(_) => {
+            return SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported);
+        }
     };
 
     // Collect use-site unpacked dims from dim source node
@@ -618,7 +620,7 @@ fn expand_typedef(
             i.unpacked = merged.into_boxed_slice();
             wrap(Ty::Integral(i))
         }
-        _ => SymbolType::Error(SymbolTypeError::UserTypeUnresolved),
+        _ => SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported),
     }
 }
 

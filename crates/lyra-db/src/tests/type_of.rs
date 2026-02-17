@@ -418,3 +418,167 @@ fn type_of_port_with_typedef() {
         other => panic!("expected Value(Integral) for port with typedef, got {other:?}"),
     }
 }
+
+#[test]
+fn type_of_typedef_with_unpacked_dims_merge() {
+    // typedef logic [7:0] T [2]; T a [3];
+    // unpacked dims order: typedef [2] first, use-site [3] after
+    // packed stays [7:0]
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef logic [7:0] T [2]; T a [3]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "a");
+    match ty {
+        SymbolType::Value(Ty::Integral(ref i)) => {
+            // Packed dims from typedef
+            assert_eq!(i.packed.len(), 1, "packed should come from typedef");
+            assert_eq!(i.packed[0].msb, ConstInt::Known(7));
+            assert_eq!(i.packed[0].lsb, ConstInt::Known(0));
+            // Unpacked dims: typedef [2] first, use-site [3] after
+            assert_eq!(i.unpacked.len(), 2, "should have 2 unpacked dims");
+            assert_eq!(i.unpacked[0], UnpackedDim::Size(ConstInt::Known(2)));
+            assert_eq!(i.unpacked[1], UnpackedDim::Size(ConstInt::Known(3)));
+        }
+        other => panic!("expected Value(Integral) with merged dims, got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_typedef_underlying_unsupported() {
+    // Typedef whose underlying is not value-usable should give specific error.
+    // `typedef wire T;` is not valid SV syntax, so we test via typedef that
+    // resolves to a non-typedef symbol (which gives UserTypeUnresolved), and
+    // test the Net underlying path by checking that the error kind is correct
+    // when a typedef chain hits a Net result.
+    //
+    // In practice, TypedefUnderlyingUnsupported fires when expand_typedef
+    // resolves a typedef and its underlying is Net or Error. We can trigger
+    // this if the typedef itself is somehow broken (e.g. Ty::Error underlying).
+    // For now, test that non-integral underlying with use-site dims gives
+    // TypedefUnderlyingUnsupported rather than UserTypeUnresolved.
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef string str_t; str_t a [3]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "a");
+    assert_eq!(
+        ty,
+        SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported),
+        "non-integral typedef underlying with use-site dims should be TypedefUnderlyingUnsupported"
+    );
+}
+
+#[test]
+fn type_of_typedef_string_no_dims() {
+    // Typedef to string WITHOUT use-site dims should work (no dim merge needed)
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; typedef string str_t; str_t a; endmodule");
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "a");
+    assert_eq!(ty, SymbolType::Value(Ty::String));
+}
+
+#[test]
+fn type_of_unsupported_dim_expr() {
+    // Concat expression in a dimension should propagate as ConstInt::Error(Unsupported)
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; logic [{1'b0, 1'b1}:0] x; endmodule");
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "x");
+    match ty {
+        SymbolType::Value(Ty::Integral(ref i)) => {
+            assert_eq!(i.packed.len(), 1);
+            assert_eq!(
+                i.packed[0].msb,
+                ConstInt::Error(ConstEvalError::Unsupported),
+                "concat in dim should be Unsupported"
+            );
+            assert_eq!(i.packed[0].lsb, ConstInt::Known(0));
+        }
+        other => panic!("expected Value(Integral) with error dim, got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_typedef_alias_vs_value_layers() {
+    // Raw query on typedef symbol -> TypeAlias
+    // Raw query on variable using typedef -> Value (after expansion)
+    // Normalized query preserves the same classification
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef logic [7:0] byte_t; byte_t x; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+
+    // Raw: typedef symbol itself
+    let raw_td = get_type_raw(&db, file, unit, "byte_t");
+    assert!(
+        matches!(raw_td, SymbolType::TypeAlias(Ty::Integral(_))),
+        "raw typedef should be TypeAlias(Integral), got {raw_td:?}"
+    );
+
+    // Raw: variable using typedef
+    let raw_var = get_type_raw(&db, file, unit, "x");
+    assert!(
+        matches!(raw_var, SymbolType::Value(Ty::Integral(_))),
+        "raw variable should be Value(Integral), got {raw_var:?}"
+    );
+
+    // Normalized: same classification preserved
+    let norm_td = get_type(&db, file, unit, "byte_t");
+    assert!(
+        matches!(norm_td, SymbolType::TypeAlias(Ty::Integral(_))),
+        "normalized typedef should be TypeAlias(Integral), got {norm_td:?}"
+    );
+
+    let norm_var = get_type(&db, file, unit, "x");
+    assert!(
+        matches!(norm_var, SymbolType::Value(Ty::Integral(_))),
+        "normalized variable should be Value(Integral), got {norm_var:?}"
+    );
+}
+
+#[test]
+fn type_of_typedef_no_dims_followed_by_decl() {
+    // Regression: typedef without unpacked dims followed by a variable decl.
+    // The parser's optional unpacked dim loop must not consume the next decl.
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef logic [7:0] byte_t; logic [3:0] x; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    // typedef should have no unpacked dims
+    let td = get_type(&db, file, unit, "byte_t");
+    match td {
+        SymbolType::TypeAlias(Ty::Integral(ref i)) => {
+            assert!(
+                i.unpacked.is_empty(),
+                "typedef should have no unpacked dims"
+            );
+            assert_eq!(i.packed.len(), 1);
+            assert_eq!(i.packed[0].msb, ConstInt::Known(7));
+        }
+        other => panic!("expected TypeAlias(Integral), got {other:?}"),
+    }
+    // Following variable should parse and type correctly
+    let var = get_type(&db, file, unit, "x");
+    match var {
+        SymbolType::Value(Ty::Integral(ref i)) => {
+            assert_eq!(i.packed.len(), 1);
+            assert_eq!(i.packed[0].msb, ConstInt::Known(3));
+            assert_eq!(i.packed[0].lsb, ConstInt::Known(0));
+        }
+        other => panic!("expected Value(Integral), got {other:?}"),
+    }
+}
