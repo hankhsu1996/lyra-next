@@ -47,6 +47,14 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 1,
     };
+    pub const UNDECLARED_TYPE: Self = Self {
+        namespace: "lyra.type",
+        number: 2,
+    };
+    pub const NOT_A_TYPE: Self = Self {
+        namespace: "lyra.type",
+        number: 3,
+    };
 
     /// Format as `"namespace[number]"`, e.g. `"lyra.semantic[1]"`.
     pub fn as_str(&self) -> String {
