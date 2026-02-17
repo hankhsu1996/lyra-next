@@ -265,6 +265,28 @@ impl Ty {
         })
     }
 
+    /// Remove the first unpacked dimension and return the element type.
+    ///
+    /// M4 only handles Integral; other variants return None.
+    /// API is generic on Ty so M5 struct/array peeling slots in without rewrite.
+    pub fn peel_unpacked_dim(&self) -> Option<Ty> {
+        match self {
+            Self::Integral(i) => {
+                if i.unpacked.is_empty() {
+                    return None;
+                }
+                let remaining = i.unpacked[1..].to_vec().into_boxed_slice();
+                Some(Self::Integral(Integral {
+                    keyword: i.keyword,
+                    signed: i.signed,
+                    packed: i.packed.clone(),
+                    unpacked: remaining,
+                }))
+            }
+            _ => None,
+        }
+    }
+
     pub fn pretty(&self) -> SmolStr {
         match self {
             Self::Integral(i) => i.pretty(),

@@ -1,6 +1,7 @@
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 
+use crate::literal::{Base, parse_literal_shape};
 use crate::types::ConstEvalError;
 
 type EvalResult = Result<i64, ConstEvalError>;
@@ -29,6 +30,14 @@ pub fn eval_const_expr(
 }
 
 fn eval_literal(node: &SyntaxNode) -> EvalResult {
+    // Use parse_literal_shape for structural checks (base, xz, width)
+    let shape = parse_literal_shape(node).ok_or(ConstEvalError::Unsupported)?;
+
+    if shape.has_xz {
+        return Err(ConstEvalError::NonConstant);
+    }
+
+    // Extract digit tokens for value computation
     let tokens: Vec<_> = node
         .children_with_tokens()
         .filter_map(|el| el.into_token())
@@ -40,78 +49,78 @@ fn eval_literal(node: &SyntaxNode) -> EvalResult {
         })
         .collect();
 
-    match tokens.as_slice() {
-        [tok] if tok.kind() == SyntaxKind::IntLiteral => {
-            let text = tok.text().replace('_', "");
-            text.parse::<i64>().map_err(|_| ConstEvalError::Overflow)
-        }
-        [tok] if tok.kind() == SyntaxKind::BasedLiteral => {
-            // Unsized based literal like 'hFF
-            eval_based_literal(tok.text())
-        }
-        [size_tok, based_tok]
-            if size_tok.kind() == SyntaxKind::IntLiteral
-                && based_tok.kind() == SyntaxKind::BasedLiteral =>
-        {
-            // Sized based literal: IntLiteral + BasedLiteral, e.g. 8 + 'hFF
-            let combined = format!("{}{}", size_tok.text(), based_tok.text());
-            eval_based_literal(&combined)
-        }
-        _ => Err(ConstEvalError::Unsupported),
+    // Pure unsized decimal (plain IntLiteral like `42`): parse directly as i64.
+    // Must check for IntLiteral token to exclude unsized based-decimal (`'d42`)
+    // which also has base==Decimal && is_unsized==true.
+    if shape.base == Base::Decimal
+        && shape.is_unsized
+        && tokens
+            .first()
+            .is_some_and(|t| t.kind() == SyntaxKind::IntLiteral)
+        && tokens.len() == 1
+    {
+        let text = tokens[0].text().replace('_', "");
+        return text.parse::<i64>().map_err(|_| ConstEvalError::Overflow);
     }
-}
 
-fn eval_based_literal(text: &str) -> EvalResult {
-    let tick_pos = text.find('\'').ok_or(ConstEvalError::Unsupported)?;
-    let size_str = &text[..tick_pos];
-    let after_tick = &text[tick_pos + 1..];
-
-    if after_tick.is_empty() {
+    // Based literal with signed prefix: not yet supported for const-eval
+    if shape.signed {
         return Err(ConstEvalError::Unsupported);
     }
 
-    // Check for signed prefix
-    let (base_and_digits, _signed) =
-        if after_tick.len() >= 2 && matches!(after_tick.as_bytes()[0], b's' | b'S') {
-            return Err(ConstEvalError::Unsupported);
-        } else {
-            (after_tick, false)
-        };
+    // Based literal: extract digits from the BasedLiteral token
+    let based_tok = tokens
+        .iter()
+        .find(|t| t.kind() == SyntaxKind::BasedLiteral)
+        .ok_or(ConstEvalError::Unsupported)?;
 
-    let base_char = base_and_digits.as_bytes()[0];
-    let digits_str = &base_and_digits[1..];
-
-    let radix: u32 = match base_char {
-        b'h' | b'H' => 16,
-        b'd' | b'D' => 10,
-        b'o' | b'O' => 8,
-        b'b' | b'B' => 2,
-        _ => return Err(ConstEvalError::Unsupported),
-    };
-
+    let digits_str = extract_based_digits(based_tok.text())?;
     let clean_digits: String = digits_str.chars().filter(|&c| c != '_').collect();
-
-    // Check for x/z/? digits
-    if clean_digits
-        .chars()
-        .any(|c| matches!(c, 'x' | 'X' | 'z' | 'Z' | '?'))
-    {
-        return Err(ConstEvalError::NonConstant);
-    }
 
     if clean_digits.is_empty() {
         return Err(ConstEvalError::Unsupported);
     }
 
+    let radix = base_radix(shape.base);
     let raw_value =
         u128::from_str_radix(&clean_digits, radix).map_err(|_| ConstEvalError::Overflow)?;
 
-    if size_str.is_empty() {
-        // No size prefix: use parsed value directly
+    if shape.is_unsized {
         i64::try_from(raw_value).map_err(|_| ConstEvalError::Overflow)
     } else {
-        let size: u32 = size_str.parse().map_err(|_| ConstEvalError::Unsupported)?;
-        truncate_to_size(raw_value, size)
+        truncate_to_size(raw_value, shape.width)
+    }
+}
+
+/// Extract the digit portion from a `BasedLiteral` token text (after tick + optional signed + base char).
+fn extract_based_digits(text: &str) -> Result<&str, ConstEvalError> {
+    let after_tick = text.strip_prefix('\'').ok_or(ConstEvalError::Unsupported)?;
+    if after_tick.is_empty() {
+        return Err(ConstEvalError::Unsupported);
+    }
+    // Skip optional signed prefix
+    let rest = if after_tick
+        .as_bytes()
+        .first()
+        .is_some_and(|&b| b == b's' || b == b'S')
+    {
+        &after_tick[1..]
+    } else {
+        after_tick
+    };
+    // Skip base character
+    if rest.is_empty() {
+        return Err(ConstEvalError::Unsupported);
+    }
+    Ok(&rest[1..])
+}
+
+fn base_radix(base: Base) -> u32 {
+    match base {
+        Base::Hex => 16,
+        Base::Decimal => 10,
+        Base::Octal => 8,
+        Base::Binary => 2,
     }
 }
 
@@ -370,6 +379,11 @@ mod tests {
     #[test]
     fn based_literal_no_size() {
         assert_eq!(eval("'hFF"), Ok(255));
+    }
+
+    #[test]
+    fn unsized_based_decimal() {
+        assert_eq!(eval("'d42"), Ok(42));
     }
 
     #[test]
