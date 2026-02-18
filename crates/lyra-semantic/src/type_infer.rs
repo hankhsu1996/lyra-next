@@ -186,35 +186,37 @@ pub fn infer_expr_type(
 }
 
 fn infer_literal(node: &SyntaxNode) -> ExprType {
-    // Check for real literal
-    let has_real = node.children_with_tokens().any(|el| {
-        el.as_token()
-            .is_some_and(|t| t.kind() == SyntaxKind::RealLiteral)
-    });
-    if has_real {
-        return ExprType::NonBit(Ty::Real(RealKw::Real));
-    }
+    let lit_kind = node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .map(|t| t.kind())
+        .find(|k| {
+            matches!(
+                k,
+                SyntaxKind::TimeLiteral
+                    | SyntaxKind::RealLiteral
+                    | SyntaxKind::StringLiteral
+                    | SyntaxKind::IntLiteral
+                    | SyntaxKind::BasedLiteral
+                    | SyntaxKind::UnbasedUnsizedLiteral
+            )
+        });
 
-    // Check for string literal
-    let has_string = node.children_with_tokens().any(|el| {
-        el.as_token()
-            .is_some_and(|t| t.kind() == SyntaxKind::StringLiteral)
-    });
-    if has_string {
-        return ExprType::NonBit(Ty::String);
-    }
-
-    // Numeric literal: use shared shape parser
-    match parse_literal_shape(node) {
-        Some(shape) => {
-            let signed = if shape.signed {
-                Signedness::Signed
-            } else {
-                Signedness::Unsigned
-            };
-            ExprType::bits(shape.width, signed)
-        }
-        None => ExprType::Error(ExprTypeErrorKind::UnsupportedLiteralKind),
+    match lit_kind {
+        Some(SyntaxKind::TimeLiteral) => ExprType::NonBit(Ty::Real(RealKw::Time)),
+        Some(SyntaxKind::RealLiteral) => ExprType::NonBit(Ty::Real(RealKw::Real)),
+        Some(SyntaxKind::StringLiteral) => ExprType::NonBit(Ty::String),
+        _ => match parse_literal_shape(node) {
+            Some(shape) => {
+                let signed = if shape.signed {
+                    Signedness::Signed
+                } else {
+                    Signedness::Unsigned
+                };
+                ExprType::bits(shape.width, signed)
+            }
+            None => ExprType::Error(ExprTypeErrorKind::UnsupportedLiteralKind),
+        },
     }
 }
 

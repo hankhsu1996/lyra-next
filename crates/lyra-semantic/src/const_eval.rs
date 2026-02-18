@@ -576,4 +576,9 @@ mod tests {
     fn underscore_in_based_literal() {
         assert_eq!(eval("8'hF_F"), Ok(255));
     }
+
+    #[test]
+    fn time_literal_unsupported() {
+        assert_eq!(eval("2ns"), Err(ConstEvalError::Unsupported));
+    }
 }

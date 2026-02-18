@@ -91,7 +91,8 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
         SyntaxKind::RealLiteral
         | SyntaxKind::BasedLiteral
         | SyntaxKind::UnbasedUnsizedLiteral
-        | SyntaxKind::StringLiteral => {
+        | SyntaxKind::StringLiteral
+        | SyntaxKind::TimeLiteral => {
             let m = p.start();
             p.bump();
             Some(m.complete(p, SyntaxKind::Literal))
