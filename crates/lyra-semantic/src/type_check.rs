@@ -199,6 +199,7 @@ fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::RangeExpr
             | SyntaxKind::FieldExpr
             | SyntaxKind::CallExpr
+            | SyntaxKind::SystemTfCall
             | SyntaxKind::NameRef
             | SyntaxKind::Literal
             | SyntaxKind::QualifiedName

@@ -430,6 +430,11 @@ pub enum SyntaxKind {
     EnumMember,
     StructType,
     StructMember,
+    SystemTfCall,
+    SystemTfArgList,
+
+    #[doc(hidden)]
+    __Last,
 }
 
 /// First node kind value -- tokens are `< NODE_START`, nodes `>= NODE_START`.

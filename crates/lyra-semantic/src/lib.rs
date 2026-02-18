@@ -10,6 +10,7 @@ mod resolve;
 pub mod resolve_index;
 pub mod scopes;
 pub mod symbols;
+pub(crate) mod syntax_helpers;
 pub mod type_check;
 mod type_extract;
 pub mod type_infer;

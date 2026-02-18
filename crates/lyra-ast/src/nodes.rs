@@ -110,6 +110,12 @@ ast_nodes! {
 
     ArgList(SyntaxKind::ArgList) {}
 
+    SystemTfCall(SyntaxKind::SystemTfCall) {
+        arg_list: SystemTfArgList,
+    }
+
+    SystemTfArgList(SyntaxKind::SystemTfArgList) {}
+
     NameRef(SyntaxKind::NameRef) {
         ident: token([Ident, EscapedIdent]),
     }
