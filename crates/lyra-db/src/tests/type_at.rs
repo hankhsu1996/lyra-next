@@ -95,3 +95,28 @@ fn type_at_enriched_includes_enum_name_cross_file() {
         "enriched printing must include enum name, got: {pretty}"
     );
 }
+
+#[test]
+fn type_at_enriched_cross_file_enum_with_array_dims() {
+    let db = LyraDatabase::default();
+    let pkg = new_file(
+        &db,
+        0,
+        "package pkg; typedef enum logic [1:0] { R, G, B } color_t; endpackage",
+    );
+    let mod_src = "module m; import pkg::*; color_t x [2][3]; assign x[0][0] = R; endmodule";
+    let mod_file = new_file(&db, 1, mod_src);
+    let unit = new_compilation_unit(&db, vec![pkg, mod_file]);
+    let offset = mod_src.find("x[0][0]").expect("needle not found") as u32;
+    let result =
+        type_at(&db, mod_file, unit, lyra_source::TextSize::new(offset)).expect("should have type");
+    let pretty = result.pretty();
+    assert!(
+        pretty.contains("enum") && pretty.contains("color_t"),
+        "enriched base must include enum name, got: {pretty}"
+    );
+    assert!(
+        pretty.contains("[2]") && pretty.contains("[3]"),
+        "enriched printing must include array dims in correct order, got: {pretty}"
+    );
+}

@@ -13,6 +13,7 @@ lyra-ast.workspace = true
 lyra-diag.workspace = true
 lyra-lexer.workspace = true
 lyra-parser.workspace = true
+smallvec.workspace = true
 smol_str.workspace = true
 
 [dev-dependencies]

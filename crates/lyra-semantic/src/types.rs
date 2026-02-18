@@ -1,4 +1,5 @@
 use lyra_ast::ErasedAstId;
+use smallvec::SmallVec;
 use smol_str::SmolStr;
 
 use crate::aggregate::{EnumId, StructId};
@@ -388,10 +389,26 @@ fn range_width(msb: i64, lsb: i64) -> Option<u32> {
     u32::try_from(diff).ok()
 }
 
+/// Wrap a `Ty` with `Ty::Array` layers for each unpacked dim.
+///
+/// Dims are applied right-to-left so the outermost (leftmost in source) dim
+/// is the outermost `Array` wrapper. For example, given dims `[2], [3]`
+/// (outermost-first), the result is `Array(Array(inner, Size(3)), Size(2))`.
+pub fn wrap_unpacked(ty: Ty, unpacked: &[UnpackedDim]) -> Ty {
+    unpacked.iter().rev().fold(ty, |inner, dim| Ty::Array {
+        elem: Box::new(inner),
+        dim: dim.clone(),
+    })
+}
+
 /// Collect all `Array` dims outermost-first, returning the innermost non-Array base.
-pub fn collect_array_dims(ty: &Ty) -> (&Ty, Vec<&UnpackedDim>) {
+///
+/// Outermost dim = first element in the returned slice. This matches source
+/// order: `int x [2][3]` yields `[Size(2), Size(3)]`. The nesting invariant
+/// guarantees that the outermost source dim is the outermost `Array` wrapper.
+pub fn collect_array_dims(ty: &Ty) -> (&Ty, SmallVec<[&UnpackedDim; 2]>) {
     let mut current = ty;
-    let mut dims = Vec::new();
+    let mut dims = SmallVec::new();
     while let Ty::Array { elem, dim } = current {
         dims.push(dim);
         current = elem;
@@ -792,5 +809,37 @@ mod tests {
     #[test]
     fn net_kind_ne() {
         assert_ne!(NetKind::Wire, NetKind::Tri);
+    }
+
+    #[test]
+    fn dimension_nesting_and_print_order() {
+        // `int a [2][3]` -- outermost dim is [2], innermost is [3].
+        // Nesting: Array(Array(int, Size(3)), Size(2))
+        let inner = Ty::int();
+        let with_3 = Ty::Array {
+            elem: Box::new(inner),
+            dim: UnpackedDim::Size(ConstInt::Known(3)),
+        };
+        let with_2_3 = Ty::Array {
+            elem: Box::new(with_3),
+            dim: UnpackedDim::Size(ConstInt::Known(2)),
+        };
+        // wrap_unpacked with outermost-first slice must produce the same nesting
+        let from_wrap = wrap_unpacked(
+            Ty::int(),
+            &[
+                UnpackedDim::Size(ConstInt::Known(2)),
+                UnpackedDim::Size(ConstInt::Known(3)),
+            ],
+        );
+        assert_eq!(with_2_3, from_wrap);
+        // collect_array_dims returns outermost-first
+        let (base, dims) = collect_array_dims(&with_2_3);
+        assert_eq!(*base, Ty::int());
+        assert_eq!(dims.len(), 2);
+        assert_eq!(*dims[0], UnpackedDim::Size(ConstInt::Known(2)));
+        assert_eq!(*dims[1], UnpackedDim::Size(ConstInt::Known(3)));
+        // Pretty output matches source order: "int [2] [3]"
+        assert_eq!(with_2_3.pretty(), "int [2] [3]");
     }
 }

@@ -36,6 +36,8 @@ Only integral types have packed dimensions. Non-integral types (`Real`, `String`
 
 `Ty::Enum(EnumId)` and `Ty::Struct(StructId)` carry an ID that identifies the aggregate definition. The ID includes a `FileId` and an ordinal within the defining scope. Names are not stored in the type -- name lookup requires access to the def index.
 
+IDs are internal-only. Ordinal churn is accepted for now. Revisit when finer-grained intra-file invalidation or external persistence is needed.
+
 ## Printing Contract
 
 ### `Ty::pretty()` -- pure, always lossless

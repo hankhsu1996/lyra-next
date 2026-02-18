@@ -1,7 +1,7 @@
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxToken;
 
-use crate::node::ast_nodes;
+use crate::node::{AstNode, ast_nodes};
 use crate::support::{self, AstChildren};
 
 ast_nodes! {
@@ -354,5 +354,102 @@ impl QualifiedName {
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
             .filter(|tok| tok.kind() == SyntaxKind::Ident)
+    }
+}
+
+impl InstancePort {
+    /// The port name token for named connections (`.foo(expr)`).
+    pub fn port_name(&self) -> Option<SyntaxToken> {
+        // Named connection: `.` Ident `(` expr `)`
+        // Wildcard `.*` is lexed as a single DotStar token, not Dot + Star
+        let mut saw_dot = false;
+        for el in self.syntax.children_with_tokens() {
+            if let rowan::NodeOrToken::Token(tok) = el {
+                if tok.kind() == SyntaxKind::Dot {
+                    saw_dot = true;
+                } else if saw_dot && tok.kind() == SyntaxKind::Ident {
+                    return Some(tok);
+                } else if tok.kind() == SyntaxKind::DotStar {
+                    return None;
+                }
+            }
+        }
+        None
+    }
+
+    /// The actual expression node connected to this port.
+    pub fn actual_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+        // For named: `.foo(expr)` -- the expr is a child node inside parens
+        // For positional: the expr is a direct child node
+        self.syntax.children().next()
+    }
+
+    /// Whether this is a named connection (`.foo(expr)`).
+    pub fn is_named(&self) -> bool {
+        self.port_name().is_some()
+    }
+
+    /// Whether this is a `.*` wildcard connection.
+    pub fn is_wildcard(&self) -> bool {
+        self.syntax.children_with_tokens().any(
+            |el| matches!(el, rowan::NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::DotStar),
+        )
+    }
+}
+
+impl ModuleInstantiation {
+    /// Iterate over all instance entries in this statement.
+    ///
+    /// A single `ModuleInstantiation` statement can declare multiple instances:
+    /// `adder u1(.a(x)), u2(.a(y));`
+    ///
+    /// Each entry yields the instance name token and optional port list.
+    pub fn instances(&self) -> impl Iterator<Item = (SyntaxToken, Option<InstancePortList>)> + '_ {
+        InstanceIter {
+            children: self.syntax.children_with_tokens(),
+            past_module_name: false,
+        }
+    }
+}
+
+struct InstanceIter<I> {
+    children: I,
+    past_module_name: bool,
+}
+
+impl<I: Iterator<Item = rowan::NodeOrToken<lyra_parser::SyntaxNode, SyntaxToken>>> Iterator
+    for InstanceIter<I>
+{
+    type Item = (SyntaxToken, Option<InstancePortList>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut name_token: Option<SyntaxToken> = None;
+        for el in self.children.by_ref() {
+            match el {
+                rowan::NodeOrToken::Token(tok) => {
+                    if tok.kind() == SyntaxKind::Ident {
+                        if self.past_module_name {
+                            name_token = Some(tok);
+                        } else {
+                            // First ident is the module type name -- skip it
+                            self.past_module_name = true;
+                        }
+                    }
+                }
+                rowan::NodeOrToken::Node(node) => {
+                    if node.kind() == SyntaxKind::InstancePortList
+                        && let Some(name) = name_token.take()
+                    {
+                        let port_list = InstancePortList::cast(node);
+                        return Some((name, port_list));
+                    }
+                }
+            }
+        }
+        // Instance without port list
+        if let Some(name) = name_token {
+            return Some((name, None));
+        }
+        None
     }
 }

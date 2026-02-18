@@ -21,6 +21,15 @@ pub enum MessageId {
     BitsWide,
     UndeclaredType,
     NotAType,
+    // Elaboration messages
+    UnresolvedModuleInst,
+    NotAModule,
+    UnknownPort,
+    DuplicatePortConn,
+    TooManyPositionalPorts,
+    MissingPortConn,
+    PortWidthMismatch,
+    ElabRecursionLimit,
     // Label messages
     NotFoundInScope,
     NotFoundAsType,
@@ -34,6 +43,7 @@ pub enum MessageId {
 pub enum Arg {
     Name(SmolStr),
     Width(u32),
+    Count(usize),
 }
 
 impl Arg {
@@ -41,7 +51,7 @@ impl Arg {
     pub fn as_name(&self) -> Option<&str> {
         match self {
             Arg::Name(s) => Some(s.as_str()),
-            Arg::Width(_) => None,
+            _ => None,
         }
     }
 
@@ -49,7 +59,15 @@ impl Arg {
     pub fn as_width(&self) -> Option<u32> {
         match self {
             Arg::Width(w) => Some(*w),
-            Arg::Name(_) => None,
+            _ => None,
+        }
+    }
+
+    /// Extract the inner `usize` if this is a `Count` variant.
+    pub fn as_count(&self) -> Option<usize> {
+        match self {
+            Arg::Count(c) => Some(*c),
+            _ => None,
         }
     }
 }
@@ -114,6 +132,31 @@ pub fn render_message(msg: &Message) -> String {
         }
         MessageId::UndeclaredType => format!("undeclared type `{}`", name()),
         MessageId::NotAType => format!("`{}` is not a type", name()),
+        MessageId::UnresolvedModuleInst => format!("module `{}` not found", name()),
+        MessageId::NotAModule => format!("`{}` is not a module", name()),
+        MessageId::UnknownPort => {
+            let port = name();
+            let module = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("port `{port}` not found on module `{module}`")
+        }
+        MessageId::DuplicatePortConn => format!("port `{}` connected more than once", name()),
+        MessageId::TooManyPositionalPorts => {
+            let expected = msg.args.first().and_then(Arg::as_count).unwrap_or(0);
+            let got = msg.args.get(1).and_then(Arg::as_count).unwrap_or(0);
+            format!("too many positional ports: expected {expected}, got {got}")
+        }
+        MessageId::MissingPortConn => {
+            let port = name();
+            let module = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("port `{port}` not connected on module `{module}`")
+        }
+        MessageId::PortWidthMismatch => {
+            let port = name();
+            let formal_w = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
+            let actual_w = msg.args.get(2).and_then(Arg::as_width).unwrap_or(0);
+            format!("port `{port}`: formal is {formal_w} bits, actual is {actual_w} bits")
+        }
+        MessageId::ElabRecursionLimit => "elaboration recursion limit reached".into(),
         MessageId::NotFoundInScope => "not found in this scope".into(),
         MessageId::NotFoundAsType => "not found as a type in this scope".into(),
         MessageId::ValueNotType => "this is a value, not a type".into(),
