@@ -112,13 +112,12 @@ impl IntegralKw {
     }
 }
 
-/// An integral type: keyword identity, signedness, and dimensions.
+/// An integral type: keyword identity, signedness, and packed dimensions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Integral {
     pub keyword: IntegralKw,
     pub signed: bool,
     pub packed: Box<[PackedDim]>,
-    pub unpacked: Box<[UnpackedDim]>,
 }
 
 impl Integral {
@@ -142,10 +141,6 @@ impl Integral {
         for dim in &self.packed {
             s.push(' ');
             fmt_packed_dim(&mut s, dim);
-        }
-        for dim in &self.unpacked {
-            s.push(' ');
-            fmt_unpacked_dim(&mut s, dim);
         }
         SmolStr::new(s)
     }
@@ -190,7 +185,6 @@ impl Ty {
             keyword: IntegralKw::Logic,
             signed,
             packed,
-            unpacked: Box::new([]),
         })
     }
 
@@ -199,7 +193,6 @@ impl Ty {
             keyword: IntegralKw::Reg,
             signed,
             packed,
-            unpacked: Box::new([]),
         })
     }
 
@@ -208,7 +201,6 @@ impl Ty {
             keyword: IntegralKw::Bit,
             signed,
             packed,
-            unpacked: Box::new([]),
         })
     }
 
@@ -221,7 +213,6 @@ impl Ty {
             keyword: IntegralKw::Int,
             signed: IntegralKw::Int.default_signed(),
             packed: Box::new([]),
-            unpacked: Box::new([]),
         })
     }
 
@@ -230,7 +221,6 @@ impl Ty {
             keyword: IntegralKw::Integer,
             signed: IntegralKw::Integer.default_signed(),
             packed: Box::new([]),
-            unpacked: Box::new([]),
         })
     }
 
@@ -239,7 +229,6 @@ impl Ty {
             keyword: IntegralKw::Byte,
             signed: IntegralKw::Byte.default_signed(),
             packed: Box::new([]),
-            unpacked: Box::new([]),
         })
     }
 
@@ -248,7 +237,6 @@ impl Ty {
             keyword: IntegralKw::Shortint,
             signed: IntegralKw::Shortint.default_signed(),
             packed: Box::new([]),
-            unpacked: Box::new([]),
         })
     }
 
@@ -257,7 +245,6 @@ impl Ty {
             keyword: IntegralKw::Longint,
             signed: IntegralKw::Longint.default_signed(),
             packed: Box::new([]),
-            unpacked: Box::new([]),
         })
     }
 
@@ -266,27 +253,12 @@ impl Ty {
             keyword: IntegralKw::Time,
             signed: IntegralKw::Time.default_signed(),
             packed: Box::new([]),
-            unpacked: Box::new([]),
         })
     }
 
     /// Remove the outermost unpacked dimension and return the element type.
-    ///
-    /// Handles both Integral (unpacked field) and `Ty::Array` wrapper.
     pub fn peel_unpacked_dim(&self) -> Option<Ty> {
         match self {
-            Self::Integral(i) => {
-                if i.unpacked.is_empty() {
-                    return None;
-                }
-                let remaining = i.unpacked[1..].to_vec().into_boxed_slice();
-                Some(Self::Integral(Integral {
-                    keyword: i.keyword,
-                    signed: i.signed,
-                    packed: i.packed.clone(),
-                    unpacked: remaining,
-                }))
-            }
             Self::Array { elem, .. } => Some(elem.as_ref().clone()),
             _ => None,
         }
@@ -294,11 +266,19 @@ impl Ty {
 
     pub fn pretty(&self) -> SmolStr {
         match self {
+            Self::Array { .. } => {
+                let (base, dims) = collect_array_dims(self);
+                let mut s = String::from(base.pretty().as_str());
+                for dim in &dims {
+                    s.push(' ');
+                    fmt_unpacked_dim(&mut s, dim);
+                }
+                SmolStr::new(s)
+            }
             Self::Integral(i) => i.pretty(),
             Self::Real(r) => SmolStr::new_static(r.keyword_str()),
             Self::Enum(_) => SmolStr::new_static("enum"),
             Self::Struct(_) => SmolStr::new_static("struct"),
-            Self::Array { elem, .. } => elem.pretty(),
             Self::String => SmolStr::new_static("string"),
             Self::Chandle => SmolStr::new_static("chandle"),
             Self::Event => SmolStr::new_static("event"),
@@ -401,6 +381,17 @@ pub struct NetType {
 fn range_width(msb: i64, lsb: i64) -> Option<u32> {
     let diff = (i128::from(msb) - i128::from(lsb)).unsigned_abs() + 1;
     u32::try_from(diff).ok()
+}
+
+/// Collect all `Array` dims outermost-first, returning the innermost non-Array base.
+pub fn collect_array_dims(ty: &Ty) -> (&Ty, Vec<&UnpackedDim>) {
+    let mut current = ty;
+    let mut dims = Vec::new();
+    while let Ty::Array { elem, dim } = current {
+        dims.push(dim);
+        current = elem;
+    }
+    (current, dims)
 }
 
 fn fmt_const_int(s: &mut String, c: &ConstInt) {
@@ -723,7 +714,6 @@ mod tests {
             keyword: IntegralKw::Int,
             signed: false,
             packed: Box::new([]),
-            unpacked: Box::new([]),
         });
         assert_eq!(ty.pretty(), "int unsigned");
     }

@@ -1,4 +1,3 @@
-use lyra_semantic::aggregate::TypeOrigin;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{
     ConstEvalError, ConstInt, IntegralKw, NetKind, SymbolType, SymbolTypeError, Ty, UnpackedDim,
@@ -264,19 +263,23 @@ fn type_of_unpacked() {
     let unit = single_file_unit(&db, file);
     let ty = get_type(&db, file, unit, "x");
     match ty {
-        SymbolType::Value(Ty::Integral(ref i)) => {
-            assert_eq!(i.keyword, IntegralKw::Logic);
-            assert!(i.packed.is_empty());
-            assert_eq!(i.unpacked.len(), 1);
+        SymbolType::Value(Ty::Array { ref elem, ref dim }) => {
+            match elem.as_ref() {
+                Ty::Integral(i) => {
+                    assert_eq!(i.keyword, IntegralKw::Logic);
+                    assert!(i.packed.is_empty());
+                }
+                other => panic!("expected Integral base, got {other:?}"),
+            }
             assert_eq!(
-                i.unpacked[0],
+                *dim,
                 UnpackedDim::Range {
                     msb: ConstInt::Known(3),
                     lsb: ConstInt::Known(0),
                 }
             );
         }
-        other => panic!("expected Value(Integral), got {other:?}"),
+        other => panic!("expected Value(Array), got {other:?}"),
     }
 }
 
@@ -423,8 +426,8 @@ fn type_of_port_with_typedef() {
 #[test]
 fn type_of_typedef_with_unpacked_dims_merge() {
     // typedef logic [7:0] T [2]; T a [3];
-    // unpacked dims order: typedef [2] first, use-site [3] after
-    // packed stays [7:0]
+    // Result: Array(Array(Integral(logic [7:0]), Size(2)), Size(3))
+    // Outermost is [3] (use-site), inner is [2] (typedef)
     let db = LyraDatabase::default();
     let file = new_file(
         &db,
@@ -433,34 +436,37 @@ fn type_of_typedef_with_unpacked_dims_merge() {
     );
     let unit = single_file_unit(&db, file);
     let ty = get_type(&db, file, unit, "a");
+    // Outermost dim is use-site [3]
     match ty {
-        SymbolType::Value(Ty::Integral(ref i)) => {
-            // Packed dims from typedef
-            assert_eq!(i.packed.len(), 1, "packed should come from typedef");
-            assert_eq!(i.packed[0].msb, ConstInt::Known(7));
-            assert_eq!(i.packed[0].lsb, ConstInt::Known(0));
-            // Unpacked dims: typedef [2] first, use-site [3] after
-            assert_eq!(i.unpacked.len(), 2, "should have 2 unpacked dims");
-            assert_eq!(i.unpacked[0], UnpackedDim::Size(ConstInt::Known(2)));
-            assert_eq!(i.unpacked[1], UnpackedDim::Size(ConstInt::Known(3)));
+        SymbolType::Value(Ty::Array { ref elem, ref dim }) => {
+            assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(3)));
+            // Inner dim is typedef [2]
+            match elem.as_ref() {
+                Ty::Array {
+                    elem: inner,
+                    dim: inner_dim,
+                } => {
+                    assert_eq!(*inner_dim, UnpackedDim::Size(ConstInt::Known(2)));
+                    match inner.as_ref() {
+                        Ty::Integral(i) => {
+                            assert_eq!(i.packed.len(), 1);
+                            assert_eq!(i.packed[0].msb, ConstInt::Known(7));
+                            assert_eq!(i.packed[0].lsb, ConstInt::Known(0));
+                        }
+                        other => panic!("expected Integral base, got {other:?}"),
+                    }
+                }
+                other => panic!("expected inner Array, got {other:?}"),
+            }
         }
-        other => panic!("expected Value(Integral) with merged dims, got {other:?}"),
+        other => panic!("expected Value(Array(Array(Integral))), got {other:?}"),
     }
 }
 
 #[test]
-fn type_of_typedef_underlying_unsupported() {
-    // Typedef whose underlying is not value-usable should give specific error.
-    // `typedef wire T;` is not valid SV syntax, so we test via typedef that
-    // resolves to a non-typedef symbol (which gives UserTypeUnresolved), and
-    // test the Net underlying path by checking that the error kind is correct
-    // when a typedef chain hits a Net result.
-    //
-    // In practice, TypedefUnderlyingUnsupported fires when expand_typedef
-    // resolves a typedef and its underlying is Net or Error. We can trigger
-    // this if the typedef itself is somehow broken (e.g. Ty::Error underlying).
-    // For now, test that non-integral underlying with use-site dims gives
-    // TypedefUnderlyingUnsupported rather than UserTypeUnresolved.
+fn type_of_typedef_string_with_dims() {
+    // typedef string str_t; str_t a [3];
+    // Should produce Array { elem: String, dim: Size(3) }
     let db = LyraDatabase::default();
     let file = new_file(
         &db,
@@ -469,11 +475,13 @@ fn type_of_typedef_underlying_unsupported() {
     );
     let unit = single_file_unit(&db, file);
     let ty = get_type(&db, file, unit, "a");
-    assert_eq!(
-        ty,
-        SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported),
-        "non-integral typedef underlying with use-site dims should be TypedefUnderlyingUnsupported"
-    );
+    match ty {
+        SymbolType::Value(Ty::Array { ref elem, ref dim }) => {
+            assert_eq!(**elem, Ty::String);
+            assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(3)));
+        }
+        other => panic!("expected Value(Array(String, 3)), got {other:?}"),
+    }
 }
 
 #[test]
@@ -559,14 +567,10 @@ fn type_of_typedef_no_dims_followed_by_decl() {
         "module m; typedef logic [7:0] byte_t; logic [3:0] x; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    // typedef should have no unpacked dims
+    // typedef should have no unpacked dims (no Array wrapping)
     let td = get_type(&db, file, unit, "byte_t");
     match td {
         SymbolType::TypeAlias(Ty::Integral(ref i)) => {
-            assert!(
-                i.unpacked.is_empty(),
-                "typedef should have no unpacked dims"
-            );
             assert_eq!(i.packed.len(), 1);
             assert_eq!(i.packed[0].msb, ConstInt::Known(7));
         }
@@ -785,26 +789,6 @@ fn type_of_typedef_enum_with_dims_merge() {
 }
 
 #[test]
-fn type_of_typedef_string_with_dims_now_uses_array() {
-    // typedef string S; S x [3];
-    // Before enum/struct, this was TypedefUnderlyingUnsupported.
-    // Now string with dims should still be unsupported (no Ty::Array for string).
-    let db = LyraDatabase::default();
-    let file = new_file(
-        &db,
-        0,
-        "module m; typedef string str_t; str_t a [3]; endmodule",
-    );
-    let unit = single_file_unit(&db, file);
-    let ty = get_type(&db, file, unit, "a");
-    assert_eq!(
-        ty,
-        SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported),
-        "string with use-site dims should still be unsupported"
-    );
-}
-
-#[test]
 fn type_of_typedef_enum_with_typedef_unpacked_dims() {
     // typedef enum { A, B } E [4];
     // The typedef itself has unpacked dims -- these must be preserved.
@@ -821,5 +805,85 @@ fn type_of_typedef_enum_with_typedef_unpacked_dims() {
             assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(4)));
         }
         other => panic!("expected TypeAlias(Array(Enum, 4)), got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_real_array() {
+    // real x[4] -> Array(Real, Size(4)), pretty = "real [4]"
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; real x [4]; endmodule");
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "x");
+    match ty {
+        SymbolType::Value(Ty::Array { ref elem, ref dim }) => {
+            assert!(
+                matches!(**elem, Ty::Real(_)),
+                "inner type should be Real, got {elem:?}"
+            );
+            assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(4)));
+        }
+        other => panic!("expected Value(Array(Real, 4)), got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_string_array() {
+    // string s[2] -> Array(String, Size(2)), pretty = "string [2]"
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; string s [2]; endmodule");
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "s");
+    match ty {
+        SymbolType::Value(Ty::Array { ref elem, ref dim }) => {
+            assert_eq!(**elem, Ty::String);
+            assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(2)));
+        }
+        other => panic!("expected Value(Array(String, 2)), got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_logic_multi_unpacked() {
+    // logic [7:0] x [2][3] -> Array(Array(Integral(logic [7:0]), Size(3)), Size(2))
+    // pretty = "logic [7:0] [2] [3]"
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; logic [7:0] x [2][3]; endmodule");
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "x");
+    match ty {
+        SymbolType::Value(ref outer @ Ty::Array { .. }) => {
+            // Verify dims order via pretty printing
+            assert_eq!(outer.pretty(), "logic [7:0] [2] [3]");
+        }
+        other => panic!("expected Value(Array(Array(Integral))), got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_typedef_integral_unpacked() {
+    // typedef logic [7:0] T [4]; T x; -> Array(Integral(logic [7:0]), Size(4))
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef logic [7:0] T [4]; T x; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "x");
+    match ty {
+        SymbolType::Value(Ty::Array { ref elem, ref dim }) => {
+            match elem.as_ref() {
+                Ty::Integral(i) => {
+                    assert_eq!(i.keyword, IntegralKw::Logic);
+                    assert_eq!(i.packed.len(), 1);
+                    assert_eq!(i.packed[0].msb, ConstInt::Known(7));
+                    assert_eq!(i.packed[0].lsb, ConstInt::Known(0));
+                }
+                other => panic!("expected Integral base, got {other:?}"),
+            }
+            assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(4)));
+        }
+        other => panic!("expected Value(Array(Integral, 4)), got {other:?}"),
     }
 }

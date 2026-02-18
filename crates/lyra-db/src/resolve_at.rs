@@ -177,7 +177,11 @@ fn pretty_symbol_type_enriched(
 // Name-enriched pretty-printing for types with aggregate IDs.
 // Looks up the defining file from the aggregate ID, not the query source file.
 fn pretty_ty_enriched(db: &dyn salsa::Database, unit: CompilationUnit, ty: &Ty) -> SmolStr {
-    match ty {
+    use lyra_semantic::types::collect_array_dims;
+
+    // Peel off Array layers first, then enrich the base
+    let (base, dims) = collect_array_dims(ty);
+    let base_str = match base {
         Ty::Enum(id) => {
             let Some(src) = source_file_by_id(db, unit, id.file) else {
                 return SmolStr::new_static("enum");
@@ -191,8 +195,8 @@ fn pretty_ty_enriched(db: &dyn salsa::Database, unit: CompilationUnit, ty: &Ty) 
                 }
             });
             match name {
-                Some(n) => SmolStr::new(format!("enum {n}")),
-                None => SmolStr::new_static("enum"),
+                Some(n) => format!("enum {n}"),
+                None => "enum".to_string(),
             }
         }
         Ty::Struct(id) => {
@@ -219,18 +223,23 @@ fn pretty_ty_enriched(db: &dyn salsa::Database, unit: CompilationUnit, ty: &Ty) 
                         s.push(' ');
                         s.push_str(n);
                     }
-                    SmolStr::new(s)
+                    s
                 }
-                None => SmolStr::new_static("struct"),
+                None => "struct".to_string(),
             }
         }
-        Ty::Array { elem, dim } => {
-            let base = pretty_ty_enriched(db, unit, elem);
-            let dim_str = format_unpacked_dim(dim);
-            SmolStr::new(format!("{base} {dim_str}"))
-        }
-        other => other.pretty(),
+        other => other.pretty().to_string(),
+    };
+
+    if dims.is_empty() {
+        return SmolStr::new(base_str);
     }
+    let mut s = base_str;
+    for dim in &dims {
+        s.push(' ');
+        s.push_str(&format_unpacked_dim(dim));
+    }
+    SmolStr::new(s)
 }
 
 fn format_unpacked_dim(dim: &lyra_semantic::types::UnpackedDim) -> String {
