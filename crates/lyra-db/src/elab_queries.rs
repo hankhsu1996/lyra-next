@@ -1,20 +1,24 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use lyra_ast::{AstNode, ErasedAstId};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
-use lyra_semantic::const_eval::{ConstLookup, eval_const_expr};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::symbols::GlobalDefId;
-use lyra_semantic::types::{ConstEvalError, ConstInt, SymbolType, Ty};
+use lyra_semantic::types::ConstInt;
 use lyra_source::{FileId, Span, TextRange};
 use smol_str::SmolStr;
 
-use crate::elaboration::{
-    ElabDiag, ElabItemKey, ElabTree, GenScopeKey, GenScopeKind, GenScopeNode, InstanceKey,
-    InstanceNode, ParamEnvId, ParamEnvInterner, ScopeKey,
+use crate::elab_eval::{
+    EvalEnv, build_param_env, cond_site_key, eval_env_expr, eval_gen_condition,
+    extract_param_overrides,
 };
-use crate::module_sig::{ModuleSig, ParamKind, ParamSig, PortDirection, PortSig};
+use crate::elaboration::{
+    CondCacheKey, CondSiteKind, ElabDiag, ElabNodeId, ElabTree, GenScopeKind, GenScopeNode,
+    GenScopeOrigin, GenvarEnvId, GenvarEnvInterner, InstId, InstOrigin, InstanceNode, ParamEnvId,
+    ParamEnvInterner,
+};
+use crate::module_sig::{ModuleSig, ParamKind, PortDirection, PortSig};
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::semantic::{def_index_file, global_def_index};
 use crate::type_queries::{SymbolRef, type_of_symbol};
@@ -22,21 +26,18 @@ use crate::{CompilationUnit, source_file_by_id};
 
 const ELAB_RECURSION_LIMIT: usize = 256;
 
-/// Identifies a top module for elaboration.
 #[salsa::interned]
 pub struct TopModule<'db> {
     pub unit: CompilationUnit,
     pub name: SmolStr,
 }
 
-/// Identifies a module definition for signature extraction.
 #[salsa::interned]
 pub struct ModuleRef<'db> {
     pub unit: CompilationUnit,
     pub def_id: GlobalDefId,
 }
 
-/// Build a module signature from the module header AST (Salsa-cached).
 #[salsa::tracked(return_ref)]
 pub fn module_signature<'db>(db: &'db dyn salsa::Database, module: ModuleRef<'db>) -> ModuleSig {
     let unit = module.unit(db);
@@ -108,11 +109,11 @@ fn extract_port_sigs(
                 let sym_ref = SymbolRef::new(db, unit, gsym);
                 let st = type_of_symbol(db, sym_ref);
                 match st {
-                    SymbolType::Value(ty) => Some(ty),
+                    lyra_semantic::types::SymbolType::Value(ty) => Some(ty),
                     _ => None,
                 }
             })
-            .unwrap_or(Ty::Error);
+            .unwrap_or(lyra_semantic::types::Ty::Error);
 
         let name_range = port.name().map(|t| t.text_range()).unwrap_or_default();
         let decl_range = port.text_range();
@@ -131,7 +132,7 @@ fn extract_port_sigs(
 fn extract_param_sigs(
     module_decl: &lyra_ast::ModuleDecl,
     id_map: &lyra_ast::AstIdMap,
-) -> Vec<ParamSig> {
+) -> Vec<crate::module_sig::ParamSig> {
     let Some(param_port_list) = module_decl.param_port_list() else {
         return Vec::new();
     };
@@ -168,7 +169,7 @@ fn extract_param_sigs(
                 None
             };
 
-            params.push(ParamSig {
+            params.push(crate::module_sig::ParamSig {
                 name: param_name,
                 kind: if is_type_param {
                     ParamKind::Type
@@ -184,270 +185,6 @@ fn extract_param_sigs(
     params
 }
 
-/// Lookup that resolves names against a module's parameter environment.
-///
-/// If a name matches a parameter in `sig`, returns the value from
-/// `values[0..prefix_len]`. Parameters at or beyond `prefix_len`
-/// are forward references and return `Error(Unresolved)`.
-/// If the name is not a parameter, returns `None` so the caller
-/// can fall back to symbol-table resolution.
-struct ParamLookup<'a> {
-    sig: &'a ModuleSig,
-    values: &'a [ConstInt],
-    prefix_len: usize,
-}
-
-impl ConstLookup for ParamLookup<'_> {
-    fn lookup(&self, name: &str) -> Option<ConstInt> {
-        let (idx, _) = self.sig.param_by_name(name)?;
-        let i = idx as usize;
-        if i < self.prefix_len {
-            Some(self.values[i].clone())
-        } else {
-            Some(ConstInt::Error(ConstEvalError::Unresolved))
-        }
-    }
-}
-
-/// Collect override mappings, validating names/counts and emitting diagnostics.
-///
-/// Returns a vec of `Option<ConstInt>` aligned with `sig.params`: `Some(v)` if
-/// the parameter has an override, `None` if it should use its default.
-fn collect_overrides(
-    sig: &ModuleSig,
-    overrides: &[ParamOverride],
-    file_id: FileId,
-    inst_range: TextRange,
-    diags: &mut Vec<ElabDiag>,
-) -> Vec<Option<ConstInt>> {
-    let param_count = sig.params.len();
-    let mut result = vec![None; param_count];
-
-    let has_named = overrides.iter().any(|o| o.name.is_some());
-    if has_named {
-        let mut seen: HashSet<u32> = HashSet::new();
-        for ovr in overrides {
-            let Some(ref name) = ovr.name else {
-                continue;
-            };
-            match sig.param_by_name(name) {
-                Some((idx, _)) => {
-                    if !seen.insert(idx) {
-                        diags.push(ElabDiag::DuplicateParamOverride {
-                            name: SmolStr::new(name.as_str()),
-                            span: Span {
-                                file: file_id,
-                                range: ovr.span,
-                            },
-                        });
-                        continue;
-                    }
-                    if matches!(ovr.value, ConstInt::Error(_)) {
-                        diags.push(ElabDiag::ParamNotConst {
-                            name: sig.params[idx as usize].name.clone(),
-                            span: Span {
-                                file: file_id,
-                                range: ovr.span,
-                            },
-                        });
-                    }
-                    result[idx as usize] = Some(ovr.value.clone());
-                }
-                None => {
-                    diags.push(ElabDiag::UnknownParam {
-                        name: SmolStr::new(name.as_str()),
-                        module: sig.name.clone(),
-                        span: Span {
-                            file: file_id,
-                            range: ovr.span,
-                        },
-                    });
-                }
-            }
-        }
-    } else {
-        let value_param_count = sig
-            .params
-            .iter()
-            .filter(|p| p.kind == ParamKind::Value)
-            .count();
-        if overrides.len() > value_param_count {
-            diags.push(ElabDiag::TooManyPositionalParams {
-                expected: value_param_count,
-                got: overrides.len(),
-                span: Span {
-                    file: file_id,
-                    range: inst_range,
-                },
-            });
-        }
-        let mut ovr_idx = 0;
-        for (i, param) in sig.params.iter().enumerate() {
-            if param.kind == ParamKind::Type {
-                continue;
-            }
-            if ovr_idx < overrides.len() {
-                if matches!(overrides[ovr_idx].value, ConstInt::Error(_)) {
-                    diags.push(ElabDiag::ParamNotConst {
-                        name: param.name.clone(),
-                        span: Span {
-                            file: file_id,
-                            range: overrides[ovr_idx].span,
-                        },
-                    });
-                }
-                result[i] = Some(overrides[ovr_idx].value.clone());
-                ovr_idx += 1;
-            }
-        }
-    }
-
-    result
-}
-
-/// Build a param env by evaluating defaults incrementally (seeing earlier
-/// params) and applying overrides. Returns an interned `ParamEnvId`.
-fn build_param_env(
-    db: &dyn salsa::Database,
-    unit: CompilationUnit,
-    sig: &ModuleSig,
-    overrides: &[ParamOverride],
-    inst_span: Span,
-    diags: &mut Vec<ElabDiag>,
-    interner: &mut ParamEnvInterner,
-) -> ParamEnvId {
-    let param_count = sig.params.len();
-    if param_count == 0 {
-        return ParamEnvId::EMPTY;
-    }
-
-    let override_map = collect_overrides(sig, overrides, inst_span.file, inst_span.range, diags);
-
-    // Default expressions live in the target module's file, not the
-    // instantiation site. Extract file from the first default_expr.
-    let def_file_id = sig
-        .params
-        .iter()
-        .find_map(|p| p.default_expr.as_ref().map(|e| e.file()));
-    let def_source_file = def_file_id.and_then(|fid| source_file_by_id(db, unit, fid));
-    let id_map = def_source_file.map(|sf| ast_id_map(db, sf));
-    let parse = def_source_file.map(|sf| parse_file(db, sf));
-
-    let mut values = Vec::with_capacity(param_count);
-    for (i, param) in sig.params.iter().enumerate() {
-        if param.kind == ParamKind::Type {
-            values.push(ConstInt::Error(ConstEvalError::Unsupported));
-            continue;
-        }
-
-        if let Some(ref ovr_val) = override_map[i] {
-            values.push(ovr_val.clone());
-            continue;
-        }
-
-        let val = if let Some(expr_ast_id) = &param.default_expr {
-            if let (Some(id_map), Some(parse)) = (&id_map, &parse) {
-                if let Some(expr_node) = id_map.get_node(&parse.syntax(), *expr_ast_id) {
-                    let param_lookup = ParamLookup {
-                        sig,
-                        values: &values,
-                        prefix_len: i,
-                    };
-                    let resolve_name = |name_node: &SyntaxNode| -> Result<i64, ConstEvalError> {
-                        let name_text = extract_name_text(name_node)?;
-                        if let Some(ci) = param_lookup.lookup(&name_text) {
-                            return match ci {
-                                ConstInt::Known(v) => Ok(v),
-                                ConstInt::Error(e) => Err(e),
-                                ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
-                            };
-                        }
-                        let name_ast_id = id_map
-                            .erased_ast_id(name_node)
-                            .ok_or(ConstEvalError::Unresolved)?;
-                        let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, name_ast_id);
-                        match crate::const_eval::eval_const_int(db, expr_ref) {
-                            ConstInt::Known(v) => Ok(v),
-                            ConstInt::Error(e) => Err(e),
-                            ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
-                        }
-                    };
-                    match eval_const_expr(&expr_node, &resolve_name) {
-                        Ok(v) => ConstInt::Known(v),
-                        Err(e) => ConstInt::Error(e),
-                    }
-                } else {
-                    let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, *expr_ast_id);
-                    crate::const_eval::eval_const_int(db, expr_ref)
-                }
-            } else {
-                let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, *expr_ast_id);
-                crate::const_eval::eval_const_int(db, expr_ref)
-            }
-        } else {
-            ConstInt::Error(ConstEvalError::Unresolved)
-        };
-        values.push(val);
-    }
-
-    interner.intern(values)
-}
-
-struct ParamOverride {
-    name: Option<SmolStr>,
-    value: ConstInt,
-    span: TextRange,
-}
-
-/// Extract parameter overrides from a `ModuleInstantiation` node.
-///
-/// Evaluates override expressions in the instantiating module's scope
-/// so that `#(.W(X))` resolves `X` against the instantiator's params/genvars.
-fn extract_param_overrides(
-    inst_node: &lyra_ast::ModuleInstantiation,
-    ctx: &ElabCtx<'_>,
-    env: &ScopeEnv<'_>,
-) -> Vec<ParamOverride> {
-    let Some(param_port_list) = inst_node.param_overrides() else {
-        return Vec::new();
-    };
-
-    let mut overrides = Vec::new();
-
-    for child in param_port_list.syntax().children() {
-        if child.kind() != SyntaxKind::InstancePort {
-            continue;
-        }
-        let Some(ip) = lyra_ast::InstancePort::cast(child) else {
-            continue;
-        };
-
-        let name = ip.port_name().map(|t| SmolStr::new(t.text()));
-        let span = ip.syntax().text_range();
-
-        let value = if let Some(expr_node) = ip.actual_expr() {
-            match eval_env_expr(
-                ctx,
-                &expr_node,
-                env.file_id,
-                env.sig,
-                env.param_env,
-                env.genvars,
-            ) {
-                Ok(v) => ConstInt::Known(v),
-                Err(e) => ConstInt::Error(e),
-            }
-        } else {
-            ConstInt::Error(ConstEvalError::Unresolved)
-        };
-
-        overrides.push(ParamOverride { name, value, span });
-    }
-
-    overrides
-}
-
-/// Elaborate a top module into an instance tree (Salsa-cached).
 #[salsa::tracked(return_ref)]
 pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> ElabTree {
     let unit = top.unit(db);
@@ -456,6 +193,16 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
 
     let mut diags = Vec::new();
     let mut interner = ParamEnvInterner::new();
+    let genvar_interner = GenvarEnvInterner::new();
+
+    let empty_tree = |diags, interner, genvar_interner| ElabTree {
+        top: None,
+        instances: Vec::new(),
+        gen_scopes: Vec::new(),
+        diagnostics: diags,
+        envs: interner,
+        genvar_envs: genvar_interner,
+    };
 
     let Some((top_def_id, top_kind)) = global.resolve_definition(&name) else {
         diags.push(ElabDiag::UnresolvedModuleInst {
@@ -465,13 +212,7 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
                 range: TextRange::default(),
             },
         });
-        return ElabTree {
-            top: None,
-            nodes: HashMap::new(),
-            gen_scopes: HashMap::new(),
-            diagnostics: diags,
-            envs: interner,
-        };
+        return empty_tree(diags, interner, genvar_interner);
     };
 
     if top_kind != DefinitionKind::Module {
@@ -482,24 +223,12 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
                 range: TextRange::default(),
             },
         });
-        return ElabTree {
-            top: None,
-            nodes: HashMap::new(),
-            gen_scopes: HashMap::new(),
-            diagnostics: diags,
-            envs: interner,
-        };
+        return empty_tree(diags, interner, genvar_interner);
     }
 
     let file_id = top_def_id.file();
     let top_name_range = module_name_range(db, unit, top_def_id);
-    let top_key = InstanceKey {
-        file: file_id,
-        name_range: top_name_range,
-        parent_gen: None,
-    };
 
-    // Top module: defaults only, no overrides
     let sig = module_signature(db, ModuleRef::new(db, unit, top_def_id));
     let param_env = build_param_env(
         db,
@@ -514,77 +243,92 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
         &mut interner,
     );
 
-    let mut nodes = HashMap::new();
-    let mut gen_scopes = HashMap::new();
-    nodes.insert(
-        top_key.clone(),
-        InstanceNode {
-            key: top_key.clone(),
-            parent: None,
-            module_def: top_def_id,
-            instance_name: name.clone(),
-            param_env,
-            children: Vec::new(),
-        },
-    );
+    let top_origin = InstOrigin {
+        parent_inst: None,
+        inst_stmt_ast: ErasedAstId::placeholder(file_id),
+        inst_ordinal: 0,
+    };
+
+    let mut tree = ElabTree {
+        top: None,
+        instances: Vec::new(),
+        gen_scopes: Vec::new(),
+        diagnostics: Vec::new(),
+        envs: interner,
+        genvar_envs: genvar_interner,
+    };
+
+    let top_id = tree.push_instance(InstanceNode {
+        origin: top_origin,
+        parent: None,
+        module_def: top_def_id,
+        instance_name: name.clone(),
+        param_env,
+        children: Vec::new(),
+        source_file: file_id,
+        name_range: top_name_range,
+    });
+    tree.top = Some(top_id);
 
     let mut active_stack = Vec::new();
+    let mut cond_cache = HashMap::new();
+    let max_generate_iters = max_generate_iterations();
+
     let mut ctx = ElabCtx {
         db,
         unit,
-        nodes: &mut nodes,
-        gen_scopes: &mut gen_scopes,
+        tree: &mut tree,
         diags: &mut diags,
         active_stack: &mut active_stack,
-        interner: &mut interner,
-        cond_cache: HashMap::new(),
+        cond_cache: &mut cond_cache,
+        max_generate_iters,
     };
 
-    elaborate_module(
-        &mut ctx,
-        top_def_id,
-        &ScopeKey::Instance(top_key.clone()),
-        &[],
-    );
+    elaborate_module(&mut ctx, top_def_id, top_id, ElabNodeId::Inst(top_id));
 
-    ElabTree {
-        top: Some(top_key),
-        nodes,
-        gen_scopes,
-        diagnostics: diags,
-        envs: interner,
-    }
+    tree.diagnostics = diags;
+    tree
 }
 
-type CondCacheKey = (ErasedAstId, ParamEnvId, Vec<(SmolStr, i64)>);
+fn max_generate_iterations() -> usize {
+    #[cfg(test)]
+    {
+        32
+    }
+    #[cfg(not(test))]
+    {
+        crate::elaboration::ELAB_MAX_GENERATE_ITERATIONS
+    }
+}
 
 struct ElabCtx<'a> {
     db: &'a dyn salsa::Database,
     unit: CompilationUnit,
-    nodes: &'a mut HashMap<InstanceKey, InstanceNode>,
-    gen_scopes: &'a mut HashMap<GenScopeKey, GenScopeNode>,
+    tree: &'a mut ElabTree,
     diags: &'a mut Vec<ElabDiag>,
     active_stack: &'a mut Vec<GlobalDefId>,
-    interner: &'a mut ParamEnvInterner,
-    cond_cache: HashMap<CondCacheKey, Option<i64>>,
+    cond_cache: &'a mut HashMap<CondCacheKey, ConstInt>,
+    max_generate_iters: usize,
 }
 
-/// Immutable context for expanding children within a scope.
 struct ScopeEnv<'a> {
     file_id: FileId,
-    parent_scope: &'a ScopeKey,
+    parent_scope: ElabNodeId,
+    enclosing_inst: InstId,
     sig: &'a ModuleSig,
     param_env: ParamEnvId,
-    genvars: &'a [(SmolStr, i64)],
+    genvar_env: GenvarEnvId,
     global: &'a lyra_semantic::global_index::GlobalDefIndex,
 }
 
-impl ScopeEnv<'_> {
-    fn parent_gen_key(&self) -> Option<Box<GenScopeKey>> {
-        match self.parent_scope {
-            ScopeKey::GenScope(gk) => Some(Box::new(gk.clone())),
-            ScopeKey::Instance(_) => None,
-        }
+fn make_eval_env<'a>(ctx: &'a ElabCtx<'_>, env: &'a ScopeEnv<'a>) -> EvalEnv<'a> {
+    let genvar_values = ctx.tree.genvar_envs.values(env.genvar_env);
+    EvalEnv {
+        file_id: env.file_id,
+        sig: env.sig,
+        param_env: env.param_env,
+        genvar_values,
+        interner: &ctx.tree.envs,
     }
 }
 
@@ -613,8 +357,8 @@ fn module_name_range(
 fn elaborate_module(
     ctx: &mut ElabCtx<'_>,
     module_def: GlobalDefId,
-    parent_scope: &ScopeKey,
-    genvars: &[(SmolStr, i64)],
+    inst_id: InstId,
+    parent_scope: ElabNodeId,
 ) {
     let file_id = module_def.file();
 
@@ -629,15 +373,15 @@ fn elaborate_module(
     }
 
     ctx.active_stack.push(module_def);
-    elaborate_module_body(ctx, module_def, parent_scope, genvars);
+    elaborate_module_body(ctx, module_def, inst_id, parent_scope);
     ctx.active_stack.pop();
 }
 
 fn elaborate_module_body(
     ctx: &mut ElabCtx<'_>,
     module_def: GlobalDefId,
-    parent_scope: &ScopeKey,
-    genvars: &[(SmolStr, i64)],
+    inst_id: InstId,
+    parent_scope: ElabNodeId,
 ) {
     let file_id = module_def.file();
     let Some(source_file) = source_file_by_id(ctx.db, ctx.unit, file_id) else {
@@ -658,20 +402,15 @@ fn elaborate_module_body(
     };
 
     let sig = module_signature(ctx.db, ModuleRef::new(ctx.db, ctx.unit, module_def));
-
-    // Get the param_env for the current instance scope
-    let param_env = match parent_scope {
-        ScopeKey::Instance(ik) => ctx.nodes.get(ik).map(|n| n.param_env),
-        ScopeKey::GenScope(_) => None,
-    }
-    .unwrap_or(ParamEnvId::EMPTY);
+    let param_env = ctx.tree.inst(inst_id).param_env;
 
     let env = ScopeEnv {
         file_id,
         parent_scope,
+        enclosing_inst: inst_id,
         sig,
         param_env,
-        genvars,
+        genvar_env: GenvarEnvId::EMPTY,
         global,
     };
     expand_body_children(ctx, body.syntax(), &env);
@@ -725,18 +464,35 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
 
     let target_sig = module_signature(ctx.db, ModuleRef::new(ctx.db, ctx.unit, target_def_id));
 
-    let overrides = extract_param_overrides(&inst_node, ctx, env);
+    let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
+    let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
 
-    for (inst_name_tok, port_list) in inst_node.instances() {
-        let parent_gen = match env.parent_scope {
-            ScopeKey::GenScope(gsk) => Some(gsk.clone()),
-            ScopeKey::Instance(_) => None,
+    let inst_stmt_ast = id_map
+        .as_ref()
+        .and_then(|m| m.erased_ast_id(node))
+        .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
+
+    let eval_env = make_eval_env(ctx, env);
+    let overrides = extract_param_overrides(&inst_node, ctx.db, ctx.unit, &eval_env);
+
+    #[cfg(debug_assertions)]
+    let mut debug_origins = std::collections::HashSet::new();
+
+    for (idx, (inst_name_tok, port_list)) in inst_node.instances().enumerate() {
+        let origin = InstOrigin {
+            parent_inst: Some(env.enclosing_inst),
+            inst_stmt_ast,
+            inst_ordinal: idx as u32,
         };
-        let child_key = InstanceKey {
-            file: env.file_id,
-            name_range: inst_name_tok.text_range(),
-            parent_gen,
-        };
+
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                debug_origins.insert(origin),
+                "duplicate instance origin under parent {:?}",
+                env.enclosing_inst
+            );
+        }
 
         let child_param_env = build_param_env(
             ctx.db,
@@ -748,7 +504,7 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
                 range: inst_name_tok.text_range(),
             },
             ctx.diags,
-            ctx.interner,
+            &mut ctx.tree.envs,
         );
 
         if let Some(ref pl) = port_list {
@@ -762,22 +518,21 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
             );
         }
 
-        let child_item = ElabItemKey::Inst(child_key.clone());
+        let child_id = ctx.tree.push_instance(InstanceNode {
+            origin,
+            parent: Some(env.parent_scope),
+            module_def: target_def_id,
+            instance_name: SmolStr::new(inst_name_tok.text()),
+            param_env: child_param_env,
+            children: Vec::new(),
+            source_file: env.file_id,
+            name_range: inst_name_tok.text_range(),
+        });
 
-        ctx.nodes
-            .entry(child_key.clone())
-            .or_insert_with(|| InstanceNode {
-                key: child_key.clone(),
-                parent: Some(env.parent_scope.clone()),
-                module_def: target_def_id,
-                instance_name: SmolStr::new(inst_name_tok.text()),
-                param_env: child_param_env,
-                children: Vec::new(),
-            });
+        ctx.tree
+            .add_child(env.parent_scope, ElabNodeId::Inst(child_id));
 
-        add_child_to_scope(ctx, env.parent_scope, child_item);
-
-        elaborate_module(ctx, target_def_id, &ScopeKey::Instance(child_key), &[]);
+        elaborate_module(ctx, target_def_id, child_id, ElabNodeId::Inst(child_id));
     }
 }
 
@@ -787,7 +542,36 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
         return;
     }
 
-    let cond_val = eval_gen_condition(ctx, &children[0], env);
+    let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
+    let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
+    let scope_ast = id_map
+        .as_ref()
+        .and_then(|m| m.erased_ast_id(node))
+        .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
+
+    let cache_key = Some(cond_site_key(
+        scope_ast,
+        CondSiteKind::GenIf,
+        env.param_env,
+        env.genvar_env,
+    ));
+
+    let genvar_values = ctx.tree.genvar_envs.values(env.genvar_env);
+    let eval_env = EvalEnv {
+        file_id: env.file_id,
+        sig: env.sig,
+        param_env: env.param_env,
+        genvar_values,
+        interner: &ctx.tree.envs,
+    };
+    let cond_val = eval_gen_condition(
+        ctx.db,
+        ctx.unit,
+        &children[0],
+        &eval_env,
+        ctx.cond_cache,
+        cache_key,
+    );
 
     let cond_true = if let Some(v) = cond_val {
         v != 0
@@ -811,46 +595,38 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
         return;
     };
 
-    let scope_key = GenScopeKey {
-        file: env.file_id,
-        offset: node.text_range(),
+    let origin = GenScopeOrigin {
+        parent_inst: env.enclosing_inst,
+        scope_ast,
         iter: None,
-        parent_gen: env.parent_gen_key(),
     };
+
     let block_name = extract_block_name(body);
 
-    ctx.gen_scopes
-        .entry(scope_key.clone())
-        .or_insert_with(|| GenScopeNode {
-            key: scope_key.clone(),
-            parent: env.parent_scope.clone(),
-            name: block_name,
-            kind: GenScopeKind::If,
-            children: Vec::new(),
-        });
+    let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
+        origin,
+        parent: env.parent_scope,
+        name: block_name,
+        kind: GenScopeKind::If,
+        children: Vec::new(),
+        source_file: env.file_id,
+        offset: node.text_range(),
+    });
 
-    let scope_item = ElabItemKey::GenScope(scope_key.clone());
-    add_child_to_scope(ctx, env.parent_scope, scope_item);
+    ctx.tree
+        .add_child(env.parent_scope, ElabNodeId::GenScope(scope_id));
 
-    let child_scope = ScopeKey::GenScope(scope_key);
     let child_env = ScopeEnv {
-        parent_scope: &child_scope,
+        parent_scope: ElabNodeId::GenScope(scope_id),
         ..*env
     };
     expand_body_children(ctx, body, &child_env);
 }
 
 fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
+    let eval_env = make_eval_env(ctx, env);
     let eval_fn = |expr_node: &SyntaxNode| -> Option<i64> {
-        eval_env_expr(
-            ctx,
-            expr_node,
-            env.file_id,
-            env.sig,
-            env.param_env,
-            env.genvars,
-        )
-        .ok()
+        eval_env_expr(ctx.db, ctx.unit, expr_node, &eval_env).ok()
     };
     let for_parts = extract_for_parts(node, &eval_fn);
 
@@ -868,6 +644,13 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
         return;
     };
 
+    let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
+    let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
+    let scope_ast = id_map
+        .as_ref()
+        .and_then(|m| m.erased_ast_id(node))
+        .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
+
     let genvar_name = parts.genvar_name;
     let mut current = parts.init;
     let limit = parts.limit;
@@ -877,10 +660,10 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
         return;
     }
 
-    let max_iterations = 10000;
+    let max_iters = ctx.max_generate_iters;
     let mut iteration = 0;
 
-    while iteration < max_iterations {
+    while iteration < max_iters {
         let cond_met = match limit {
             ForLimit::Lt(n) => current < n,
             ForLimit::Le(n) => current <= n,
@@ -893,37 +676,39 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
             break;
         }
 
-        let scope_key = GenScopeKey {
-            file: env.file_id,
-            offset: node.text_range(),
-            iter: Some(current),
-            parent_gen: env.parent_gen_key(),
+        let iter_value = ConstInt::Known(current);
+        let origin = GenScopeOrigin {
+            parent_inst: env.enclosing_inst,
+            scope_ast,
+            iter: Some(iter_value.clone()),
         };
 
         let block_name = extract_block_name(&body);
 
-        ctx.gen_scopes
-            .entry(scope_key.clone())
-            .or_insert_with(|| GenScopeNode {
-                key: scope_key.clone(),
-                parent: env.parent_scope.clone(),
-                name: block_name,
-                kind: GenScopeKind::ForIteration {
-                    genvar_name: genvar_name.clone(),
-                    genvar_value: current,
-                },
-                children: Vec::new(),
-            });
+        let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
+            origin,
+            parent: env.parent_scope,
+            name: block_name,
+            kind: GenScopeKind::ForIteration {
+                genvar_name: genvar_name.clone(),
+                genvar_value: iter_value.clone(),
+            },
+            children: Vec::new(),
+            source_file: env.file_id,
+            offset: node.text_range(),
+        });
 
-        let scope_item = ElabItemKey::GenScope(scope_key.clone());
-        add_child_to_scope(ctx, env.parent_scope, scope_item);
+        ctx.tree
+            .add_child(env.parent_scope, ElabNodeId::GenScope(scope_id));
 
-        let mut child_genvars = env.genvars.to_vec();
-        child_genvars.push((genvar_name.clone(), current));
-        let child_scope = ScopeKey::GenScope(scope_key.clone());
+        let child_genvar_env =
+            ctx.tree
+                .genvar_envs
+                .push(env.genvar_env, genvar_name.clone(), iter_value);
+
         let child_env = ScopeEnv {
-            parent_scope: &child_scope,
-            genvars: &child_genvars,
+            parent_scope: ElabNodeId::GenScope(scope_id),
+            genvar_env: child_genvar_env,
             ..*env
         };
         expand_body_children(ctx, &body, &child_env);
@@ -931,26 +716,36 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
         current = current.wrapping_add(step);
         iteration += 1;
     }
+
+    if iteration >= max_iters {
+        let still_going = match limit {
+            ForLimit::Lt(n) => current < n,
+            ForLimit::Le(n) => current <= n,
+            ForLimit::Gt(n) => current > n,
+            ForLimit::Ge(n) => current >= n,
+            ForLimit::Ne(n) => current != n,
+        };
+        if still_going {
+            ctx.diags.push(ElabDiag::GenerateIterationLimit {
+                span: Span {
+                    file: env.file_id,
+                    range: node.text_range(),
+                },
+                limit: max_iters,
+            });
+        }
+    }
 }
 
-fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
-    let child_nodes: Vec<SyntaxNode> = node.children().collect();
-    if child_nodes.is_empty() {
-        return;
-    }
-
-    let case_val = eval_gen_condition(ctx, &child_nodes[0], env);
-    let Some(case_val) = case_val else {
-        ctx.diags.push(ElabDiag::GenCondNotConst {
-            span: Span {
-                file: env.file_id,
-                range: child_nodes[0].text_range(),
-            },
-        });
-        return;
-    };
-
-    let mut matched_body: Option<SyntaxNode> = None;
+fn match_case_body(
+    child_nodes: &[SyntaxNode],
+    case_val: i64,
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    cond_cache: &mut HashMap<CondCacheKey, ConstInt>,
+    eval_env: &EvalEnv<'_>,
+) -> Option<(Option<SyntaxNode>, SyntaxNode)> {
+    let mut matched_body: Option<(SyntaxNode, SyntaxNode)> = None;
     let mut default_body: Option<SyntaxNode> = None;
 
     for child in &child_nodes[1..] {
@@ -973,11 +768,13 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
             .collect();
 
         for expr in &item_exprs {
-            let item_val = eval_gen_condition(ctx, expr, env);
+            let item_val = eval_gen_condition(db, unit, expr, eval_env, cond_cache, None);
             if let Some(v) = item_val
                 && v == case_val
             {
-                matched_body = child.children().last();
+                if let Some(body_node) = child.children().last() {
+                    matched_body = Some((child.clone(), body_node));
+                }
                 break;
             }
         }
@@ -987,35 +784,99 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         }
     }
 
-    let Some(body) = matched_body.or(default_body) else {
+    if let Some((item, body)) = matched_body {
+        Some((Some(item), body))
+    } else {
+        default_body.map(|body| (None, body))
+    }
+}
+
+fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
+    let child_nodes: Vec<SyntaxNode> = node.children().collect();
+    if child_nodes.is_empty() {
+        return;
+    }
+
+    let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
+    let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
+    let case_stmt_ast = id_map
+        .as_ref()
+        .and_then(|m| m.erased_ast_id(node))
+        .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
+
+    let cache_key = Some(cond_site_key(
+        case_stmt_ast,
+        CondSiteKind::GenCase,
+        env.param_env,
+        env.genvar_env,
+    ));
+
+    let genvar_values = ctx.tree.genvar_envs.values(env.genvar_env);
+    let eval_env = EvalEnv {
+        file_id: env.file_id,
+        sig: env.sig,
+        param_env: env.param_env,
+        genvar_values,
+        interner: &ctx.tree.envs,
+    };
+    let case_val = eval_gen_condition(
+        ctx.db,
+        ctx.unit,
+        &child_nodes[0],
+        &eval_env,
+        ctx.cond_cache,
+        cache_key,
+    );
+
+    let Some(case_val) = case_val else {
+        ctx.diags.push(ElabDiag::GenCondNotConst {
+            span: Span {
+                file: env.file_id,
+                range: child_nodes[0].text_range(),
+            },
+        });
         return;
     };
 
-    let scope_key = GenScopeKey {
-        file: env.file_id,
-        offset: node.text_range(),
+    let Some((case_item_node, body)) = match_case_body(
+        &child_nodes,
+        case_val,
+        ctx.db,
+        ctx.unit,
+        ctx.cond_cache,
+        &eval_env,
+    ) else {
+        return;
+    };
+
+    let scope_ast = case_item_node
+        .as_ref()
+        .and_then(|item| id_map.as_ref().and_then(|m| m.erased_ast_id(item)))
+        .unwrap_or(case_stmt_ast);
+
+    let origin = GenScopeOrigin {
+        parent_inst: env.enclosing_inst,
+        scope_ast,
         iter: None,
-        parent_gen: env.parent_gen_key(),
     };
 
     let block_name = extract_block_name(&body);
 
-    ctx.gen_scopes
-        .entry(scope_key.clone())
-        .or_insert_with(|| GenScopeNode {
-            key: scope_key.clone(),
-            parent: env.parent_scope.clone(),
-            name: block_name,
-            kind: GenScopeKind::CaseItem,
-            children: Vec::new(),
-        });
+    let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
+        origin,
+        parent: env.parent_scope,
+        name: block_name,
+        kind: GenScopeKind::CaseItem,
+        children: Vec::new(),
+        source_file: env.file_id,
+        offset: node.text_range(),
+    });
 
-    let scope_item = ElabItemKey::GenScope(scope_key.clone());
-    add_child_to_scope(ctx, env.parent_scope, scope_item);
+    ctx.tree
+        .add_child(env.parent_scope, ElabNodeId::GenScope(scope_id));
 
-    let child_scope = ScopeKey::GenScope(scope_key);
     let child_env = ScopeEnv {
-        parent_scope: &child_scope,
+        parent_scope: ElabNodeId::GenScope(scope_id),
         ..*env
     };
     expand_body_children(ctx, &body, &child_env);
@@ -1024,167 +885,37 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
 fn process_generate_block(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
     let block_name = extract_block_name(node);
 
-    let scope_key = GenScopeKey {
-        file: env.file_id,
-        offset: node.text_range(),
+    let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
+    let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
+    let scope_ast = id_map
+        .as_ref()
+        .and_then(|m| m.erased_ast_id(node))
+        .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
+
+    let origin = GenScopeOrigin {
+        parent_inst: env.enclosing_inst,
+        scope_ast,
         iter: None,
-        parent_gen: env.parent_gen_key(),
     };
 
-    ctx.gen_scopes
-        .entry(scope_key.clone())
-        .or_insert_with(|| GenScopeNode {
-            key: scope_key.clone(),
-            parent: env.parent_scope.clone(),
-            name: block_name,
-            kind: GenScopeKind::If,
-            children: Vec::new(),
-        });
+    let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
+        origin,
+        parent: env.parent_scope,
+        name: block_name,
+        kind: GenScopeKind::If,
+        children: Vec::new(),
+        source_file: env.file_id,
+        offset: node.text_range(),
+    });
 
-    let scope_item = ElabItemKey::GenScope(scope_key.clone());
-    add_child_to_scope(ctx, env.parent_scope, scope_item);
+    ctx.tree
+        .add_child(env.parent_scope, ElabNodeId::GenScope(scope_id));
 
-    let child_scope = ScopeKey::GenScope(scope_key);
     let child_env = ScopeEnv {
-        parent_scope: &child_scope,
+        parent_scope: ElabNodeId::GenScope(scope_id),
         ..*env
     };
     expand_body_children(ctx, node, &child_env);
-}
-
-fn add_child_to_scope(ctx: &mut ElabCtx<'_>, scope: &ScopeKey, item: ElabItemKey) {
-    match scope {
-        ScopeKey::Instance(ik) => {
-            if let Some(node) = ctx.nodes.get_mut(ik) {
-                node.children.push(item);
-            }
-        }
-        ScopeKey::GenScope(gk) => {
-            if let Some(node) = ctx.gen_scopes.get_mut(gk) {
-                node.children.push(item);
-            }
-        }
-    }
-}
-
-fn eval_env_expr(
-    ctx: &ElabCtx<'_>,
-    expr_node: &SyntaxNode,
-    file_id: FileId,
-    sig: &ModuleSig,
-    param_env: ParamEnvId,
-    genvars: &[(SmolStr, i64)],
-) -> Result<i64, ConstEvalError> {
-    let source_file =
-        source_file_by_id(ctx.db, ctx.unit, file_id).ok_or(ConstEvalError::Unresolved)?;
-    let id_map = ast_id_map(ctx.db, source_file);
-
-    // Fast path: DB-backed evaluation for simple literal cases
-    if genvars.is_empty()
-        && sig.params.is_empty()
-        && let Some(expr_ast_id) = id_map.erased_ast_id(expr_node)
-    {
-        let expr_ref = crate::const_eval::ConstExprRef::new(ctx.db, ctx.unit, expr_ast_id);
-        if let ConstInt::Known(v) = crate::const_eval::eval_const_int(ctx.db, expr_ref) {
-            return Ok(v);
-        }
-    }
-
-    let env_values = ctx.interner.values(param_env);
-    let param_lookup = ParamLookup {
-        sig,
-        values: env_values,
-        prefix_len: sig.params.len(),
-    };
-
-    let resolve_name = |name_node: &SyntaxNode| -> Result<i64, ConstEvalError> {
-        let name_text = extract_name_text(name_node)?;
-
-        // 1. Walk genvars from back to front (innermost first)
-        for (gn, gv) in genvars.iter().rev() {
-            if name_text == gn.as_str() {
-                return Ok(*gv);
-            }
-        }
-
-        // 2. Check param env (never fall through for param names)
-        if let Some(ci) = param_lookup.lookup(&name_text) {
-            return match ci {
-                ConstInt::Known(v) => Ok(v),
-                ConstInt::Error(e) => Err(e),
-                ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
-            };
-        }
-
-        // 3. Symbol-table fallback
-        let name_ast_id = id_map
-            .erased_ast_id(name_node)
-            .ok_or(ConstEvalError::Unresolved)?;
-        let expr_ref = crate::const_eval::ConstExprRef::new(ctx.db, ctx.unit, name_ast_id);
-        match crate::const_eval::eval_const_int(ctx.db, expr_ref) {
-            ConstInt::Known(v) => Ok(v),
-            ConstInt::Error(e) => Err(e),
-            ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
-        }
-    };
-
-    eval_const_expr(expr_node, &resolve_name)
-}
-
-fn eval_gen_condition(
-    ctx: &mut ElabCtx<'_>,
-    expr_node: &SyntaxNode,
-    env: &ScopeEnv<'_>,
-) -> Option<i64> {
-    let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id)?;
-    let id_map = ast_id_map(ctx.db, source_file);
-
-    if let Some(expr_ast_id) = id_map.erased_ast_id(expr_node) {
-        let cache_key = (expr_ast_id, env.param_env, env.genvars.to_vec());
-        if let Some(&cached) = ctx.cond_cache.get(&cache_key) {
-            return cached;
-        }
-        let result = eval_env_expr(
-            ctx,
-            expr_node,
-            env.file_id,
-            env.sig,
-            env.param_env,
-            env.genvars,
-        )
-        .ok();
-        ctx.cond_cache.insert(cache_key, result);
-        result
-    } else {
-        eval_env_expr(
-            ctx,
-            expr_node,
-            env.file_id,
-            env.sig,
-            env.param_env,
-            env.genvars,
-        )
-        .ok()
-    }
-}
-
-fn extract_name_text(name_node: &SyntaxNode) -> Result<String, ConstEvalError> {
-    match name_node.kind() {
-        SyntaxKind::NameRef => name_node
-            .children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .find(|t| t.kind() == SyntaxKind::Ident)
-            .map(|t| t.text().to_string())
-            .ok_or(ConstEvalError::Unresolved),
-        SyntaxKind::QualifiedName => name_node
-            .children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .filter(|t| t.kind() == SyntaxKind::Ident)
-            .last()
-            .map(|t| t.text().to_string())
-            .ok_or(ConstEvalError::Unresolved),
-        _ => Err(ConstEvalError::Unresolved),
-    }
 }
 
 use crate::elab_lower::{ForLimit, extract_block_name, extract_for_parts, is_expr_kind};

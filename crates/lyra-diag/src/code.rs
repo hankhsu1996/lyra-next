@@ -115,6 +115,10 @@ impl DiagnosticCode {
         namespace: "lyra.elab",
         number: 15,
     };
+    pub const GENERATE_ITERATION_LIMIT: Self = Self {
+        namespace: "lyra.elab",
+        number: 16,
+    };
 
     /// Format as `"namespace[number]"`, e.g. `"lyra.semantic[1]"`.
     pub fn as_str(&self) -> String {

@@ -261,6 +261,11 @@ fn elab_diag_code_msg(
         ElabDiag::GenvarNotConst { .. } => {
             (e, C::GENVAR_NOT_CONST, Message::simple(M::GenvarNotConst))
         }
+        ElabDiag::GenerateIterationLimit { limit, .. } => (
+            e,
+            C::GENERATE_ITERATION_LIMIT,
+            Message::new(M::GenerateIterationLimit, vec![Arg::Count(*limit)]),
+        ),
     }
 }
 

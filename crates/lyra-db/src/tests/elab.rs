@@ -4,7 +4,7 @@ use smol_str::SmolStr;
 
 use super::*;
 
-use crate::elaboration::{ElabItemKey, ElabTree, InstanceKey, ScopeKey};
+use crate::elaboration::{ElabNodeId, ElabTree, InstId};
 
 fn elab_diags(files: &[&str], top: &str) -> Vec<lyra_diag::Diagnostic> {
     let db = LyraDatabase::default();
@@ -45,36 +45,80 @@ fn sig_ports(src: &str, module_name: &str) -> Vec<String> {
         .collect()
 }
 
-fn child_instance_names(tree: &ElabTree, key: &InstanceKey) -> Vec<String> {
-    let node = &tree.nodes[key];
-    node.children
+// Tree-walk helpers
+
+fn child_instance_names(tree: &ElabTree, id: InstId) -> Vec<String> {
+    tree.inst(id)
+        .children
         .iter()
         .filter_map(|ck| match ck {
-            ElabItemKey::Inst(ik) => Some(tree.nodes[ik].instance_name.to_string()),
-            ElabItemKey::GenScope(_) => None,
+            ElabNodeId::Inst(iid) => Some(tree.inst(*iid).instance_name.to_string()),
+            ElabNodeId::GenScope(_) => None,
         })
         .collect()
 }
 
-fn all_instance_names_under(tree: &ElabTree, key: &InstanceKey) -> Vec<String> {
+fn all_instance_names_under(tree: &ElabTree, id: InstId) -> Vec<String> {
     let mut names = Vec::new();
-    collect_inst_names(tree, &ElabItemKey::Inst(key.clone()), &mut names);
+    collect_inst_names(tree, ElabNodeId::Inst(id), &mut names);
     names
 }
 
-fn collect_inst_names(tree: &ElabTree, item: &ElabItemKey, names: &mut Vec<String>) {
-    let children: &[ElabItemKey] = match item {
-        ElabItemKey::Inst(ik) => &tree.nodes[ik].children,
-        ElabItemKey::GenScope(gk) => match tree.gen_scopes.get(gk) {
-            Some(gs) => &gs.children,
-            None => return,
-        },
+fn collect_inst_names(tree: &ElabTree, node: ElabNodeId, names: &mut Vec<String>) {
+    let children: &[ElabNodeId] = match node {
+        ElabNodeId::Inst(id) => &tree.inst(id).children,
+        ElabNodeId::GenScope(id) => &tree.gen_scope(id).children,
     };
     for child in children {
-        if let ElabItemKey::Inst(cik) = child {
-            names.push(tree.nodes[cik].instance_name.to_string());
+        if let ElabNodeId::Inst(cid) = child {
+            names.push(tree.inst(*cid).instance_name.to_string());
         }
-        collect_inst_names(tree, child, names);
+        collect_inst_names(tree, *child, names);
+    }
+}
+
+fn find_child_inst_by_name(tree: &ElabTree, parent: InstId, name: &str) -> InstId {
+    for child in &tree.inst(parent).children {
+        if let ElabNodeId::Inst(cid) = child {
+            if tree.inst(*cid).instance_name == name {
+                return *cid;
+            }
+        }
+    }
+    panic!("child instance '{name}' not found under parent");
+}
+
+fn child_param_values(tree: &ElabTree, parent: InstId, child_name: &str) -> Vec<ConstInt> {
+    let cid = find_child_inst_by_name(tree, parent, child_name);
+    let env_id = tree.inst(cid).param_env;
+    tree.envs.values(env_id).to_vec()
+}
+
+fn assert_no_duplicate_origins(tree: &ElabTree) {
+    use std::collections::HashSet;
+    for inst in &tree.instances {
+        let mut seen_inst_origins = HashSet::new();
+        let mut seen_gen_origins = HashSet::new();
+        for child in &inst.children {
+            match child {
+                ElabNodeId::Inst(cid) => {
+                    let origin = tree.inst(*cid).origin;
+                    assert!(
+                        seen_inst_origins.insert(origin),
+                        "duplicate InstOrigin under instance '{}'",
+                        inst.instance_name
+                    );
+                }
+                ElabNodeId::GenScope(gid) => {
+                    let origin = tree.gen_scope(*gid).origin.clone();
+                    assert!(
+                        seen_gen_origins.insert(origin),
+                        "duplicate GenScopeOrigin under instance '{}'",
+                        inst.instance_name
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -280,36 +324,27 @@ fn instance_tree_two_levels() {
         "top",
     );
 
-    let top_key = tree.top.clone().expect("top should exist");
-    let top_node = &tree.nodes[&top_key];
+    let top_id = tree.top.expect("top should exist");
+    let top_node = tree.inst(top_id);
     assert_eq!(top_node.instance_name, "top");
     assert!(top_node.parent.is_none(), "top has no parent");
 
-    // top -> m1
-    let top_children = child_instance_names(&tree, &top_key);
+    let top_children = child_instance_names(&tree, top_id);
     assert_eq!(top_children, vec!["m1"]);
 
-    // m1 -> l1
-    let m1_key = match &top_node.children[0] {
-        ElabItemKey::Inst(k) => k.clone(),
-        _ => panic!("expected instance"),
-    };
-    let m1_node = &tree.nodes[&m1_key];
-    assert_eq!(m1_node.parent, Some(ScopeKey::Instance(top_key.clone())));
-    let m1_children = child_instance_names(&tree, &m1_key);
+    let m1_id = find_child_inst_by_name(&tree, top_id, "m1");
+    let m1_node = tree.inst(m1_id);
+    assert_eq!(m1_node.parent, Some(ElabNodeId::Inst(top_id)));
+    let m1_children = child_instance_names(&tree, m1_id);
     assert_eq!(m1_children, vec!["l1"]);
 
-    // l1 is a leaf
-    let l1_key = match &m1_node.children[0] {
-        ElabItemKey::Inst(k) => k.clone(),
-        _ => panic!("expected instance"),
-    };
-    let l1_node = &tree.nodes[&l1_key];
-    assert_eq!(l1_node.parent, Some(ScopeKey::Instance(m1_key)));
+    let l1_id = find_child_inst_by_name(&tree, m1_id, "l1");
+    let l1_node = tree.inst(l1_id);
+    assert_eq!(l1_node.parent, Some(ElabNodeId::Inst(m1_id)));
     assert!(l1_node.children.is_empty(), "leaf has no children");
 
-    // 3 nodes total: top, m1, l1
-    assert_eq!(tree.nodes.len(), 3);
+    assert_eq!(tree.instances.len(), 3);
+    assert_no_duplicate_origins(&tree);
 }
 
 #[test]
@@ -322,22 +357,17 @@ fn instance_tree_diamond_legal() {
         "top",
     );
 
-    let top_key = tree.top.clone().expect("top should exist");
-    let top_children = child_instance_names(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let top_children = child_instance_names(&tree, top_id);
     assert_eq!(top_children, vec!["u1", "u2"]);
 
-    // Both children point back to top
-    for child in &tree.nodes[&top_key].children {
-        if let ElabItemKey::Inst(ck) = child {
-            assert_eq!(
-                tree.nodes[ck].parent,
-                Some(ScopeKey::Instance(top_key.clone()))
-            );
-            assert!(tree.nodes[ck].children.is_empty());
+    for child in &tree.inst(top_id).children {
+        if let ElabNodeId::Inst(cid) = child {
+            assert_eq!(tree.inst(*cid).parent, Some(ElabNodeId::Inst(top_id)));
+            assert!(tree.inst(*cid).children.is_empty());
         }
     }
 
-    // No recursion diagnostics
     let recursion: Vec<_> = tree
         .diagnostics
         .iter()
@@ -345,8 +375,8 @@ fn instance_tree_diamond_legal() {
         .collect();
     assert!(recursion.is_empty(), "diamond should not trigger recursion");
 
-    // 3 nodes: top + u1 + u2
-    assert_eq!(tree.nodes.len(), 3);
+    assert_eq!(tree.instances.len(), 3);
+    assert_no_duplicate_origins(&tree);
 }
 
 #[test]
@@ -359,14 +389,15 @@ fn instance_tree_multi_instance_statement() {
         "top",
     );
 
-    let top_key = tree.top.clone().expect("top should exist");
-    let top_children = child_instance_names(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let top_children = child_instance_names(&tree, top_id);
     assert_eq!(
         top_children,
         vec!["u1", "u2"],
         "multi-instance statement produces two distinct children"
     );
-    assert_eq!(tree.nodes.len(), 3);
+    assert_eq!(tree.instances.len(), 3);
+    assert_no_duplicate_origins(&tree);
 }
 
 // Cycle detection test
@@ -388,8 +419,8 @@ fn cycle_detection() {
         "expected recursion limit diag for cycle"
     );
 
-    let top_key = tree.top.clone().expect("top should exist");
-    let top_children = child_instance_names(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let top_children = child_instance_names(&tree, top_id);
     assert_eq!(top_children, vec!["b1"], "top has one child before cycle");
 }
 
@@ -444,8 +475,8 @@ fn param_positional_override() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let children = child_instance_names(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let children = child_instance_names(&tree, top_id);
     assert_eq!(children, vec!["u1"]);
     assert!(tree.diagnostics.is_empty(), "no diags expected");
 }
@@ -459,8 +490,8 @@ fn param_named_override() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let children = child_instance_names(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let children = child_instance_names(&tree, top_id);
     assert_eq!(children, vec!["u1"]);
     assert!(tree.diagnostics.is_empty(), "no diags expected");
 }
@@ -540,8 +571,8 @@ fn generate_if_true_branch() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert!(
         all.contains(&"u1".to_string()),
         "true branch should be elaborated: {all:?}"
@@ -550,6 +581,7 @@ fn generate_if_true_branch() {
         !all.contains(&"u2".to_string()),
         "false branch should not be elaborated: {all:?}"
     );
+    assert_no_duplicate_origins(&tree);
 }
 
 #[test]
@@ -561,8 +593,8 @@ fn generate_if_false_branch() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert!(
         !all.contains(&"u1".to_string()),
         "true branch should not be elaborated: {all:?}"
@@ -584,9 +616,10 @@ fn generate_for_four_iterations() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert_eq!(all.len(), 4, "expected 4 instances from for-loop: {all:?}");
+    assert_no_duplicate_origins(&tree);
 }
 
 #[test]
@@ -598,8 +631,8 @@ fn generate_for_zero_iterations() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert!(
         all.is_empty(),
         "expected 0 instances for zero-iteration loop: {all:?}"
@@ -618,8 +651,8 @@ fn generate_case_match() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert!(
         all.contains(&"u2".to_string()),
         "case 1 should match: {all:?}"
@@ -628,6 +661,7 @@ fn generate_case_match() {
         !all.contains(&"u1".to_string()),
         "case 0 should not match: {all:?}"
     );
+    assert_no_duplicate_origins(&tree);
 }
 
 #[test]
@@ -640,8 +674,8 @@ fn generate_case_default() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert!(
         all.contains(&"u2".to_string()),
         "default should match: {all:?}"
@@ -664,8 +698,8 @@ fn param_dependent_generate_if() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert!(all.contains(&"u1".to_string()), "inner instance: {all:?}");
     assert!(
         all.contains(&"u_a".to_string()),
@@ -684,29 +718,17 @@ fn nested_generate_for_inside_if() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert_eq!(
         all.len(),
         2,
         "expected 2 instances from nested for-in-if: {all:?}"
     );
+    assert_no_duplicate_origins(&tree);
 }
 
 // ParamEnv interning tests
-
-fn child_param_values(tree: &ElabTree, parent: &InstanceKey, child_name: &str) -> Vec<ConstInt> {
-    let node = &tree.nodes[parent];
-    for ck in &node.children {
-        if let ElabItemKey::Inst(ik) = ck {
-            if tree.nodes[ik].instance_name == child_name {
-                let env_id = tree.nodes[ik].param_env;
-                return tree.envs.values(env_id).to_vec();
-            }
-        }
-    }
-    panic!("child instance '{child_name}' not found");
-}
 
 #[test]
 fn param_default_sees_override_of_earlier_param() {
@@ -717,8 +739,8 @@ fn param_default_sees_override_of_earlier_param() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let vals = child_param_values(&tree, &top_key, "u1");
+    let top_id = tree.top.expect("top should exist");
+    let vals = child_param_values(&tree, top_id, "u1");
     assert_eq!(vals.len(), 2);
     assert_eq!(vals[0], ConstInt::Known(16), "W should be overridden to 16");
     assert_eq!(
@@ -737,8 +759,8 @@ fn param_forward_reference_errors() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let vals = child_param_values(&tree, &top_key, "u1");
+    let top_id = tree.top.expect("top should exist");
+    let vals = child_param_values(&tree, top_id, "u1");
     assert_eq!(vals.len(), 2);
     assert!(
         matches!(vals[0], ConstInt::Error(_)),
@@ -757,13 +779,13 @@ fn param_env_dedup() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let node = &tree.nodes[&top_key];
-    let ids: Vec<_> = node
+    let top_id = tree.top.expect("top should exist");
+    let ids: Vec<_> = tree
+        .inst(top_id)
         .children
         .iter()
         .filter_map(|ck| match ck {
-            ElabItemKey::Inst(ik) => Some(tree.nodes[ik].param_env),
+            ElabNodeId::Inst(iid) => Some(tree.inst(*iid).param_env),
             _ => None,
         })
         .collect();
@@ -785,10 +807,10 @@ fn override_uses_instantiator_param() {
         ],
         "outer",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert_eq!(all, vec!["u1"]);
-    let vals = child_param_values(&tree, &top_key, "u1");
+    let vals = child_param_values(&tree, top_id, "u1");
     assert_eq!(vals.len(), 1);
     assert_eq!(
         vals[0],
@@ -806,8 +828,8 @@ fn override_uses_localparam() {
         ],
         "outer",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let vals = child_param_values(&tree, &top_key, "u1");
+    let top_id = tree.top.expect("top should exist");
+    let vals = child_param_values(&tree, top_id, "u1");
     assert_eq!(vals.len(), 1);
     assert_eq!(
         vals[0],
@@ -827,8 +849,8 @@ fn for_loop_bound_from_param() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert_eq!(
         all.len(),
         4,
@@ -845,8 +867,8 @@ fn for_loop_bound_from_param_expression() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert_eq!(
         all.len(),
         3,
@@ -863,8 +885,8 @@ fn for_loop_flipped_condition() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert_eq!(
         all.len(),
         4,
@@ -881,18 +903,18 @@ fn nested_for_loops_see_both_genvars() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     assert_eq!(
         all.len(),
         6,
         "expected 2*3=6 instances from nested for-loops: {all:?}"
     );
+    assert_no_duplicate_origins(&tree);
 }
 
 #[test]
 fn genvar_dependent_generate_if_inside_for() {
-    // if (i) is false for i=0, true for i=1,2
     let (_, tree) = elab_tree(
         &[
             "module leaf_a(); endmodule",
@@ -901,10 +923,221 @@ fn genvar_dependent_generate_if_inside_for() {
         ],
         "top",
     );
-    let top_key = tree.top.clone().expect("top should exist");
-    let all = all_instance_names_under(&tree, &top_key);
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
     let a_count = all.iter().filter(|n| *n == "u_a").count();
     let b_count = all.iter().filter(|n| *n == "u_b").count();
     assert_eq!(a_count, 2, "i=1,2 pick true branch: {all:?}");
     assert_eq!(b_count, 1, "i=0 picks false branch: {all:?}");
+}
+
+// Identity correctness tests
+
+#[test]
+fn two_instances_of_same_module_children_disjoint() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module mid(); leaf u(); endmodule",
+            "module top; mid m1(); mid m2(); endmodule",
+        ],
+        "top",
+    );
+
+    let top_id = tree.top.expect("top should exist");
+    let m1_id = find_child_inst_by_name(&tree, top_id, "m1");
+    let m2_id = find_child_inst_by_name(&tree, top_id, "m2");
+
+    let m1_children = child_instance_names(&tree, m1_id);
+    let m2_children = child_instance_names(&tree, m2_id);
+    assert_eq!(m1_children, vec!["u"], "m1 has its own leaf");
+    assert_eq!(m2_children, vec!["u"], "m2 has its own leaf");
+
+    let m1_leaf = find_child_inst_by_name(&tree, m1_id, "u");
+    let m2_leaf = find_child_inst_by_name(&tree, m2_id, "u");
+    assert_ne!(m1_leaf, m2_leaf, "leaves are distinct nodes");
+    assert_eq!(tree.inst(m1_leaf).parent, Some(ElabNodeId::Inst(m1_id)));
+    assert_eq!(tree.inst(m2_leaf).parent, Some(ElabNodeId::Inst(m2_id)));
+
+    assert_eq!(tree.instances.len(), 5);
+    assert_no_duplicate_origins(&tree);
+}
+
+#[test]
+fn same_module_with_generate_scopes_disjoint() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module mid(); if (1) begin leaf u(); end endmodule",
+            "module top; mid m1(); mid m2(); endmodule",
+        ],
+        "top",
+    );
+
+    let top_id = tree.top.expect("top should exist");
+    let m1_all = all_instance_names_under(&tree, find_child_inst_by_name(&tree, top_id, "m1"));
+    let m2_all = all_instance_names_under(&tree, find_child_inst_by_name(&tree, top_id, "m2"));
+    assert_eq!(m1_all, vec!["u"]);
+    assert_eq!(m2_all, vec!["u"]);
+
+    assert_eq!(tree.instances.len(), 5);
+    assert_no_duplicate_origins(&tree);
+}
+
+#[test]
+fn three_level_diamond() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module mid(); leaf u(); endmodule",
+            "module top; mid m1(); mid m2(); endmodule",
+        ],
+        "top",
+    );
+
+    assert_eq!(tree.instances.len(), 5, "top + m1 + m2 + 2 leaves");
+
+    let top_id = tree.top.expect("top should exist");
+    let m1_id = find_child_inst_by_name(&tree, top_id, "m1");
+    let m2_id = find_child_inst_by_name(&tree, top_id, "m2");
+    let m1_leaf = find_child_inst_by_name(&tree, m1_id, "u");
+    let m2_leaf = find_child_inst_by_name(&tree, m2_id, "u");
+
+    assert_eq!(tree.inst(m1_leaf).parent, Some(ElabNodeId::Inst(m1_id)));
+    assert_eq!(tree.inst(m2_leaf).parent, Some(ElabNodeId::Inst(m2_id)));
+    assert_no_duplicate_origins(&tree);
+}
+
+#[test]
+fn multi_instance_statement_identity() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module mid(); leaf u(); endmodule",
+            "module top; mid m1(), m2(); endmodule",
+        ],
+        "top",
+    );
+
+    let top_id = tree.top.expect("top should exist");
+    let m1_id = find_child_inst_by_name(&tree, top_id, "m1");
+    let m2_id = find_child_inst_by_name(&tree, top_id, "m2");
+
+    let m1_children = child_instance_names(&tree, m1_id);
+    let m2_children = child_instance_names(&tree, m2_id);
+    assert_eq!(m1_children, vec!["u"]);
+    assert_eq!(m2_children, vec!["u"]);
+    assert_eq!(tree.instances.len(), 5);
+
+    let m1_origin = tree.inst(m1_id).origin;
+    let m2_origin = tree.inst(m2_id).origin;
+    assert_eq!(
+        m1_origin.inst_stmt_ast, m2_origin.inst_stmt_ast,
+        "same statement"
+    );
+    assert_ne!(
+        m1_origin.inst_ordinal, m2_origin.inst_ordinal,
+        "different ordinals"
+    );
+    assert_no_duplicate_origins(&tree);
+}
+
+// Deterministic ordering
+
+#[test]
+fn source_order_children_lock() {
+    let (_, tree1) = elab_tree(
+        &[
+            "module a(); endmodule",
+            "module b(); endmodule",
+            "module c(); endmodule",
+            "module top; a u_a(); b u_b(); c u_c(); endmodule",
+        ],
+        "top",
+    );
+    let top1 = tree1.top.expect("top should exist");
+    let names1 = child_instance_names(&tree1, top1);
+    assert_eq!(names1, vec!["u_a", "u_b", "u_c"]);
+
+    let (_, tree2) = elab_tree(
+        &[
+            "module a(); endmodule",
+            "module b(); endmodule",
+            "module c(); endmodule",
+            "module top; a u_a(); b u_b(); c u_c(); endmodule",
+        ],
+        "top",
+    );
+    let top2 = tree2.top.expect("top should exist");
+    let names2 = child_instance_names(&tree2, top2);
+    assert_eq!(names1, names2, "deterministic ordering across runs");
+}
+
+// Iteration limit test
+
+#[test]
+fn generate_for_at_limit_emits_diagnostic() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top; for (genvar i = 0; i < 100; i = i + 1) begin leaf u(); end endmodule",
+        ],
+        "top",
+    );
+
+    let limit_diags: Vec<_> = tree
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d,
+                crate::elaboration::ElabDiag::GenerateIterationLimit { .. }
+            )
+        })
+        .collect();
+    assert_eq!(
+        limit_diags.len(),
+        1,
+        "expected 1 iteration limit diagnostic"
+    );
+
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
+    assert_eq!(
+        all.len(),
+        32,
+        "expected exactly 32 iterations (test cap) preserved as children"
+    );
+}
+
+#[test]
+fn generate_for_exact_cap_no_false_positive() {
+    // Loop with trip count == test cap (32). Should NOT emit a diagnostic.
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top; for (genvar i = 0; i < 32; i = i + 1) begin leaf u(); end endmodule",
+        ],
+        "top",
+    );
+
+    let limit_diags: Vec<_> = tree
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d,
+                crate::elaboration::ElabDiag::GenerateIterationLimit { .. }
+            )
+        })
+        .collect();
+    assert_eq!(
+        limit_diags.len(),
+        0,
+        "loop terminating exactly at cap should not emit iteration limit diagnostic"
+    );
+
+    let top_id = tree.top.expect("top should exist");
+    let all = all_instance_names_under(&tree, top_id);
+    assert_eq!(all.len(), 32, "all 32 iterations should be present");
 }
