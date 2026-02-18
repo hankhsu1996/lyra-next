@@ -136,7 +136,7 @@ fn expand_typedef(
     id_map: &lyra_ast::AstIdMap,
     caller_kind: lyra_semantic::symbols::SymbolKind,
 ) -> lyra_semantic::types::SymbolType {
-    use lyra_semantic::types::{SymbolType, SymbolTypeError, Ty, UnpackedDim};
+    use lyra_semantic::types::{SymbolType, SymbolTypeError, UnpackedDim};
     use lyra_semantic::typespec_name_ref;
 
     let Some(name_node) = typespec_name_ref(typespec) else {
@@ -190,23 +190,10 @@ fn expand_typedef(
         SymbolType::Value
     };
 
-    if use_site_unpacked.is_empty() {
-        return wrap(underlying_ty);
-    }
-
-    // Merge unpacked dims: typedef dims first, use-site dims appended after
-    match underlying_ty {
-        Ty::Integral(mut i) => {
-            let mut merged: Vec<UnpackedDim> = i.unpacked.to_vec();
-            merged.extend(use_site_unpacked);
-            i.unpacked = merged.into_boxed_slice();
-            wrap(Ty::Integral(i))
-        }
-        other @ (Ty::Enum(_) | Ty::Struct(_) | Ty::Array { .. }) => {
-            wrap(wrap_unpacked_dims(other, &use_site_unpacked))
-        }
-        _ => SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported),
-    }
+    wrap(lyra_semantic::wrap_unpacked(
+        underlying_ty,
+        &use_site_unpacked,
+    ))
 }
 
 /// Extract unpacked dims from a node (used during typedef expansion in db crate).
@@ -278,17 +265,7 @@ fn classify(ty: Ty, kind: lyra_semantic::symbols::SymbolKind) -> lyra_semantic::
     }
 }
 
-// Wrap a type with Ty::Array layers for each unpacked dim.
-// Dims are iterated right-to-left so outermost (leftmost) dim wraps last.
-fn wrap_unpacked_dims(ty: Ty, dims: &[UnpackedDim]) -> Ty {
-    dims.iter().rev().fold(ty, |inner, dim| Ty::Array {
-        elem: Box::new(inner),
-        dim: dim.clone(),
-    })
-}
-
 // Extract unpacked dims from a declaration node and wrap a type.
-// Handles both Declarator (variable decls) and TypedefDecl (typedef with unpacked dims).
 fn wrap_unpacked_dims_from_node(
     ty: Ty,
     node: Option<&lyra_parser::SyntaxNode>,
@@ -305,7 +282,7 @@ fn wrap_unpacked_dims_from_node(
     if dims.is_empty() {
         return ty;
     }
-    wrap_unpacked_dims(ty, &dims)
+    lyra_semantic::wrap_unpacked(ty, &dims)
 }
 
 fn type_of_symbol_raw_recover<'db>(

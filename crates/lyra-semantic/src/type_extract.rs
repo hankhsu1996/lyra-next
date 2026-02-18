@@ -71,11 +71,6 @@ fn normalize_ty(ty: &Ty, eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt) -> Ty
                 .iter()
                 .map(|d| normalize_packed_dim(d, eval))
                 .collect(),
-            unpacked: i
-                .unpacked
-                .iter()
-                .map(|d| normalize_unpacked_dim(d, eval))
-                .collect(),
         }),
         Ty::Array { elem, dim } => Ty::Array {
             elem: Box::new(normalize_ty(elem, eval)),
@@ -133,12 +128,8 @@ fn extract_var_decl(
     let unpacked = declarator
         .map(|d| extract_unpacked_dims(d, ast_id_map))
         .unwrap_or_default();
-    SymbolType::Value(build_integral_ty(
-        base_ty,
-        signed_override,
-        packed,
-        unpacked,
-    ))
+    let ty = build_base_ty(base_ty, signed_override, packed);
+    SymbolType::Value(wrap_unpacked(ty, &unpacked))
 }
 
 fn extract_net_decl(
@@ -170,9 +161,10 @@ fn extract_net_decl(
         let unpacked = declarator
             .map(|d| extract_unpacked_dims(d, ast_id_map))
             .unwrap_or_default();
+        let ty = build_base_ty(base, signed_override, packed);
         return SymbolType::Net(NetType {
             kind: net_kind,
-            data: build_integral_ty(base, signed_override, packed, unpacked),
+            data: wrap_unpacked(ty, &unpacked),
         });
     }
 
@@ -197,14 +189,14 @@ fn extract_net_decl(
         .unwrap_or_default();
 
     let signed = signed_override.unwrap_or(IntegralKw::Logic.default_signed());
+    let ty = Ty::Integral(Integral {
+        keyword: IntegralKw::Logic,
+        signed,
+        packed: packed.into_boxed_slice(),
+    });
     SymbolType::Net(NetType {
         kind: net_kind,
-        data: Ty::Integral(Integral {
-            keyword: IntegralKw::Logic,
-            signed,
-            packed: packed.into_boxed_slice(),
-            unpacked: unpacked.into_boxed_slice(),
-        }),
+        data: wrap_unpacked(ty, &unpacked),
     })
 }
 
@@ -226,12 +218,7 @@ fn extract_param_decl(container: &SyntaxNode, ast_id_map: &AstIdMap) -> SymbolTy
             }
             let (base_ty, signed_override) = extract_typespec_base(&ts);
             let packed = extract_packed_dims(&ts, ast_id_map);
-            SymbolType::Value(build_integral_ty(
-                base_ty,
-                signed_override,
-                packed,
-                Vec::new(),
-            ))
+            SymbolType::Value(build_base_ty(base_ty, signed_override, packed))
         }
         // No TypeSpec and this is a value parameter -> default to int (LRM 6.20.2)
         None => SymbolType::Value(Ty::int()),
@@ -253,12 +240,8 @@ fn extract_port(container: &SyntaxNode, ast_id_map: &AstIdMap) -> SymbolType {
             let packed = extract_packed_dims(&ts, ast_id_map);
             // Port unpacked dims are direct children of the Port node
             let unpacked = extract_unpacked_dims(container, ast_id_map);
-            SymbolType::Value(build_integral_ty(
-                base_ty,
-                signed_override,
-                packed,
-                unpacked,
-            ))
+            let ty = build_base_ty(base_ty, signed_override, packed);
+            SymbolType::Value(wrap_unpacked(ty, &unpacked))
         }
         // M4 provisional: ports without explicit datatype default to logic
         None => SymbolType::Value(Ty::simple_logic()),
@@ -275,14 +258,10 @@ fn extract_typedef_decl(container: &SyntaxNode, ast_id_map: &AstIdMap) -> Symbol
     }
     let (base_ty, signed_override) = extract_typespec_base(&ts);
     let packed = extract_packed_dims(&ts, ast_id_map);
-    // Typedef unpacked dims are direct children of TypedefDecl (e.g. `typedef logic [7:0] T [2];`)
+    // Typedef unpacked dims are direct children of TypedefDecl
     let unpacked = extract_unpacked_dims(container, ast_id_map);
-    SymbolType::TypeAlias(build_integral_ty(
-        base_ty,
-        signed_override,
-        packed,
-        unpacked,
-    ))
+    let ty = build_base_ty(base_ty, signed_override, packed);
+    SymbolType::TypeAlias(wrap_unpacked(ty, &unpacked))
 }
 
 /// Extract the base type keyword and optional signed/unsigned override from a `TypeSpec`.
@@ -369,25 +348,33 @@ fn expr_to_const_int(expr: &SyntaxNode, ast_id_map: &AstIdMap) -> ConstInt {
     }
 }
 
-fn build_integral_ty(
-    base: Option<Ty>,
-    signed_override: Option<bool>,
-    packed: Vec<PackedDim>,
-    unpacked: Vec<UnpackedDim>,
-) -> Ty {
+/// Build the base type from a keyword + signing override + packed dims.
+///
+/// For integrals: applies signing and packed dims.
+/// For non-integrals (real, string, etc.): returns as-is (signing/packed are inapplicable).
+fn build_base_ty(base: Option<Ty>, signed_override: Option<bool>, packed: Vec<PackedDim>) -> Ty {
     match base {
         Some(Ty::Integral(mut i)) => {
             if let Some(s) = signed_override {
                 i.signed = s;
             }
             i.packed = packed.into_boxed_slice();
-            i.unpacked = unpacked.into_boxed_slice();
             Ty::Integral(i)
         }
-        Some(Ty::Real(r)) => Ty::Real(r),
         Some(other) => other,
         None => Ty::Error,
     }
+}
+
+/// Wrap a `Ty` with `Ty::Array` layers for each unpacked dim.
+///
+/// Dims are applied right-to-left so the outermost (leftmost in source) dim
+/// is the outermost `Array` wrapper.
+pub fn wrap_unpacked(ty: Ty, unpacked: &[UnpackedDim]) -> Ty {
+    unpacked.iter().rev().fold(ty, |inner, dim| Ty::Array {
+        elem: Box::new(inner),
+        dim: dim.clone(),
+    })
 }
 
 pub(crate) fn keyword_to_ty_pub(kind: SyntaxKind) -> Option<Ty> {
@@ -401,7 +388,6 @@ fn keyword_to_ty(kind: SyntaxKind) -> Option<Ty> {
             keyword: kw,
             signed: kw.default_signed(),
             packed: Box::new([]),
-            unpacked: Box::new([]),
         }));
     }
     match kind {

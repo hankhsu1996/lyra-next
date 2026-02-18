@@ -30,43 +30,36 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 ## M3: Names and Scopes -- done
 
 - [x] Symbol table and scope tree with parent-chain resolution
-- [x] Per-file definition collection and name resolution (DefIndex, ResolveIndex)
+- [x] Per-file definition collection and name resolution
 - [x] Cross-file resolution (modules, packages, interfaces, programs, primitives, configs)
 - [x] Package imports (explicit and wildcard) with LRM precedence
 - [x] Typedef declarations with type namespace resolution
 - [x] Semantic diagnostics (unresolved names, duplicates, import errors)
-- [x] Salsa query wiring with offset-independent NameGraph for backdating
 
-## Cross-cutting infrastructure
+## M4: Type Skeleton -- done
 
-- [x] Salsa query granularity: NameGraph decouples offset-dependent parse from offset-independent resolution
-- [x] Diagnostic codes, labels, and fixits
-- [x] AST API extensibility (reduce hand-written boilerplate)
-- [x] Test harness: snapshot corpus runner
-
-## M4: Type Skeleton
-
-- [x] Type data model (Ty, Integral, ConstInt, dimensions, NetType)
+- [x] Type data model (integral types, dimensions, enums, structs, nets)
 - [x] Constant expression evaluation for dimension bounds
-- [x] type_of_symbol query (declaration -> Ty)
+- [x] type_of_symbol query
 - [x] type_of_expr query for simple expressions
 - [x] Basic type-error diagnostics (width mismatch)
 - [x] Undeclared type diagnostics
-- [x] Enum/struct representation (symbol-level, pretty, type_at)
+- [x] Enum/struct representation
 
-## M5: Tool-Grade Foundation -- not started
+## M5: Batch Semantic Engine -- not started
 
-- [ ] Module signature query (ports: name, direction, type)
-- [ ] Port connection resolve (named and positional)
-- [ ] Port connection width mismatch diagnostics
+- [ ] Module signature query (ports, params)
+- [ ] Instantiation resolution (named and positional)
+- [ ] Instance tree for a chosen top module
+- [ ] Port diagnostics (unknown, missing, width mismatch)
+- [ ] CLI batch driver
+- [ ] Performance baseline (10K lines under 1s)
+
+## M6: Elaboration Completeness -- not started
+
 - [ ] Context-determined typing (LRM 11.6)
 - [ ] Callable typing (function/task calls)
-- [ ] LSP crate with go-to-definition and hover
-- [ ] CLI batch diagnostics driver
-- [ ] Performance baseline (10K-line file under 1s)
-
-## M6: Rich Types and Deeper SV Semantics -- not started
-
-- [ ] Enum/struct semantics (layout, field access, casts, assignment compatibility)
-- [ ] Full array semantics (packed/unpacked, slicing, streaming)
+- [ ] Struct/union/enum semantics
+- [ ] Full array semantics
+- [ ] Generate blocks and parameter elaboration
 - [ ] Interface/modport semantics

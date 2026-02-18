@@ -3,10 +3,17 @@
 Milestone-based plan for Lyra Next. Each milestone enables a set of
 capabilities. Current status lives in `docs/progress.md`.
 
+This repo is the **semantic engine**: front-end pipeline correctness,
+semantic checks, diagnostics, and a batch driver. IDE surfaces (LSP,
+hover, go-to-definition) are downstream consumers that live outside
+this repo.
+
+> If a feature exists only to serve an editor UI, it is out of scope.
+
 ## How Milestones Relate to Work
 
 - Infra-heavy work lands mostly in M0--M2.
-- Semantic capability work lands mostly in M3--M5.
+- Semantic capability work lands mostly in M3+.
 - LRM features are pulled continuously once the required capability exists.
 - A milestone is done when capabilities are stable and demonstrated.
 
@@ -104,52 +111,52 @@ produce a diagnostic.
 - Basic type-error diagnostics (assignment width mismatch, undeclared type).
 - Constant expression evaluation for dimension bounds.
 
-**Demo:** Hover over a variable or expression, see its resolved type.
+**Demo:** Query a variable or expression, get its resolved type.
 Type errors shown with expected vs actual.
 
-## M5: Tool-Grade Foundation
+## M5: Batch Semantic Engine
 
-**Objective:** Semantic core handles cross-module semantics and is stable
-enough to support real tools. Results look credible on real codebases.
-
-**Deliverables:**
-
-- Module signature query: extract port names, directions, types from module
-  declarations. Cross-file, cross-package resolution.
-- Port connection typing: resolve `.name(expr)` and positional connections
-  at instantiation sites. Port width mismatch diagnostics.
-- Context-determined typing (LRM 11.6): assignment context sizing, sign
-  extension/truncation rules. Width diagnostics become more complete.
-- Callable typing: resolve function/task calls to their declarations,
-  infer parameter types and return types (no overload resolution yet).
-- LSP crate (`lyra-lsp`): go-to-definition and hover queries, backed by
-  M3/M4/M5 capabilities.
-- Batch driver crate (`lyra-cli`): load files, run queries, print
-  diagnostics. Useful for CI integration.
-- Core remains a library. Tools are separate crates that depend on
-  `lyra-db`.
-- Performance baseline: parse + full semantic analysis of a 10K-line file
-  under 1 second.
-
-**Demo:** Open a multi-module SV project in an editor with the LSP.
-Go-to-definition and hover work across module boundaries. Port connection
-mismatches produce diagnostics. CLI linter runs in CI.
-
-## M6: Rich Types and Deeper SV Semantics
-
-**Objective:** Full struct/enum/union support, array semantics, and deeper
-LRM coverage for real-world SV patterns.
+**Objective:** Slang-style batch semantic engine. Build the instance tree
+for a design and run semantic checks across it.
 
 **Deliverables:**
 
-- Struct/union/packed struct field access, assignment, and casting.
-- Full array semantics: packed/unpacked recursive dimensions, slicing,
-  streaming operators.
+- Module signature query: port names, directions, types. Parameters
+  typed enough to resolve port types.
+- Instantiation resolution: named and positional port connections.
+- Instance tree for a chosen top module.
+- Diagnostics: unknown port, missing port, port width mismatch, too many
+  args, duplicate instance names.
+- CLI batch driver: preprocess -> parse -> namegraph -> elaborate
+  (instance tree) -> semantic checks -> emit diagnostics.
+- Query-based and pure so Salsa can parallelize.
+- Performance baseline: parse + full semantic analysis of a 10K-line
+  file under 1 second.
+
+**Demo:** Run `lyra-cli check top.sv` on a multi-module design. Port
+connection mismatches and missing ports produce diagnostics with
+file/line/column. Instance tree built correctly across file boundaries.
+
+## M6: Elaboration Completeness
+
+**Objective:** Deeper LRM coverage for real-world SV patterns. Still
+batch-oriented -- richer semantics, richer diagnostics.
+
+**Deliverables:**
+
+- Context-determined typing (LRM 11.6): assignment context sizing,
+  sign extension/truncation rules.
+- Callable typing: function/task calls to declarations, parameter
+  types and return types.
+- Struct/union field access, assignment, and casting.
+- Full array semantics: packed/unpacked dimensions, slicing, streaming.
 - Enum rules: casting, comparisons, literal typing.
-- Interface/modport semantics (as needed by real codebases).
+- Generate blocks and parameter elaboration.
+- Interface/modport semantics.
 
-**Demo:** Struct field access resolves and type-checks. Array dimension
-mismatches produce diagnostics. Enum casts are validated.
+**Demo:** Run batch checks on a real-world codebase with structs,
+arrays, function calls, and generate blocks. Diagnostics cover field
+access errors, dimension mismatches, and enum cast violations.
 
 ## Rules
 
