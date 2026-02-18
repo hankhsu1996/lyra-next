@@ -1,0 +1,95 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..116
+  ModuleDecl@0..115
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..8 "m"
+    Semicolon@8..9 ";"
+    ModuleBody@9..105
+      TypedefDecl@9..43
+        Whitespace@9..12 "\n  "
+        TypedefKw@12..19 "typedef"
+        TypeSpec@19..36
+          EnumType@19..36
+            Whitespace@19..20 " "
+            EnumKw@20..24 "enum"
+            Whitespace@24..25 " "
+            LBrace@25..26 "{"
+            EnumMember@26..28
+              Whitespace@26..27 " "
+              Ident@27..28 "A"
+            Comma@28..29 ","
+            EnumMember@29..31
+              Whitespace@29..30 " "
+              Ident@30..31 "B"
+            Comma@31..32 ","
+            EnumMember@32..34
+              Whitespace@32..33 " "
+              Ident@33..34 "C"
+            Whitespace@34..35 " "
+            RBrace@35..36 "}"
+        Whitespace@36..37 " "
+        Ident@37..42 "abc_t"
+        Semicolon@42..43 ";"
+      TypedefDecl@43..85
+        Whitespace@43..46 "\n  "
+        TypedefKw@46..53 "typedef"
+        TypeSpec@53..79
+          EnumType@53..79
+            Whitespace@53..54 " "
+            EnumKw@54..58 "enum"
+            TypeSpec@58..70
+              Whitespace@58..59 " "
+              LogicKw@59..64 "logic"
+              PackedDimension@64..70
+                Whitespace@64..65 " "
+                LBracket@65..66 "["
+                Literal@66..67
+                  IntLiteral@66..67 "1"
+                Colon@67..68 ":"
+                Literal@68..69
+                  IntLiteral@68..69 "0"
+                RBracket@69..70 "]"
+            Whitespace@70..71 " "
+            LBrace@71..72 "{"
+            EnumMember@72..74
+              Whitespace@72..73 " "
+              Ident@73..74 "X"
+            Comma@74..75 ","
+            EnumMember@75..77
+              Whitespace@75..76 " "
+              Ident@76..77 "Y"
+            Whitespace@77..78 " "
+            RBrace@78..79 "}"
+        Whitespace@79..80 " "
+        Ident@80..84 "xy_t"
+        Semicolon@84..85 ";"
+      VarDecl@85..105
+        TypeSpec@85..101
+          EnumType@85..101
+            Whitespace@85..88 "\n  "
+            EnumKw@88..92 "enum"
+            Whitespace@92..93 " "
+            LBrace@93..94 "{"
+            EnumMember@94..96
+              Whitespace@94..95 " "
+              Ident@95..96 "P"
+            Comma@96..97 ","
+            EnumMember@97..99
+              Whitespace@97..98 " "
+              Ident@98..99 "Q"
+            Whitespace@99..100 " "
+            RBrace@100..101 "}"
+        Declarator@101..104
+          Whitespace@101..102 " "
+          Ident@102..104 "pq"
+        Semicolon@104..105 ";"
+    Whitespace@105..106 "\n"
+    EndmoduleKw@106..115 "endmodule"
+  Whitespace@115..116 "\n"
+---
+no diagnostics

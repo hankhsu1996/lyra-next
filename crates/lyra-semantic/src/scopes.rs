@@ -170,6 +170,7 @@ mod tests {
     use smol_str::SmolStr;
 
     use super::*;
+    use crate::aggregate::TypeOrigin;
     use crate::symbols::{Symbol, SymbolKind, SymbolTableBuilder};
 
     #[test]
@@ -184,6 +185,7 @@ mod tests {
             kind: SymbolKind::Variable,
             def_range: range,
             scope,
+            type_origin: TypeOrigin::TypeSpec,
         });
         scope_builder.add_binding(scope, id, SymbolKind::Variable);
 
@@ -210,6 +212,7 @@ mod tests {
             kind: SymbolKind::Port,
             def_range: range,
             scope: parent,
+            type_origin: TypeOrigin::TypeSpec,
         });
         scope_builder.add_binding(parent, id, SymbolKind::Port);
 
@@ -236,12 +239,14 @@ mod tests {
             kind: SymbolKind::Variable,
             def_range: range1,
             scope,
+            type_origin: TypeOrigin::TypeSpec,
         });
         let id2 = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
             def_range: range2,
             scope,
+            type_origin: TypeOrigin::TypeSpec,
         });
         scope_builder.add_binding(scope, id1, SymbolKind::Variable);
         scope_builder.add_binding(scope, id2, SymbolKind::Variable);

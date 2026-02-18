@@ -1,0 +1,126 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..174
+  ModuleDecl@0..173
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..8 "m"
+    Semicolon@8..9 ";"
+    ModuleBody@9..163
+      TypedefDecl@9..75
+        Whitespace@9..12 "\n  "
+        TypedefKw@12..19 "typedef"
+        TypeSpec@19..68
+          StructType@19..68
+            Whitespace@19..20 " "
+            StructKw@20..26 "struct"
+            Whitespace@26..27 " "
+            PackedKw@27..33 "packed"
+            Whitespace@33..34 " "
+            LBrace@34..35 "{"
+            StructMember@35..53
+              TypeSpec@35..47
+                Whitespace@35..36 " "
+                LogicKw@36..41 "logic"
+                PackedDimension@41..47
+                  Whitespace@41..42 " "
+                  LBracket@42..43 "["
+                  Literal@43..44
+                    IntLiteral@43..44 "7"
+                  Colon@44..45 ":"
+                  Literal@45..46
+                    IntLiteral@45..46 "0"
+                  RBracket@46..47 "]"
+              Declarator@47..52
+                Whitespace@47..48 " "
+                Ident@48..52 "data"
+              Semicolon@52..53 ";"
+            StructMember@53..66
+              TypeSpec@53..59
+                Whitespace@53..54 " "
+                LogicKw@54..59 "logic"
+              Declarator@59..65
+                Whitespace@59..60 " "
+                Ident@60..65 "valid"
+              Semicolon@65..66 ";"
+            Whitespace@66..67 " "
+            RBrace@67..68 "}"
+        Whitespace@68..69 " "
+        Ident@69..74 "pkt_t"
+        Semicolon@74..75 ";"
+      VarDecl@75..109
+        TypeSpec@75..102
+          StructType@75..102
+            Whitespace@75..78 "\n  "
+            StructKw@78..84 "struct"
+            Whitespace@84..85 " "
+            LBrace@85..86 "{"
+            StructMember@86..93
+              TypeSpec@86..90
+                Whitespace@86..87 " "
+                IntKw@87..90 "int"
+              Declarator@90..92
+                Whitespace@90..91 " "
+                Ident@91..92 "x"
+              Semicolon@92..93 ";"
+            StructMember@93..100
+              TypeSpec@93..97
+                Whitespace@93..94 " "
+                IntKw@94..97 "int"
+              Declarator@97..99
+                Whitespace@97..98 " "
+                Ident@98..99 "y"
+              Semicolon@99..100 ";"
+            Whitespace@100..101 " "
+            RBrace@101..102 "}"
+        Declarator@102..108
+          Whitespace@102..103 " "
+          Ident@103..108 "point"
+        Semicolon@108..109 ";"
+      TypedefDecl@109..163
+        Whitespace@109..112 "\n  "
+        TypedefKw@112..119 "typedef"
+        TypeSpec@119..155
+          StructType@119..155
+            Whitespace@119..120 " "
+            UnionKw@120..125 "union"
+            Whitespace@125..126 " "
+            LBrace@126..127 "{"
+            StructMember@127..134
+              TypeSpec@127..131
+                Whitespace@127..128 " "
+                IntKw@128..131 "int"
+              Declarator@131..133
+                Whitespace@131..132 " "
+                Ident@132..133 "i"
+              Semicolon@133..134 ";"
+            StructMember@134..153
+              TypeSpec@134..147
+                Whitespace@134..135 " "
+                LogicKw@135..140 "logic"
+                PackedDimension@140..147
+                  Whitespace@140..141 " "
+                  LBracket@141..142 "["
+                  Literal@142..144
+                    IntLiteral@142..144 "31"
+                  Colon@144..145 ":"
+                  Literal@145..146
+                    IntLiteral@145..146 "0"
+                  RBracket@146..147 "]"
+              Declarator@147..152
+                Whitespace@147..148 " "
+                Ident@148..152 "bits"
+              Semicolon@152..153 ";"
+            Whitespace@153..154 " "
+            RBrace@154..155 "}"
+        Whitespace@155..156 " "
+        Ident@156..162 "word_t"
+        Semicolon@162..163 ";"
+    Whitespace@163..164 "\n"
+    EndmoduleKw@164..173 "endmodule"
+  Whitespace@173..174 "\n"
+---
+no diagnostics

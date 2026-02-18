@@ -4,6 +4,7 @@ use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
+use crate::aggregate::{EnumDef, EnumDefIdx, EnumId, StructDef, StructDefIdx, StructId};
 use crate::diagnostic::SemanticDiag;
 use crate::scopes::{ScopeId, ScopeTree};
 use crate::symbols::{Namespace, SymbolId, SymbolTable};
@@ -45,7 +46,37 @@ pub struct DefIndex {
     /// `ErasedAstId`. Key present with `None` = parameter with no default value.
     /// Key absent = not a parameter declarator (not tracked).
     pub decl_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
+    pub enum_defs: Box<[EnumDef]>,
+    pub struct_defs: Box<[StructDef]>,
     pub diagnostics: Box<[SemanticDiag]>,
+}
+
+impl DefIndex {
+    pub fn enum_def(&self, idx: EnumDefIdx) -> &EnumDef {
+        &self.enum_defs[idx.0 as usize]
+    }
+
+    pub fn struct_def(&self, idx: StructDefIdx) -> &StructDef {
+        &self.struct_defs[idx.0 as usize]
+    }
+
+    pub fn enum_id(&self, idx: EnumDefIdx) -> EnumId {
+        let def = self.enum_def(idx);
+        EnumId {
+            file: self.file,
+            owner: def.owner.clone(),
+            ordinal: def.ordinal,
+        }
+    }
+
+    pub fn struct_id(&self, idx: StructDefIdx) -> StructId {
+        let def = self.struct_def(idx);
+        StructId {
+            file: self.file,
+            owner: def.owner.clone(),
+            ordinal: def.ordinal,
+        }
+    }
 }
 
 /// A name path: simple identifier or qualified path.

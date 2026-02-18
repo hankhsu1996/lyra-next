@@ -52,7 +52,7 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] type_of_expr query for simple expressions
 - [x] Basic type-error diagnostics (width mismatch)
 - [x] Undeclared type diagnostics
-- [ ] Enum and struct type representation
+- [x] Enum/struct representation (symbol-level, pretty, type_at)
 
 ## M5: Tool-Grade Foundation -- not started
 
@@ -64,3 +64,9 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [ ] LSP crate with go-to-definition and hover
 - [ ] CLI batch diagnostics driver
 - [ ] Performance baseline (10K-line file under 1s)
+
+## M6: Rich Types and Deeper SV Semantics -- not started
+
+- [ ] Enum/struct semantics (layout, field access, casts, assignment compatibility)
+- [ ] Full array semantics (packed/unpacked, slicing, streaming)
+- [ ] Interface/modport semantics

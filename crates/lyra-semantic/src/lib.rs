@@ -1,3 +1,4 @@
+pub mod aggregate;
 mod builder;
 pub mod const_eval;
 pub mod def_index;

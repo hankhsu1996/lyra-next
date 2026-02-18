@@ -140,6 +140,23 @@ ast_nodes! {
 
     TypeSpec(SyntaxKind::TypeSpec) { @custom }
 
+    EnumType(SyntaxKind::EnumType) {
+        members: [EnumMember],
+    }
+
+    EnumMember(SyntaxKind::EnumMember) {
+        name: token(Ident),
+    }
+
+    StructType(SyntaxKind::StructType) {
+        members: [StructMember],
+    }
+
+    StructMember(SyntaxKind::StructMember) {
+        type_spec: TypeSpec,
+        declarators: [Declarator],
+    }
+
     // Package declarations
     PackageDecl(SyntaxKind::PackageDecl) { @custom }
     PackageBody(SyntaxKind::PackageBody) { @custom }
@@ -246,6 +263,22 @@ impl FieldExpr {
     }
 }
 
+impl EnumType {
+    pub fn base_type_spec(&self) -> Option<TypeSpec> {
+        support::child(&self.syntax)
+    }
+}
+
+impl StructType {
+    pub fn is_packed(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::PackedKw).is_some()
+    }
+
+    pub fn is_union(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::UnionKw).is_some()
+    }
+}
+
 impl TypeSpec {
     pub fn keyword(&self) -> Option<SyntaxToken> {
         // First token that is a keyword or ident
@@ -256,6 +289,14 @@ impl TypeSpec {
 
     pub fn packed_dimensions(&self) -> AstChildren<PackedDimension> {
         support::children(&self.syntax)
+    }
+
+    pub fn enum_type(&self) -> Option<EnumType> {
+        support::child(&self.syntax)
+    }
+
+    pub fn struct_type(&self) -> Option<StructType> {
+        support::child(&self.syntax)
     }
 }
 

@@ -99,6 +99,7 @@ impl ExprType {
             Ty::Real(_) | Ty::String | Ty::Chandle | Ty::Event | Ty::Void => {
                 ExprType::NonBit(ty.clone())
             }
+            Ty::Enum(_) | Ty::Struct(_) | Ty::Array { .. } => ExprType::NonBit(ty.clone()),
             Ty::Error => ExprType::Error(ExprTypeErrorKind::Unresolved),
         }
     }

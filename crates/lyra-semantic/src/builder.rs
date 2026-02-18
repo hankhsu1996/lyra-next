@@ -1,21 +1,26 @@
 use std::collections::HashMap;
 
 use lyra_ast::{
-    AstIdMap, AstNode, ConfigDecl, InterfaceDecl, ModuleInstantiation, NameRef, Port,
-    PrimitiveDecl, ProgramDecl, QualifiedName, TypedefDecl,
+    AstIdMap, AstNode, ConfigDecl, EnumType, InterfaceDecl, ModuleInstantiation, NameRef, Port,
+    PrimitiveDecl, ProgramDecl, QualifiedName, StructType, TypedefDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
+use crate::aggregate::{
+    EnumDef, EnumDefIdx, EnumVariant, StructDef, StructDefIdx, StructField, TypeOrigin, TypeRef,
+    extract_typeref_from_typespec,
+};
 use crate::def_index::{DefIndex, ExpectedNs, Exports, Import, ImportName, NamePath, UseSite};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
+use crate::types::Ty;
 
 pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> DefIndex {
-    let mut ctx = DefContext::new(ast_id_map);
+    let mut ctx = DefContext::new(file, ast_id_map);
     let root = parse.syntax();
 
     // Root file scope
@@ -53,6 +58,8 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         decl_to_symbol: ctx.decl_to_symbol,
         symbol_to_decl: ctx.symbol_to_decl.into_boxed_slice(),
         decl_to_init_expr: ctx.decl_to_init_expr,
+        enum_defs: ctx.enum_defs.into_boxed_slice(),
+        struct_defs: ctx.struct_defs.into_boxed_slice(),
         diagnostics: diagnostics.into_boxed_slice(),
     }
 }
@@ -78,6 +85,7 @@ fn detect_duplicates(
 }
 
 struct DefContext<'a> {
+    file: FileId,
     ast_id_map: &'a AstIdMap,
     symbols: SymbolTableBuilder,
     scopes: ScopeTreeBuilder,
@@ -88,11 +96,17 @@ struct DefContext<'a> {
     decl_to_init_expr: HashMap<lyra_ast::ErasedAstId, Option<lyra_ast::ErasedAstId>>,
     use_sites: Vec<UseSite>,
     imports: Vec<Import>,
+    enum_defs: Vec<EnumDef>,
+    struct_defs: Vec<StructDef>,
+    current_owner: Option<SmolStr>,
+    enum_ordinals: HashMap<Option<SmolStr>, u32>,
+    struct_ordinals: HashMap<Option<SmolStr>, u32>,
 }
 
 impl<'a> DefContext<'a> {
-    fn new(ast_id_map: &'a AstIdMap) -> Self {
+    fn new(file: FileId, ast_id_map: &'a AstIdMap) -> Self {
         Self {
+            file,
             ast_id_map,
             symbols: SymbolTableBuilder::new(),
             scopes: ScopeTreeBuilder::new(),
@@ -103,6 +117,11 @@ impl<'a> DefContext<'a> {
             decl_to_init_expr: HashMap::new(),
             use_sites: Vec::new(),
             imports: Vec::new(),
+            enum_defs: Vec::new(),
+            struct_defs: Vec::new(),
+            current_owner: None,
+            enum_ordinals: HashMap::new(),
+            struct_ordinals: HashMap::new(),
         }
     }
 
@@ -113,13 +132,24 @@ impl<'a> DefContext<'a> {
         def_range: TextRange,
         scope: ScopeId,
     ) -> SymbolId {
+        self.add_symbol_with_origin(name, kind, def_range, scope, TypeOrigin::TypeSpec)
+    }
+
+    fn add_symbol_with_origin(
+        &mut self,
+        name: SmolStr,
+        kind: SymbolKind,
+        def_range: TextRange,
+        scope: ScopeId,
+        type_origin: TypeOrigin,
+    ) -> SymbolId {
         let id = self.symbols.push(Symbol {
             name,
             kind,
             def_range,
             scope,
+            type_origin,
         });
-        // Keep symbol_to_decl in sync (filled with None; callers populate it)
         self.symbol_to_decl.push(None);
         self.scopes.add_binding(scope, id, kind);
         id
@@ -153,23 +183,21 @@ fn collect_source_file(ctx: &mut DefContext<'_>, root: &SyntaxNode, file_scope: 
 }
 
 fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: ScopeId) {
-    // Module name -> exports (not lexical scope)
     let module_name = first_ident_token(node);
     if let Some(name_tok) = &module_name {
         let name = SmolStr::new(name_tok.text());
         let range = name_tok.text_range();
-        // Module scope is the parent for all declarations inside the module
         let module_scope = ctx.scopes.push(ScopeKind::Module, None);
         let sym_id = ctx.symbols.push(Symbol {
-            name,
+            name: name.clone(),
             kind: SymbolKind::Module,
             def_range: range,
             scope: module_scope,
+            type_origin: TypeOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
 
-        // Record decl_to_symbol and symbol_to_decl for cross-file resolution
         if let Some(module_decl) = lyra_ast::ModuleDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&module_decl)
         {
@@ -178,7 +206,7 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
             ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
 
-        // Visit parameter port list
+        let prev_owner = ctx.current_owner.replace(name);
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::ParamPortList => {
@@ -193,6 +221,7 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
                 _ => {}
             }
         }
+        ctx.current_owner = prev_owner;
     }
 }
 
@@ -203,15 +232,15 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
         let range = name_tok.text_range();
         let package_scope = ctx.scopes.push(ScopeKind::Package, None);
         let sym_id = ctx.symbols.push(Symbol {
-            name,
+            name: name.clone(),
             kind: SymbolKind::Package,
             def_range: range,
             scope: package_scope,
+            type_origin: TypeOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_packages.push(sym_id);
 
-        // Record decl_to_symbol and symbol_to_decl for cross-file resolution
         if let Some(pkg_decl) = lyra_ast::PackageDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&pkg_decl)
         {
@@ -220,12 +249,13 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
             ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
 
-        // Visit package body
+        let prev_owner = ctx.current_owner.replace(name);
         for child in node.children() {
             if child.kind() == SyntaxKind::PackageBody {
                 collect_package_body(ctx, &child, package_scope);
             }
         }
+        ctx.current_owner = prev_owner;
     }
 }
 
@@ -236,10 +266,11 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         let range = name_tok.text_range();
         let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
         let sym_id = ctx.symbols.push(Symbol {
-            name,
+            name: name.clone(),
             kind: SymbolKind::Interface,
             def_range: range,
             scope: iface_scope,
+            type_origin: TypeOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
@@ -252,6 +283,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
 
+        let prev_owner = ctx.current_owner.replace(name);
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::ParamPortList => {
@@ -266,6 +298,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
                 _ => {}
             }
         }
+        ctx.current_owner = prev_owner;
     }
 }
 
@@ -276,10 +309,11 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         let range = name_tok.text_range();
         let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
         let sym_id = ctx.symbols.push(Symbol {
-            name,
+            name: name.clone(),
             kind: SymbolKind::Program,
             def_range: range,
             scope: prog_scope,
+            type_origin: TypeOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
@@ -292,6 +326,7 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
 
+        let prev_owner = ctx.current_owner.replace(name);
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::ParamPortList => {
@@ -306,6 +341,7 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
                 _ => {}
             }
         }
+        ctx.current_owner = prev_owner;
     }
 }
 
@@ -320,6 +356,7 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             kind: SymbolKind::Primitive,
             def_range: range,
             scope: prim_scope,
+            type_origin: TypeOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
@@ -339,14 +376,13 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     if let Some(name_tok) = &name_tok {
         let name = SmolStr::new(name_tok.text());
         let range = name_tok.text_range();
-        // Config bodies are static rules with no declarations, so use a
-        // Module scope as a placeholder (no internal body collection).
         let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
         let sym_id = ctx.symbols.push(Symbol {
             name,
             kind: SymbolKind::Config,
             def_range: range,
             scope: cfg_scope,
+            type_origin: TypeOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
@@ -543,18 +579,20 @@ fn collect_declarators(
     kind: SymbolKind,
     scope: ScopeId,
 ) {
+    // Detect inline enum/struct in the TypeSpec child
+    let type_origin = detect_aggregate_type(ctx, node, scope);
     for child in node.children() {
         if child.kind() == SyntaxKind::TypeSpec {
             collect_type_spec_refs(ctx, &child, scope);
         } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = first_ident_token(&child) {
-                let sym_id = ctx.add_symbol(
+                let sym_id = ctx.add_symbol_with_origin(
                     SmolStr::new(name_tok.text()),
                     kind,
                     name_tok.text_range(),
                     scope,
+                    type_origin,
                 );
-                // Record decl_to_symbol and symbol_to_decl
                 if let Some(decl) = lyra_ast::Declarator::cast(child.clone())
                     && let Some(ast_id) = ctx.ast_id_map.ast_id(&decl)
                 {
@@ -563,7 +601,6 @@ fn collect_declarators(
                     ctx.symbol_to_decl[sym_id.index()] = Some(erased);
                 }
             }
-            // Collect name refs in initializer expressions
             collect_name_refs(ctx, &child, scope);
         }
     }
@@ -670,6 +707,8 @@ fn collect_type_spec_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sc
 }
 
 fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    // Detect enum/struct in the TypeSpec child
+    let type_origin = detect_aggregate_type(ctx, node, scope);
     for child in node.children() {
         if child.kind() == SyntaxKind::TypeSpec {
             collect_type_spec_refs(ctx, &child, scope);
@@ -678,11 +717,23 @@ fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) 
     if let Some(td) = TypedefDecl::cast(node.clone())
         && let Some(name_tok) = td.name()
     {
-        let sym_id = ctx.add_symbol(
-            SmolStr::new(name_tok.text()),
+        let typedef_name = SmolStr::new(name_tok.text());
+        // Update the def name if we collected an aggregate
+        match type_origin {
+            TypeOrigin::Enum(idx) => {
+                ctx.enum_defs[idx.0 as usize].name = Some(typedef_name.clone());
+            }
+            TypeOrigin::Struct(idx) => {
+                ctx.struct_defs[idx.0 as usize].name = Some(typedef_name.clone());
+            }
+            TypeOrigin::TypeSpec => {}
+        }
+        let sym_id = ctx.add_symbol_with_origin(
+            typedef_name,
             SymbolKind::Typedef,
             name_tok.text_range(),
             scope,
+            type_origin,
         );
         if let Some(ast_id) = ctx.ast_id_map.ast_id(&td) {
             let erased = ast_id.erase();
@@ -690,6 +741,115 @@ fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) 
             ctx.symbol_to_decl[sym_id.index()] = Some(erased);
         }
     }
+}
+
+// Detect enum/struct type in a declaration's TypeSpec child.
+// If found, build the def table entry and return the appropriate TypeOrigin.
+fn detect_aggregate_type(
+    ctx: &mut DefContext<'_>,
+    decl_node: &SyntaxNode,
+    scope: ScopeId,
+) -> TypeOrigin {
+    for child in decl_node.children() {
+        if child.kind() == SyntaxKind::TypeSpec {
+            for ts_child in child.children() {
+                if ts_child.kind() == SyntaxKind::EnumType
+                    && let Some(et) = EnumType::cast(ts_child.clone())
+                {
+                    return TypeOrigin::Enum(collect_enum_def(ctx, &et, scope));
+                } else if ts_child.kind() == SyntaxKind::StructType
+                    && let Some(st) = StructType::cast(ts_child)
+                {
+                    return TypeOrigin::Struct(collect_struct_def(ctx, &st, scope));
+                }
+            }
+        }
+    }
+    TypeOrigin::TypeSpec
+}
+
+fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, _scope: ScopeId) -> EnumDefIdx {
+    let owner = ctx.current_owner.clone();
+    let ordinal = ctx.enum_ordinals.entry(owner.clone()).or_insert(0);
+    let ord = *ordinal;
+    *ordinal += 1;
+    let idx = EnumDefIdx(ctx.enum_defs.len() as u32);
+
+    // Extract base type
+    let base = if let Some(base_ts) = enum_type.base_type_spec() {
+        extract_typeref_from_typespec(base_ts.syntax(), ctx.file)
+    } else {
+        TypeRef::Resolved(Ty::int())
+    };
+
+    // Extract variants
+    let variants: Box<[EnumVariant]> = enum_type
+        .members()
+        .filter_map(|member| {
+            let name_tok = member.name()?;
+            let init = member
+                .syntax()
+                .children()
+                .find(|c| is_expression_kind(c.kind()))
+                .and_then(|expr| ctx.ast_id_map.erased_ast_id(&expr));
+            Some(EnumVariant {
+                name: SmolStr::new(name_tok.text()),
+                init,
+            })
+        })
+        .collect();
+
+    ctx.enum_defs.push(EnumDef {
+        name: None,
+        owner,
+        ordinal: ord,
+        base,
+        variants,
+    });
+    idx
+}
+
+fn collect_struct_def(
+    ctx: &mut DefContext<'_>,
+    struct_type: &StructType,
+    _scope: ScopeId,
+) -> StructDefIdx {
+    let owner = ctx.current_owner.clone();
+    let ordinal = ctx.struct_ordinals.entry(owner.clone()).or_insert(0);
+    let ord = *ordinal;
+    *ordinal += 1;
+    let idx = StructDefIdx(ctx.struct_defs.len() as u32);
+
+    let packed = struct_type.is_packed();
+    let is_union = struct_type.is_union();
+
+    // Extract fields from StructMember children
+    let mut fields = Vec::new();
+    for member in struct_type.members() {
+        let member_ts = member.type_spec();
+        let ty = match member_ts {
+            Some(ref ts) => extract_typeref_from_typespec(ts.syntax(), ctx.file),
+            None => TypeRef::Resolved(Ty::Error),
+        };
+        for decl in member.declarators() {
+            if let Some(name_tok) = decl.name() {
+                fields.push(StructField {
+                    name: SmolStr::new(name_tok.text()),
+                    ty: ty.clone(),
+                });
+            }
+        }
+    }
+
+    ctx.struct_defs.push(StructDef {
+        name: None,
+        owner,
+        ordinal: ord,
+        packed,
+        is_union,
+        fields: fields.into_boxed_slice(),
+    });
+    idx
 }
 
 fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
