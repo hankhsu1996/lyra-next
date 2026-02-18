@@ -58,6 +58,7 @@ pub(crate) fn port_decl_list(p: &mut Parser) {
 // Single ANSI port declaration.
 fn port_decl(p: &mut Parser) {
     let m = p.start();
+    super::eat_attr_instances(p);
     // Direction: input / output / inout / ref
     if is_direction(p.current()) {
         p.bump();
