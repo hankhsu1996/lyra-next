@@ -7,7 +7,7 @@ use lyra_source::{FileId, Span, TextRange};
 use smol_str::SmolStr;
 
 use crate::elab_queries::{TopModule, elaborate_top};
-use crate::elaboration::{ElabDiag, ParamEnvId};
+use crate::elaboration::ElabDiag;
 use crate::module_sig::ModuleSig;
 use crate::pipeline::preprocess_file;
 use crate::{CompilationUnit, source_file_by_id};
@@ -314,106 +314,45 @@ pub(crate) struct ForParts {
 
 pub(crate) fn extract_for_parts(
     node: &SyntaxNode,
-    _param_env: ParamEnvId,
-    _sig: &ModuleSig,
-    _genvar_binding: Option<(&SmolStr, i64)>,
+    eval_expr: &dyn Fn(&SyntaxNode) -> Option<i64>,
 ) -> Option<ForParts> {
-    let tokens: Vec<_> = node
-        .descendants_with_tokens()
-        .filter_map(|el| el.into_token())
-        .filter(|t| t.kind() != SyntaxKind::Whitespace)
-        .collect();
+    // ForStmt child structure (from the parser):
+    //   NameRef       -- genvar name (init LHS)
+    //   Expression    -- init value
+    //   BinExpr       -- condition (genvar OP limit)
+    //   NameRef       -- genvar name (step LHS)
+    //   BinExpr       -- step expression (genvar +/- step_val)
+    //   Body          -- loop body (BlockStmt)
+    let children: Vec<SyntaxNode> = node.children().collect();
 
-    let lparen_pos = tokens.iter().position(|t| t.kind() == SyntaxKind::LParen)?;
+    // Extract genvar name from first NameRef
+    let genvar_name_node = children.iter().find(|c| c.kind() == SyntaxKind::NameRef)?;
+    let genvar_name = SmolStr::new(
+        genvar_name_node
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find(|t| t.kind() == SyntaxKind::Ident)?
+            .text(),
+    );
 
-    let mut pos = lparen_pos + 1;
-    if pos < tokens.len() && tokens[pos].kind() == SyntaxKind::GenvarKw {
-        pos += 1;
-    }
-
-    if pos >= tokens.len() || tokens[pos].kind() != SyntaxKind::Ident {
-        return None;
-    }
-    let genvar_name = SmolStr::new(tokens[pos].text());
-
-    pos += 1;
-    if pos >= tokens.len() || tokens[pos].kind() != SyntaxKind::Assign {
-        return None;
-    }
-    pos += 1;
-
-    let first_semi = tokens[pos..]
+    // Find the init expression (first non-NameRef expression-kind node)
+    let init_node = children
         .iter()
-        .position(|t| t.kind() == SyntaxKind::Semicolon)?;
-    let init_end = pos + first_semi;
-    let init = parse_simple_int_from_tokens(&tokens[pos..init_end])?;
+        .find(|c| c.kind() != SyntaxKind::NameRef && is_expr_kind(c.kind()))?;
+    let init = eval_expr(init_node)?;
 
-    pos = init_end + 1;
+    // Find the first BinExpr (condition)
+    let cond_node = children.iter().find(|c| c.kind() == SyntaxKind::BinExpr)?;
+    let (limit, flipped) = extract_condition(&genvar_name, cond_node, eval_expr)?;
 
-    let second_semi_offset = tokens[pos..]
+    // Find the second BinExpr (step), after the condition
+    let cond_idx = children.iter().position(|c| std::ptr::eq(c, cond_node))?;
+    let step_node = children[cond_idx + 1..]
         .iter()
-        .position(|t| t.kind() == SyntaxKind::Semicolon)?;
-    let cond_end = pos + second_semi_offset;
+        .find(|c| c.kind() == SyntaxKind::BinExpr)?;
+    let step = extract_step(&genvar_name, step_node, eval_expr)?;
 
-    if pos >= cond_end {
-        return None;
-    }
-    if tokens[pos].kind() == SyntaxKind::Ident && tokens[pos].text() == genvar_name.as_str() {
-        pos += 1;
-    } else {
-        return None;
-    }
-
-    if pos >= cond_end {
-        return None;
-    }
-
-    let op_kind = tokens[pos].kind();
-    pos += 1;
-
-    let limit_val = parse_simple_int_from_tokens(&tokens[pos..cond_end])?;
-
-    let limit = match op_kind {
-        SyntaxKind::Lt => ForLimit::Lt(limit_val),
-        SyntaxKind::LtEq => ForLimit::Le(limit_val),
-        SyntaxKind::Gt => ForLimit::Gt(limit_val),
-        SyntaxKind::GtEq => ForLimit::Ge(limit_val),
-        SyntaxKind::BangEq => ForLimit::Ne(limit_val),
-        _ => return None,
-    };
-
-    pos = cond_end + 1;
-
-    let rparen_pos = tokens[pos..]
-        .iter()
-        .position(|t| t.kind() == SyntaxKind::RParen)?;
-    let step_end = pos + rparen_pos;
-
-    if pos < step_end && tokens[pos].kind() == SyntaxKind::Ident {
-        pos += 1;
-    }
-    if pos < step_end && tokens[pos].kind() == SyntaxKind::Assign {
-        pos += 1;
-    }
-    if pos < step_end && tokens[pos].kind() == SyntaxKind::Ident {
-        pos += 1;
-    }
-
-    if pos >= step_end {
-        return None;
-    }
-
-    let step_op = tokens[pos].kind();
-    pos += 1;
-
-    let step_val = parse_simple_int_from_tokens(&tokens[pos..step_end])?;
-
-    let step = match step_op {
-        SyntaxKind::Plus => step_val,
-        SyntaxKind::Minus => -step_val,
-        _ => return None,
-    };
-
+    let _ = flipped;
     Some(ForParts {
         genvar_name,
         init,
@@ -422,11 +361,100 @@ pub(crate) fn extract_for_parts(
     })
 }
 
-fn parse_simple_int_from_tokens(tokens: &[lyra_parser::SyntaxToken]) -> Option<i64> {
-    if tokens.len() == 1 && tokens[0].kind() == SyntaxKind::IntLiteral {
-        return tokens[0].text().parse::<i64>().ok();
+fn extract_condition(
+    genvar_name: &str,
+    cond_node: &SyntaxNode,
+    eval_expr: &dyn Fn(&SyntaxNode) -> Option<i64>,
+) -> Option<(ForLimit, bool)> {
+    let cond_children: Vec<SyntaxNode> = cond_node.children().collect();
+    if cond_children.len() < 2 {
+        return None;
     }
-    None
+
+    let op_kind = cond_node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| is_comparison_op(t.kind()))?
+        .kind();
+
+    let lhs_is_genvar = node_is_name(genvar_name, &cond_children[0]);
+    let rhs_is_genvar = node_is_name(genvar_name, &cond_children[1]);
+
+    let (limit_node, effective_op, flipped) = if lhs_is_genvar {
+        (&cond_children[1], op_kind, false)
+    } else if rhs_is_genvar {
+        (&cond_children[0], flip_comparison(op_kind)?, true)
+    } else {
+        return None;
+    };
+
+    let limit_val = eval_expr(limit_node)?;
+    let limit = match effective_op {
+        SyntaxKind::Lt => ForLimit::Lt(limit_val),
+        SyntaxKind::LtEq => ForLimit::Le(limit_val),
+        SyntaxKind::Gt => ForLimit::Gt(limit_val),
+        SyntaxKind::GtEq => ForLimit::Ge(limit_val),
+        SyntaxKind::BangEq => ForLimit::Ne(limit_val),
+        _ => return None,
+    };
+    Some((limit, flipped))
+}
+
+fn extract_step(
+    genvar_name: &str,
+    step_node: &SyntaxNode,
+    eval_expr: &dyn Fn(&SyntaxNode) -> Option<i64>,
+) -> Option<i64> {
+    let step_children: Vec<SyntaxNode> = step_node.children().collect();
+    if step_children.len() < 2 {
+        return None;
+    }
+
+    let op_kind = step_node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| matches!(t.kind(), SyntaxKind::Plus | SyntaxKind::Minus))?
+        .kind();
+
+    let lhs_is_genvar = node_is_name(genvar_name, &step_children[0]);
+
+    if !lhs_is_genvar {
+        return None;
+    }
+
+    let step_val = eval_expr(&step_children[1])?;
+    match op_kind {
+        SyntaxKind::Plus => Some(step_val),
+        SyntaxKind::Minus => Some(-step_val),
+        _ => None,
+    }
+}
+
+fn node_is_name(name: &str, node: &SyntaxNode) -> bool {
+    if node.kind() != SyntaxKind::NameRef {
+        return false;
+    }
+    node.children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .any(|t| t.kind() == SyntaxKind::Ident && t.text() == name)
+}
+
+fn is_comparison_op(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::Lt | SyntaxKind::LtEq | SyntaxKind::Gt | SyntaxKind::GtEq | SyntaxKind::BangEq
+    )
+}
+
+fn flip_comparison(op: SyntaxKind) -> Option<SyntaxKind> {
+    match op {
+        SyntaxKind::Lt => Some(SyntaxKind::Gt),
+        SyntaxKind::Gt => Some(SyntaxKind::Lt),
+        SyntaxKind::LtEq => Some(SyntaxKind::GtEq),
+        SyntaxKind::GtEq => Some(SyntaxKind::LtEq),
+        SyntaxKind::BangEq => Some(SyntaxKind::BangEq),
+        _ => None,
+    }
 }
 
 pub(crate) fn is_expr_kind(kind: SyntaxKind) -> bool {

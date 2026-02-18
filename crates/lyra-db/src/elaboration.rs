@@ -20,11 +20,16 @@ pub(crate) struct InstanceKey {
 }
 
 /// Identity for a generate scope (if/for/case branch).
+///
+/// For nested for-loops, the same inner `ForStmt` offset+iter combination
+/// repeats across outer iterations. `parent_gen` disambiguates by
+/// recording the enclosing generate scope.
 #[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub(crate) struct GenScopeKey {
     pub(crate) file: FileId,
     pub(crate) offset: TextRange,
     pub(crate) iter: Option<i64>,
+    pub(crate) parent_gen: Option<Box<GenScopeKey>>,
 }
 
 /// An item in a scope's children list.

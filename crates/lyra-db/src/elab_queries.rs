@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use lyra_ast::AstNode;
+use lyra_ast::{AstNode, ErasedAstId};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
 use lyra_semantic::const_eval::{ConstLookup, eval_const_expr};
@@ -400,34 +400,20 @@ struct ParamOverride {
 }
 
 /// Extract parameter overrides from a `ModuleInstantiation` node.
+///
+/// Evaluates override expressions in the instantiating module's scope
+/// so that `#(.W(X))` resolves `X` against the instantiator's params/genvars.
 fn extract_param_overrides(
     inst_node: &lyra_ast::ModuleInstantiation,
-    file_id: FileId,
-    db: &dyn salsa::Database,
-    unit: CompilationUnit,
+    ctx: &ElabCtx<'_>,
+    env: &ScopeEnv<'_>,
 ) -> Vec<ParamOverride> {
     let Some(param_port_list) = inst_node.param_overrides() else {
         return Vec::new();
     };
 
-    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
-        return Vec::new();
-    };
-    let id_map = ast_id_map(db, source_file);
-
     let mut overrides = Vec::new();
-    for param_port in param_port_list.params() {
-        // ParamPortList contains ParamDecl nodes in the header,
-        // but in instantiation context it contains InstancePort nodes.
-        // The parser wraps overrides as InstancePort nodes.
-        // We need to work at the raw syntax level.
-        for declarator in param_port.declarators() {
-            let _ = declarator;
-        }
-    }
 
-    // Work at the raw syntax level: the ParamPortList in instantiation
-    // context contains InstancePort children (not ParamDecl).
     for child in param_port_list.syntax().children() {
         if child.kind() != SyntaxKind::InstancePort {
             continue;
@@ -440,11 +426,16 @@ fn extract_param_overrides(
         let span = ip.syntax().text_range();
 
         let value = if let Some(expr_node) = ip.actual_expr() {
-            if let Some(expr_ast_id) = id_map.erased_ast_id(&expr_node) {
-                let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, expr_ast_id);
-                crate::const_eval::eval_const_int(db, expr_ref)
-            } else {
-                ConstInt::Error(ConstEvalError::Unsupported)
+            match eval_env_expr(
+                ctx,
+                &expr_node,
+                env.file_id,
+                env.sig,
+                env.param_env,
+                env.genvars,
+            ) {
+                Ok(v) => ConstInt::Known(v),
+                Err(e) => ConstInt::Error(e),
             }
         } else {
             ConstInt::Error(ConstEvalError::Unresolved)
@@ -546,13 +537,14 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
         diags: &mut diags,
         active_stack: &mut active_stack,
         interner: &mut interner,
+        cond_cache: HashMap::new(),
     };
 
     elaborate_module(
         &mut ctx,
         top_def_id,
         &ScopeKey::Instance(top_key.clone()),
-        None,
+        &[],
     );
 
     ElabTree {
@@ -564,6 +556,8 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
     }
 }
 
+type CondCacheKey = (ErasedAstId, ParamEnvId, Vec<(SmolStr, i64)>);
+
 struct ElabCtx<'a> {
     db: &'a dyn salsa::Database,
     unit: CompilationUnit,
@@ -572,6 +566,7 @@ struct ElabCtx<'a> {
     diags: &'a mut Vec<ElabDiag>,
     active_stack: &'a mut Vec<GlobalDefId>,
     interner: &'a mut ParamEnvInterner,
+    cond_cache: HashMap<CondCacheKey, Option<i64>>,
 }
 
 /// Immutable context for expanding children within a scope.
@@ -580,8 +575,17 @@ struct ScopeEnv<'a> {
     parent_scope: &'a ScopeKey,
     sig: &'a ModuleSig,
     param_env: ParamEnvId,
-    genvar_binding: Option<(&'a SmolStr, i64)>,
+    genvars: &'a [(SmolStr, i64)],
     global: &'a lyra_semantic::global_index::GlobalDefIndex,
+}
+
+impl ScopeEnv<'_> {
+    fn parent_gen_key(&self) -> Option<Box<GenScopeKey>> {
+        match self.parent_scope {
+            ScopeKey::GenScope(gk) => Some(Box::new(gk.clone())),
+            ScopeKey::Instance(_) => None,
+        }
+    }
 }
 
 fn module_name_range(
@@ -610,7 +614,7 @@ fn elaborate_module(
     ctx: &mut ElabCtx<'_>,
     module_def: GlobalDefId,
     parent_scope: &ScopeKey,
-    genvar_binding: Option<(&SmolStr, i64)>,
+    genvars: &[(SmolStr, i64)],
 ) {
     let file_id = module_def.file();
 
@@ -625,7 +629,7 @@ fn elaborate_module(
     }
 
     ctx.active_stack.push(module_def);
-    elaborate_module_body(ctx, module_def, parent_scope, genvar_binding);
+    elaborate_module_body(ctx, module_def, parent_scope, genvars);
     ctx.active_stack.pop();
 }
 
@@ -633,7 +637,7 @@ fn elaborate_module_body(
     ctx: &mut ElabCtx<'_>,
     module_def: GlobalDefId,
     parent_scope: &ScopeKey,
-    genvar_binding: Option<(&SmolStr, i64)>,
+    genvars: &[(SmolStr, i64)],
 ) {
     let file_id = module_def.file();
     let Some(source_file) = source_file_by_id(ctx.db, ctx.unit, file_id) else {
@@ -667,7 +671,7 @@ fn elaborate_module_body(
         parent_scope,
         sig,
         param_env,
-        genvar_binding,
+        genvars,
         global,
     };
     expand_body_children(ctx, body.syntax(), &env);
@@ -677,7 +681,7 @@ fn expand_body_children(ctx: &mut ElabCtx<'_>, body_node: &SyntaxNode, env: &Sco
     for child in body_node.children() {
         match child.kind() {
             SyntaxKind::ModuleInstantiation => {
-                process_instantiation(ctx, &child, env.file_id, env.parent_scope, env.global);
+                process_instantiation(ctx, &child, env);
             }
             SyntaxKind::IfStmt => process_generate_if(ctx, &child, env),
             SyntaxKind::ForStmt => process_generate_for(ctx, &child, env),
@@ -689,13 +693,7 @@ fn expand_body_children(ctx: &mut ElabCtx<'_>, body_node: &SyntaxNode, env: &Sco
     }
 }
 
-fn process_instantiation(
-    ctx: &mut ElabCtx<'_>,
-    node: &SyntaxNode,
-    file_id: FileId,
-    parent_scope: &ScopeKey,
-    global: &lyra_semantic::global_index::GlobalDefIndex,
-) {
+fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
     let Some(inst_node) = lyra_ast::ModuleInstantiation::cast(node.clone()) else {
         return;
     };
@@ -704,11 +702,12 @@ fn process_instantiation(
     };
     let inst_module_name = SmolStr::new(name_tok.text());
     let name_span = Span {
-        file: file_id,
+        file: env.file_id,
         range: name_tok.text_range(),
     };
 
-    let Some((target_def_id, target_kind)) = global.resolve_definition(&inst_module_name) else {
+    let Some((target_def_id, target_kind)) = env.global.resolve_definition(&inst_module_name)
+    else {
         ctx.diags.push(ElabDiag::UnresolvedModuleInst {
             name: inst_module_name,
             span: name_span,
@@ -726,15 +725,15 @@ fn process_instantiation(
 
     let target_sig = module_signature(ctx.db, ModuleRef::new(ctx.db, ctx.unit, target_def_id));
 
-    let overrides = extract_param_overrides(&inst_node, file_id, ctx.db, ctx.unit);
+    let overrides = extract_param_overrides(&inst_node, ctx, env);
 
     for (inst_name_tok, port_list) in inst_node.instances() {
-        let parent_gen = match parent_scope {
+        let parent_gen = match env.parent_scope {
             ScopeKey::GenScope(gsk) => Some(gsk.clone()),
             ScopeKey::Instance(_) => None,
         };
         let child_key = InstanceKey {
-            file: file_id,
+            file: env.file_id,
             name_range: inst_name_tok.text_range(),
             parent_gen,
         };
@@ -745,7 +744,7 @@ fn process_instantiation(
             target_sig,
             &overrides,
             Span {
-                file: file_id,
+                file: env.file_id,
                 range: inst_name_tok.text_range(),
             },
             ctx.diags,
@@ -757,7 +756,7 @@ fn process_instantiation(
                 pl,
                 target_sig,
                 &inst_module_name,
-                file_id,
+                env.file_id,
                 inst_name_tok.text_range(),
                 ctx.diags,
             );
@@ -769,16 +768,16 @@ fn process_instantiation(
             .entry(child_key.clone())
             .or_insert_with(|| InstanceNode {
                 key: child_key.clone(),
-                parent: Some(parent_scope.clone()),
+                parent: Some(env.parent_scope.clone()),
                 module_def: target_def_id,
                 instance_name: SmolStr::new(inst_name_tok.text()),
                 param_env: child_param_env,
                 children: Vec::new(),
             });
 
-        add_child_to_scope(ctx, parent_scope, child_item);
+        add_child_to_scope(ctx, env.parent_scope, child_item);
 
-        elaborate_module(ctx, target_def_id, &ScopeKey::Instance(child_key), None);
+        elaborate_module(ctx, target_def_id, &ScopeKey::Instance(child_key), &[]);
     }
 }
 
@@ -788,14 +787,7 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
         return;
     }
 
-    let cond_val = eval_gen_condition(
-        ctx,
-        &children[0],
-        env.file_id,
-        env.sig,
-        env.param_env,
-        env.genvar_binding,
-    );
+    let cond_val = eval_gen_condition(ctx, &children[0], env);
 
     let cond_true = if let Some(v) = cond_val {
         v != 0
@@ -823,6 +815,7 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
         file: env.file_id,
         offset: node.text_range(),
         iter: None,
+        parent_gen: env.parent_gen_key(),
     };
     let block_name = extract_block_name(body);
 
@@ -848,7 +841,18 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
 }
 
 fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
-    let for_parts = extract_for_parts(node, env.param_env, env.sig, env.genvar_binding);
+    let eval_fn = |expr_node: &SyntaxNode| -> Option<i64> {
+        eval_env_expr(
+            ctx,
+            expr_node,
+            env.file_id,
+            env.sig,
+            env.param_env,
+            env.genvars,
+        )
+        .ok()
+    };
+    let for_parts = extract_for_parts(node, &eval_fn);
 
     let Some(parts) = for_parts else {
         ctx.diags.push(ElabDiag::GenvarNotConst {
@@ -893,6 +897,7 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
             file: env.file_id,
             offset: node.text_range(),
             iter: Some(current),
+            parent_gen: env.parent_gen_key(),
         };
 
         let block_name = extract_block_name(&body);
@@ -913,10 +918,12 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
         let scope_item = ElabItemKey::GenScope(scope_key.clone());
         add_child_to_scope(ctx, env.parent_scope, scope_item);
 
-        let child_scope = ScopeKey::GenScope(scope_key);
+        let mut child_genvars = env.genvars.to_vec();
+        child_genvars.push((genvar_name.clone(), current));
+        let child_scope = ScopeKey::GenScope(scope_key.clone());
         let child_env = ScopeEnv {
             parent_scope: &child_scope,
-            genvar_binding: Some((&genvar_name, current)),
+            genvars: &child_genvars,
             ..*env
         };
         expand_body_children(ctx, &body, &child_env);
@@ -932,14 +939,7 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         return;
     }
 
-    let case_val = eval_gen_condition(
-        ctx,
-        &child_nodes[0],
-        env.file_id,
-        env.sig,
-        env.param_env,
-        env.genvar_binding,
-    );
+    let case_val = eval_gen_condition(ctx, &child_nodes[0], env);
     let Some(case_val) = case_val else {
         ctx.diags.push(ElabDiag::GenCondNotConst {
             span: Span {
@@ -973,14 +973,7 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
             .collect();
 
         for expr in &item_exprs {
-            let item_val = eval_gen_condition(
-                ctx,
-                expr,
-                env.file_id,
-                env.sig,
-                env.param_env,
-                env.genvar_binding,
-            );
+            let item_val = eval_gen_condition(ctx, expr, env);
             if let Some(v) = item_val
                 && v == case_val
             {
@@ -1002,6 +995,7 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         file: env.file_id,
         offset: node.text_range(),
         iter: None,
+        parent_gen: env.parent_gen_key(),
     };
 
     let block_name = extract_block_name(&body);
@@ -1034,6 +1028,7 @@ fn process_generate_block(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeE
         file: env.file_id,
         offset: node.text_range(),
         iter: None,
+        parent_gen: env.parent_gen_key(),
     };
 
     ctx.gen_scopes
@@ -1072,26 +1067,26 @@ fn add_child_to_scope(ctx: &mut ElabCtx<'_>, scope: &ScopeKey, item: ElabItemKey
     }
 }
 
-fn eval_gen_condition(
-    ctx: &mut ElabCtx<'_>,
+fn eval_env_expr(
+    ctx: &ElabCtx<'_>,
     expr_node: &SyntaxNode,
     file_id: FileId,
     sig: &ModuleSig,
     param_env: ParamEnvId,
-    genvar_binding: Option<(&SmolStr, i64)>,
-) -> Option<i64> {
-    let source_file = source_file_by_id(ctx.db, ctx.unit, file_id)?;
+    genvars: &[(SmolStr, i64)],
+) -> Result<i64, ConstEvalError> {
+    let source_file =
+        source_file_by_id(ctx.db, ctx.unit, file_id).ok_or(ConstEvalError::Unresolved)?;
     let id_map = ast_id_map(ctx.db, source_file);
 
-    // Try DB-backed evaluation first for simple literal cases (no genvar, no params)
-    if genvar_binding.is_none()
+    // Fast path: DB-backed evaluation for simple literal cases
+    if genvars.is_empty()
         && sig.params.is_empty()
         && let Some(expr_ast_id) = id_map.erased_ast_id(expr_node)
     {
         let expr_ref = crate::const_eval::ConstExprRef::new(ctx.db, ctx.unit, expr_ast_id);
-        let result = crate::const_eval::eval_const_int(ctx.db, expr_ref);
-        if let ConstInt::Known(v) = result {
-            return Some(v);
+        if let ConstInt::Known(v) = crate::const_eval::eval_const_int(ctx.db, expr_ref) {
+            return Ok(v);
         }
     }
 
@@ -1105,14 +1100,14 @@ fn eval_gen_condition(
     let resolve_name = |name_node: &SyntaxNode| -> Result<i64, ConstEvalError> {
         let name_text = extract_name_text(name_node)?;
 
-        // Check genvar binding first
-        if let Some((gn, gv)) = genvar_binding
-            && name_text == gn.as_str()
-        {
-            return Ok(gv);
+        // 1. Walk genvars from back to front (innermost first)
+        for (gn, gv) in genvars.iter().rev() {
+            if name_text == gn.as_str() {
+                return Ok(*gv);
+            }
         }
 
-        // Check param env by name via sig
+        // 2. Check param env (never fall through for param names)
         if let Some(ci) = param_lookup.lookup(&name_text) {
             return match ci {
                 ConstInt::Known(v) => Ok(v),
@@ -1121,7 +1116,7 @@ fn eval_gen_condition(
             };
         }
 
-        // Fall back to symbol-table resolution
+        // 3. Symbol-table fallback
         let name_ast_id = id_map
             .erased_ast_id(name_node)
             .ok_or(ConstEvalError::Unresolved)?;
@@ -1133,7 +1128,44 @@ fn eval_gen_condition(
         }
     };
 
-    eval_const_expr(expr_node, &resolve_name).ok()
+    eval_const_expr(expr_node, &resolve_name)
+}
+
+fn eval_gen_condition(
+    ctx: &mut ElabCtx<'_>,
+    expr_node: &SyntaxNode,
+    env: &ScopeEnv<'_>,
+) -> Option<i64> {
+    let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id)?;
+    let id_map = ast_id_map(ctx.db, source_file);
+
+    if let Some(expr_ast_id) = id_map.erased_ast_id(expr_node) {
+        let cache_key = (expr_ast_id, env.param_env, env.genvars.to_vec());
+        if let Some(&cached) = ctx.cond_cache.get(&cache_key) {
+            return cached;
+        }
+        let result = eval_env_expr(
+            ctx,
+            expr_node,
+            env.file_id,
+            env.sig,
+            env.param_env,
+            env.genvars,
+        )
+        .ok();
+        ctx.cond_cache.insert(cache_key, result);
+        result
+    } else {
+        eval_env_expr(
+            ctx,
+            expr_node,
+            env.file_id,
+            env.sig,
+            env.param_env,
+            env.genvars,
+        )
+        .ok()
+    }
 }
 
 fn extract_name_text(name_node: &SyntaxNode) -> Result<String, ConstEvalError> {

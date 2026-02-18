@@ -773,3 +773,138 @@ fn param_env_dedup() {
         "identical param envs should share the same ParamEnvId"
     );
 }
+
+// Override resolves instantiator's param
+
+#[test]
+fn override_uses_instantiator_param() {
+    let (_, tree) = elab_tree(
+        &[
+            "module inner #(parameter int W = 1)(); endmodule",
+            "module outer #(parameter int X = 4)(); inner #(.W(X)) u1(); endmodule",
+        ],
+        "outer",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert_eq!(all, vec!["u1"]);
+    let vals = child_param_values(&tree, &top_key, "u1");
+    assert_eq!(vals.len(), 1);
+    assert_eq!(
+        vals[0],
+        ConstInt::Known(4),
+        "W should be 4 from outer's X default"
+    );
+}
+
+#[test]
+fn override_uses_localparam() {
+    let (_, tree) = elab_tree(
+        &[
+            "module inner #(parameter int W = 1)(); endmodule",
+            "module outer; localparam int Y = 16; inner #(.W(Y)) u1(); endmodule",
+        ],
+        "outer",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let vals = child_param_values(&tree, &top_key, "u1");
+    assert_eq!(vals.len(), 1);
+    assert_eq!(
+        vals[0],
+        ConstInt::Known(16),
+        "W should be 16 from localparam Y"
+    );
+}
+
+// For-loop with param bounds
+
+#[test]
+fn for_loop_bound_from_param() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top #(parameter int N = 4)(); for (genvar i = 0; i < N; i = i + 1) begin leaf u(); end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert_eq!(
+        all.len(),
+        4,
+        "expected 4 instances from for-loop with param N=4: {all:?}"
+    );
+}
+
+#[test]
+fn for_loop_bound_from_param_expression() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top #(parameter int N = 4)(); for (genvar i = 0; i < N - 1; i = i + 1) begin leaf u(); end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert_eq!(
+        all.len(),
+        3,
+        "expected 3 instances from for-loop with param N-1=3: {all:?}"
+    );
+}
+
+#[test]
+fn for_loop_flipped_condition() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top; for (genvar i = 0; 4 > i; i = i + 1) begin leaf u(); end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert_eq!(
+        all.len(),
+        4,
+        "expected 4 instances from flipped condition '4 > i': {all:?}"
+    );
+}
+
+#[test]
+fn nested_for_loops_see_both_genvars() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top; for (genvar i = 0; i < 2; i = i + 1) begin for (genvar j = 0; j < 3; j = j + 1) begin leaf u(); end end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert_eq!(
+        all.len(),
+        6,
+        "expected 2*3=6 instances from nested for-loops: {all:?}"
+    );
+}
+
+#[test]
+fn genvar_dependent_generate_if_inside_for() {
+    // if (i) is false for i=0, true for i=1,2
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf_a(); endmodule",
+            "module leaf_b(); endmodule",
+            "module top; for (genvar i = 0; i < 3; i = i + 1) begin if (i) begin leaf_a u_a(); end else begin leaf_b u_b(); end end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    let a_count = all.iter().filter(|n| *n == "u_a").count();
+    let b_count = all.iter().filter(|n| *n == "u_b").count();
+    assert_eq!(a_count, 2, "i=1,2 pick true branch: {all:?}");
+    assert_eq!(b_count, 1, "i=0 picks false branch: {all:?}");
+}
