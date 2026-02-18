@@ -37,6 +37,7 @@ pub enum MessageId {
     GenCondNotConst,
     GenvarNotConst,
     DuplicateGenBlockName,
+    GenerateIterationLimit,
     // Label messages
     NotFoundInScope,
     NotFoundAsType,
@@ -187,6 +188,10 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::GenvarNotConst => "genvar expression is not constant".into(),
         MessageId::DuplicateGenBlockName => {
             format!("duplicate generate block name `{}`", name())
+        }
+        MessageId::GenerateIterationLimit => {
+            let limit = msg.args.first().and_then(Arg::as_count).unwrap_or(0);
+            format!("generate-for iteration limit ({limit}) reached")
         }
         MessageId::NotFoundInScope => "not found in this scope".into(),
         MessageId::NotFoundAsType => "not found as a type in this scope".into(),

@@ -1,49 +1,141 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use lyra_ast::ErasedAstId;
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::ConstInt;
 use lyra_source::{FileId, Span, TextRange};
 use smol_str::SmolStr;
 
-/// Instance identity keyed by the instance name token's text range
-/// plus the enclosing generate scope (if any).
-///
-/// Outside generate-for, each instance name has a unique offset.
-/// Inside generate-for, the same AST node is visited per iteration,
-/// so `parent_gen` disambiguates via the enclosing `GenScopeKey`.
-#[derive(Clone, Hash, Eq, PartialEq, Debug)]
-pub(crate) struct InstanceKey {
-    pub(crate) file: FileId,
+// Arena IDs
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub(crate) struct InstId(u32);
+
+impl InstId {
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub(crate) struct GenScopeId(u32);
+
+impl GenScopeId {
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub(crate) enum ElabNodeId {
+    Inst(InstId),
+    GenScope(GenScopeId),
+}
+
+// Origin keys (stable identity data on nodes)
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub(crate) struct InstOrigin {
+    pub(crate) parent_inst: Option<InstId>,
+    pub(crate) inst_stmt_ast: ErasedAstId,
+    pub(crate) inst_ordinal: u32,
+}
+
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub(crate) struct GenScopeOrigin {
+    pub(crate) parent_inst: InstId,
+    pub(crate) scope_ast: ErasedAstId,
+    pub(crate) iter: Option<ConstInt>,
+}
+
+// Node types
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InstanceNode {
+    pub(crate) origin: InstOrigin,
+    pub(crate) parent: Option<ElabNodeId>,
+    pub(crate) module_def: GlobalDefId,
+    pub(crate) instance_name: SmolStr,
+    pub(crate) param_env: ParamEnvId,
+    pub(crate) children: Vec<ElabNodeId>,
+    pub(crate) source_file: FileId,
     pub(crate) name_range: TextRange,
-    pub(crate) parent_gen: Option<GenScopeKey>,
 }
 
-/// Identity for a generate scope (if/for/case branch).
-#[derive(Clone, Hash, Eq, PartialEq, Debug)]
-pub(crate) struct GenScopeKey {
-    pub(crate) file: FileId,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GenScopeKind {
+    If,
+    ForIteration {
+        genvar_name: SmolStr,
+        genvar_value: ConstInt,
+    },
+    CaseItem,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GenScopeNode {
+    pub(crate) origin: GenScopeOrigin,
+    pub(crate) parent: ElabNodeId,
+    pub(crate) name: Option<SmolStr>,
+    pub(crate) kind: GenScopeKind,
+    pub(crate) children: Vec<ElabNodeId>,
+    pub(crate) source_file: FileId,
     pub(crate) offset: TextRange,
-    pub(crate) iter: Option<i64>,
 }
 
-/// An item in a scope's children list.
-#[derive(Clone, Hash, Eq, PartialEq, Debug)]
-pub(crate) enum ElabItemKey {
-    Inst(InstanceKey),
-    GenScope(GenScopeKey),
+// ElabTree
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ElabTree {
+    pub(crate) top: Option<InstId>,
+    pub(crate) instances: Vec<InstanceNode>,
+    pub(crate) gen_scopes: Vec<GenScopeNode>,
+    pub(crate) diagnostics: Vec<ElabDiag>,
+    pub(crate) envs: ParamEnvInterner,
+    pub(crate) genvar_envs: GenvarEnvInterner,
 }
 
-/// Unified key for any scope in the elaboration tree.
-#[derive(Clone, Hash, Eq, PartialEq, Debug)]
-pub(crate) enum ScopeKey {
-    Instance(InstanceKey),
-    GenScope(GenScopeKey),
+impl ElabTree {
+    pub(crate) fn push_instance(&mut self, node: InstanceNode) -> InstId {
+        let id = InstId(self.instances.len() as u32);
+        self.instances.push(node);
+        id
+    }
+
+    pub(crate) fn push_gen_scope(&mut self, node: GenScopeNode) -> GenScopeId {
+        let id = GenScopeId(self.gen_scopes.len() as u32);
+        self.gen_scopes.push(node);
+        id
+    }
+
+    pub(crate) fn inst(&self, id: InstId) -> &InstanceNode {
+        &self.instances[id.index()]
+    }
+
+    pub(crate) fn inst_mut(&mut self, id: InstId) -> &mut InstanceNode {
+        &mut self.instances[id.index()]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn gen_scope(&self, id: GenScopeId) -> &GenScopeNode {
+        &self.gen_scopes[id.index()]
+    }
+
+    pub(crate) fn gen_scope_mut(&mut self, id: GenScopeId) -> &mut GenScopeNode {
+        &mut self.gen_scopes[id.index()]
+    }
+
+    pub(crate) fn add_child(&mut self, parent: ElabNodeId, child: ElabNodeId) {
+        match parent {
+            ElabNodeId::Inst(id) => self.inst_mut(id).children.push(child),
+            ElabNodeId::GenScope(id) => self.gen_scope_mut(id).children.push(child),
+        }
+    }
 }
 
-/// Interned identity for a parameter environment.
-///
-/// `ParamEnvId(0)` is always the empty environment (no parameters).
+// ParamEnvId and interner
+
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub(crate) struct ParamEnvId(u32);
 
@@ -51,7 +143,6 @@ impl ParamEnvId {
     pub(crate) const EMPTY: Self = Self(0);
 }
 
-/// Fingerprint for fast `HashMap` lookup without allocating a `Box<[ConstInt]>` to probe.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 struct EnvFingerprint {
     hash: u64,
@@ -64,11 +155,6 @@ fn hash_values(values: &[ConstInt]) -> u64 {
     hasher.finish()
 }
 
-/// Deduplicating interner for parameter environments.
-///
-/// Maps value slices to small `ParamEnvId(u32)` IDs. Identical value
-/// slices always get the same ID. The interner lives in `ElabCtx`
-/// during elaboration and is moved into `ElabTree` for consumers.
 #[derive(Debug, Clone)]
 pub(crate) struct ParamEnvInterner {
     map: HashMap<EnvFingerprint, Vec<ParamEnvId>>,
@@ -122,55 +208,108 @@ impl ParamEnvInterner {
     }
 }
 
-/// What kind of generate scope this is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum GenScopeKind {
-    If,
-    ForIteration {
-        genvar_name: SmolStr,
-        genvar_value: i64,
-    },
-    CaseItem,
+// GenvarEnvId and interner
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub(crate) struct GenvarEnvId(u32);
+
+impl GenvarEnvId {
+    pub(crate) const EMPTY: Self = Self(0);
 }
 
-/// A node in the elaboration instance tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct InstanceNode {
-    pub(crate) key: InstanceKey,
-    pub(crate) parent: Option<ScopeKey>,
-    pub(crate) module_def: GlobalDefId,
-    pub(crate) instance_name: SmolStr,
-    pub(crate) param_env: ParamEnvId,
-    pub(crate) children: Vec<ElabItemKey>,
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+struct GenvarEnvFingerprint {
+    parent: GenvarEnvId,
+    name_hash: u64,
+    value: ConstInt,
 }
 
-/// A generate scope node.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GenScopeNode {
-    pub(crate) key: GenScopeKey,
-    pub(crate) parent: ScopeKey,
-    pub(crate) name: Option<SmolStr>,
-    pub(crate) kind: GenScopeKind,
-    pub(crate) children: Vec<ElabItemKey>,
+#[derive(Debug, Clone)]
+pub(crate) struct GenvarEnvInterner {
+    map: HashMap<GenvarEnvFingerprint, Vec<GenvarEnvId>>,
+    envs: Vec<Box<[(SmolStr, ConstInt)]>>,
 }
 
-/// The elaborated instance tree rooted at a top module.
-///
-/// The top module is a node in `nodes` with `parent: None`.
-/// Children are stored in source order of instantiation appearance.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ElabTree {
-    pub(crate) top: Option<InstanceKey>,
-    pub(crate) nodes: HashMap<InstanceKey, InstanceNode>,
-    pub(crate) gen_scopes: HashMap<GenScopeKey, GenScopeNode>,
-    pub(crate) diagnostics: Vec<ElabDiag>,
-    pub(crate) envs: ParamEnvInterner,
+impl PartialEq for GenvarEnvInterner {
+    fn eq(&self, other: &Self) -> bool {
+        self.envs == other.envs
+    }
 }
 
-/// Elaboration-specific diagnostic, before lowering to `lyra_diag::Diagnostic`.
-///
-/// Stores `Span` (file + range) so diagnostics map to the correct file
-/// in multi-file compilation units.
+impl Eq for GenvarEnvInterner {}
+
+impl GenvarEnvInterner {
+    pub(crate) fn new() -> Self {
+        let empty: Box<[(SmolStr, ConstInt)]> = Box::new([]);
+        let mut map = HashMap::new();
+        let fp = GenvarEnvFingerprint {
+            parent: GenvarEnvId(0),
+            name_hash: 0,
+            value: ConstInt::Known(0),
+        };
+        map.insert(fp, vec![GenvarEnvId(0)]);
+        Self {
+            map,
+            envs: vec![empty],
+        }
+    }
+
+    pub(crate) fn push(
+        &mut self,
+        parent: GenvarEnvId,
+        name: SmolStr,
+        value: ConstInt,
+    ) -> GenvarEnvId {
+        let name_hash = {
+            let mut h = std::hash::DefaultHasher::new();
+            name.hash(&mut h);
+            h.finish()
+        };
+        let fp = GenvarEnvFingerprint {
+            parent,
+            name_hash,
+            value: value.clone(),
+        };
+        if let Some(candidates) = self.map.get(&fp) {
+            for &cand_id in candidates {
+                let cand = &self.envs[cand_id.0 as usize];
+                let parent_vals = &self.envs[parent.0 as usize];
+                if cand.len() == parent_vals.len() + 1
+                    && cand[..parent_vals.len()] == parent_vals[..]
+                    && cand.last().map(|(n, v)| (n, v)) == Some((&name, &value))
+                {
+                    return cand_id;
+                }
+            }
+        }
+        let parent_vals = self.envs[parent.0 as usize].to_vec();
+        let mut new_vals = parent_vals;
+        new_vals.push((name, value));
+        let id = GenvarEnvId(self.envs.len() as u32);
+        self.envs.push(new_vals.into_boxed_slice());
+        self.map.entry(fp).or_default().push(id);
+        id
+    }
+
+    pub(crate) fn values(&self, id: GenvarEnvId) -> &[(SmolStr, ConstInt)] {
+        &self.envs[id.0 as usize]
+    }
+}
+
+// Condition cache key
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub(crate) enum CondSiteKind {
+    GenIf,
+    GenCase,
+}
+
+pub(crate) type CondCacheKey = (ErasedAstId, CondSiteKind, ParamEnvId, GenvarEnvId);
+
+// Elaboration diagnostics
+
+pub(crate) const ELAB_MAX_GENERATE_ITERATIONS: usize = 10_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ElabDiag {
     UnresolvedModuleInst {
@@ -227,6 +366,10 @@ pub(crate) enum ElabDiag {
     GenvarNotConst {
         span: Span,
     },
+    GenerateIterationLimit {
+        span: Span,
+        limit: usize,
+    },
 }
 
 impl ElabDiag {
@@ -244,7 +387,8 @@ impl ElabDiag {
             | Self::TooManyPositionalParams { span, .. }
             | Self::ParamNotConst { span, .. }
             | Self::GenCondNotConst { span }
-            | Self::GenvarNotConst { span } => span,
+            | Self::GenvarNotConst { span }
+            | Self::GenerateIterationLimit { span, .. } => span,
         }
     }
 }

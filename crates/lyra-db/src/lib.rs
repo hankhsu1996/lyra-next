@@ -1,5 +1,6 @@
 mod const_eval;
 mod diagnostics;
+mod elab_eval;
 mod elab_lower;
 mod elab_queries;
 mod elaboration;

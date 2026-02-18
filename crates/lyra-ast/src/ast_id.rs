@@ -56,6 +56,14 @@ impl ErasedAstId {
     pub fn file(self) -> FileId {
         self.0.file
     }
+
+    /// Sentinel id for use when no AST node is available (e.g. top-level roots).
+    pub fn placeholder(file: FileId) -> Self {
+        Self(RawAstId {
+            file,
+            index: u32::MAX,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
