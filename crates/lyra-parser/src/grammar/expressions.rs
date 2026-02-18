@@ -36,6 +36,7 @@ fn expr_bp(p: &mut Parser, min_bp: u8, mode: ExprMode) -> Option<CompletedMarker
             }
             let m = lhs.precede(p);
             p.bump(); // ?
+            super::eat_attr_instances(p);
             expr_bp(p, 0, mode); // middle expression, no min_bp restriction
             p.expect(SyntaxKind::Colon);
             expr_bp(p, 1, mode); // right-associative
@@ -56,6 +57,7 @@ fn expr_bp(p: &mut Parser, min_bp: u8, mode: ExprMode) -> Option<CompletedMarker
         }
         let m = lhs.precede(p);
         p.bump(); // operator
+        super::eat_attr_instances(p);
         expr_bp(p, op_bp.1, mode);
         lhs = m.complete(p, kind);
     }
@@ -67,6 +69,7 @@ fn lhs(p: &mut Parser, mode: ExprMode) -> Option<CompletedMarker> {
     if let Some(bp) = prefix_bp(p.current()) {
         let m = p.start();
         p.bump(); // prefix operator
+        super::eat_attr_instances(p);
         expr_bp(p, bp, mode);
         return Some(m.complete(p, SyntaxKind::PrefixExpr));
     }

@@ -44,6 +44,7 @@ pub(crate) fn package_decl(p: &mut Parser) {
 
 // Parse one package item. Returns false if no progress was made.
 fn package_item(p: &mut Parser) -> bool {
+    super::eat_attr_instances(p);
     match p.current() {
         SyntaxKind::ParameterKw | SyntaxKind::LocalparamKw => {
             declarations::param_decl(p);
@@ -166,6 +167,7 @@ pub(crate) fn module_decl(p: &mut Parser) {
 
 // Parse one module item. Returns false if no progress was made.
 fn module_item(p: &mut Parser) -> bool {
+    super::eat_attr_instances(p);
     match p.current() {
         SyntaxKind::AssignKw => {
             continuous_assign(p);
@@ -336,6 +338,7 @@ fn instance_port_list(p: &mut Parser) {
 
 fn instance_port(p: &mut Parser) {
     let m = p.start();
+    super::eat_attr_instances(p);
     if p.at(SyntaxKind::Dot) {
         // Named: .port_name(expr)
         p.bump(); // .

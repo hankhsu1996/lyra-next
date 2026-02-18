@@ -7,6 +7,7 @@ use super::expressions;
 
 // Parse a single statement.
 pub(crate) fn stmt(p: &mut Parser) {
+    super::eat_attr_instances(p);
     // Timing control prefix: `@(...)` or `#delay`
     if p.at(SyntaxKind::At) || p.at(SyntaxKind::Hash) {
         timing_control_stmt(p);

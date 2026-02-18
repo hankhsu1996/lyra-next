@@ -364,6 +364,10 @@ pub enum SyntaxKind {
     XnorKw,
     XorKw,
 
+    // Attribute delimiters
+    AttrOpen,
+    AttrClose,
+
     // Node boundary
     #[doc(hidden)]
     __NodeStart,
@@ -435,6 +439,8 @@ pub enum SyntaxKind {
     SystemTfArgList,
     GenerateRegion,
     GenvarDecl,
+    AttrInst,
+    AttrSpec,
 
     #[doc(hidden)]
     __Last,

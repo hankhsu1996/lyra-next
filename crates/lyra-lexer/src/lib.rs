@@ -16,9 +16,27 @@ pub struct Token {
 pub fn lex(src: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut rest = src;
+    let mut prev_sig_kind = SyntaxKind::Eof;
+    let mut attr_depth: u32 = 0;
 
     while !rest.is_empty() {
-        let (kind, consumed) = lex_one(rest);
+        let after_at = prev_sig_kind == SyntaxKind::At;
+        let (kind, consumed) = lex_one(rest, after_at, attr_depth);
+
+        if kind == SyntaxKind::AttrOpen {
+            attr_depth += 1;
+        } else if kind == SyntaxKind::AttrClose {
+            attr_depth = attr_depth.saturating_sub(1);
+        }
+
+        if is_attr_depth_reset(kind) {
+            attr_depth = 0;
+        }
+
+        if !is_trivia(kind) {
+            prev_sig_kind = kind;
+        }
+
         tokens.push(Token {
             kind,
             len: TextSize::new(consumed as u32),
@@ -33,7 +51,26 @@ pub fn lex(src: &str) -> Vec<Token> {
     tokens
 }
 
-fn lex_one(s: &str) -> (SyntaxKind, usize) {
+fn is_trivia(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
+    )
+}
+
+fn is_attr_depth_reset(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::Semicolon
+            | SyntaxKind::EndKw
+            | SyntaxKind::EndmoduleKw
+            | SyntaxKind::EndpackageKw
+            | SyntaxKind::EndinterfaceKw
+            | SyntaxKind::EndprogramKw
+    )
+}
+
+fn lex_one(s: &str, after_at: bool, attr_depth: u32) -> (SyntaxKind, usize) {
     let bytes = s.as_bytes();
     let c = bytes[0];
 
@@ -56,7 +93,7 @@ fn lex_one(s: &str) -> (SyntaxKind, usize) {
     }
 
     // Operators and punctuation (longest-match decision tree)
-    if let Some(r) = lex_operator(bytes) {
+    if let Some(r) = lex_operator(bytes, after_at, attr_depth) {
         return r;
     }
 
@@ -106,7 +143,7 @@ fn lex_one(s: &str) -> (SyntaxKind, usize) {
 }
 
 // Operator/punctuation dispatch. Returns None for non-operator bytes.
-fn lex_operator(bytes: &[u8]) -> Option<(SyntaxKind, usize)> {
+fn lex_operator(bytes: &[u8], after_at: bool, attr_depth: u32) -> Option<(SyntaxKind, usize)> {
     let r = match bytes[0] {
         b'!' => lex_bang(bytes),
         b'=' => lex_eq(bytes),
@@ -118,7 +155,7 @@ fn lex_operator(bytes: &[u8]) -> Option<(SyntaxKind, usize)> {
         b'~' => lex_tilde(bytes),
         b'+' => lex_plus(bytes),
         b'-' => lex_minus(bytes),
-        b'*' => lex_star(bytes),
+        b'*' => lex_star(bytes, attr_depth),
         b'/' => lex_slash(bytes),
         b'%' => lex_percent(bytes),
         b'#' => {
@@ -139,7 +176,13 @@ fn lex_operator(bytes: &[u8]) -> Option<(SyntaxKind, usize)> {
         b'?' => (SyntaxKind::Question, 1),
         b';' => (SyntaxKind::Semicolon, 1),
         b',' => (SyntaxKind::Comma, 1),
-        b'(' => (SyntaxKind::LParen, 1),
+        b'(' => {
+            if bytes.get(1) == Some(&b'*') && !after_at {
+                (SyntaxKind::AttrOpen, 2)
+            } else {
+                (SyntaxKind::LParen, 1)
+            }
+        }
         b')' => (SyntaxKind::RParen, 1),
         b'{' => (SyntaxKind::LBrace, 1),
         b'}' => (SyntaxKind::RBrace, 1),
@@ -264,10 +307,11 @@ fn lex_minus(bytes: &[u8]) -> (SyntaxKind, usize) {
     }
 }
 
-fn lex_star(bytes: &[u8]) -> (SyntaxKind, usize) {
+fn lex_star(bytes: &[u8], attr_depth: u32) -> (SyntaxKind, usize) {
     match bytes.get(1) {
         Some(&b'*') => (SyntaxKind::StarStar, 2),
         Some(&b'=') => (SyntaxKind::StarEq, 2),
+        Some(&b')') if attr_depth > 0 => (SyntaxKind::AttrClose, 2),
         _ => (SyntaxKind::Star, 1),
     }
 }
