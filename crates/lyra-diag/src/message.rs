@@ -30,6 +30,13 @@ pub enum MessageId {
     MissingPortConn,
     PortWidthMismatch,
     ElabRecursionLimit,
+    UnknownParam,
+    DuplicateParamOverride,
+    TooManyPositionalParams,
+    ParamNotConst,
+    GenCondNotConst,
+    GenvarNotConst,
+    DuplicateGenBlockName,
     // Label messages
     NotFoundInScope,
     NotFoundAsType,
@@ -157,6 +164,30 @@ pub fn render_message(msg: &Message) -> String {
             format!("port `{port}`: formal is {formal_w} bits, actual is {actual_w} bits")
         }
         MessageId::ElabRecursionLimit => "elaboration recursion limit reached".into(),
+        MessageId::UnknownParam => {
+            let param = name();
+            let module = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("parameter `{param}` not found on module `{module}`")
+        }
+        MessageId::DuplicateParamOverride => {
+            format!("parameter `{}` overridden more than once", name())
+        }
+        MessageId::TooManyPositionalParams => {
+            let expected = msg.args.first().and_then(Arg::as_count).unwrap_or(0);
+            let got = msg.args.get(1).and_then(Arg::as_count).unwrap_or(0);
+            format!("too many positional parameter overrides: expected {expected}, got {got}")
+        }
+        MessageId::ParamNotConst => {
+            format!(
+                "parameter `{}` override is not a constant expression",
+                name()
+            )
+        }
+        MessageId::GenCondNotConst => "generate condition is not a constant expression".into(),
+        MessageId::GenvarNotConst => "genvar expression is not constant".into(),
+        MessageId::DuplicateGenBlockName => {
+            format!("duplicate generate block name `{}`", name())
+        }
         MessageId::NotFoundInScope => "not found in this scope".into(),
         MessageId::NotFoundAsType => "not found as a type in this scope".into(),
         MessageId::ValueNotType => "this is a value, not a type".into(),

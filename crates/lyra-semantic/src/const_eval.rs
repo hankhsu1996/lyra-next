@@ -3,9 +3,48 @@ use lyra_parser::SyntaxNode;
 
 use crate::literal::{Base, parse_literal_shape};
 use crate::syntax_helpers::{system_tf_args, system_tf_name};
-use crate::types::ConstEvalError;
+use crate::types::{ConstEvalError, ConstInt};
 
 type EvalResult = Result<i64, ConstEvalError>;
+
+/// Trait for looking up constant values by name.
+///
+/// Implementors provide name-to-value mappings for different contexts:
+/// parameter environments, genvar bindings, etc.
+pub trait ConstLookup {
+    fn lookup(&self, name: &str) -> Option<ConstInt>;
+}
+
+/// Stacked constant evaluation environment.
+///
+/// Each level holds a `ConstLookup` source. Name resolution walks the
+/// stack from innermost to outermost, returning the first match.
+pub struct ConstEnv<'a> {
+    parent: Option<&'a ConstEnv<'a>>,
+    source: &'a dyn ConstLookup,
+}
+
+impl<'a> ConstEnv<'a> {
+    pub fn new(source: &'a dyn ConstLookup) -> Self {
+        Self {
+            parent: None,
+            source,
+        }
+    }
+
+    pub fn with_parent(parent: &'a ConstEnv<'a>, source: &'a dyn ConstLookup) -> Self {
+        Self {
+            parent: Some(parent),
+            source,
+        }
+    }
+
+    pub fn lookup(&self, name: &str) -> Option<ConstInt> {
+        self.source
+            .lookup(name)
+            .or_else(|| self.parent?.lookup(name))
+    }
+}
 
 /// Pure constant expression evaluator over the syntax tree.
 ///

@@ -53,7 +53,6 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Instance tree for a chosen top module
 - [x] Port diagnostics (unknown, missing, duplicate, too-many-positional)
 - [x] CLI batch driver
-- [ ] Performance baseline (10K lines under 1s)
 
 ## M6: Elaboration Completeness -- not started
 
@@ -63,3 +62,4 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [ ] Full array semantics
 - [ ] Generate blocks and parameter elaboration
 - [ ] Interface/modport semantics
+- [ ] Performance baseline (10K lines under 1s)
