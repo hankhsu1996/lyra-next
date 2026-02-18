@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::ConstInt;
 use lyra_source::{FileId, Span, TextRange};
 use smol_str::SmolStr;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Instance identity keyed by the instance name token's text range
 /// plus the enclosing generate scope (if any).
@@ -40,29 +41,84 @@ pub(crate) enum ScopeKey {
     GenScope(GenScopeKey),
 }
 
-/// Evaluated parameter environment for one module instance.
+/// Interned identity for a parameter environment.
 ///
-/// Values are aligned with `ModuleSig.params` order. O(1) by index.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ParamEnv {
-    values: Box<[ConstInt]>,
+/// `ParamEnvId(0)` is always the empty environment (no parameters).
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub(crate) struct ParamEnvId(u32);
+
+impl ParamEnvId {
+    pub(crate) const EMPTY: Self = Self(0);
 }
 
-impl ParamEnv {
-    pub(crate) fn new(values: Vec<ConstInt>) -> Self {
+/// Fingerprint for fast `HashMap` lookup without allocating a `Box<[ConstInt]>` to probe.
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+struct EnvFingerprint {
+    hash: u64,
+    len: usize,
+}
+
+fn hash_values(values: &[ConstInt]) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    values.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Deduplicating interner for parameter environments.
+///
+/// Maps value slices to small `ParamEnvId(u32)` IDs. Identical value
+/// slices always get the same ID. The interner lives in `ElabCtx`
+/// during elaboration and is moved into `ElabTree` for consumers.
+#[derive(Debug, Clone)]
+pub(crate) struct ParamEnvInterner {
+    map: HashMap<EnvFingerprint, Vec<ParamEnvId>>,
+    envs: Vec<Box<[ConstInt]>>,
+}
+
+impl PartialEq for ParamEnvInterner {
+    fn eq(&self, other: &Self) -> bool {
+        self.envs == other.envs
+    }
+}
+
+impl Eq for ParamEnvInterner {}
+
+impl ParamEnvInterner {
+    pub(crate) fn new() -> Self {
+        let empty: Box<[ConstInt]> = Box::new([]);
+        let fp = EnvFingerprint {
+            hash: hash_values(&empty),
+            len: 0,
+        };
+        let id = ParamEnvId(0);
+        let mut map = HashMap::new();
+        map.insert(fp, vec![id]);
         Self {
-            values: values.into_boxed_slice(),
+            map,
+            envs: vec![empty],
         }
     }
 
-    pub(crate) fn empty() -> Arc<Self> {
-        Arc::new(Self {
-            values: Box::new([]),
-        })
+    pub(crate) fn intern(&mut self, values: Vec<ConstInt>) -> ParamEnvId {
+        let fp = EnvFingerprint {
+            hash: hash_values(&values),
+            len: values.len(),
+        };
+        if let Some(candidates) = self.map.get(&fp) {
+            for &cand_id in candidates {
+                if self.envs[cand_id.0 as usize].as_ref() == values.as_slice() {
+                    return cand_id;
+                }
+            }
+        }
+        let id = ParamEnvId(self.envs.len() as u32);
+        self.envs.push(values.into_boxed_slice());
+        self.map.entry(fp).or_default().push(id);
+        id
     }
 
-    pub(crate) fn values_slice(&self) -> &[ConstInt] {
-        &self.values
+    pub(crate) fn values(&self, id: ParamEnvId) -> &[ConstInt] {
+        &self.envs[id.0 as usize]
     }
 }
 
@@ -84,7 +140,7 @@ pub(crate) struct InstanceNode {
     pub(crate) parent: Option<ScopeKey>,
     pub(crate) module_def: GlobalDefId,
     pub(crate) instance_name: SmolStr,
-    pub(crate) param_env: Arc<ParamEnv>,
+    pub(crate) param_env: ParamEnvId,
     pub(crate) children: Vec<ElabItemKey>,
 }
 
@@ -108,6 +164,7 @@ pub(crate) struct ElabTree {
     pub(crate) nodes: HashMap<InstanceKey, InstanceNode>,
     pub(crate) gen_scopes: HashMap<GenScopeKey, GenScopeNode>,
     pub(crate) diagnostics: Vec<ElabDiag>,
+    pub(crate) envs: ParamEnvInterner,
 }
 
 /// Elaboration-specific diagnostic, before lowering to `lyra_diag::Diagnostic`.

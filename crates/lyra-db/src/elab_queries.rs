@@ -1,18 +1,18 @@
+use std::collections::{HashMap, HashSet};
+
 use lyra_ast::AstNode;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
-use lyra_semantic::const_eval::eval_const_expr;
+use lyra_semantic::const_eval::{ConstLookup, eval_const_expr};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::{ConstEvalError, ConstInt, SymbolType, Ty};
 use lyra_source::{FileId, Span, TextRange};
 use smol_str::SmolStr;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use crate::elaboration::{
     ElabDiag, ElabItemKey, ElabTree, GenScopeKey, GenScopeKind, GenScopeNode, InstanceKey,
-    InstanceNode, ParamEnv, ScopeKey,
+    InstanceNode, ParamEnvId, ParamEnvInterner, ScopeKey,
 };
 use crate::module_sig::{ModuleSig, ParamKind, ParamSig, PortDirection, PortSig};
 use crate::pipeline::{ast_id_map, parse_file};
@@ -184,40 +184,45 @@ fn extract_param_sigs(
     params
 }
 
-/// Build a `ParamEnv` by evaluating defaults and applying overrides.
-fn build_param_env(
-    db: &dyn salsa::Database,
-    unit: CompilationUnit,
+/// Lookup that resolves names against a module's parameter environment.
+///
+/// If a name matches a parameter in `sig`, returns the value from
+/// `values[0..prefix_len]`. Parameters at or beyond `prefix_len`
+/// are forward references and return `Error(Unresolved)`.
+/// If the name is not a parameter, returns `None` so the caller
+/// can fall back to symbol-table resolution.
+struct ParamLookup<'a> {
+    sig: &'a ModuleSig,
+    values: &'a [ConstInt],
+    prefix_len: usize,
+}
+
+impl ConstLookup for ParamLookup<'_> {
+    fn lookup(&self, name: &str) -> Option<ConstInt> {
+        let (idx, _) = self.sig.param_by_name(name)?;
+        let i = idx as usize;
+        if i < self.prefix_len {
+            Some(self.values[i].clone())
+        } else {
+            Some(ConstInt::Error(ConstEvalError::Unresolved))
+        }
+    }
+}
+
+/// Collect override mappings, validating names/counts and emitting diagnostics.
+///
+/// Returns a vec of `Option<ConstInt>` aligned with `sig.params`: `Some(v)` if
+/// the parameter has an override, `None` if it should use its default.
+fn collect_overrides(
     sig: &ModuleSig,
     overrides: &[ParamOverride],
     file_id: FileId,
     inst_range: TextRange,
     diags: &mut Vec<ElabDiag>,
-) -> Arc<ParamEnv> {
+) -> Vec<Option<ConstInt>> {
     let param_count = sig.params.len();
-    if param_count == 0 {
-        return ParamEnv::empty();
-    }
+    let mut result = vec![None; param_count];
 
-    // Evaluate defaults in declaration order
-    let mut values = Vec::with_capacity(param_count);
-    for (i, param) in sig.params.iter().enumerate() {
-        if param.kind == ParamKind::Type {
-            values.push(ConstInt::Error(ConstEvalError::Unsupported));
-            continue;
-        }
-
-        let val = if let Some(expr_id) = &param.default_expr {
-            let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, *expr_id);
-            crate::const_eval::eval_const_int(db, expr_ref)
-        } else {
-            ConstInt::Error(ConstEvalError::Unresolved)
-        };
-        let _ = i; // future: forward reference detection
-        values.push(val);
-    }
-
-    // Apply overrides
     let has_named = overrides.iter().any(|o| o.name.is_some());
     if has_named {
         let mut seen: HashSet<u32> = HashSet::new();
@@ -246,7 +251,7 @@ fn build_param_env(
                             },
                         });
                     }
-                    values[idx as usize] = ovr.value.clone();
+                    result[idx as usize] = Some(ovr.value.clone());
                 }
                 None => {
                     diags.push(ElabDiag::UnknownParam {
@@ -291,13 +296,101 @@ fn build_param_env(
                         },
                     });
                 }
-                values[i] = overrides[ovr_idx].value.clone();
+                result[i] = Some(overrides[ovr_idx].value.clone());
                 ovr_idx += 1;
             }
         }
     }
 
-    Arc::new(ParamEnv::new(values))
+    result
+}
+
+/// Build a param env by evaluating defaults incrementally (seeing earlier
+/// params) and applying overrides. Returns an interned `ParamEnvId`.
+fn build_param_env(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    sig: &ModuleSig,
+    overrides: &[ParamOverride],
+    inst_span: Span,
+    diags: &mut Vec<ElabDiag>,
+    interner: &mut ParamEnvInterner,
+) -> ParamEnvId {
+    let param_count = sig.params.len();
+    if param_count == 0 {
+        return ParamEnvId::EMPTY;
+    }
+
+    let override_map = collect_overrides(sig, overrides, inst_span.file, inst_span.range, diags);
+
+    // Default expressions live in the target module's file, not the
+    // instantiation site. Extract file from the first default_expr.
+    let def_file_id = sig
+        .params
+        .iter()
+        .find_map(|p| p.default_expr.as_ref().map(|e| e.file()));
+    let def_source_file = def_file_id.and_then(|fid| source_file_by_id(db, unit, fid));
+    let id_map = def_source_file.map(|sf| ast_id_map(db, sf));
+    let parse = def_source_file.map(|sf| parse_file(db, sf));
+
+    let mut values = Vec::with_capacity(param_count);
+    for (i, param) in sig.params.iter().enumerate() {
+        if param.kind == ParamKind::Type {
+            values.push(ConstInt::Error(ConstEvalError::Unsupported));
+            continue;
+        }
+
+        if let Some(ref ovr_val) = override_map[i] {
+            values.push(ovr_val.clone());
+            continue;
+        }
+
+        let val = if let Some(expr_ast_id) = &param.default_expr {
+            if let (Some(id_map), Some(parse)) = (&id_map, &parse) {
+                if let Some(expr_node) = id_map.get_node(&parse.syntax(), *expr_ast_id) {
+                    let param_lookup = ParamLookup {
+                        sig,
+                        values: &values,
+                        prefix_len: i,
+                    };
+                    let resolve_name = |name_node: &SyntaxNode| -> Result<i64, ConstEvalError> {
+                        let name_text = extract_name_text(name_node)?;
+                        if let Some(ci) = param_lookup.lookup(&name_text) {
+                            return match ci {
+                                ConstInt::Known(v) => Ok(v),
+                                ConstInt::Error(e) => Err(e),
+                                ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
+                            };
+                        }
+                        let name_ast_id = id_map
+                            .erased_ast_id(name_node)
+                            .ok_or(ConstEvalError::Unresolved)?;
+                        let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, name_ast_id);
+                        match crate::const_eval::eval_const_int(db, expr_ref) {
+                            ConstInt::Known(v) => Ok(v),
+                            ConstInt::Error(e) => Err(e),
+                            ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
+                        }
+                    };
+                    match eval_const_expr(&expr_node, &resolve_name) {
+                        Ok(v) => ConstInt::Known(v),
+                        Err(e) => ConstInt::Error(e),
+                    }
+                } else {
+                    let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, *expr_ast_id);
+                    crate::const_eval::eval_const_int(db, expr_ref)
+                }
+            } else {
+                let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, *expr_ast_id);
+                crate::const_eval::eval_const_int(db, expr_ref)
+            }
+        } else {
+            ConstInt::Error(ConstEvalError::Unresolved)
+        };
+        values.push(val);
+    }
+
+    interner.intern(values)
 }
 
 struct ParamOverride {
@@ -371,6 +464,7 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
     let global = global_def_index(db, unit);
 
     let mut diags = Vec::new();
+    let mut interner = ParamEnvInterner::new();
 
     let Some((top_def_id, top_kind)) = global.resolve_definition(&name) else {
         diags.push(ElabDiag::UnresolvedModuleInst {
@@ -385,6 +479,7 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
             nodes: HashMap::new(),
             gen_scopes: HashMap::new(),
             diagnostics: diags,
+            envs: interner,
         };
     };
 
@@ -401,6 +496,7 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
             nodes: HashMap::new(),
             gen_scopes: HashMap::new(),
             diagnostics: diags,
+            envs: interner,
         };
     }
 
@@ -414,7 +510,18 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
 
     // Top module: defaults only, no overrides
     let sig = module_signature(db, ModuleRef::new(db, unit, top_def_id));
-    let param_env = build_param_env(db, unit, sig, &[], file_id, top_name_range, &mut diags);
+    let param_env = build_param_env(
+        db,
+        unit,
+        sig,
+        &[],
+        Span {
+            file: file_id,
+            range: top_name_range,
+        },
+        &mut diags,
+        &mut interner,
+    );
 
     let mut nodes = HashMap::new();
     let mut gen_scopes = HashMap::new();
@@ -438,6 +545,7 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
         gen_scopes: &mut gen_scopes,
         diags: &mut diags,
         active_stack: &mut active_stack,
+        interner: &mut interner,
     };
 
     elaborate_module(
@@ -452,6 +560,7 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
         nodes,
         gen_scopes,
         diagnostics: diags,
+        envs: interner,
     }
 }
 
@@ -462,6 +571,7 @@ struct ElabCtx<'a> {
     gen_scopes: &'a mut HashMap<GenScopeKey, GenScopeNode>,
     diags: &'a mut Vec<ElabDiag>,
     active_stack: &'a mut Vec<GlobalDefId>,
+    interner: &'a mut ParamEnvInterner,
 }
 
 /// Immutable context for expanding children within a scope.
@@ -469,7 +579,7 @@ struct ScopeEnv<'a> {
     file_id: FileId,
     parent_scope: &'a ScopeKey,
     sig: &'a ModuleSig,
-    param_env: &'a Arc<ParamEnv>,
+    param_env: ParamEnvId,
     genvar_binding: Option<(&'a SmolStr, i64)>,
     global: &'a lyra_semantic::global_index::GlobalDefIndex,
 }
@@ -547,16 +657,16 @@ fn elaborate_module_body(
 
     // Get the param_env for the current instance scope
     let param_env = match parent_scope {
-        ScopeKey::Instance(ik) => ctx.nodes.get(ik).map(|n| Arc::clone(&n.param_env)),
+        ScopeKey::Instance(ik) => ctx.nodes.get(ik).map(|n| n.param_env),
         ScopeKey::GenScope(_) => None,
     }
-    .unwrap_or_else(ParamEnv::empty);
+    .unwrap_or(ParamEnvId::EMPTY);
 
     let env = ScopeEnv {
         file_id,
         parent_scope,
         sig,
-        param_env: &param_env,
+        param_env,
         genvar_binding,
         global,
     };
@@ -634,9 +744,12 @@ fn process_instantiation(
             ctx.unit,
             target_sig,
             &overrides,
-            file_id,
-            inst_name_tok.text_range(),
+            Span {
+                file: file_id,
+                range: inst_name_tok.text_range(),
+            },
             ctx.diags,
+            ctx.interner,
         );
 
         if let Some(ref pl) = port_list {
@@ -964,7 +1077,7 @@ fn eval_gen_condition(
     expr_node: &SyntaxNode,
     file_id: FileId,
     sig: &ModuleSig,
-    param_env: &Arc<ParamEnv>,
+    param_env: ParamEnvId,
     genvar_binding: Option<(&SmolStr, i64)>,
 ) -> Option<i64> {
     let source_file = source_file_by_id(ctx.db, ctx.unit, file_id)?;
@@ -982,33 +1095,42 @@ fn eval_gen_condition(
         }
     }
 
-    // Inline evaluation with genvar and param_env lookup in the closure
-    let genvar_name = genvar_binding.map(|(n, _)| n.clone());
-    let genvar_value = genvar_binding.map(|(_, v)| v);
-    let env_values = param_env.values_slice();
+    let env_values = ctx.interner.values(param_env);
+    let param_lookup = ParamLookup {
+        sig,
+        values: env_values,
+        prefix_len: sig.params.len(),
+    };
 
     let resolve_name = |name_node: &SyntaxNode| -> Result<i64, ConstEvalError> {
         let name_text = extract_name_text(name_node)?;
 
         // Check genvar binding first
-        if let (Some(gn), Some(gv)) = (&genvar_name, genvar_value)
+        if let Some((gn, gv)) = genvar_binding
             && name_text == gn.as_str()
         {
             return Ok(gv);
         }
 
         // Check param env by name via sig
-        if let Some((idx, _)) = sig.param_by_name(&name_text)
-            && let Some(val) = env_values.get(idx as usize)
-        {
-            return match val {
-                ConstInt::Known(v) => Ok(*v),
-                ConstInt::Error(e) => Err(*e),
+        if let Some(ci) = param_lookup.lookup(&name_text) {
+            return match ci {
+                ConstInt::Known(v) => Ok(v),
+                ConstInt::Error(e) => Err(e),
                 ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
             };
         }
 
-        Err(ConstEvalError::Unresolved)
+        // Fall back to symbol-table resolution
+        let name_ast_id = id_map
+            .erased_ast_id(name_node)
+            .ok_or(ConstEvalError::Unresolved)?;
+        let expr_ref = crate::const_eval::ConstExprRef::new(ctx.db, ctx.unit, name_ast_id);
+        match crate::const_eval::eval_const_int(ctx.db, expr_ref) {
+            ConstInt::Known(v) => Ok(v),
+            ConstInt::Error(e) => Err(e),
+            ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
+        }
     };
 
     eval_const_expr(expr_node, &resolve_name).ok()
