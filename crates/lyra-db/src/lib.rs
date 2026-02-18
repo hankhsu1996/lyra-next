@@ -1,7 +1,10 @@
 mod const_eval;
 mod diagnostics;
+mod elab_queries;
+mod elaboration;
 mod expr_queries;
 mod lower_diag;
+mod module_sig;
 pub mod pipeline;
 mod resolve_at;
 pub mod semantic;
@@ -33,6 +36,9 @@ pub use resolve_at::{TypeAtResult, resolve_at, symbol_global, type_at};
 
 // Re-export diagnostics
 pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};
+
+// Re-export elaboration queries
+pub use elab_queries::{TopModule, elab_diagnostics, elaborate_top, module_signature};
 
 /// Sorted include-path lookup for deterministic O(log n) resolution.
 ///

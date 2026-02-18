@@ -1,4 +1,5 @@
 mod const_eval;
+mod elab;
 mod exports;
 mod expr_type;
 mod resolve;

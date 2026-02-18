@@ -46,13 +46,13 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Undeclared type diagnostics
 - [x] Enum/struct representation
 
-## M5: Batch Semantic Engine -- not started
+## M5: Batch Semantic Engine -- done
 
-- [ ] Module signature query (ports, params)
-- [ ] Instantiation resolution (named and positional)
-- [ ] Instance tree for a chosen top module
-- [ ] Port diagnostics (unknown, missing, width mismatch)
-- [ ] CLI batch driver
+- [x] Module signature query (ports, params)
+- [x] Instantiation resolution (named and positional)
+- [x] Instance tree for a chosen top module
+- [x] Port diagnostics (unknown, missing, duplicate, too-many-positional)
+- [x] CLI batch driver
 - [ ] Performance baseline (10K lines under 1s)
 
 ## M6: Elaboration Completeness -- not started

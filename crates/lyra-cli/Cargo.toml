@@ -15,7 +15,9 @@ lyra-preprocess.workspace = true
 lyra-parser.workspace = true
 lyra-ast.workspace = true
 lyra-semantic.workspace = true
+lyra-diag.workspace = true
 lyra-db.workspace = true
+smol_str.workspace = true
 
 [lints]
 workspace = true

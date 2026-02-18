@@ -55,6 +55,38 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 3,
     };
+    pub const UNRESOLVED_MODULE_INST: Self = Self {
+        namespace: "lyra.elab",
+        number: 1,
+    };
+    pub const NOT_A_MODULE: Self = Self {
+        namespace: "lyra.elab",
+        number: 2,
+    };
+    pub const UNKNOWN_PORT: Self = Self {
+        namespace: "lyra.elab",
+        number: 3,
+    };
+    pub const DUPLICATE_PORT_CONN: Self = Self {
+        namespace: "lyra.elab",
+        number: 4,
+    };
+    pub const TOO_MANY_POSITIONAL_PORTS: Self = Self {
+        namespace: "lyra.elab",
+        number: 5,
+    };
+    pub const MISSING_PORT_CONN: Self = Self {
+        namespace: "lyra.elab",
+        number: 6,
+    };
+    pub const PORT_WIDTH_MISMATCH: Self = Self {
+        namespace: "lyra.elab",
+        number: 7,
+    };
+    pub const ELAB_RECURSION_LIMIT: Self = Self {
+        namespace: "lyra.elab",
+        number: 8,
+    };
 
     /// Format as `"namespace[number]"`, e.g. `"lyra.semantic[1]"`.
     pub fn as_str(&self) -> String {

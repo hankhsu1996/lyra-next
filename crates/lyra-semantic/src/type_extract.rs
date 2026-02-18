@@ -4,7 +4,7 @@ use lyra_parser::{SyntaxElement, SyntaxNode};
 
 use crate::types::{
     ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType, PackedDim, RealKw,
-    SymbolType, SymbolTypeError, Ty, UnpackedDim,
+    SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
 };
 
 /// Extract a `SymbolType` from a declaration container node.
@@ -364,17 +364,6 @@ fn build_base_ty(base: Option<Ty>, signed_override: Option<bool>, packed: Vec<Pa
         Some(other) => other,
         None => Ty::Error,
     }
-}
-
-/// Wrap a `Ty` with `Ty::Array` layers for each unpacked dim.
-///
-/// Dims are applied right-to-left so the outermost (leftmost in source) dim
-/// is the outermost `Array` wrapper.
-pub fn wrap_unpacked(ty: Ty, unpacked: &[UnpackedDim]) -> Ty {
-    unpacked.iter().rev().fold(ty, |inner, dim| Ty::Array {
-        elem: Box::new(inner),
-        dim: dim.clone(),
-    })
 }
 
 pub(crate) fn keyword_to_ty_pub(kind: SyntaxKind) -> Option<Ty> {
