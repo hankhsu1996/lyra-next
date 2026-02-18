@@ -87,6 +87,34 @@ impl DiagnosticCode {
         namespace: "lyra.elab",
         number: 8,
     };
+    pub const UNKNOWN_PARAM: Self = Self {
+        namespace: "lyra.elab",
+        number: 9,
+    };
+    pub const DUPLICATE_PARAM_OVERRIDE: Self = Self {
+        namespace: "lyra.elab",
+        number: 10,
+    };
+    pub const TOO_MANY_POSITIONAL_PARAMS: Self = Self {
+        namespace: "lyra.elab",
+        number: 11,
+    };
+    pub const PARAM_NOT_CONST: Self = Self {
+        namespace: "lyra.elab",
+        number: 12,
+    };
+    pub const GEN_COND_NOT_CONST: Self = Self {
+        namespace: "lyra.elab",
+        number: 13,
+    };
+    pub const GENVAR_NOT_CONST: Self = Self {
+        namespace: "lyra.elab",
+        number: 14,
+    };
+    pub const DUPLICATE_GEN_BLOCK_NAME: Self = Self {
+        namespace: "lyra.elab",
+        number: 15,
+    };
 
     /// Format as `"namespace[number]"`, e.g. `"lyra.semantic[1]"`.
     pub fn as_str(&self) -> String {

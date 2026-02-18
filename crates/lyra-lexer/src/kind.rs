@@ -432,6 +432,8 @@ pub enum SyntaxKind {
     StructMember,
     SystemTfCall,
     SystemTfArgList,
+    GenerateRegion,
+    GenvarDecl,
 
     #[doc(hidden)]
     __Last,

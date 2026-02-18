@@ -3,6 +3,8 @@ use smol_str::SmolStr;
 
 use super::*;
 
+use crate::elaboration::{ElabItemKey, ElabTree, InstanceKey, ScopeKey};
+
 fn elab_diags(files: &[&str], top: &str) -> Vec<lyra_diag::Diagnostic> {
     let db = LyraDatabase::default();
     let mut source_files = Vec::new();
@@ -12,6 +14,18 @@ fn elab_diags(files: &[&str], top: &str) -> Vec<lyra_diag::Diagnostic> {
     let unit = new_compilation_unit(&db, source_files);
     let top_mod = TopModule::new(&db, unit, SmolStr::new(top));
     elab_diagnostics(&db, top_mod).to_vec()
+}
+
+fn elab_tree(files: &[&str], top: &str) -> (LyraDatabase, ElabTree) {
+    let db = LyraDatabase::default();
+    let mut source_files = Vec::new();
+    for (i, src) in files.iter().enumerate() {
+        source_files.push(new_file(&db, i as u32, src));
+    }
+    let unit = new_compilation_unit(&db, source_files);
+    let top_mod = TopModule::new(&db, unit, SmolStr::new(top));
+    let tree = elaborate_top(&db, top_mod).clone();
+    (db, tree)
 }
 
 fn sig_ports(src: &str, module_name: &str) -> Vec<String> {
@@ -28,6 +42,39 @@ fn sig_ports(src: &str, module_name: &str) -> Vec<String> {
         .iter()
         .map(|p| format!("{}: {}", p.name, p.ty.pretty()))
         .collect()
+}
+
+fn child_instance_names(tree: &ElabTree, key: &InstanceKey) -> Vec<String> {
+    let node = &tree.nodes[key];
+    node.children
+        .iter()
+        .filter_map(|ck| match ck {
+            ElabItemKey::Inst(ik) => Some(tree.nodes[ik].instance_name.to_string()),
+            ElabItemKey::GenScope(_) => None,
+        })
+        .collect()
+}
+
+fn all_instance_names_under(tree: &ElabTree, key: &InstanceKey) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_inst_names(tree, &ElabItemKey::Inst(key.clone()), &mut names);
+    names
+}
+
+fn collect_inst_names(tree: &ElabTree, item: &ElabItemKey, names: &mut Vec<String>) {
+    let children: &[ElabItemKey] = match item {
+        ElabItemKey::Inst(ik) => &tree.nodes[ik].children,
+        ElabItemKey::GenScope(gk) => match tree.gen_scopes.get(gk) {
+            Some(gs) => &gs.children,
+            None => return,
+        },
+    };
+    for child in children {
+        if let ElabItemKey::Inst(cik) = child {
+            names.push(tree.nodes[cik].instance_name.to_string());
+        }
+        collect_inst_names(tree, child, names);
+    }
 }
 
 // Module signature tests
@@ -221,51 +268,43 @@ fn not_a_module_instantiation() {
 
 // Instance tree tests
 
-fn child_names(
-    tree: &crate::elaboration::ElabTree,
-    key: crate::elaboration::InstanceKey,
-) -> Vec<String> {
-    let node = &tree.nodes[&key];
-    node.children
-        .iter()
-        .map(|ck| tree.nodes[ck].instance_name.to_string())
-        .collect()
-}
-
 #[test]
 fn instance_tree_two_levels() {
-    let db = LyraDatabase::default();
-    let f0 = new_file(&db, 0, "module leaf(input logic a); endmodule");
-    let f1 = new_file(
-        &db,
-        1,
-        "module mid(input logic x); leaf l1(.a(x)); endmodule",
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(input logic a); endmodule",
+            "module mid(input logic x); leaf l1(.a(x)); endmodule",
+            "module top; logic w; mid m1(.x(w)); endmodule",
+        ],
+        "top",
     );
-    let f2 = new_file(&db, 2, "module top; logic w; mid m1(.x(w)); endmodule");
-    let unit = new_compilation_unit(&db, vec![f0, f1, f2]);
-    let top = TopModule::new(&db, unit, SmolStr::new("top"));
-    let tree = elaborate_top(&db, top);
 
-    let top_key = tree.top.expect("top should exist");
+    let top_key = tree.top.clone().expect("top should exist");
     let top_node = &tree.nodes[&top_key];
     assert_eq!(top_node.instance_name, "top");
     assert!(top_node.parent.is_none(), "top has no parent");
 
     // top -> m1
-    let top_children = child_names(tree, top_key);
+    let top_children = child_instance_names(&tree, &top_key);
     assert_eq!(top_children, vec!["m1"]);
 
     // m1 -> l1
-    let m1_key = top_node.children[0];
+    let m1_key = match &top_node.children[0] {
+        ElabItemKey::Inst(k) => k.clone(),
+        _ => panic!("expected instance"),
+    };
     let m1_node = &tree.nodes[&m1_key];
-    assert_eq!(m1_node.parent, Some(top_key));
-    let m1_children = child_names(tree, m1_key);
+    assert_eq!(m1_node.parent, Some(ScopeKey::Instance(top_key.clone())));
+    let m1_children = child_instance_names(&tree, &m1_key);
     assert_eq!(m1_children, vec!["l1"]);
 
     // l1 is a leaf
-    let l1_key = m1_node.children[0];
+    let l1_key = match &m1_node.children[0] {
+        ElabItemKey::Inst(k) => k.clone(),
+        _ => panic!("expected instance"),
+    };
     let l1_node = &tree.nodes[&l1_key];
-    assert_eq!(l1_node.parent, Some(m1_key));
+    assert_eq!(l1_node.parent, Some(ScopeKey::Instance(m1_key)));
     assert!(l1_node.children.is_empty(), "leaf has no children");
 
     // 3 nodes total: top, m1, l1
@@ -274,26 +313,27 @@ fn instance_tree_two_levels() {
 
 #[test]
 fn instance_tree_diamond_legal() {
-    // Same module type instantiated in two places is legal, produces two nodes
-    let db = LyraDatabase::default();
-    let f0 = new_file(&db, 0, "module leaf(input logic a); endmodule");
-    let f1 = new_file(
-        &db,
-        1,
-        "module top; logic x, y; leaf u1(.a(x)); leaf u2(.a(y)); endmodule",
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(input logic a); endmodule",
+            "module top; logic x, y; leaf u1(.a(x)); leaf u2(.a(y)); endmodule",
+        ],
+        "top",
     );
-    let unit = new_compilation_unit(&db, vec![f0, f1]);
-    let top = TopModule::new(&db, unit, SmolStr::new("top"));
-    let tree = elaborate_top(&db, top);
 
-    let top_key = tree.top.expect("top should exist");
-    let top_children = child_names(tree, top_key);
+    let top_key = tree.top.clone().expect("top should exist");
+    let top_children = child_instance_names(&tree, &top_key);
     assert_eq!(top_children, vec!["u1", "u2"]);
 
     // Both children point back to top
-    for ck in &tree.nodes[&top_key].children {
-        assert_eq!(tree.nodes[ck].parent, Some(top_key));
-        assert!(tree.nodes[ck].children.is_empty());
+    for child in &tree.nodes[&top_key].children {
+        if let ElabItemKey::Inst(ck) = child {
+            assert_eq!(
+                tree.nodes[ck].parent,
+                Some(ScopeKey::Instance(top_key.clone()))
+            );
+            assert!(tree.nodes[ck].children.is_empty());
+        }
     }
 
     // No recursion diagnostics
@@ -310,20 +350,16 @@ fn instance_tree_diamond_legal() {
 
 #[test]
 fn instance_tree_multi_instance_statement() {
-    // `leaf u1(...), u2(...);` -- two instances from one statement
-    let db = LyraDatabase::default();
-    let f0 = new_file(&db, 0, "module leaf(input logic a); endmodule");
-    let f1 = new_file(
-        &db,
-        1,
-        "module top; logic x, y; leaf u1(.a(x)), u2(.a(y)); endmodule",
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(input logic a); endmodule",
+            "module top; logic x, y; leaf u1(.a(x)), u2(.a(y)); endmodule",
+        ],
+        "top",
     );
-    let unit = new_compilation_unit(&db, vec![f0, f1]);
-    let top = TopModule::new(&db, unit, SmolStr::new("top"));
-    let tree = elaborate_top(&db, top);
 
-    let top_key = tree.top.expect("top should exist");
-    let top_children = child_names(tree, top_key);
+    let top_key = tree.top.clone().expect("top should exist");
+    let top_children = child_instance_names(&tree, &top_key);
     assert_eq!(
         top_children,
         vec!["u1", "u2"],
@@ -336,14 +372,11 @@ fn instance_tree_multi_instance_statement() {
 
 #[test]
 fn cycle_detection() {
-    let db = LyraDatabase::default();
-    let f0 = new_file(&db, 0, "module a; b b1(); endmodule");
-    let f1 = new_file(&db, 1, "module b; a a1(); endmodule");
-    let unit = new_compilation_unit(&db, vec![f0, f1]);
-    let top = TopModule::new(&db, unit, SmolStr::new("a"));
-    let tree = elaborate_top(&db, top);
+    let (_, tree) = elab_tree(
+        &["module a; b b1(); endmodule", "module b; a a1(); endmodule"],
+        "a",
+    );
 
-    // Recursion diag exists
     let recursion: Vec<_> = tree
         .diagnostics
         .iter()
@@ -354,9 +387,8 @@ fn cycle_detection() {
         "expected recursion limit diag for cycle"
     );
 
-    // Top exists with a child (b1), but recursion stops the cycle
-    let top_key = tree.top.expect("top should exist");
-    let top_children = child_names(tree, top_key);
+    let top_key = tree.top.clone().expect("top should exist");
+    let top_children = child_instance_names(&tree, &top_key);
     assert_eq!(top_children, vec!["b1"], "top has one child before cycle");
 }
 
@@ -378,5 +410,284 @@ fn multi_file_instantiation() {
     assert!(
         elab_diags.is_empty(),
         "multi-file should have no elab errors, got: {elab_diags:?}"
+    );
+}
+
+// Parameter tests
+
+#[test]
+fn param_default_no_override() {
+    let diags = elab_diags(
+        &[
+            "module leaf #(parameter int W = 8)(input logic [W-1:0] a); endmodule",
+            "module top; logic [7:0] d; leaf u1(.a(d)); endmodule",
+        ],
+        "top",
+    );
+    let elab_errs: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code.namespace == "lyra.elab" && d.severity == lyra_diag::Severity::Error)
+        .collect();
+    assert!(
+        elab_errs.is_empty(),
+        "param with default should need no override, got: {elab_errs:?}"
+    );
+}
+
+#[test]
+fn param_positional_override() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf #(parameter int W = 8)(); endmodule",
+            "module top; leaf #(16) u1(); endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let children = child_instance_names(&tree, &top_key);
+    assert_eq!(children, vec!["u1"]);
+    assert!(tree.diagnostics.is_empty(), "no diags expected");
+}
+
+#[test]
+fn param_named_override() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf #(parameter int W = 8)(); endmodule",
+            "module top; leaf #(.W(16)) u1(); endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let children = child_instance_names(&tree, &top_key);
+    assert_eq!(children, vec!["u1"]);
+    assert!(tree.diagnostics.is_empty(), "no diags expected");
+}
+
+#[test]
+fn param_unknown_name() {
+    let diags = elab_diags(
+        &[
+            "module leaf #(parameter int W = 8)(); endmodule",
+            "module top; leaf #(.BOGUS(16)) u1(); endmodule",
+        ],
+        "top",
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::UNKNOWN_PARAM)
+        .collect();
+    assert_eq!(unknown.len(), 1, "expected 1 unknown param diag");
+}
+
+#[test]
+fn param_too_many_positional() {
+    let diags = elab_diags(
+        &[
+            "module leaf #(parameter int W = 8)(); endmodule",
+            "module top; leaf #(16, 32) u1(); endmodule",
+        ],
+        "top",
+    );
+    let too_many: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::TOO_MANY_POSITIONAL_PARAMS)
+        .collect();
+    assert_eq!(too_many.len(), 1, "expected 1 too-many params diag");
+}
+
+#[test]
+fn param_duplicate_named() {
+    let diags = elab_diags(
+        &[
+            "module leaf #(parameter int W = 8)(); endmodule",
+            "module top; leaf #(.W(16), .W(32)) u1(); endmodule",
+        ],
+        "top",
+    );
+    let dups: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DUPLICATE_PARAM_OVERRIDE)
+        .collect();
+    assert_eq!(dups.len(), 1, "expected 1 duplicate param override diag");
+}
+
+#[test]
+fn param_non_const_override() {
+    let diags = elab_diags(
+        &[
+            "module leaf #(parameter int W = 8)(); endmodule",
+            "module top; logic [3:0] x; leaf #(.W(x)) u1(); endmodule",
+        ],
+        "top",
+    );
+    let not_const: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::PARAM_NOT_CONST)
+        .collect();
+    assert_eq!(not_const.len(), 1, "expected 1 param-not-const diag");
+}
+
+// Generate-if tests
+
+#[test]
+fn generate_if_true_branch() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top; if (1) begin leaf u1(); end else begin leaf u2(); end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert!(
+        all.contains(&"u1".to_string()),
+        "true branch should be elaborated: {all:?}"
+    );
+    assert!(
+        !all.contains(&"u2".to_string()),
+        "false branch should not be elaborated: {all:?}"
+    );
+}
+
+#[test]
+fn generate_if_false_branch() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top; if (0) begin leaf u1(); end else begin leaf u2(); end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert!(
+        !all.contains(&"u1".to_string()),
+        "true branch should not be elaborated: {all:?}"
+    );
+    assert!(
+        all.contains(&"u2".to_string()),
+        "false branch should be elaborated: {all:?}"
+    );
+}
+
+// Generate-for tests
+
+#[test]
+fn generate_for_four_iterations() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top; for (genvar i = 0; i < 4; i = i + 1) begin leaf u(); end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert_eq!(all.len(), 4, "expected 4 instances from for-loop: {all:?}");
+}
+
+#[test]
+fn generate_for_zero_iterations() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top; for (genvar i = 0; i < 0; i = i + 1) begin leaf u(); end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert!(
+        all.is_empty(),
+        "expected 0 instances for zero-iteration loop: {all:?}"
+    );
+}
+
+// Generate-case tests
+
+#[test]
+fn generate_case_match() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf_a(); endmodule",
+            "module leaf_b(); endmodule",
+            "module top; case (1) 0: begin leaf_a u1(); end 1: begin leaf_b u2(); end endcase endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert!(
+        all.contains(&"u2".to_string()),
+        "case 1 should match: {all:?}"
+    );
+    assert!(
+        !all.contains(&"u1".to_string()),
+        "case 0 should not match: {all:?}"
+    );
+}
+
+#[test]
+fn generate_case_default() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf_a(); endmodule",
+            "module leaf_b(); endmodule",
+            "module top; case (99) 0: begin leaf_a u1(); end default: begin leaf_b u2(); end endcase endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert!(
+        all.contains(&"u2".to_string()),
+        "default should match: {all:?}"
+    );
+    assert!(
+        !all.contains(&"u1".to_string()),
+        "case 0 should not match: {all:?}"
+    );
+}
+
+// Param-dependent generate test
+
+#[test]
+fn param_dependent_generate_if() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module inner #(parameter int USE_A = 1)(); if (USE_A) begin leaf u_a(); end else begin leaf u_b(); end endmodule",
+            "module top; inner u1(); endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert!(all.contains(&"u1".to_string()), "inner instance: {all:?}");
+    assert!(
+        all.contains(&"u_a".to_string()),
+        "USE_A=1 default should pick true branch: {all:?}"
+    );
+}
+
+// Nested generate
+
+#[test]
+fn nested_generate_for_inside_if() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf(); endmodule",
+            "module top; if (1) begin for (genvar i = 0; i < 2; i = i + 1) begin leaf u(); end end endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let all = all_instance_names_under(&tree, &top_key);
+    assert_eq!(
+        all.len(),
+        2,
+        "expected 2 instances from nested for-in-if: {all:?}"
     );
 }

@@ -406,6 +406,11 @@ impl InstancePort {
 }
 
 impl ModuleInstantiation {
+    /// The parameter override list `#(...)` if present.
+    pub fn param_overrides(&self) -> Option<ParamPortList> {
+        support::child(&self.syntax)
+    }
+
     /// Iterate over all instance entries in this statement.
     ///
     /// A single `ModuleInstantiation` statement can declare multiple instances:

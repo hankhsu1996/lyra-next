@@ -35,6 +35,7 @@ pub(crate) struct ParamSig {
     pub(crate) name: SmolStr,
     pub(crate) kind: ParamKind,
     pub(crate) has_default: bool,
+    pub(crate) default_expr: Option<lyra_ast::ErasedAstId>,
     pub(crate) name_range: TextRange,
 }
 
@@ -47,6 +48,7 @@ pub(crate) struct ModuleSig {
     pub(crate) ports: Box<[PortSig]>,
     pub(crate) params: Box<[ParamSig]>,
     port_index: HashMap<SmolStr, u32>,
+    param_index: HashMap<SmolStr, u32>,
 }
 
 impl ModuleSig {
@@ -56,11 +58,17 @@ impl ModuleSig {
             .enumerate()
             .map(|(i, p)| (p.name.clone(), i as u32))
             .collect();
+        let param_index = params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.name.clone(), i as u32))
+            .collect();
         Self {
             name,
             ports: ports.into_boxed_slice(),
             params: params.into_boxed_slice(),
             port_index,
+            param_index,
         }
     }
 
@@ -68,5 +76,11 @@ impl ModuleSig {
     pub(crate) fn port_by_name(&self, name: &str) -> Option<(u32, &PortSig)> {
         let &idx = self.port_index.get(name)?;
         Some((idx, &self.ports[idx as usize]))
+    }
+
+    /// O(1) param lookup by name.
+    pub(crate) fn param_by_name(&self, name: &str) -> Option<(u32, &ParamSig)> {
+        let &idx = self.param_index.get(name)?;
+        Some((idx, &self.params[idx as usize]))
     }
 }
