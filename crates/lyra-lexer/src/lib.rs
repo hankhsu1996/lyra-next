@@ -379,6 +379,21 @@ fn lex_based_value(bytes: &[u8], start: usize) -> (SyntaxKind, usize) {
     (SyntaxKind::BasedLiteral, i)
 }
 
+// Check for a time unit suffix (s, ms, us, ns, ps, fs) at `pos` in `bytes`.
+// Returns the suffix length if valid, or None.
+fn try_time_suffix(bytes: &[u8], pos: usize) -> Option<usize> {
+    let remaining = &bytes[pos..];
+    let suffix_len = match remaining.first() {
+        Some(&b's') => 1,
+        Some(&(b'f' | b'm' | b'n' | b'p' | b'u')) if remaining.get(1) == Some(&b's') => 2,
+        _ => return None,
+    };
+    if is_ident_continue(remaining.get(suffix_len)) {
+        return None;
+    }
+    Some(suffix_len)
+}
+
 // Lex a numeric literal starting with a digit.
 fn lex_number(bytes: &[u8]) -> (SyntaxKind, usize) {
     let mut i = 1;
@@ -394,6 +409,9 @@ fn lex_number(bytes: &[u8]) -> (SyntaxKind, usize) {
                 i += 1;
             }
             i = consume_exponent(bytes, i);
+            if let Some(suf) = try_time_suffix(bytes, i) {
+                return (SyntaxKind::TimeLiteral, i + suf);
+            }
             return (SyntaxKind::RealLiteral, i);
         }
         return (SyntaxKind::IntLiteral, i);
@@ -405,10 +423,16 @@ fn lex_number(bytes: &[u8]) -> (SyntaxKind, usize) {
         let digit_pos = if has_sign { i + 2 } else { i + 1 };
         if digit_pos < bytes.len() && bytes[digit_pos].is_ascii_digit() {
             i = consume_exponent(bytes, i);
+            if let Some(suf) = try_time_suffix(bytes, i) {
+                return (SyntaxKind::TimeLiteral, i + suf);
+            }
             return (SyntaxKind::RealLiteral, i);
         }
     }
 
+    if let Some(suf) = try_time_suffix(bytes, i) {
+        return (SyntaxKind::TimeLiteral, i + suf);
+    }
     (SyntaxKind::IntLiteral, i)
 }
 

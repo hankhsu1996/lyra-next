@@ -94,3 +94,53 @@ fn real_dot_not_followed_by_digit() {
     assert_eq!(k[1], (SyntaxKind::Dot, "."));
     assert_eq!(k[2], (SyntaxKind::Ident, "E3"));
 }
+
+#[test]
+fn time_literals() {
+    assert_eq!(single("2ns"), (SyntaxKind::TimeLiteral, "2ns"));
+    assert_eq!(single("40ps"), (SyntaxKind::TimeLiteral, "40ps"));
+    assert_eq!(single("1us"), (SyntaxKind::TimeLiteral, "1us"));
+    assert_eq!(single("100ms"), (SyntaxKind::TimeLiteral, "100ms"));
+    assert_eq!(single("3s"), (SyntaxKind::TimeLiteral, "3s"));
+    assert_eq!(single("10fs"), (SyntaxKind::TimeLiteral, "10fs"));
+    assert_eq!(single("2.1ns"), (SyntaxKind::TimeLiteral, "2.1ns"));
+    assert_eq!(single("23E10ns"), (SyntaxKind::TimeLiteral, "23E10ns"));
+}
+
+#[test]
+fn time_literal_negative_cases() {
+    // Not a time unit -- 'n' alone is not valid
+    let k = lex_kinds("2n");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "2"));
+    assert_eq!(k[1], (SyntaxKind::Ident, "n"));
+
+    // Ident-continue after suffix rejects time literal
+    let k = lex_kinds("2nsec");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "2"));
+    assert_eq!(k[1], (SyntaxKind::Ident, "nsec"));
+
+    let k = lex_kinds("2ns0");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "2"));
+    assert_eq!(k[1], (SyntaxKind::Ident, "ns0"));
+
+    let k = lex_kinds("2step");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "2"));
+    assert_eq!(k[1], (SyntaxKind::Ident, "step"));
+
+    // Whitespace separates: not a time literal
+    let k = lex_kinds("2 ns");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "2"));
+    assert_eq!(k[1].0, SyntaxKind::Whitespace);
+    assert_eq!(k[2], (SyntaxKind::Ident, "ns"));
+
+    // Dot-separated: 1.ns is not a time literal
+    let k = lex_kinds("1.ns");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "1"));
+    assert_eq!(k[1], (SyntaxKind::Dot, "."));
+    assert_eq!(k[2], (SyntaxKind::Ident, "ns"));
+
+    // Sized literal not affected
+    let k = lex_kinds("4'shA");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "4"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteral, "'shA"));
+}

@@ -123,6 +123,7 @@ pub enum SyntaxKind {
     BasedLiteral,
     RealLiteral,
     UnbasedUnsizedLiteral,
+    TimeLiteral,
 
     // Identifier tokens (new)
     SystemIdent,
