@@ -264,6 +264,11 @@ impl Ty {
         }
     }
 
+    /// Human-readable type representation (pure, no DB access).
+    ///
+    /// Always lossless: includes all packed dims, unpacked dims, and
+    /// signedness overrides. Enum/struct variants print as bare keywords
+    /// without names; use `TyFmt` in `lyra-db` for name-enriched output.
     pub fn pretty(&self) -> SmolStr {
         match self {
             Self::Array { .. } => {
@@ -305,7 +310,7 @@ pub enum SymbolType {
 }
 
 impl SymbolType {
-    /// Human-readable representation.
+    /// Human-readable representation (delegates to `Ty::pretty()`).
     pub fn pretty(&self) -> SmolStr {
         match self {
             SymbolType::Value(ty) => ty.pretty(),

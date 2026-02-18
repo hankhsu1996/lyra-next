@@ -57,3 +57,41 @@ fn type_at_precedence() {
         "expected logic type, got: {pretty}"
     );
 }
+
+#[test]
+fn type_at_includes_unpacked_dims() {
+    // Cursor on a use-site NameRef of x (in "x = 0") to get its declared type
+    let src = "module m; logic [7:0] x [4]; logic [7:0] y; assign y = x[0]; endmodule";
+    let offset = find_offset(src, "x[0]");
+    let result = type_at_str(src, offset).expect("should have type");
+    assert!(
+        result.contains("[4]"),
+        "printing must include unpacked dim, got: {result}"
+    );
+    assert!(
+        result.contains("[7:0]"),
+        "printing must include packed dim, got: {result}"
+    );
+}
+
+#[test]
+fn type_at_enriched_includes_enum_name_cross_file() {
+    let db = LyraDatabase::default();
+    let pkg = new_file(
+        &db,
+        0,
+        "package pkg; typedef enum logic [1:0] { A, B, C } color_t; endpackage",
+    );
+    // Use-site: assign c = A, cursor on "c =" to get enriched type
+    let mod_src = "module m; import pkg::*; color_t c; assign c = A; endmodule";
+    let mod_file = new_file(&db, 1, mod_src);
+    let unit = new_compilation_unit(&db, vec![pkg, mod_file]);
+    let offset = mod_src.find("c = A").expect("needle not found") as u32;
+    let result =
+        type_at(&db, mod_file, unit, lyra_source::TextSize::new(offset)).expect("should have type");
+    let pretty = result.pretty();
+    assert!(
+        pretty.contains("enum") && pretty.contains("color_t"),
+        "enriched printing must include enum name, got: {pretty}"
+    );
+}

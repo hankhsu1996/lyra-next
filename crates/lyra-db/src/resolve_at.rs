@@ -155,111 +155,126 @@ impl TypeAtResult {
     }
 }
 
-fn pretty_symbol_type_enriched(
-    db: &dyn salsa::Database,
+/// Lossless type formatter with DB-powered name enrichment.
+///
+/// `Ty::pretty()` is always lossless but cannot resolve aggregate names
+/// (enum/struct) because `lyra-semantic` has no DB access. `TyFmt` adds
+/// name lookup by querying def indexes through Salsa, producing output
+/// like `enum color_t` or `struct packed pixel_t` instead of bare keywords.
+pub(crate) struct TyFmt<'db> {
+    db: &'db dyn salsa::Database,
     unit: CompilationUnit,
-    st: &SymbolType,
-) -> SmolStr {
-    match st {
-        SymbolType::Value(ty) => pretty_ty_enriched(db, unit, ty),
-        SymbolType::TypeAlias(ty) => {
-            SmolStr::new(format!("type = {}", pretty_ty_enriched(db, unit, ty)))
-        }
-        SymbolType::Net(net) => SmolStr::new(format!(
-            "{} {}",
-            net.kind.keyword_str(),
-            pretty_ty_enriched(db, unit, &net.data)
-        )),
-        SymbolType::Error(_) => SmolStr::new_static("<error>"),
-    }
 }
 
-// Name-enriched pretty-printing for types with aggregate IDs.
-// Looks up the defining file from the aggregate ID, not the query source file.
-fn pretty_ty_enriched(db: &dyn salsa::Database, unit: CompilationUnit, ty: &Ty) -> SmolStr {
-    use lyra_semantic::types::collect_array_dims;
+impl<'db> TyFmt<'db> {
+    pub(crate) fn new(db: &'db dyn salsa::Database, unit: CompilationUnit) -> Self {
+        Self { db, unit }
+    }
 
-    // Peel off Array layers first, then enrich the base
-    let (base, dims) = collect_array_dims(ty);
-    let base_str = match base {
-        Ty::Enum(id) => {
-            let Some(src) = source_file_by_id(db, unit, id.file) else {
-                return SmolStr::new_static("enum");
-            };
-            let def = def_index_file(db, src);
-            let name = def.enum_defs.iter().find_map(|d| {
-                if d.owner == id.owner && d.ordinal == id.ordinal {
-                    d.name.clone()
+    pub(crate) fn symbol_type(&self, st: &SymbolType) -> SmolStr {
+        match st {
+            SymbolType::Value(ty) => self.ty(ty),
+            SymbolType::TypeAlias(ty) => SmolStr::new(format!("type = {}", self.ty(ty))),
+            SymbolType::Net(net) => {
+                SmolStr::new(format!("{} {}", net.kind.keyword_str(), self.ty(&net.data)))
+            }
+            SymbolType::Error(_) => SmolStr::new_static("<error>"),
+        }
+    }
+
+    pub(crate) fn ty(&self, ty: &Ty) -> SmolStr {
+        use lyra_semantic::types::collect_array_dims;
+
+        let (base, dims) = collect_array_dims(ty);
+        let base_str = match base {
+            Ty::Enum(id) => self.enum_name(id),
+            Ty::Struct(id) => self.struct_name(id),
+            other => other.pretty().to_string(),
+        };
+
+        if dims.is_empty() {
+            return SmolStr::new(base_str);
+        }
+        let mut s = base_str;
+        for dim in &dims {
+            s.push(' ');
+            fmt_unpacked_dim(&mut s, dim);
+        }
+        SmolStr::new(s)
+    }
+
+    fn enum_name(&self, id: &lyra_semantic::aggregate::EnumId) -> String {
+        let Some(src) = source_file_by_id(self.db, self.unit, id.file) else {
+            return "enum".to_string();
+        };
+        let def = def_index_file(self.db, src);
+        let name = def.enum_defs.iter().find_map(|d| {
+            if d.owner == id.owner && d.ordinal == id.ordinal {
+                d.name.clone()
+            } else {
+                None
+            }
+        });
+        match name {
+            Some(n) => format!("enum {n}"),
+            None => "enum".to_string(),
+        }
+    }
+
+    fn struct_name(&self, id: &lyra_semantic::aggregate::StructId) -> String {
+        let Some(src) = source_file_by_id(self.db, self.unit, id.file) else {
+            return "struct".to_string();
+        };
+        let def = def_index_file(self.db, src);
+        let info = def
+            .struct_defs
+            .iter()
+            .find(|d| d.owner == id.owner && d.ordinal == id.ordinal);
+        match info {
+            Some(d) => {
+                let mut s = String::new();
+                if d.is_union {
+                    s.push_str("union");
                 } else {
-                    None
+                    s.push_str("struct");
                 }
-            });
-            match name {
-                Some(n) => format!("enum {n}"),
-                None => "enum".to_string(),
-            }
-        }
-        Ty::Struct(id) => {
-            let Some(src) = source_file_by_id(db, unit, id.file) else {
-                return SmolStr::new_static("struct");
-            };
-            let def = def_index_file(db, src);
-            let info = def
-                .struct_defs
-                .iter()
-                .find(|d| d.owner == id.owner && d.ordinal == id.ordinal);
-            match info {
-                Some(d) => {
-                    let mut s = String::new();
-                    if d.is_union {
-                        s.push_str("union");
-                    } else {
-                        s.push_str("struct");
-                    }
-                    if d.packed {
-                        s.push_str(" packed");
-                    }
-                    if let Some(ref n) = d.name {
-                        s.push(' ');
-                        s.push_str(n);
-                    }
-                    s
+                if d.packed {
+                    s.push_str(" packed");
                 }
-                None => "struct".to_string(),
+                if let Some(ref n) = d.name {
+                    s.push(' ');
+                    s.push_str(n);
+                }
+                s
             }
+            None => "struct".to_string(),
         }
-        other => other.pretty().to_string(),
-    };
-
-    if dims.is_empty() {
-        return SmolStr::new(base_str);
     }
-    let mut s = base_str;
-    for dim in &dims {
-        s.push(' ');
-        s.push_str(&format_unpacked_dim(dim));
-    }
-    SmolStr::new(s)
 }
 
-fn format_unpacked_dim(dim: &lyra_semantic::types::UnpackedDim) -> String {
+fn fmt_unpacked_dim(out: &mut String, dim: &lyra_semantic::types::UnpackedDim) {
+    use core::fmt::Write;
     use lyra_semantic::types::UnpackedDim;
     match dim {
         UnpackedDim::Range { msb, lsb } => {
-            format!("[{}:{}]", fmt_const(msb), fmt_const(lsb))
+            let _ = write!(out, "[{}:{}]", FmtConst(msb), FmtConst(lsb));
         }
         UnpackedDim::Size(c) => {
-            format!("[{}]", fmt_const(c))
+            let _ = write!(out, "[{}]", FmtConst(c));
         }
     }
 }
 
-fn fmt_const(c: &lyra_semantic::types::ConstInt) -> String {
-    use lyra_semantic::types::ConstInt;
-    match c {
-        ConstInt::Known(v) => v.to_string(),
-        ConstInt::Unevaluated(_) => "?".to_string(),
-        ConstInt::Error(_) => "!".to_string(),
+struct FmtConst<'a>(&'a lyra_semantic::types::ConstInt);
+
+impl core::fmt::Display for FmtConst<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        use lyra_semantic::types::ConstInt;
+        match self.0 {
+            ConstInt::Known(v) => write!(f, "{v}"),
+            ConstInt::Unevaluated(_) => f.write_str("?"),
+            ConstInt::Error(_) => f.write_str("!"),
+        }
     }
 }
 
@@ -284,7 +299,8 @@ pub fn type_at(
     if let Some(gsym) = resolve_at(db, file, unit, offset) {
         let sym_ref = SymbolRef::new(db, unit, gsym);
         let st = type_of_symbol(db, sym_ref);
-        let pretty = pretty_symbol_type_enriched(db, unit, &st);
+        let fmt = TyFmt::new(db, unit);
+        let pretty = fmt.symbol_type(&st);
         return Some(TypeAtResult::SymbolEnriched { st, pretty });
     }
 
