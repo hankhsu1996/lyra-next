@@ -1,4 +1,5 @@
 use lyra_diag::DiagnosticCode;
+use lyra_semantic::types::ConstInt;
 use smol_str::SmolStr;
 
 use super::*;
@@ -689,5 +690,86 @@ fn nested_generate_for_inside_if() {
         all.len(),
         2,
         "expected 2 instances from nested for-in-if: {all:?}"
+    );
+}
+
+// ParamEnv interning tests
+
+fn child_param_values(tree: &ElabTree, parent: &InstanceKey, child_name: &str) -> Vec<ConstInt> {
+    let node = &tree.nodes[parent];
+    for ck in &node.children {
+        if let ElabItemKey::Inst(ik) = ck {
+            if tree.nodes[ik].instance_name == child_name {
+                let env_id = tree.nodes[ik].param_env;
+                return tree.envs.values(env_id).to_vec();
+            }
+        }
+    }
+    panic!("child instance '{child_name}' not found");
+}
+
+#[test]
+fn param_default_sees_override_of_earlier_param() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf #(parameter int W = 8, parameter int DEPTH = 1 << W)(); endmodule",
+            "module top; leaf #(.W(16)) u1(); endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let vals = child_param_values(&tree, &top_key, "u1");
+    assert_eq!(vals.len(), 2);
+    assert_eq!(vals[0], ConstInt::Known(16), "W should be overridden to 16");
+    assert_eq!(
+        vals[1],
+        ConstInt::Known(65536),
+        "DEPTH should be 1<<16 = 65536"
+    );
+}
+
+#[test]
+fn param_forward_reference_errors() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf #(parameter int A = B, parameter int B = 8)(); endmodule",
+            "module top; leaf u1(); endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let vals = child_param_values(&tree, &top_key, "u1");
+    assert_eq!(vals.len(), 2);
+    assert!(
+        matches!(vals[0], ConstInt::Error(_)),
+        "A should be error (forward ref to B), got: {:?}",
+        vals[0]
+    );
+    assert_eq!(vals[1], ConstInt::Known(8), "B should be 8");
+}
+
+#[test]
+fn param_env_dedup() {
+    let (_, tree) = elab_tree(
+        &[
+            "module leaf #(parameter int W = 8)(); endmodule",
+            "module top; leaf u1(); leaf u2(); endmodule",
+        ],
+        "top",
+    );
+    let top_key = tree.top.clone().expect("top should exist");
+    let node = &tree.nodes[&top_key];
+    let ids: Vec<_> = node
+        .children
+        .iter()
+        .filter_map(|ck| match ck {
+            ElabItemKey::Inst(ik) => Some(tree.nodes[ik].param_env),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(
+        ids[0], ids[1],
+        "identical param envs should share the same ParamEnvId"
     );
 }

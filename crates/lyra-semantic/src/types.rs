@@ -5,7 +5,7 @@ use smol_str::SmolStr;
 use crate::aggregate::{EnumId, StructId};
 
 /// A constant integer value, used for dimension bounds and widths.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ConstInt {
     Known(i64),
     Unevaluated(ErasedAstId),
@@ -13,7 +13,7 @@ pub enum ConstInt {
 }
 
 /// Reasons a constant expression evaluation can fail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConstEvalError {
     NonConstant,
     DivideByZero,

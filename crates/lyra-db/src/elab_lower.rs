@@ -1,13 +1,13 @@
+use std::collections::HashSet;
+
 use lyra_ast::AstNode;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
 use lyra_source::{FileId, Span, TextRange};
 use smol_str::SmolStr;
-use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::elab_queries::{TopModule, elaborate_top};
-use crate::elaboration::{ElabDiag, ParamEnv};
+use crate::elaboration::{ElabDiag, ParamEnvId};
 use crate::module_sig::ModuleSig;
 use crate::pipeline::preprocess_file;
 use crate::{CompilationUnit, source_file_by_id};
@@ -314,7 +314,7 @@ pub(crate) struct ForParts {
 
 pub(crate) fn extract_for_parts(
     node: &SyntaxNode,
-    _param_env: &Arc<ParamEnv>,
+    _param_env: ParamEnvId,
     _sig: &ModuleSig,
     _genvar_binding: Option<(&SmolStr, i64)>,
 ) -> Option<ForParts> {
