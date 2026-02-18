@@ -6,5 +6,4 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Ch 5: Lexical conventions
 
-- **Escaped identifiers in declarations** -- parser does not accept `\name` as a variable/signal name in declarations. Blocked by: parser. Planned tests: `lrm_ch05_escaped_identifiers`.
 - **`initial begin` / procedural blocks** -- parser does not accept `initial begin...end` in module body. Blocked by: parser. Planned tests: `lrm_ch05_system_names` (needs `$display`, `$finish` in procedural context).

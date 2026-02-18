@@ -96,7 +96,7 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
             p.bump();
             Some(m.complete(p, SyntaxKind::Literal))
         }
-        SyntaxKind::Ident | SyntaxKind::SystemIdent | SyntaxKind::EscapedIdent => {
+        SyntaxKind::Ident | SyntaxKind::SystemIdent => {
             // Check for qualified name: Ident :: Ident [:: Ident]*
             if p.current() == SyntaxKind::Ident
                 && p.nth(1) == SyntaxKind::ColonColon

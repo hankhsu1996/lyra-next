@@ -181,4 +181,59 @@ mod tests {
         // Still roundtrips
         assert_eq!(parse.syntax().text().to_string(), src);
     }
+
+    #[test]
+    fn escaped_ident_normalized_in_lookahead() {
+        let src = r"module m; int \foo ; endmodule";
+        let tokens = lyra_lexer::lex(src);
+        let p = parser::Parser::new(&tokens);
+        // Skip `module` and `m` and `;` (positions 0, 1, 2 after trivia skip)
+        // Find the escaped ident in the token stream
+        let mut found = false;
+        for n in 0..20 {
+            if p.nth(n) == SyntaxKind::Eof {
+                break;
+            }
+            // nth() should never return EscapedIdent
+            assert_ne!(
+                p.nth(n),
+                SyntaxKind::EscapedIdent,
+                "nth({n}) returned EscapedIdent; normalization failed"
+            );
+            found = true;
+        }
+        assert!(found);
+    }
+
+    #[test]
+    fn escaped_ident_parses_as_declaration() {
+        // Plain expect(Ident) must accept escaped identifiers via normalization
+        let src = r"module m; int \busa+index ; endmodule";
+        let tokens = lyra_lexer::lex(src);
+        let parse = parse(&tokens, src);
+        assert!(
+            parse.errors.is_empty(),
+            "escaped ident should parse without errors: {:?}",
+            parse.errors,
+        );
+        assert_eq!(parse.syntax().text().to_string(), src);
+    }
+
+    #[test]
+    fn escaped_ident_preserved_in_cst() {
+        let src = r"module m; int \foo ; endmodule";
+        let tokens = lyra_lexer::lex(src);
+        let parse = parse(&tokens, src);
+        assert!(parse.errors.is_empty());
+        let root = parse.syntax();
+        // Walk all tokens and find the EscapedIdent
+        let has_escaped = root
+            .descendants_with_tokens()
+            .filter_map(|el| el.into_token())
+            .any(|tok| tok.kind() == SyntaxKind::EscapedIdent && tok.text() == r"\foo");
+        assert!(
+            has_escaped,
+            "CST must preserve EscapedIdent token kind for roundtrip fidelity"
+        );
+    }
 }

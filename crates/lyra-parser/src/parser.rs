@@ -47,6 +47,9 @@ impl<'t> Parser<'t> {
     }
 
     // Return the kind of the nth significant (non-trivia) token ahead.
+    // Normalizes EscapedIdent to Ident so grammar code treats all
+    // identifier forms uniformly. The raw token kind is preserved in the
+    // green tree by bump().
     pub(crate) fn nth(&self, n: usize) -> SyntaxKind {
         let fuel = self.fuel.get();
         if fuel == 0 {
@@ -63,7 +66,7 @@ impl<'t> Parser<'t> {
                 continue;
             }
             if seen == n {
-                return kind;
+                return normalize(kind);
             }
             seen += 1;
             pos += 1;
@@ -230,6 +233,16 @@ impl CompletedMarker {
             pos: new_pos,
             completed: false,
         }
+    }
+}
+
+// Normalize token kinds for grammar-level lookahead. EscapedIdent is
+// reported as Ident so grammar code never needs to distinguish them.
+// The raw token kind is preserved in the green tree by bump().
+fn normalize(kind: SyntaxKind) -> SyntaxKind {
+    match kind {
+        SyntaxKind::EscapedIdent => SyntaxKind::Ident,
+        k => k,
     }
 }
 
