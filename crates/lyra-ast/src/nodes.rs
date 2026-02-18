@@ -12,7 +12,7 @@ ast_nodes! {
 
     // Declarations
     ModuleDecl(SyntaxKind::ModuleDecl) {
-        name: token(Ident),
+        name: token([Ident, EscapedIdent]),
         param_port_list: ParamPortList,
         port_list: PortList,
         body: ModuleBody,
@@ -33,7 +33,7 @@ ast_nodes! {
     }
 
     Port(SyntaxKind::Port) {
-        name: token(Ident),
+        name: token([Ident, EscapedIdent]),
         type_spec: TypeSpec,
         direction: token([InputKw, OutputKw, InoutKw, RefKw]),
     }
@@ -111,7 +111,7 @@ ast_nodes! {
     ArgList(SyntaxKind::ArgList) {}
 
     NameRef(SyntaxKind::NameRef) {
-        ident: token(Ident),
+        ident: token([Ident, EscapedIdent]),
     }
 
     Literal(SyntaxKind::Literal) {
@@ -124,11 +124,11 @@ ast_nodes! {
     ErrorNode(SyntaxKind::ErrorNode) {}
 
     Declarator(SyntaxKind::Declarator) {
-        name: token(Ident),
+        name: token([Ident, EscapedIdent]),
     }
 
     ModuleInstantiation(SyntaxKind::ModuleInstantiation) {
-        module_name: token(Ident),
+        module_name: token([Ident, EscapedIdent]),
         port_list: InstancePortList,
     }
 
@@ -145,7 +145,7 @@ ast_nodes! {
     }
 
     EnumMember(SyntaxKind::EnumMember) {
-        name: token(Ident),
+        name: token([Ident, EscapedIdent]),
     }
 
     StructType(SyntaxKind::StructType) {
@@ -165,12 +165,12 @@ ast_nodes! {
     QualifiedName(SyntaxKind::QualifiedName) { @custom }
 
     TypedefDecl(SyntaxKind::TypedefDecl) {
-        name: token(Ident),
+        name: token([Ident, EscapedIdent]),
         type_spec: TypeSpec,
     }
 
     InterfaceDecl(SyntaxKind::InterfaceDecl) {
-        name: token(Ident),
+        name: token([Ident, EscapedIdent]),
         param_port_list: ParamPortList,
         port_list: PortList,
         body: InterfaceBody,
@@ -179,7 +179,7 @@ ast_nodes! {
     InterfaceBody(SyntaxKind::InterfaceBody) {}
 
     ProgramDecl(SyntaxKind::ProgramDecl) {
-        name: token(Ident),
+        name: token([Ident, EscapedIdent]),
         param_port_list: ParamPortList,
         port_list: PortList,
         body: ProgramBody,
@@ -188,11 +188,11 @@ ast_nodes! {
     ProgramBody(SyntaxKind::ProgramBody) {}
 
     PrimitiveDecl(SyntaxKind::PrimitiveDecl) {
-        name: token(Ident),
+        name: token([Ident, EscapedIdent]),
     }
 
     ConfigDecl(SyntaxKind::ConfigDecl) {
-        name: token(Ident),
+        name: token([Ident, EscapedIdent]),
     }
 }
 
@@ -254,11 +254,11 @@ impl PrefixExpr {
 
 impl FieldExpr {
     pub fn field_name(&self) -> Option<SyntaxToken> {
-        // The field name is the last Ident token
+        // The field name is the last identifier token (simple or escaped)
         self.syntax
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|tok| tok.kind() == SyntaxKind::Ident)
+            .filter(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
             .last()
     }
 }
@@ -302,7 +302,7 @@ impl TypeSpec {
 
 impl PackageDecl {
     pub fn name(&self) -> Option<SyntaxToken> {
-        support::token(&self.syntax, SyntaxKind::Ident)
+        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
     }
 
     pub fn body(&self) -> Option<PackageBody> {
@@ -340,7 +340,7 @@ impl ImportItem {
     }
 
     pub fn package_name(&self) -> Option<SyntaxToken> {
-        support::token(&self.syntax, SyntaxKind::Ident)
+        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
     }
 
     pub fn is_wildcard(&self) -> bool {
@@ -353,7 +353,7 @@ impl QualifiedName {
         self.syntax
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|tok| tok.kind() == SyntaxKind::Ident)
+            .filter(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
     }
 }
 
@@ -367,7 +367,9 @@ impl InstancePort {
             if let rowan::NodeOrToken::Token(tok) = el {
                 if tok.kind() == SyntaxKind::Dot {
                     saw_dot = true;
-                } else if saw_dot && tok.kind() == SyntaxKind::Ident {
+                } else if saw_dot
+                    && matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
+                {
                     return Some(tok);
                 } else if tok.kind() == SyntaxKind::DotStar {
                     return None;
@@ -427,7 +429,7 @@ impl<I: Iterator<Item = rowan::NodeOrToken<lyra_parser::SyntaxNode, SyntaxToken>
         for el in self.children.by_ref() {
             match el {
                 rowan::NodeOrToken::Token(tok) => {
-                    if tok.kind() == SyntaxKind::Ident {
+                    if matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent) {
                         if self.past_module_name {
                             name_token = Some(tok);
                         } else {
