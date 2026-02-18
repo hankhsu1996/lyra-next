@@ -23,9 +23,12 @@ pub(crate) struct InstanceNode {
 }
 
 /// The elaborated instance tree rooted at a top module.
+///
+/// The top module is a node in `nodes` with `parent: None`.
+/// Children are stored in source order of instantiation appearance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ElabTree {
-    pub(crate) top: Option<GlobalDefId>,
+    pub(crate) top: Option<InstanceKey>,
     pub(crate) nodes: HashMap<InstanceKey, InstanceNode>,
     pub(crate) diagnostics: Vec<ElabDiag>,
 }

@@ -221,6 +221,17 @@ fn not_a_module_instantiation() {
 
 // Instance tree tests
 
+fn child_names(
+    tree: &crate::elaboration::ElabTree,
+    key: crate::elaboration::InstanceKey,
+) -> Vec<String> {
+    let node = &tree.nodes[&key];
+    node.children
+        .iter()
+        .map(|ck| tree.nodes[ck].instance_name.to_string())
+        .collect()
+}
+
 #[test]
 fn instance_tree_two_levels() {
     let db = LyraDatabase::default();
@@ -234,14 +245,36 @@ fn instance_tree_two_levels() {
     let unit = new_compilation_unit(&db, vec![f0, f1, f2]);
     let top = TopModule::new(&db, unit, SmolStr::new("top"));
     let tree = elaborate_top(&db, top);
-    assert!(tree.top.is_some());
-    // The tree should have at least the mid instance and the leaf instance
-    assert!(!tree.nodes.is_empty(), "expected non-empty instance tree");
+
+    let top_key = tree.top.expect("top should exist");
+    let top_node = &tree.nodes[&top_key];
+    assert_eq!(top_node.instance_name, "top");
+    assert!(top_node.parent.is_none(), "top has no parent");
+
+    // top -> m1
+    let top_children = child_names(tree, top_key);
+    assert_eq!(top_children, vec!["m1"]);
+
+    // m1 -> l1
+    let m1_key = top_node.children[0];
+    let m1_node = &tree.nodes[&m1_key];
+    assert_eq!(m1_node.parent, Some(top_key));
+    let m1_children = child_names(tree, m1_key);
+    assert_eq!(m1_children, vec!["l1"]);
+
+    // l1 is a leaf
+    let l1_key = m1_node.children[0];
+    let l1_node = &tree.nodes[&l1_key];
+    assert_eq!(l1_node.parent, Some(m1_key));
+    assert!(l1_node.children.is_empty(), "leaf has no children");
+
+    // 3 nodes total: top, m1, l1
+    assert_eq!(tree.nodes.len(), 3);
 }
 
 #[test]
 fn instance_tree_diamond_legal() {
-    // Same module type instantiated in two unrelated places is legal
+    // Same module type instantiated in two places is legal, produces two nodes
     let db = LyraDatabase::default();
     let f0 = new_file(&db, 0, "module leaf(input logic a); endmodule");
     let f1 = new_file(
@@ -252,30 +285,79 @@ fn instance_tree_diamond_legal() {
     let unit = new_compilation_unit(&db, vec![f0, f1]);
     let top = TopModule::new(&db, unit, SmolStr::new("top"));
     let tree = elaborate_top(&db, top);
-    let elab_errs: Vec<_> = tree
+
+    let top_key = tree.top.expect("top should exist");
+    let top_children = child_names(tree, top_key);
+    assert_eq!(top_children, vec!["u1", "u2"]);
+
+    // Both children point back to top
+    for ck in &tree.nodes[&top_key].children {
+        assert_eq!(tree.nodes[ck].parent, Some(top_key));
+        assert!(tree.nodes[ck].children.is_empty());
+    }
+
+    // No recursion diagnostics
+    let recursion: Vec<_> = tree
         .diagnostics
         .iter()
         .filter(|d| matches!(d, crate::elaboration::ElabDiag::RecursionLimit { .. }))
         .collect();
-    assert!(elab_errs.is_empty(), "diamond should not trigger recursion");
+    assert!(recursion.is_empty(), "diamond should not trigger recursion");
+
+    // 3 nodes: top + u1 + u2
+    assert_eq!(tree.nodes.len(), 3);
+}
+
+#[test]
+fn instance_tree_multi_instance_statement() {
+    // `leaf u1(...), u2(...);` -- two instances from one statement
+    let db = LyraDatabase::default();
+    let f0 = new_file(&db, 0, "module leaf(input logic a); endmodule");
+    let f1 = new_file(
+        &db,
+        1,
+        "module top; logic x, y; leaf u1(.a(x)), u2(.a(y)); endmodule",
+    );
+    let unit = new_compilation_unit(&db, vec![f0, f1]);
+    let top = TopModule::new(&db, unit, SmolStr::new("top"));
+    let tree = elaborate_top(&db, top);
+
+    let top_key = tree.top.expect("top should exist");
+    let top_children = child_names(tree, top_key);
+    assert_eq!(
+        top_children,
+        vec!["u1", "u2"],
+        "multi-instance statement produces two distinct children"
+    );
+    assert_eq!(tree.nodes.len(), 3);
 }
 
 // Cycle detection test
 
 #[test]
 fn cycle_detection() {
-    let diags = elab_diags(
-        &["module a; b b1(); endmodule", "module b; a a1(); endmodule"],
-        "a",
-    );
-    let recursion: Vec<_> = diags
+    let db = LyraDatabase::default();
+    let f0 = new_file(&db, 0, "module a; b b1(); endmodule");
+    let f1 = new_file(&db, 1, "module b; a a1(); endmodule");
+    let unit = new_compilation_unit(&db, vec![f0, f1]);
+    let top = TopModule::new(&db, unit, SmolStr::new("a"));
+    let tree = elaborate_top(&db, top);
+
+    // Recursion diag exists
+    let recursion: Vec<_> = tree
+        .diagnostics
         .iter()
-        .filter(|d| d.code == DiagnosticCode::ELAB_RECURSION_LIMIT)
+        .filter(|d| matches!(d, crate::elaboration::ElabDiag::RecursionLimit { .. }))
         .collect();
     assert!(
         !recursion.is_empty(),
         "expected recursion limit diag for cycle"
     );
+
+    // Top exists with a child (b1), but recursion stops the cycle
+    let top_key = tree.top.expect("top should exist");
+    let top_children = child_names(tree, top_key);
+    assert_eq!(top_children, vec!["b1"], "top has one child before cycle");
 }
 
 // Multi-file test

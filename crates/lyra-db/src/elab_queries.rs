@@ -178,30 +178,69 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
             },
         });
         return ElabTree {
-            top: Some(top_def_id),
+            top: None,
             nodes: HashMap::new(),
             diagnostics: diags,
         };
     }
 
-    let mut nodes = HashMap::new();
-    let mut active_stack = Vec::new();
+    let file_id = top_def_id.file();
+    let top_name_range = module_name_range(db, unit, top_def_id);
+    let top_key = InstanceKey {
+        file: file_id,
+        name_range: top_name_range,
+    };
 
+    let mut nodes = HashMap::new();
+    nodes.insert(
+        top_key,
+        InstanceNode {
+            key: top_key,
+            parent: None,
+            module_def: top_def_id,
+            instance_name: name.clone(),
+            children: Vec::new(),
+        },
+    );
+
+    let mut active_stack = Vec::new();
     elaborate_module(
         db,
         unit,
         top_def_id,
-        None,
+        Some(top_key),
         &mut nodes,
         &mut diags,
         &mut active_stack,
     );
 
     ElabTree {
-        top: Some(top_def_id),
+        top: Some(top_key),
         nodes,
         diagnostics: diags,
     }
+}
+
+fn module_name_range(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    def_id: GlobalDefId,
+) -> TextRange {
+    let Some(source_file) = source_file_by_id(db, unit, def_id.file()) else {
+        return TextRange::default();
+    };
+    let parse = parse_file(db, source_file);
+    let id_map = ast_id_map(db, source_file);
+    let Some(node) = id_map.get_node(&parse.syntax(), def_id.ast_id()) else {
+        return TextRange::default();
+    };
+    let Some(module_decl) = lyra_ast::ModuleDecl::cast(node) else {
+        return TextRange::default();
+    };
+    module_decl
+        .name()
+        .map(|t| t.text_range())
+        .unwrap_or_default()
 }
 
 fn elaborate_module(
@@ -310,6 +349,12 @@ fn elaborate_module_body(
                 instance_name: SmolStr::new(name_tok.text()),
                 children: Vec::new(),
             });
+
+            if let Some(pk) = parent_key
+                && let Some(parent_node) = nodes.get_mut(&pk)
+            {
+                parent_node.children.push(child_key);
+            }
 
             elaborate_module(
                 db,
