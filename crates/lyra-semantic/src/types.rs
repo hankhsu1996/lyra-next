@@ -1,6 +1,8 @@
 use lyra_ast::ErasedAstId;
 use smol_str::SmolStr;
 
+use crate::aggregate::{EnumId, StructId};
+
 /// A constant integer value, used for dimension bounds and widths.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConstInt {
@@ -172,6 +174,9 @@ impl RealKw {
 pub enum Ty {
     Integral(Integral),
     Real(RealKw),
+    Enum(EnumId),
+    Struct(StructId),
+    Array { elem: Box<Ty>, dim: UnpackedDim },
     String,
     Chandle,
     Event,
@@ -265,10 +270,9 @@ impl Ty {
         })
     }
 
-    /// Remove the first unpacked dimension and return the element type.
+    /// Remove the outermost unpacked dimension and return the element type.
     ///
-    /// M4 only handles Integral; other variants return None.
-    /// API is generic on Ty so M5 struct/array peeling slots in without rewrite.
+    /// Handles both Integral (unpacked field) and `Ty::Array` wrapper.
     pub fn peel_unpacked_dim(&self) -> Option<Ty> {
         match self {
             Self::Integral(i) => {
@@ -283,6 +287,7 @@ impl Ty {
                     unpacked: remaining,
                 }))
             }
+            Self::Array { elem, .. } => Some(elem.as_ref().clone()),
             _ => None,
         }
     }
@@ -291,6 +296,9 @@ impl Ty {
         match self {
             Self::Integral(i) => i.pretty(),
             Self::Real(r) => SmolStr::new_static(r.keyword_str()),
+            Self::Enum(_) => SmolStr::new_static("enum"),
+            Self::Struct(_) => SmolStr::new_static("struct"),
+            Self::Array { elem, .. } => elem.pretty(),
             Self::String => SmolStr::new_static("string"),
             Self::Chandle => SmolStr::new_static("chandle"),
             Self::Event => SmolStr::new_static("event"),

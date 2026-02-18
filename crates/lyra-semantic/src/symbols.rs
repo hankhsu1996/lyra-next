@@ -2,6 +2,7 @@ use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
+use crate::aggregate::TypeOrigin;
 use crate::scopes::ScopeId;
 
 /// Which namespace a symbol or use site belongs to.
@@ -107,6 +108,7 @@ pub struct Symbol {
     pub kind: SymbolKind,
     pub def_range: TextRange,
     pub scope: ScopeId,
+    pub type_origin: TypeOrigin,
 }
 
 /// Per-file symbol store, indexed by `SymbolId`.

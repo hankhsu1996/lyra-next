@@ -426,6 +426,10 @@ pub enum SyntaxKind {
     ProgramBody,
     PrimitiveDecl,
     ConfigDecl,
+    EnumType,
+    EnumMember,
+    StructType,
+    StructMember,
 }
 
 /// First node kind value -- tokens are `< NODE_START`, nodes `>= NODE_START`.

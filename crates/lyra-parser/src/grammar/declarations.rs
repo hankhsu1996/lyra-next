@@ -105,7 +105,11 @@ fn var_declarator(p: &mut Parser) {
 // Parse a type specifier: `logic`, `reg`, `bit`, `logic [7:0]`, `Ident`, etc.
 pub(crate) fn type_spec(p: &mut Parser) {
     let m = p.start();
-    if is_data_type_keyword(p.current()) {
+    if p.at(SyntaxKind::EnumKw) {
+        enum_type(p);
+    } else if p.at(SyntaxKind::StructKw) || p.at(SyntaxKind::UnionKw) {
+        struct_type(p);
+    } else if is_data_type_keyword(p.current()) {
         p.bump();
     } else if p.at(SyntaxKind::Ident) {
         if p.nth(1) == SyntaxKind::ColonColon && p.nth(2) == SyntaxKind::Ident {
@@ -176,6 +180,88 @@ pub(crate) fn typedef_decl(p: &mut Parser) {
     m.complete(p, SyntaxKind::TypedefDecl);
 }
 
+// Parse enum type body: `enum [base_type] '{' member {',' member} '}'`
+// Produces an EnumType child node within the enclosing TypeSpec.
+fn enum_type(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // enum
+    // Optional base type (keyword types only for M4)
+    if is_base_type_keyword(p.current()) {
+        type_spec(p);
+    }
+    p.expect(SyntaxKind::LBrace);
+    if !p.at(SyntaxKind::RBrace) {
+        enum_member(p);
+        while p.eat(SyntaxKind::Comma) {
+            if p.at(SyntaxKind::RBrace) {
+                break;
+            }
+            enum_member(p);
+        }
+    }
+    p.expect(SyntaxKind::RBrace);
+    m.complete(p, SyntaxKind::EnumType);
+}
+
+fn enum_member(p: &mut Parser) {
+    let m = p.start();
+    p.expect(SyntaxKind::Ident);
+    if p.eat(SyntaxKind::Assign) {
+        expressions::expr(p);
+    }
+    m.complete(p, SyntaxKind::EnumMember);
+}
+
+// Parse struct/union type body:
+// `(struct|union) [packed] [tagged] [signing] '{' member+ '}'`
+// Produces a StructType child node within the enclosing TypeSpec.
+fn struct_type(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // struct | union
+    if p.at(SyntaxKind::PackedKw) {
+        p.bump();
+    }
+    if p.at(SyntaxKind::TaggedKw) {
+        p.bump();
+    }
+    // Optional signing after packed
+    if p.at(SyntaxKind::SignedKw) || p.at(SyntaxKind::UnsignedKw) {
+        p.bump();
+    }
+    p.expect(SyntaxKind::LBrace);
+    while !p.at(SyntaxKind::RBrace) && !p.at(SyntaxKind::Eof) {
+        struct_member(p);
+    }
+    p.expect(SyntaxKind::RBrace);
+    m.complete(p, SyntaxKind::StructType);
+}
+
+fn struct_member(p: &mut Parser) {
+    let m = p.start();
+    type_spec(p);
+    var_declarator(p);
+    while p.eat(SyntaxKind::Comma) {
+        var_declarator(p);
+    }
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::StructMember);
+}
+
+// Base type keywords valid as enum base type (integral types only, per LRM 6.19).
+fn is_base_type_keyword(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::LogicKw
+            | SyntaxKind::RegKw
+            | SyntaxKind::BitKw
+            | SyntaxKind::IntegerKw
+            | SyntaxKind::IntKw
+            | SyntaxKind::ShortintKw
+            | SyntaxKind::LongintKw
+            | SyntaxKind::ByteKw
+    )
+}
+
 pub(crate) fn is_data_type_keyword(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -195,5 +281,8 @@ pub(crate) fn is_data_type_keyword(kind: SyntaxKind) -> bool {
             | SyntaxKind::ChandleKw
             | SyntaxKind::EventKw
             | SyntaxKind::VoidKw
+            | SyntaxKind::EnumKw
+            | SyntaxKind::StructKw
+            | SyntaxKind::UnionKw
     )
 }

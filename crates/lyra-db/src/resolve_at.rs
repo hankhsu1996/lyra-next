@@ -1,6 +1,6 @@
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::ExprType;
-use lyra_semantic::types::SymbolType;
+use lyra_semantic::types::{SymbolType, Ty};
 use smol_str::SmolStr;
 
 use crate::expr_queries::ExprRef;
@@ -142,6 +142,7 @@ fn find_module_instantiation_name_at(
 pub enum TypeAtResult {
     Expr(ExprType),
     Symbol(SymbolType),
+    SymbolEnriched { st: SymbolType, pretty: SmolStr },
 }
 
 impl TypeAtResult {
@@ -149,7 +150,107 @@ impl TypeAtResult {
         match self {
             TypeAtResult::Expr(et) => et.pretty(),
             TypeAtResult::Symbol(st) => st.pretty(),
+            TypeAtResult::SymbolEnriched { pretty, .. } => pretty.clone(),
         }
+    }
+}
+
+fn pretty_symbol_type_enriched(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    st: &SymbolType,
+) -> SmolStr {
+    match st {
+        SymbolType::Value(ty) => pretty_ty_enriched(db, unit, ty),
+        SymbolType::TypeAlias(ty) => {
+            SmolStr::new(format!("type = {}", pretty_ty_enriched(db, unit, ty)))
+        }
+        SymbolType::Net(net) => SmolStr::new(format!(
+            "{} {}",
+            net.kind.keyword_str(),
+            pretty_ty_enriched(db, unit, &net.data)
+        )),
+        SymbolType::Error(_) => SmolStr::new_static("<error>"),
+    }
+}
+
+// Name-enriched pretty-printing for types with aggregate IDs.
+// Looks up the defining file from the aggregate ID, not the query source file.
+fn pretty_ty_enriched(db: &dyn salsa::Database, unit: CompilationUnit, ty: &Ty) -> SmolStr {
+    match ty {
+        Ty::Enum(id) => {
+            let Some(src) = source_file_by_id(db, unit, id.file) else {
+                return SmolStr::new_static("enum");
+            };
+            let def = def_index_file(db, src);
+            let name = def.enum_defs.iter().find_map(|d| {
+                if d.owner == id.owner && d.ordinal == id.ordinal {
+                    d.name.clone()
+                } else {
+                    None
+                }
+            });
+            match name {
+                Some(n) => SmolStr::new(format!("enum {n}")),
+                None => SmolStr::new_static("enum"),
+            }
+        }
+        Ty::Struct(id) => {
+            let Some(src) = source_file_by_id(db, unit, id.file) else {
+                return SmolStr::new_static("struct");
+            };
+            let def = def_index_file(db, src);
+            let info = def
+                .struct_defs
+                .iter()
+                .find(|d| d.owner == id.owner && d.ordinal == id.ordinal);
+            match info {
+                Some(d) => {
+                    let mut s = String::new();
+                    if d.is_union {
+                        s.push_str("union");
+                    } else {
+                        s.push_str("struct");
+                    }
+                    if d.packed {
+                        s.push_str(" packed");
+                    }
+                    if let Some(ref n) = d.name {
+                        s.push(' ');
+                        s.push_str(n);
+                    }
+                    SmolStr::new(s)
+                }
+                None => SmolStr::new_static("struct"),
+            }
+        }
+        Ty::Array { elem, dim } => {
+            let base = pretty_ty_enriched(db, unit, elem);
+            let dim_str = format_unpacked_dim(dim);
+            SmolStr::new(format!("{base} {dim_str}"))
+        }
+        other => other.pretty(),
+    }
+}
+
+fn format_unpacked_dim(dim: &lyra_semantic::types::UnpackedDim) -> String {
+    use lyra_semantic::types::UnpackedDim;
+    match dim {
+        UnpackedDim::Range { msb, lsb } => {
+            format!("[{}:{}]", fmt_const(msb), fmt_const(lsb))
+        }
+        UnpackedDim::Size(c) => {
+            format!("[{}]", fmt_const(c))
+        }
+    }
+}
+
+fn fmt_const(c: &lyra_semantic::types::ConstInt) -> String {
+    use lyra_semantic::types::ConstInt;
+    match c {
+        ConstInt::Known(v) => v.to_string(),
+        ConstInt::Unevaluated(_) => "?".to_string(),
+        ConstInt::Error(_) => "!".to_string(),
     }
 }
 
@@ -174,7 +275,8 @@ pub fn type_at(
     if let Some(gsym) = resolve_at(db, file, unit, offset) {
         let sym_ref = SymbolRef::new(db, unit, gsym);
         let st = type_of_symbol(db, sym_ref);
-        return Some(TypeAtResult::Symbol(st));
+        let pretty = pretty_symbol_type_enriched(db, unit, &st);
+        return Some(TypeAtResult::SymbolEnriched { st, pretty });
     }
 
     // Priority 2: Smallest enclosing "real" expression

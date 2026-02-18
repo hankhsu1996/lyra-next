@@ -1,6 +1,7 @@
 use lyra_lexer::SyntaxKind;
+use lyra_semantic::aggregate::TypeOrigin;
 use lyra_semantic::symbols::GlobalSymbolId;
-use lyra_semantic::types::{ConstEvalError, ConstInt, UnpackedDim};
+use lyra_semantic::types::{ConstEvalError, ConstInt, Ty, UnpackedDim};
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::pipeline::{ast_id_map, parse_file};
@@ -51,6 +52,31 @@ pub fn type_of_symbol_raw<'db>(
         _ => {}
     }
 
+    // Check TypeOrigin for enum/struct types
+    match sym.type_origin {
+        TypeOrigin::Enum(idx) => {
+            let id = def.enum_id(idx);
+            let ty = Ty::Enum(id);
+            let parse = parse_file(db, source_file);
+            let map = ast_id_map(db, source_file);
+            let decl_ast_id = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o);
+            let decl_node = decl_ast_id.and_then(|id| map.get_node(&parse.syntax(), id));
+            let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
+            return classify(ty, sym.kind);
+        }
+        TypeOrigin::Struct(idx) => {
+            let id = def.struct_id(idx);
+            let ty = Ty::Struct(id);
+            let parse = parse_file(db, source_file);
+            let map = ast_id_map(db, source_file);
+            let decl_ast_id = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o);
+            let decl_node = decl_ast_id.and_then(|id| map.get_node(&parse.syntax(), id));
+            let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
+            return classify(ty, sym.kind);
+        }
+        TypeOrigin::TypeSpec => {}
+    }
+
     let Some(decl_ast_id) = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o) else {
         return SymbolType::Error(SymbolTypeError::MissingDecl);
     };
@@ -83,8 +109,6 @@ pub fn type_of_symbol_raw<'db>(
     if let Some(ref ts) = typespec
         && typespec_name_ref(ts).is_some()
     {
-        // For Port nodes, unpacked dims are direct children of the Port node
-        // (not inside a Declarator), so pass the Port node as dim source.
         let dim_source = if decl_node.kind() == SyntaxKind::Port {
             Some(&decl_node)
         } else {
@@ -178,6 +202,9 @@ fn expand_typedef(
             i.unpacked = merged.into_boxed_slice();
             wrap(Ty::Integral(i))
         }
+        other @ (Ty::Enum(_) | Ty::Struct(_) | Ty::Array { .. }) => {
+            wrap(wrap_unpacked_dims(other, &use_site_unpacked))
+        }
         _ => SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported),
     }
 }
@@ -240,6 +267,45 @@ pub(crate) fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::Literal
             | SyntaxKind::QualifiedName
     )
+}
+
+fn classify(ty: Ty, kind: lyra_semantic::symbols::SymbolKind) -> lyra_semantic::types::SymbolType {
+    use lyra_semantic::types::SymbolType;
+    if kind == lyra_semantic::symbols::SymbolKind::Typedef {
+        SymbolType::TypeAlias(ty)
+    } else {
+        SymbolType::Value(ty)
+    }
+}
+
+// Wrap a type with Ty::Array layers for each unpacked dim.
+// Dims are iterated right-to-left so outermost (leftmost) dim wraps last.
+fn wrap_unpacked_dims(ty: Ty, dims: &[UnpackedDim]) -> Ty {
+    dims.iter().rev().fold(ty, |inner, dim| Ty::Array {
+        elem: Box::new(inner),
+        dim: dim.clone(),
+    })
+}
+
+// Extract unpacked dims from a declaration node and wrap a type.
+// Handles both Declarator (variable decls) and TypedefDecl (typedef with unpacked dims).
+fn wrap_unpacked_dims_from_node(
+    ty: Ty,
+    node: Option<&lyra_parser::SyntaxNode>,
+    ast_id_map: &lyra_ast::AstIdMap,
+) -> Ty {
+    let Some(node) = node else { return ty };
+    if !matches!(
+        node.kind(),
+        SyntaxKind::Declarator | SyntaxKind::TypedefDecl
+    ) {
+        return ty;
+    }
+    let dims = extract_unpacked_dims_raw(node, ast_id_map);
+    if dims.is_empty() {
+        return ty;
+    }
+    wrap_unpacked_dims(ty, &dims)
 }
 
 fn type_of_symbol_raw_recover<'db>(

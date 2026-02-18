@@ -77,6 +77,10 @@ fn normalize_ty(ty: &Ty, eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt) -> Ty
                 .map(|d| normalize_unpacked_dim(d, eval))
                 .collect(),
         }),
+        Ty::Array { elem, dim } => Ty::Array {
+            elem: Box::new(normalize_ty(elem, eval)),
+            dim: normalize_unpacked_dim(dim, eval),
+        },
         other => other.clone(),
     }
 }
@@ -384,6 +388,10 @@ fn build_integral_ty(
         Some(other) => other,
         None => Ty::Error,
     }
+}
+
+pub(crate) fn keyword_to_ty_pub(kind: SyntaxKind) -> Option<Ty> {
+    keyword_to_ty(kind)
 }
 
 fn keyword_to_ty(kind: SyntaxKind) -> Option<Ty> {

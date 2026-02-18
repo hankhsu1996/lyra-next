@@ -1,3 +1,4 @@
+use lyra_semantic::aggregate::TypeOrigin;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{
     ConstEvalError, ConstInt, IntegralKw, NetKind, SymbolType, SymbolTypeError, Ty, UnpackedDim,
@@ -580,5 +581,245 @@ fn type_of_typedef_no_dims_followed_by_decl() {
             assert_eq!(i.packed[0].lsb, ConstInt::Known(0));
         }
         other => panic!("expected Value(Integral), got {other:?}"),
+    }
+}
+
+// Enum/struct type tests
+
+#[test]
+fn type_of_typedef_enum() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef enum { A, B, C } abc_t; abc_t x; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let td = get_type(&db, file, unit, "abc_t");
+    assert!(
+        matches!(td, SymbolType::TypeAlias(Ty::Enum(_))),
+        "typedef enum should be TypeAlias(Enum), got {td:?}"
+    );
+    let var = get_type(&db, file, unit, "x");
+    assert!(
+        matches!(var, SymbolType::Value(Ty::Enum(_))),
+        "variable of typedef enum should be Value(Enum), got {var:?}"
+    );
+}
+
+#[test]
+fn type_of_typedef_struct_packed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef struct packed { logic [7:0] data; } pkt_t; pkt_t y; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let td = get_type(&db, file, unit, "pkt_t");
+    assert!(
+        matches!(td, SymbolType::TypeAlias(Ty::Struct(_))),
+        "typedef struct should be TypeAlias(Struct), got {td:?}"
+    );
+    let var = get_type(&db, file, unit, "y");
+    assert!(
+        matches!(var, SymbolType::Value(Ty::Struct(_))),
+        "variable of typedef struct should be Value(Struct), got {var:?}"
+    );
+}
+
+#[test]
+fn type_of_inline_enum() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; enum { P, Q } pq; endmodule");
+    let unit = single_file_unit(&db, file);
+    let var = get_type(&db, file, unit, "pq");
+    assert!(
+        matches!(var, SymbolType::Value(Ty::Enum(_))),
+        "inline enum variable should be Value(Enum), got {var:?}"
+    );
+}
+
+#[test]
+fn type_of_inline_struct() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; struct { int a; int b; } point; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let var = get_type(&db, file, unit, "point");
+    assert!(
+        matches!(var, SymbolType::Value(Ty::Struct(_))),
+        "inline struct variable should be Value(Struct), got {var:?}"
+    );
+}
+
+#[test]
+fn type_of_enum_array() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef enum { A, B } ab_t; ab_t x [4]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let var = get_type(&db, file, unit, "x");
+    match var {
+        SymbolType::Value(Ty::Array { ref dim, .. }) => {
+            assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(4)));
+        }
+        other => panic!("expected Value(Array), got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_enum_array_2d_peel() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef enum { A, B } ab_t; ab_t x [2][3]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let var = get_type(&db, file, unit, "x");
+    match var {
+        SymbolType::Value(ref ty @ Ty::Array { .. }) => {
+            // Outermost dim is [2]
+            let peeled = ty.peel_unpacked_dim();
+            assert!(peeled.is_some(), "should peel outermost dim");
+            match peeled {
+                Some(Ty::Array { ref dim, .. }) => {
+                    assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(3)));
+                }
+                other => panic!("after peel, expected Array with dim 3, got {other:?}"),
+            }
+        }
+        other => panic!("expected Value(Array), got {other:?}"),
+    }
+}
+
+#[test]
+fn enum_def_variants_stable() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef enum { X, Y, Z } xyz_t; endmodule",
+    );
+    let def = def_index_file(&db, file);
+    assert_eq!(def.enum_defs.len(), 1);
+    let names: Vec<&str> = def.enum_defs[0]
+        .variants
+        .iter()
+        .map(|v| v.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["X", "Y", "Z"]);
+}
+
+#[test]
+fn struct_def_fields_stable() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef struct packed { logic [7:0] data; logic valid; } pkt_t; endmodule",
+    );
+    let def = def_index_file(&db, file);
+    assert_eq!(def.struct_defs.len(), 1);
+    let names: Vec<&str> = def.struct_defs[0]
+        .fields
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["data", "valid"]);
+    assert!(def.struct_defs[0].packed);
+    assert!(!def.struct_defs[0].is_union);
+}
+
+#[test]
+fn enum_id_churn_contained() {
+    // Two modules with enums. Adding an enum in module a should not affect module b's IDs.
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module a; typedef enum { X } e1; typedef enum { Y } e2; endmodule\n\
+         module b; typedef enum { Z } e3; endmodule",
+    );
+    let def = def_index_file(&db, file);
+    // Module a has 2 enums (ordinals 0, 1 under owner "a")
+    // Module b has 1 enum (ordinal 0 under owner "b")
+    assert_eq!(def.enum_defs.len(), 3);
+    assert_eq!(def.enum_defs[0].owner.as_deref(), Some("a"));
+    assert_eq!(def.enum_defs[0].ordinal, 0);
+    assert_eq!(def.enum_defs[1].owner.as_deref(), Some("a"));
+    assert_eq!(def.enum_defs[1].ordinal, 1);
+    assert_eq!(def.enum_defs[2].owner.as_deref(), Some("b"));
+    assert_eq!(def.enum_defs[2].ordinal, 0);
+}
+
+#[test]
+fn type_of_typedef_enum_with_dims_merge() {
+    // typedef enum { A, B } E; E x [3];
+    // Should produce Array { elem: Enum, dim: Size(3) }
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef enum { A, B } E; E x [3]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let var = get_type(&db, file, unit, "x");
+    match var {
+        SymbolType::Value(Ty::Array { ref elem, ref dim }) => {
+            assert!(
+                matches!(**elem, Ty::Enum(_)),
+                "inner type should be Enum, got {elem:?}"
+            );
+            assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(3)));
+        }
+        other => panic!("expected Value(Array(Enum, 3)), got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_typedef_string_with_dims_now_uses_array() {
+    // typedef string S; S x [3];
+    // Before enum/struct, this was TypedefUnderlyingUnsupported.
+    // Now string with dims should still be unsupported (no Ty::Array for string).
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef string str_t; str_t a [3]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "a");
+    assert_eq!(
+        ty,
+        SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported),
+        "string with use-site dims should still be unsupported"
+    );
+}
+
+#[test]
+fn type_of_typedef_enum_with_typedef_unpacked_dims() {
+    // typedef enum { A, B } E [4];
+    // The typedef itself has unpacked dims -- these must be preserved.
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; typedef enum { A, B } E [4]; endmodule");
+    let unit = single_file_unit(&db, file);
+    let td = get_type(&db, file, unit, "E");
+    match td {
+        SymbolType::TypeAlias(Ty::Array { ref elem, ref dim }) => {
+            assert!(
+                matches!(**elem, Ty::Enum(_)),
+                "inner type should be Enum, got {elem:?}"
+            );
+            assert_eq!(*dim, UnpackedDim::Size(ConstInt::Known(4)));
+        }
+        other => panic!("expected TypeAlias(Array(Enum, 4)), got {other:?}"),
     }
 }
