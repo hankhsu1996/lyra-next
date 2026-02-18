@@ -3,6 +3,7 @@ use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
 
 use crate::literal::parse_literal_shape;
+use crate::syntax_helpers::system_tf_name;
 use crate::types::{ConstEvalError, ConstInt, RealKw, SymbolType, Ty};
 
 /// Signedness for bit-vector expression typing.
@@ -179,7 +180,7 @@ pub fn infer_expr_type(
         SyntaxKind::IndexExpr => infer_index(expr, ctx),
         SyntaxKind::RangeExpr => ExprType::Error(ExprTypeErrorKind::RangeUnsupported),
         SyntaxKind::FieldExpr => ExprType::Error(ExprTypeErrorKind::FieldAccessUnsupported),
-        SyntaxKind::CallExpr => infer_call(expr, ctx),
+        SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => infer_call(expr, ctx),
         _ => ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind),
     }
 }
@@ -499,16 +500,7 @@ fn infer_index(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 }
 
 fn infer_call(node: &SyntaxNode, _ctx: &dyn InferCtx) -> ExprType {
-    let Some(name_ref) = node.children().find(|c| c.kind() == SyntaxKind::NameRef) else {
-        return ExprType::Error(ExprTypeErrorKind::UserCallUnsupported);
-    };
-
-    let sys_token = name_ref
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .find(|tok| tok.kind() == SyntaxKind::SystemIdent);
-
-    if let Some(tok) = sys_token {
+    if let Some(tok) = system_tf_name(node) {
         match tok.text() {
             "$clog2" => ExprType::BitVec(BitVecType {
                 width: BitWidth::Known(32),
@@ -636,6 +628,7 @@ fn is_expression_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::RangeExpr
             | SyntaxKind::FieldExpr
             | SyntaxKind::CallExpr
+            | SyntaxKind::SystemTfCall
             | SyntaxKind::NameRef
             | SyntaxKind::Literal
             | SyntaxKind::QualifiedName

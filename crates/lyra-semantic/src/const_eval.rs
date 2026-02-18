@@ -2,6 +2,7 @@ use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 
 use crate::literal::{Base, parse_literal_shape};
+use crate::syntax_helpers::{system_tf_args, system_tf_name};
 use crate::types::ConstEvalError;
 
 type EvalResult = Result<i64, ConstEvalError>;
@@ -24,7 +25,7 @@ pub fn eval_const_expr(
             eval_const_expr(&child, resolve_name)
         }
         SyntaxKind::NameRef | SyntaxKind::QualifiedName => resolve_name(node),
-        SyntaxKind::CallExpr => eval_call_expr(node, resolve_name),
+        SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => eval_call_expr(node, resolve_name),
         _ => Err(ConstEvalError::Unsupported),
     }
 }
@@ -219,27 +220,13 @@ fn eval_call_expr(
     node: &SyntaxNode,
     resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
 ) -> EvalResult {
-    // CallExpr has a NameRef child (containing SystemIdent) and an ArgList child.
-    // The NameRef wraps the function name token.
-    let name_ref = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::NameRef)
-        .ok_or(ConstEvalError::Unsupported)?;
-
-    let func_token = name_ref
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .find(|tok| tok.kind() == SyntaxKind::SystemIdent)
-        .ok_or(ConstEvalError::Unsupported)?;
+    let func_token = system_tf_name(node).ok_or(ConstEvalError::Unsupported)?;
 
     if func_token.text() != "$clog2" {
         return Err(ConstEvalError::Unsupported);
     }
 
-    let arg_list = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::ArgList)
-        .ok_or(ConstEvalError::Unsupported)?;
+    let arg_list = system_tf_args(node).ok_or(ConstEvalError::Unsupported)?;
 
     let first_arg = arg_list
         .children()
@@ -305,6 +292,7 @@ mod tests {
                 | SyntaxKind::RangeExpr
                 | SyntaxKind::FieldExpr
                 | SyntaxKind::CallExpr
+                | SyntaxKind::SystemTfCall
                 | SyntaxKind::NameRef
                 | SyntaxKind::QualifiedName
                 | SyntaxKind::Expression

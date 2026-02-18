@@ -19,7 +19,7 @@ impl Language for SvLanguage {
 
     fn kind_from_raw(raw: rowan::SyntaxKind) -> SyntaxKind {
         assert!(
-            raw.0 <= SyntaxKind::StructMember as u16,
+            raw.0 < SyntaxKind::__Last as u16,
             "invalid SyntaxKind value: {}",
             raw.0
         );
@@ -235,5 +235,139 @@ mod tests {
             has_escaped,
             "CST must preserve EscapedIdent token kind for roundtrip fidelity"
         );
+    }
+
+    // Helper: find the first node of a given kind in the tree
+    fn find_node(root: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
+        if root.kind() == kind {
+            return Some(root.clone());
+        }
+        for child in root.children() {
+            if let Some(found) = find_node(&child, kind) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    fn parse_module(src: &str) -> (Parse, SyntaxNode) {
+        let full = format!("module m; {src} endmodule");
+        let tokens = lyra_lexer::lex(&full);
+        let p = parse(&tokens, &full);
+        let root = p.syntax();
+        (
+            Parse {
+                green: p.green.clone(),
+                errors: p.errors.clone(),
+            },
+            root,
+        )
+    }
+
+    #[test]
+    fn system_tf_call_with_type_arg() {
+        let (p, root) = parse_module("parameter P = $bits(logic [7:0]);");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        assert_eq!(
+            root.text().to_string().as_str(),
+            "module m; parameter P = $bits(logic [7:0]); endmodule"
+        );
+        let call = find_node(&root, SyntaxKind::SystemTfCall);
+        assert!(call.is_some(), "should have SystemTfCall node");
+        let call = call.unwrap();
+        // SystemIdent is a direct child token
+        let has_sys = call
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .any(|tok| tok.kind() == SyntaxKind::SystemIdent && tok.text() == "$bits");
+        assert!(
+            has_sys,
+            "SystemTfCall should contain $bits SystemIdent token"
+        );
+        // Should have SystemTfArgList child
+        let arg_list = call
+            .children()
+            .find(|c| c.kind() == SyntaxKind::SystemTfArgList);
+        assert!(arg_list.is_some(), "should have SystemTfArgList");
+        // TypeSpec inside arg list
+        let ts = find_node(&arg_list.unwrap(), SyntaxKind::TypeSpec);
+        assert!(
+            ts.is_some(),
+            "arg list should contain TypeSpec for `logic [7:0]`"
+        );
+    }
+
+    #[test]
+    fn system_tf_call_simple_type() {
+        let (p, root) = parse_module("parameter P = $bits(int);");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let call = find_node(&root, SyntaxKind::SystemTfCall);
+        assert!(call.is_some());
+    }
+
+    #[test]
+    fn system_tf_call_user_type_as_expr() {
+        // User-defined type name parses as expression (NameRef), not TypeSpec
+        let (p, root) = parse_module("parameter P = $bits(foo_t);");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let call = find_node(&root, SyntaxKind::SystemTfCall).unwrap();
+        let arg_list = call
+            .children()
+            .find(|c| c.kind() == SyntaxKind::SystemTfArgList)
+            .unwrap();
+        let name_ref = find_node(&arg_list, SyntaxKind::NameRef);
+        assert!(
+            name_ref.is_some(),
+            "foo_t should parse as NameRef expression"
+        );
+        let ts = find_node(&arg_list, SyntaxKind::TypeSpec);
+        assert!(ts.is_none(), "foo_t should NOT parse as TypeSpec");
+    }
+
+    #[test]
+    fn system_tf_call_display() {
+        let (p, root) = parse_module("initial begin $display(\"hello\"); end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let call = find_node(&root, SyntaxKind::SystemTfCall);
+        assert!(call.is_some(), "$display(...) should be SystemTfCall");
+    }
+
+    #[test]
+    fn system_ident_without_parens_is_name_ref() {
+        let (p, root) = parse_module("initial begin $finish; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let call = find_node(&root, SyntaxKind::SystemTfCall);
+        assert!(
+            call.is_none(),
+            "$finish without parens should NOT be SystemTfCall"
+        );
+        let nr = find_node(&root, SyntaxKind::NameRef);
+        assert!(nr.is_some(), "$finish should be NameRef");
+    }
+
+    #[test]
+    fn system_tf_call_clog2() {
+        let (p, root) = parse_module("parameter P = $clog2(4);");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let call = find_node(&root, SyntaxKind::SystemTfCall);
+        assert!(call.is_some());
+    }
+
+    #[test]
+    fn normal_call_still_produces_call_expr() {
+        let (p, root) = parse_module("initial begin f(1); end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let call = find_node(&root, SyntaxKind::CallExpr);
+        assert!(call.is_some(), "f(...) should produce CallExpr");
+        let sys_call = find_node(&root, SyntaxKind::SystemTfCall);
+        assert!(sys_call.is_none(), "f(...) should NOT be SystemTfCall");
+    }
+
+    #[test]
+    fn system_tf_call_roundtrip() {
+        let src = "module m; parameter P = $bits(logic [7:0]); endmodule";
+        let tokens = lyra_lexer::lex(src);
+        let p = parse(&tokens, src);
+        assert_eq!(p.syntax().text().to_string(), src);
     }
 }
