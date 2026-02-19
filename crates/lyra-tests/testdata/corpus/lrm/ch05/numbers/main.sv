@@ -32,6 +32,12 @@ module numbers_test;
   logic allx = 'x;
   logic allz = 'z;
 
+  // Unbased unsized with wider targets (context-determined width, LRM 5.7.1)
+  logic [7:0]  wide_all0 = '0;
+  logic [7:0]  wide_all1 = '1;
+  logic [15:0] wide_allx = 'x;
+  logic [31:0] wide_allz = 'z;
+
   // Underscore separators
   logic [15:0] uscore = 16'b0011_0101_0001_1111;
   int hex_uscore = 32'h12ab_f001;

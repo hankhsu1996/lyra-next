@@ -76,6 +76,36 @@ fn concat_lhs_no_diag() {
 }
 
 #[test]
+fn unbased_unsized_var_init_no_diag() {
+    let src = "module m; logic [7:0] x = '1; endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(
+        diags.is_empty(),
+        "no width warning for unbased unsized var init"
+    );
+}
+
+#[test]
+fn unbased_unsized_continuous_assign_no_diag() {
+    let src = "module m; logic [7:0] a; assign a = '0; endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(
+        diags.is_empty(),
+        "no width warning for unbased unsized continuous assign"
+    );
+}
+
+#[test]
+fn unbased_unsized_blocking_assign_no_diag() {
+    let src = "module m; logic [7:0] a; always_comb begin a = 'x; end endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(
+        diags.is_empty(),
+        "no width warning for unbased unsized blocking assign"
+    );
+}
+
+#[test]
 fn width_mismatch_has_labels() {
     let src = "module m; logic [7:0] a; logic [3:0] b; assign a = b; endmodule";
     let diags = type_diag_warnings(src);
