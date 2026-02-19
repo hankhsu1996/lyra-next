@@ -441,6 +441,9 @@ pub enum SyntaxKind {
     GenvarDecl,
     AttrInst,
     AttrSpec,
+    FunctionDecl,
+    TaskDecl,
+    TfPortDecl,
 
     #[doc(hidden)]
     __Last,

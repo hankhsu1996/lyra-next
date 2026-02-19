@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use lyra_semantic::types::Ty;
 use lyra_source::TextRange;
 use smol_str::SmolStr;
@@ -82,5 +84,47 @@ impl ModuleSig {
     pub(crate) fn param_by_name(&self, name: &str) -> Option<(u32, &ParamSig)> {
         let &idx = self.param_index.get(name)?;
         Some((idx, &self.params[idx as usize]))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CallableKind {
+    Function,
+    Task,
+}
+
+/// A port in a function/task signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TfPortSig {
+    pub(crate) name: SmolStr,
+    pub(crate) direction: PortDirection,
+    pub(crate) ty: Ty,
+    pub(crate) has_default: bool,
+    pub(crate) name_range: TextRange,
+    pub(crate) decl_range: TextRange,
+}
+
+/// A function/task signature: return type and ports in declaration order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CallableSig {
+    pub(crate) name: SmolStr,
+    pub(crate) kind: CallableKind,
+    pub(crate) return_ty: Ty,
+    pub(crate) ports: Box<[TfPortSig]>,
+}
+
+impl CallableSig {
+    pub(crate) fn new(
+        name: SmolStr,
+        kind: CallableKind,
+        return_ty: Ty,
+        ports: Vec<TfPortSig>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            name,
+            kind,
+            return_ty,
+            ports: ports.into_boxed_slice(),
+        })
     }
 }

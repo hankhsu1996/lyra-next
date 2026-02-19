@@ -1,9 +1,15 @@
-use lyra_semantic::type_infer::{ExprType, ExprTypeErrorKind, InferCtx};
+use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
+use lyra_semantic::type_infer::{
+    CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx,
+    ResolveCallableError,
+};
 use lyra_semantic::types::ConstInt;
 
+use crate::callable_queries::{CallableRef, callable_signature};
 use crate::const_eval::{ConstExprRef, eval_const_int};
+use crate::module_sig::CallableKind as DbCallableKind;
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::semantic::resolve_index_file;
+use crate::semantic::{def_index_file, resolve_index_file};
 use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, source_file_by_id};
 
@@ -85,5 +91,63 @@ impl InferCtx for DbInferCtx<'_> {
         };
         let expr_ref = ConstExprRef::new(self.db, self.unit, ast_id);
         eval_const_int(self.db, expr_ref)
+    }
+
+    fn resolve_callable(
+        &self,
+        callee_node: &lyra_parser::SyntaxNode,
+    ) -> Result<GlobalSymbolId, ResolveCallableError> {
+        let Some(ast_id) = self.ast_id_map.erased_ast_id(callee_node) else {
+            return Err(ResolveCallableError::NotFound);
+        };
+
+        let resolve = resolve_index_file(self.db, self.source_file, self.unit);
+        let Some(res) = resolve.resolutions.get(&ast_id) else {
+            return Err(ResolveCallableError::NotFound);
+        };
+
+        let target_id = res.symbol;
+
+        // Check that the resolved symbol is actually a function or task
+        let Some(target_file) = source_file_by_id(self.db, self.unit, target_id.file) else {
+            return Err(ResolveCallableError::NotFound);
+        };
+        let target_def = def_index_file(self.db, target_file);
+        let target_info = target_def.symbols.get(target_id.local);
+
+        match target_info.kind {
+            SymbolKind::Function | SymbolKind::Task => Ok(target_id),
+            other => Err(ResolveCallableError::NotACallable(other)),
+        }
+    }
+
+    fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef> {
+        let callable_ref = CallableRef::new(self.db, self.unit, sym);
+        let sig = callable_signature(self.db, callable_ref);
+        let kind = match sig.kind {
+            DbCallableKind::Function => CallableKind::Function,
+            DbCallableKind::Task => CallableKind::Task,
+        };
+        let eval = |expr_ast_id: lyra_ast::ErasedAstId| -> ConstInt {
+            let expr_ref = ConstExprRef::new(self.db, self.unit, expr_ast_id);
+            eval_const_int(self.db, expr_ref)
+        };
+        let normalize = |ty: &lyra_semantic::types::Ty| -> lyra_semantic::types::Ty {
+            lyra_semantic::normalize_ty(ty, &eval)
+        };
+        let ports: Vec<CallablePort> = sig
+            .ports
+            .iter()
+            .map(|p| CallablePort {
+                name: p.name.clone(),
+                ty: normalize(&p.ty),
+                has_default: p.has_default,
+            })
+            .collect();
+        Some(CallableSigRef {
+            kind,
+            return_ty: normalize(&sig.return_ty),
+            ports: ports.into(),
+        })
     }
 }

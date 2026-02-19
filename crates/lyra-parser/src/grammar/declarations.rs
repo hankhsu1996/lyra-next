@@ -154,7 +154,7 @@ pub(crate) fn packed_dimension(p: &mut Parser) {
     m.complete(p, SyntaxKind::PackedDimension);
 }
 
-fn unpacked_dimension(p: &mut Parser) {
+pub(crate) fn unpacked_dimension(p: &mut Parser) {
     let m = p.start();
     p.bump(); // [
     if !p.at(SyntaxKind::RBracket) {

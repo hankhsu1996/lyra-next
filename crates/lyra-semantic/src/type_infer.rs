@@ -3,6 +3,7 @@ use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
 
 use crate::literal::parse_literal_shape;
+use crate::symbols::{GlobalSymbolId, SymbolKind};
 use crate::syntax_helpers::system_tf_name;
 use crate::types::{ConstEvalError, ConstInt, RealKw, SymbolType, Ty};
 
@@ -67,6 +68,10 @@ pub enum ExprTypeErrorKind {
     FieldAccessUnsupported,
     UserCallUnsupported,
     RangeUnsupported,
+    UnsupportedCalleeForm(CalleeFormKind),
+    UnresolvedCall,
+    NotACallable(SymbolKind),
+    TaskInExprContext,
 }
 
 /// Result of typing an expression (self-determined).
@@ -146,6 +151,47 @@ impl ExprType {
     }
 }
 
+/// Category of unsupported callee syntax (for future diagnostic messages).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalleeFormKind {
+    MethodCall,
+    Other,
+}
+
+/// Error resolving a callable name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveCallableError {
+    NotFound,
+    NotACallable(SymbolKind),
+}
+
+/// Signature of a callable, passed through inference by the DB layer.
+///
+/// This is the source of truth for call-site type checking. The DB layer
+/// normalizes the raw `CallableSig` types (evaluating `ConstInt::Unevaluated`
+/// dims) and builds this lightweight projection that `lyra-semantic` can
+/// consume without depending on `lyra-db`.
+pub struct CallableSigRef {
+    pub kind: CallableKind,
+    pub return_ty: Ty,
+    pub ports: Box<[CallablePort]>,
+}
+
+/// Whether a callable is a function or task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallableKind {
+    Function,
+    Task,
+}
+
+/// Port info needed for call checking. Contains only what inference uses.
+#[derive(Debug, Clone)]
+pub struct CallablePort {
+    pub name: SmolStr,
+    pub ty: Ty,
+    pub has_default: bool,
+}
+
 /// Callbacks for the inference engine. No DB access -- pure.
 pub trait InferCtx {
     /// Resolve a `NameRef`/`QualifiedName` to its type.
@@ -154,6 +200,13 @@ pub trait InferCtx {
     fn symbol_type_of_name(&self, name_node: &SyntaxNode) -> Option<SymbolType>;
     /// Evaluate a constant expression (for replication count).
     fn const_eval(&self, expr_node: &SyntaxNode) -> ConstInt;
+    /// Resolve a callee name node to a callable symbol.
+    fn resolve_callable(
+        &self,
+        callee_node: &SyntaxNode,
+    ) -> Result<GlobalSymbolId, ResolveCallableError>;
+    /// Get the signature of a callable symbol.
+    fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef>;
 }
 
 /// Infer the self-determined type of an expression node.
@@ -501,17 +554,87 @@ fn infer_index(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     }
 }
 
-fn infer_call(node: &SyntaxNode, _ctx: &dyn InferCtx) -> ExprType {
+fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    // System task/function calls: $clog2, etc.
     if let Some(tok) = system_tf_name(node) {
-        match tok.text() {
+        return match tok.text() {
             "$clog2" => ExprType::BitVec(BitVecType {
                 width: BitWidth::Known(32),
                 signed: Signedness::Signed,
             }),
             _ => ExprType::Error(ExprTypeErrorKind::UnsupportedSystemCall),
+        };
+    }
+
+    // User-defined call: classify callee form
+    let callee_node = match node.first_child() {
+        Some(c) if is_expression_kind(c.kind()) => c,
+        _ => return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind),
+    };
+
+    match callee_node.kind() {
+        SyntaxKind::NameRef | SyntaxKind::QualifiedName => {}
+        SyntaxKind::FieldExpr => {
+            return ExprType::Error(ExprTypeErrorKind::UnsupportedCalleeForm(
+                CalleeFormKind::MethodCall,
+            ));
         }
-    } else {
-        ExprType::Error(ExprTypeErrorKind::UserCallUnsupported)
+        _ => {
+            return ExprType::Error(ExprTypeErrorKind::UnsupportedCalleeForm(
+                CalleeFormKind::Other,
+            ));
+        }
+    }
+
+    // Resolve callee to a callable symbol
+    let sym_id = match ctx.resolve_callable(&callee_node) {
+        Ok(id) => id,
+        Err(ResolveCallableError::NotFound) => {
+            return ExprType::Error(ExprTypeErrorKind::UnresolvedCall);
+        }
+        Err(ResolveCallableError::NotACallable(kind)) => {
+            return ExprType::Error(ExprTypeErrorKind::NotACallable(kind));
+        }
+    };
+
+    // Get callable signature
+    let Some(sig) = ctx.callable_sig(sym_id) else {
+        return ExprType::Error(ExprTypeErrorKind::UnresolvedCall);
+    };
+
+    // Task used in expression context
+    if sig.kind == CallableKind::Task {
+        return ExprType::Error(ExprTypeErrorKind::TaskInExprContext);
+    }
+
+    // Check arguments
+    check_call_args(node, &sig, ctx);
+
+    // Return the declared return type
+    ExprType::from_ty(&sig.return_ty)
+}
+
+/// Check call arguments against the callable signature.
+///
+/// For now, infers each argument's type (for context-determined sizing)
+/// but does not emit diagnostics for type mismatches. Arity and named-arg
+/// validation is performed.
+fn check_call_args(call_node: &SyntaxNode, sig: &CallableSigRef, ctx: &dyn InferCtx) {
+    // Find ArgList child
+    let arg_list = call_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ArgList);
+
+    let args: Vec<SyntaxNode> = arg_list
+        .iter()
+        .flat_map(|al| al.children())
+        .filter(|c| is_expression_kind(c.kind()))
+        .collect();
+
+    // Infer each argument with expected type from the port signature
+    for (i, arg) in args.iter().enumerate() {
+        let expected = sig.ports.get(i).map(|p| ExprType::from_ty(&p.ty));
+        infer_expr_type(arg, ctx, expected.as_ref());
     }
 }
 
