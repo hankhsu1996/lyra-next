@@ -64,7 +64,7 @@ When you fix an engine gap, add the now-passing tests to the corpus and remove t
 
 ### Policy: corpus changes require gaps.md review
 
-If `testdata/corpus/lrm_ch*` changes in a PR, check whether `docs/lrm/gaps.md` should also change (new gaps discovered, or gaps resolved). This keeps the ledger in sync with reality.
+If `testdata/corpus/lrm/` changes in a PR, check whether `docs/lrm/gaps.md` should also change (new gaps discovered, or gaps resolved). This keeps the ledger in sync with reality.
 
 ### Signing off: `/lrm-signoff <chapter>`
 
