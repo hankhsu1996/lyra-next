@@ -78,16 +78,6 @@ impl<'t> Parser<'t> {
         self.nth(0)
     }
 
-    /// The kind of the raw token at the current position, without skipping trivia.
-    /// Returns `Eof` if past the end.
-    pub(crate) fn raw_current(&self) -> SyntaxKind {
-        if self.pos < self.tokens.len() {
-            self.tokens[self.pos].kind
-        } else {
-            SyntaxKind::Eof
-        }
-    }
-
     pub(crate) fn at(&self, kind: SyntaxKind) -> bool {
         self.current() == kind
     }

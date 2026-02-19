@@ -6,12 +6,6 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 5: Lexical conventions
 
-### 5.7 Spaced sized literals
-
-The LRM allows whitespace between the size, base, and value tokens in sized literals (e.g., `5 'd 3`). The lexer correctly produces separate `IntLiteral` and `BasedLiteral` tokens with trivia between them, but the parser only binds them when they are immediately adjacent (no trivia). Blocked by: parser change to allow trivia-separated sized literals.
-
-Test to add: spaced sized literal case in `lrm/ch05/numbers`
-
 ### 5.10 Keyed and default assignment patterns
 
 Keyed assignment patterns (`'{a:0, b:1}`) and default patterns (`'{default:0}`) in structure and array literals cause a parser panic (rowan builder assertion failure). The parser's `ConcatExpr` handler does not recognize the `key : value` form inside `'{...}`. Blocked by: parser support for keyed assignment pattern syntax.
