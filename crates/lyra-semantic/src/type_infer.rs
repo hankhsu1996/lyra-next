@@ -19,6 +19,20 @@ pub enum Signedness {
 pub enum BitWidth {
     Known(u32),
     Unknown,
+    /// Width adapts to assignment context. The u32 is the self-determined
+    /// fallback (1 for unbased unsized literals, LRM 5.7.1).
+    ContextDetermined(u32),
+}
+
+impl BitWidth {
+    /// Concrete width in self-determined context: `Known` and
+    /// `ContextDetermined` resolve to their inner value, `Unknown` to `None`.
+    pub fn self_determined(&self) -> Option<u32> {
+        match self {
+            BitWidth::Known(w) | BitWidth::ContextDetermined(w) => Some(*w),
+            BitWidth::Unknown => None,
+        }
+    }
 }
 
 /// A bit-vector value type (integral expressions).
@@ -37,8 +51,8 @@ impl BitVecType {
             s.push_str(" signed");
         }
         match self.width {
-            BitWidth::Known(1) => {}
-            BitWidth::Known(w) => {
+            BitWidth::Known(1) | BitWidth::ContextDetermined(1) => {}
+            BitWidth::Known(w) | BitWidth::ContextDetermined(w) => {
                 use core::fmt::Write;
                 let _ = write!(s, " [{}:0]", w - 1);
             }
@@ -259,6 +273,10 @@ fn infer_literal(node: &SyntaxNode) -> ExprType {
         Some(SyntaxKind::TimeLiteral) => ExprType::NonBit(Ty::Real(RealKw::Time)),
         Some(SyntaxKind::RealLiteral) => ExprType::NonBit(Ty::Real(RealKw::Real)),
         Some(SyntaxKind::StringLiteral) => ExprType::NonBit(Ty::String),
+        Some(SyntaxKind::UnbasedUnsizedLiteral) => ExprType::BitVec(BitVecType {
+            width: BitWidth::ContextDetermined(1),
+            signed: Signedness::Unsigned,
+        }),
         _ => match parse_literal_shape(node) {
             Some(shape) => {
                 let signed = if shape.signed {
@@ -397,13 +415,13 @@ fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         }
         let child_ty = infer_expr_type(&child, ctx, None);
         match &child_ty {
-            ExprType::BitVec(bv) => match bv.width {
-                BitWidth::Known(w) => {
+            ExprType::BitVec(bv) => match bv.width.self_determined() {
+                Some(w) => {
                     if let Some(ref mut tw) = total_width {
                         *tw = tw.saturating_add(w);
                     }
                 }
-                BitWidth::Unknown => {
+                None => {
                     all_known = false;
                 }
             },
@@ -480,13 +498,13 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         for item in inner_items {
             let item_ty = infer_expr_type(item, ctx, None);
             match &item_ty {
-                ExprType::BitVec(bv) => match bv.width {
-                    BitWidth::Known(w) => {
+                ExprType::BitVec(bv) => match bv.width.self_determined() {
+                    Some(w) => {
                         if let Some(ref mut t) = total {
                             *t = t.saturating_add(w);
                         }
                     }
-                    BitWidth::Unknown => all_known = false,
+                    None => all_known = false,
                 },
                 ExprType::NonBit(_) => {
                     return ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand);
@@ -501,8 +519,8 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         }
     };
 
-    let result_width = match (replic_count, inner_width) {
-        (Some(n), BitWidth::Known(w)) => BitWidth::Known(n.saturating_mul(w)),
+    let result_width = match (replic_count, inner_width.self_determined()) {
+        (Some(n), Some(w)) => BitWidth::Known(n.saturating_mul(w)),
         _ => BitWidth::Unknown,
     };
 
@@ -727,8 +745,8 @@ fn find_operator_token(node: &SyntaxNode) -> Option<SyntaxKind> {
 
 fn merge_bitvec(a: &BitVecType, b: &BitVecType) -> BitVecType {
     BitVecType {
-        width: match (a.width, b.width) {
-            (BitWidth::Known(wa), BitWidth::Known(wb)) => BitWidth::Known(wa.max(wb)),
+        width: match (a.width.self_determined(), b.width.self_determined()) {
+            (Some(wa), Some(wb)) => BitWidth::Known(wa.max(wb)),
             _ => BitWidth::Unknown,
         },
         signed: if a.signed == Signedness::Signed && b.signed == Signedness::Signed {

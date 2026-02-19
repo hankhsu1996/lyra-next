@@ -12,12 +12,6 @@ The LRM allows whitespace between the size, base, and value tokens in sized lite
 
 Test to add: spaced sized literal case in `lrm/ch05/numbers`
 
-### 5.7 Unbased unsized literal width
-
-Unbased unsized literals (`'0`, `'1`, `'x`, `'z`) should expand to the width of their assignment context per LRM 5.7.1. The engine currently treats them as 1-bit, causing spurious width-mismatch warnings when assigned to wider targets. Blocked by: semantic support for context-dependent literal width.
-
-Test to add: unbased unsized literals assigned to multi-bit targets in `lrm/ch05/numbers`
-
 ### 5.10 Keyed and default assignment patterns
 
 Keyed assignment patterns (`'{a:0, b:1}`) and default patterns (`'{default:0}`) in structure and array literals cause a parser panic (rowan builder assertion failure). The parser's `ConcatExpr` handler does not recognize the `key : value` form inside `'{...}`. Blocked by: parser support for keyed assignment pattern syntax.

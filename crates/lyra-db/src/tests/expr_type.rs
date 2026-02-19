@@ -61,6 +61,13 @@ fn bv_u(width: u32) -> ExprType {
     bv(width, Signedness::Unsigned)
 }
 
+fn bv_context(fallback: u32) -> ExprType {
+    ExprType::BitVec(BitVecType {
+        width: BitWidth::ContextDetermined(fallback),
+        signed: Signedness::Unsigned,
+    })
+}
+
 fn bv_s(width: u32) -> ExprType {
     bv(width, Signedness::Signed)
 }
@@ -100,7 +107,20 @@ fn expr_type_unbased_unsized() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "module m; parameter P = '1; endmodule");
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(1));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_context(1));
+}
+
+#[test]
+fn expr_type_unbased_unsized_in_binop() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] a; parameter P = a + '1; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    // ContextDetermined(1) consumed by merge_bitvec -> Known(max(8,1)) = Known(8)
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
 }
 
 #[test]
