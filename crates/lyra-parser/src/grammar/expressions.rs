@@ -82,11 +82,11 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
         SyntaxKind::IntLiteral => {
             let m = p.start();
             p.bump();
-            // Sized based literal: IntLiteral immediately followed by BasedLiteral
-            // e.g. `8` `'hFF` forms `8'hFF`. No trivia allowed between them
-            // per IEEE 1800-2023 section 5.7.1. Use raw_current() to reject
-            // cases like `8 'hFF` where whitespace separates the tokens.
-            if p.raw_current() == SyntaxKind::BasedLiteral {
+            // Sized based literal: IntLiteral followed by BasedLiteral.
+            // Trivia (whitespace, comments) between them is allowed -- the LRM
+            // grammar operates on post-preprocessor token streams where
+            // macro/include expansion can insert trivia between tokens.
+            if p.current() == SyntaxKind::BasedLiteral {
                 p.bump();
             }
             Some(m.complete(p, SyntaxKind::Literal))

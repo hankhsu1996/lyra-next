@@ -235,4 +235,24 @@ mod tests {
     fn real_literal_returns_none() {
         assert!(parse_shape("3.14").is_none());
     }
+
+    #[test]
+    fn spaced_sized_hex() {
+        let s = parse_shape("8 'hFF").expect("should parse");
+        assert_eq!(s.width, 8);
+        assert!(!s.signed);
+        assert_eq!(s.base, Base::Hex);
+        assert!(!s.is_unsized);
+        assert!(!s.has_xz);
+    }
+
+    #[test]
+    fn spaced_sized_binary() {
+        let s = parse_shape("4 'b1010").expect("should parse");
+        assert_eq!(s.width, 4);
+        assert!(!s.signed);
+        assert_eq!(s.base, Base::Binary);
+        assert!(!s.is_unsized);
+        assert!(!s.has_xz);
+    }
 }

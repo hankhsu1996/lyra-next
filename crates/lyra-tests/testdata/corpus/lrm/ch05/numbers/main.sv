@@ -42,6 +42,10 @@ module numbers_test;
   logic [15:0] uscore = 16'b0011_0101_0001_1111;
   int hex_uscore = 32'h12ab_f001;
 
+  // Spaced sized literals (LRM 5.7.1 -- trivia between size and base)
+  logic [7:0]  spaced_hex = 8 'hFF;
+  logic [3:0]  spaced_bin = 4 'b1010;
+
   // Real literals (5.7.2)
   real r1 = 1.2;
   real r2 = 0.1;
