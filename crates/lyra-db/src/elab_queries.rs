@@ -297,7 +297,7 @@ fn max_generate_iterations() -> usize {
     }
     #[cfg(not(test))]
     {
-        crate::elaboration::ELAB_MAX_GENERATE_ITERATIONS
+        10_000
     }
 }
 

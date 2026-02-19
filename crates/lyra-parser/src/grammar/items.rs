@@ -66,6 +66,14 @@ fn package_item(p: &mut Parser) -> bool {
             declarations::typedef_decl(p);
             true
         }
+        SyntaxKind::FunctionKw => {
+            function_decl(p);
+            true
+        }
+        SyntaxKind::TaskKw => {
+            task_decl(p);
+            true
+        }
         _ => {
             p.error_bump("unexpected token in package body");
             !p.at_end()
@@ -230,6 +238,14 @@ fn module_item(p: &mut Parser) -> bool {
         }
         SyntaxKind::GenvarKw => {
             genvar_decl(p);
+            true
+        }
+        SyntaxKind::FunctionKw => {
+            function_decl(p);
+            true
+        }
+        SyntaxKind::TaskKw => {
+            task_decl(p);
             true
         }
         SyntaxKind::Ident => {
@@ -688,6 +704,175 @@ fn at_gen_end(p: &Parser) -> bool {
         || p.at(SyntaxKind::EndgenerateKw)
         || p.at(SyntaxKind::EndinterfaceKw)
         || p.at(SyntaxKind::EndprogramKw)
+        || p.at(SyntaxKind::EndfunctionKw)
+        || p.at(SyntaxKind::EndtaskKw)
+}
+
+// `function [lifetime] return_type name ( tf_port_list ) ; { stmt/decl } endfunction [: name]`
+pub(crate) fn function_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // function
+
+    // Optional lifetime
+    if p.at(SyntaxKind::AutomaticKw) || p.at(SyntaxKind::StaticKw) {
+        p.bump();
+    }
+
+    // Return type (optional -- implicit `logic` if omitted, LRM 13.4.1).
+    // Lookahead: if current is Ident followed by `(` or `;`, the Ident is
+    // the function name, not a type. Otherwise consume a type_spec first.
+    if p.at(SyntaxKind::Ident)
+        && (p.nth(1) == SyntaxKind::LParen || p.nth(1) == SyntaxKind::Semicolon)
+    {
+        // No explicit return type -- name follows directly
+        p.bump(); // function name
+    } else {
+        declarations::type_spec(p);
+        p.expect(SyntaxKind::Ident); // function name
+    }
+
+    // Optional port list
+    if p.at(SyntaxKind::LParen) {
+        tf_port_list(p);
+    }
+
+    p.expect(SyntaxKind::Semicolon);
+
+    // Body: statements and declarations until endfunction
+    while !p.at(SyntaxKind::EndfunctionKw) && !p.at_end() && !at_func_task_end(p) {
+        statements::stmt(p);
+    }
+
+    if !p.eat(SyntaxKind::EndfunctionKw) {
+        p.error("expected `endfunction`");
+    }
+
+    // Optional `: name`
+    if p.eat(SyntaxKind::Colon) && p.at(SyntaxKind::Ident) {
+        p.bump();
+    }
+
+    m.complete(p, SyntaxKind::FunctionDecl);
+}
+
+// `task [lifetime] name ( tf_port_list ) ; { stmt/decl } endtask [: name]`
+pub(crate) fn task_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // task
+
+    // Optional lifetime
+    if p.at(SyntaxKind::AutomaticKw) || p.at(SyntaxKind::StaticKw) {
+        p.bump();
+    }
+
+    // Task name
+    p.expect(SyntaxKind::Ident);
+
+    // Optional port list
+    if p.at(SyntaxKind::LParen) {
+        tf_port_list(p);
+    }
+
+    p.expect(SyntaxKind::Semicolon);
+
+    // Body: statements and declarations until endtask
+    while !p.at(SyntaxKind::EndtaskKw) && !p.at_end() && !at_func_task_end(p) {
+        statements::stmt(p);
+    }
+
+    if !p.eat(SyntaxKind::EndtaskKw) {
+        p.error("expected `endtask`");
+    }
+
+    // Optional `: name`
+    if p.eat(SyntaxKind::Colon) && p.at(SyntaxKind::Ident) {
+        p.bump();
+    }
+
+    m.complete(p, SyntaxKind::TaskDecl);
+}
+
+// Parse TF port list: `( [dir] type name {, name} [= default] {; ...} )`
+fn tf_port_list(p: &mut Parser) {
+    p.bump(); // (
+
+    if !p.at(SyntaxKind::RParen) {
+        tf_port_decl(p);
+        while p.eat(SyntaxKind::Comma) {
+            if p.at(SyntaxKind::RParen) {
+                break;
+            }
+            tf_port_decl(p);
+        }
+    }
+
+    p.expect(SyntaxKind::RParen);
+}
+
+// Parse a single TF port declaration: `[direction] type name {, name} [= default]`
+fn tf_port_decl(p: &mut Parser) {
+    let m = p.start();
+
+    // Optional direction
+    if is_tf_direction(p.current()) {
+        p.bump();
+    }
+
+    // Type (may be omitted if direction-only with implicit type)
+    if declarations::is_data_type_keyword(p.current())
+        || (p.at(SyntaxKind::Ident) && p.nth(1) == SyntaxKind::Ident)
+        || (p.at(SyntaxKind::Ident) && p.nth(1) == SyntaxKind::ColonColon)
+    {
+        declarations::type_spec(p);
+    }
+
+    // First declarator (name + optional default)
+    tf_declarator(p);
+
+    // Additional names sharing the same type: `, name [= default]`
+    // Only if next comma is followed by a plain Ident (not a direction or type keyword)
+    while p.at(SyntaxKind::Comma)
+        && !is_tf_direction(p.nth(1))
+        && !declarations::is_data_type_keyword(p.nth(1))
+        && p.nth(1) == SyntaxKind::Ident
+        && p.nth(2) != SyntaxKind::Ident
+        && p.nth(2) != SyntaxKind::ColonColon
+    {
+        p.bump(); // ,
+        tf_declarator(p);
+    }
+
+    m.complete(p, SyntaxKind::TfPortDecl);
+}
+
+fn tf_declarator(p: &mut Parser) {
+    let d = p.start();
+    p.expect(SyntaxKind::Ident);
+    // Optional unpacked dimensions
+    while p.at(SyntaxKind::LBracket) {
+        declarations::unpacked_dimension(p);
+    }
+    // Optional default
+    if p.eat(SyntaxKind::Assign) {
+        expressions::expr(p);
+    }
+    d.complete(p, SyntaxKind::Declarator);
+}
+
+fn is_tf_direction(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::InputKw | SyntaxKind::OutputKw | SyntaxKind::InoutKw | SyntaxKind::RefKw
+    )
+}
+
+// Outer-construct boundary check for function/task body recovery
+fn at_func_task_end(p: &Parser) -> bool {
+    p.at(SyntaxKind::EndmoduleKw)
+        || p.at(SyntaxKind::EndpackageKw)
+        || p.at(SyntaxKind::EndinterfaceKw)
+        || p.at(SyntaxKind::EndprogramKw)
+        || p.at(SyntaxKind::EndgenerateKw)
 }
 
 fn is_net_type(kind: SyntaxKind) -> bool {

@@ -308,8 +308,6 @@ pub(crate) type CondCacheKey = (ErasedAstId, CondSiteKind, ParamEnvId, GenvarEnv
 
 // Elaboration diagnostics
 
-pub(crate) const ELAB_MAX_GENERATE_ITERATIONS: usize = 10_000;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ElabDiag {
     UnresolvedModuleInst {

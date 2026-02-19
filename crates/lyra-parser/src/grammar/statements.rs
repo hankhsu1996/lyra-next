@@ -304,5 +304,5 @@ fn is_case_keyword(kind: SyntaxKind) -> bool {
 
 // Check if we're at a token that closes an outer construct, to prevent runaway.
 fn at_block_end(p: &Parser) -> bool {
-    p.at(SyntaxKind::EndmoduleKw)
+    p.at(SyntaxKind::EndmoduleKw) || p.at(SyntaxKind::EndfunctionKw) || p.at(SyntaxKind::EndtaskKw)
 }

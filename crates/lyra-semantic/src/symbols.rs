@@ -76,6 +76,8 @@ pub enum SymbolKind {
     Program,
     Primitive,
     Config,
+    Function,
+    Task,
 }
 
 impl SymbolKind {
@@ -92,7 +94,12 @@ impl SymbolKind {
             | Self::Program
             | Self::Primitive
             | Self::Config => Namespace::Definition,
-            Self::Port | Self::Net | Self::Variable | Self::Parameter => Namespace::Value,
+            Self::Port
+            | Self::Net
+            | Self::Variable
+            | Self::Parameter
+            | Self::Function
+            | Self::Task => Namespace::Value,
             Self::Typedef => Namespace::Type,
         }
     }

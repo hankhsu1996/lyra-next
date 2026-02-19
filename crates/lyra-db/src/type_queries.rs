@@ -48,7 +48,9 @@ pub fn type_of_symbol_raw<'db>(
         | SymbolKind::Interface
         | SymbolKind::Program
         | SymbolKind::Primitive
-        | SymbolKind::Config => return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
+        | SymbolKind::Config
+        | SymbolKind::Function
+        | SymbolKind::Task => return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
         _ => {}
     }
 

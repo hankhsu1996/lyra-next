@@ -61,7 +61,10 @@ pub fn normalize_symbol_type(
     }
 }
 
-fn normalize_ty(ty: &Ty, eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt) -> Ty {
+/// Normalize all `ConstInt::Unevaluated` values inside a `Ty`.
+///
+/// Transforms unevaluated dims to `Known`/`Error` by calling `eval`.
+pub fn normalize_ty(ty: &Ty, eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt) -> Ty {
     match ty {
         Ty::Integral(i) => Ty::Integral(Integral {
             keyword: i.keyword,
@@ -262,6 +265,16 @@ fn extract_typedef_decl(container: &SyntaxNode, ast_id_map: &AstIdMap) -> Symbol
     let unpacked = extract_unpacked_dims(container, ast_id_map);
     let ty = build_base_ty(base_ty, signed_override, packed);
     SymbolType::TypeAlias(wrap_unpacked(ty, &unpacked))
+}
+
+/// Extract the base `Ty` from a `TypeSpec` node, including signing and packed dims.
+///
+/// Used by callable signature extraction (in `lyra-db`) to type TF port parameters
+/// without going through the full `extract_type_from_container` path.
+pub fn extract_base_ty_from_typespec(typespec: &SyntaxNode, ast_id_map: &AstIdMap) -> Ty {
+    let (base_ty, signed_override) = extract_typespec_base(typespec);
+    let packed = extract_packed_dims(typespec, ast_id_map);
+    build_base_ty(base_ty, signed_override, packed)
 }
 
 /// Extract the base type keyword and optional signed/unsigned override from a `TypeSpec`.

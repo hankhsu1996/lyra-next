@@ -1,5 +1,6 @@
 pub mod aggregate;
-mod builder;
+pub(crate) mod builder;
+mod builder_stmt;
 pub mod const_eval;
 pub mod def_index;
 pub mod diagnostic;
@@ -18,5 +19,8 @@ pub mod types;
 
 pub use builder::build_def_index;
 pub use resolve::{build_resolve_core, build_resolve_index};
-pub use type_extract::{extract_type_from_container, normalize_symbol_type, typespec_name_ref};
+pub use type_extract::{
+    extract_base_ty_from_typespec, extract_type_from_container, normalize_symbol_type,
+    normalize_ty, typespec_name_ref,
+};
 pub use types::wrap_unpacked;

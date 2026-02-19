@@ -1,3 +1,4 @@
+mod callable_queries;
 mod const_eval;
 mod diagnostics;
 mod elab_eval;
@@ -29,6 +30,9 @@ pub use const_eval::{ConstExprRef, eval_const_int};
 
 // Re-export type queries
 pub use type_queries::{SymbolRef, type_of_symbol, type_of_symbol_raw};
+
+// Re-export callable queries
+pub use callable_queries::{CallableRef, callable_signature};
 
 // Re-export expression queries
 pub use expr_queries::{ExprRef, type_of_expr};

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use lyra_ast::{
-    AstIdMap, AstNode, ConfigDecl, EnumType, InterfaceDecl, ModuleInstantiation, NameRef, Port,
-    PrimitiveDecl, ProgramDecl, QualifiedName, StructType, TypedefDecl,
+    AstIdMap, AstNode, ConfigDecl, EnumType, FunctionDecl, InterfaceDecl, ModuleInstantiation,
+    NameRef, Port, PrimitiveDecl, ProgramDecl, QualifiedName, StructType, TaskDecl, TfPortDecl,
+    TypedefDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
@@ -84,27 +85,32 @@ fn detect_duplicates(
     }
 }
 
-struct DefContext<'a> {
-    file: FileId,
-    ast_id_map: &'a AstIdMap,
-    symbols: SymbolTableBuilder,
-    scopes: ScopeTreeBuilder,
-    export_definitions: Vec<SymbolId>,
-    export_packages: Vec<SymbolId>,
-    decl_to_symbol: HashMap<lyra_ast::ErasedAstId, SymbolId>,
-    symbol_to_decl: Vec<Option<lyra_ast::ErasedAstId>>,
-    decl_to_init_expr: HashMap<lyra_ast::ErasedAstId, Option<lyra_ast::ErasedAstId>>,
-    use_sites: Vec<UseSite>,
-    imports: Vec<Import>,
-    enum_defs: Vec<EnumDef>,
-    struct_defs: Vec<StructDef>,
-    current_owner: Option<SmolStr>,
-    enum_ordinals: HashMap<Option<SmolStr>, u32>,
-    struct_ordinals: HashMap<Option<SmolStr>, u32>,
+/// Mutable context accumulated during a single `build_def_index` pass.
+///
+/// Fields are `pub(crate)` because `builder_stmt` needs direct access for
+/// statement/expression collection. Both modules are internal to
+/// `lyra-semantic` and maintain builder invariants together.
+pub(crate) struct DefContext<'a> {
+    pub(crate) file: FileId,
+    pub(crate) ast_id_map: &'a AstIdMap,
+    pub(crate) symbols: SymbolTableBuilder,
+    pub(crate) scopes: ScopeTreeBuilder,
+    pub(crate) export_definitions: Vec<SymbolId>,
+    pub(crate) export_packages: Vec<SymbolId>,
+    pub(crate) decl_to_symbol: HashMap<lyra_ast::ErasedAstId, SymbolId>,
+    pub(crate) symbol_to_decl: Vec<Option<lyra_ast::ErasedAstId>>,
+    pub(crate) decl_to_init_expr: HashMap<lyra_ast::ErasedAstId, Option<lyra_ast::ErasedAstId>>,
+    pub(crate) use_sites: Vec<UseSite>,
+    pub(crate) imports: Vec<Import>,
+    pub(crate) enum_defs: Vec<EnumDef>,
+    pub(crate) struct_defs: Vec<StructDef>,
+    pub(crate) current_owner: Option<SmolStr>,
+    pub(crate) enum_ordinals: HashMap<Option<SmolStr>, u32>,
+    pub(crate) struct_ordinals: HashMap<Option<SmolStr>, u32>,
 }
 
 impl<'a> DefContext<'a> {
-    fn new(file: FileId, ast_id_map: &'a AstIdMap) -> Self {
+    pub(crate) fn new(file: FileId, ast_id_map: &'a AstIdMap) -> Self {
         Self {
             file,
             ast_id_map,
@@ -125,7 +131,7 @@ impl<'a> DefContext<'a> {
         }
     }
 
-    fn add_symbol(
+    pub(crate) fn add_symbol(
         &mut self,
         name: SmolStr,
         kind: SymbolKind,
@@ -135,7 +141,7 @@ impl<'a> DefContext<'a> {
         self.add_symbol_with_origin(name, kind, def_range, scope, TypeOrigin::TypeSpec)
     }
 
-    fn add_symbol_with_origin(
+    pub(crate) fn add_symbol_with_origin(
         &mut self,
         name: SmolStr,
         kind: SymbolKind,
@@ -487,10 +493,107 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
             collect_typedef(ctx, node, scope);
         }
         SyntaxKind::AlwaysBlock | SyntaxKind::InitialBlock => {
-            collect_procedural_block(ctx, node, scope);
+            crate::builder_stmt::collect_procedural_block(ctx, node, scope);
+        }
+        SyntaxKind::FunctionDecl | SyntaxKind::TaskDecl => {
+            collect_callable_decl(ctx, node, scope);
         }
         _ => {}
     }
+}
+
+fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    let is_function = node.kind() == SyntaxKind::FunctionDecl;
+    let kind = if is_function {
+        SymbolKind::Function
+    } else {
+        SymbolKind::Task
+    };
+
+    // Extract name: for functions, use FunctionDecl::name(); for tasks, use TaskDecl::name()
+    let name_tok = if is_function {
+        FunctionDecl::cast(node.clone()).and_then(|f| f.name())
+    } else {
+        TaskDecl::cast(node.clone()).and_then(|t| t.name())
+    };
+
+    let Some(name_tok) = name_tok else { return };
+    let name = SmolStr::new(name_tok.text());
+    let scope_kind = if is_function {
+        ScopeKind::Function
+    } else {
+        ScopeKind::Task
+    };
+    let callable_scope = ctx.scopes.push(scope_kind, Some(scope));
+    let sym_id = ctx.add_symbol(name.clone(), kind, name_tok.text_range(), scope);
+
+    // Store decl-to-symbol mapping
+    if is_function {
+        if let Some(func) = FunctionDecl::cast(node.clone())
+            && let Some(ast_id) = ctx.ast_id_map.ast_id(&func)
+        {
+            let erased = ast_id.erase();
+            ctx.decl_to_symbol.insert(erased, sym_id);
+            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+        }
+    } else if let Some(task) = TaskDecl::cast(node.clone())
+        && let Some(ast_id) = ctx.ast_id_map.ast_id(&task)
+    {
+        let erased = ast_id.erase();
+        ctx.decl_to_symbol.insert(erased, sym_id);
+        ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+    }
+
+    // Collect return type spec refs (for typedef resolution in the enclosing scope)
+    if is_function
+        && let Some(func) = FunctionDecl::cast(node.clone())
+        && let Some(ts) = func.type_spec()
+    {
+        collect_type_spec_refs(ctx, ts.syntax(), scope);
+    }
+
+    // Collect TF port declarations
+    let tf_port_decls: Box<[TfPortDecl]> = if is_function {
+        FunctionDecl::cast(node.clone())
+            .map(|f| f.tf_port_decls().collect())
+            .unwrap_or_default()
+    } else {
+        TaskDecl::cast(node.clone())
+            .map(|t| t.tf_port_decls().collect())
+            .unwrap_or_default()
+    };
+
+    for port_decl in &tf_port_decls {
+        // Collect type spec refs for resolution
+        if let Some(ts) = port_decl.type_spec() {
+            collect_type_spec_refs(ctx, ts.syntax(), callable_scope);
+        }
+        // Collect each declarator as a port symbol
+        for decl in port_decl.declarators() {
+            if let Some(name_tok) = decl.name() {
+                let port_sym = ctx.add_symbol(
+                    SmolStr::new(name_tok.text()),
+                    SymbolKind::Port,
+                    name_tok.text_range(),
+                    callable_scope,
+                );
+                if let Some(ast_id) = ctx.ast_id_map.ast_id(&decl) {
+                    let erased = ast_id.erase();
+                    ctx.decl_to_symbol.insert(erased, port_sym);
+                    ctx.symbol_to_decl[port_sym.index()] = Some(erased);
+                }
+            }
+        }
+    }
+
+    // Body is opaque for now: no local variables, statements, or name-refs
+    // are collected. A follow-up PR must walk the body to:
+    //   1. Collect local variable/parameter declarations
+    //   2. Index name-refs for resolve_index (enables go-to-definition inside bodies)
+    //   3. Walk statements for type-checking (assign width checks, etc.)
+    // Until then, expressions inside callable bodies are invisible to the
+    // semantic model. This is acceptable because call *sites* (outside the
+    // body) are the primary target of this change.
 }
 
 fn collect_import_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
@@ -573,7 +676,7 @@ fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeI
     }
 }
 
-fn collect_declarators(
+pub(crate) fn collect_declarators(
     ctx: &mut DefContext<'_>,
     node: &SyntaxNode,
     kind: SymbolKind,
@@ -602,62 +705,6 @@ fn collect_declarators(
                 }
             }
             collect_name_refs(ctx, &child, scope);
-        }
-    }
-}
-
-fn collect_procedural_block(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    for child in node.children() {
-        collect_statement(ctx, &child, scope);
-    }
-}
-
-fn collect_statement(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    match node.kind() {
-        SyntaxKind::BlockStmt => {
-            let block_scope = ctx.scopes.push(ScopeKind::Block, Some(scope));
-            for child in node.children() {
-                match child.kind() {
-                    SyntaxKind::VarDecl => {
-                        collect_declarators(ctx, &child, SymbolKind::Variable, block_scope);
-                    }
-                    _ => {
-                        collect_statement(ctx, &child, block_scope);
-                    }
-                }
-            }
-        }
-        SyntaxKind::VarDecl => {
-            collect_declarators(ctx, node, SymbolKind::Variable, scope);
-        }
-        SyntaxKind::IfStmt
-        | SyntaxKind::CaseStmt
-        | SyntaxKind::CaseItem
-        | SyntaxKind::ForStmt
-        | SyntaxKind::WhileStmt
-        | SyntaxKind::RepeatStmt
-        | SyntaxKind::ForeverStmt
-        | SyntaxKind::TimingControl => {
-            // Recurse into children
-            for child in node.children() {
-                collect_statement(ctx, &child, scope);
-            }
-            // Collect name refs from expression tokens at this level
-            collect_direct_name_refs(ctx, node, scope);
-        }
-        SyntaxKind::AssignStmt | SyntaxKind::EventExpr | SyntaxKind::EventItem => {
-            collect_name_refs(ctx, node, scope);
-        }
-        _ => {
-            // For expression nodes and others, collect name refs
-            if is_expression_kind(node.kind()) {
-                collect_name_refs(ctx, node, scope);
-            } else {
-                // Recurse for other structural nodes
-                for child in node.children() {
-                    collect_statement(ctx, &child, scope);
-                }
-            }
         }
     }
 }
@@ -852,7 +899,7 @@ fn collect_struct_def(
     idx
 }
 
-fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
         if child.kind() == SyntaxKind::NameRef {
             if let Some(name_ref) = NameRef::cast(child.clone())
@@ -896,60 +943,7 @@ fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
     }
 }
 
-fn collect_direct_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    // Collect name refs from direct expression children only (not structural children)
-    for child in node.children() {
-        if is_expression_kind(child.kind())
-            || child.kind() == SyntaxKind::NameRef
-            || child.kind() == SyntaxKind::QualifiedName
-        {
-            collect_name_refs_from_expr(ctx, &child, scope);
-        }
-    }
-}
-
-fn collect_name_refs_from_expr(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    if node.kind() == SyntaxKind::NameRef {
-        if let Some(name_ref) = NameRef::cast(node.clone())
-            && let Some(ident) = name_ref.ident()
-            && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
-        {
-            ctx.use_sites.push(UseSite {
-                path: NamePath::Simple(SmolStr::new(ident.text())),
-                expected_ns: ExpectedNs::Exact(Namespace::Value),
-                range: name_ref.text_range(),
-                scope,
-                ast_id: ast_id.erase(),
-            });
-        }
-        return;
-    }
-    if node.kind() == SyntaxKind::QualifiedName {
-        if let Some(qn) = QualifiedName::cast(node.clone())
-            && let Some(ast_id) = ctx.ast_id_map.ast_id(&qn)
-        {
-            let segments: Box<[SmolStr]> = qn
-                .segments()
-                .map(|ident| SmolStr::new(ident.text()))
-                .collect();
-            if !segments.is_empty() {
-                ctx.use_sites.push(UseSite {
-                    path: NamePath::Qualified { segments },
-                    expected_ns: ExpectedNs::Exact(Namespace::Value),
-                    range: qn.text_range(),
-                    scope,
-                    ast_id: ast_id.erase(),
-                });
-            }
-        }
-        return;
-    }
-    for child in node.children() {
-        collect_name_refs_from_expr(ctx, &child, scope);
-    }
-}
-
-fn is_expression_kind(kind: SyntaxKind) -> bool {
+pub(crate) fn is_expression_kind(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         SyntaxKind::Expression

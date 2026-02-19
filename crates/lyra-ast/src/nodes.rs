@@ -200,6 +200,21 @@ ast_nodes! {
     ConfigDecl(SyntaxKind::ConfigDecl) {
         name: token([Ident, EscapedIdent]),
     }
+
+    FunctionDecl(SyntaxKind::FunctionDecl) {
+        type_spec: TypeSpec,
+        declarators: [Declarator],
+    }
+
+    TaskDecl(SyntaxKind::TaskDecl) {
+        declarators: [Declarator],
+    }
+
+    TfPortDecl(SyntaxKind::TfPortDecl) {
+        type_spec: TypeSpec,
+        declarators: [Declarator],
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+    }
 }
 
 // Custom accessors
@@ -360,6 +375,60 @@ impl QualifiedName {
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
             .filter(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
+    }
+}
+
+impl FunctionDecl {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        // The function name is the Ident that follows either:
+        //   (a) the TypeSpec child (explicit return type), or
+        //   (b) the `function` keyword + optional lifetime (implicit return type).
+        // In case (b), no TypeSpec exists, so we find the first Ident after
+        // skipping `function` and optional `automatic`/`static`.
+        let has_type_spec = self
+            .syntax
+            .children()
+            .any(|n| n.kind() == SyntaxKind::TypeSpec);
+
+        if has_type_spec {
+            let mut past_type_spec = false;
+            for el in self.syntax.children_with_tokens() {
+                match el {
+                    rowan::NodeOrToken::Node(ref n) if n.kind() == SyntaxKind::TypeSpec => {
+                        past_type_spec = true;
+                    }
+                    rowan::NodeOrToken::Token(tok) => {
+                        if past_type_spec
+                            && matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
+                        {
+                            return Some(tok);
+                        }
+                    }
+                    rowan::NodeOrToken::Node(_) => {}
+                }
+            }
+            None
+        } else {
+            // No TypeSpec -- first Ident after FunctionKw and optional lifetime
+            self.syntax
+                .children_with_tokens()
+                .filter_map(|el| el.into_token())
+                .find(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
+        }
+    }
+
+    pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
+        support::children(&self.syntax)
+    }
+}
+
+impl TaskDecl {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
+    }
+
+    pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
+        support::children(&self.syntax)
     }
 }
 

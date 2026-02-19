@@ -54,12 +54,12 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Port diagnostics (unknown, missing, duplicate, too-many-positional)
 - [x] CLI batch driver
 
-## M6: Elaboration Completeness -- not started
+## M6: Elaboration Completeness -- in progress
 
 - [ ] Context-determined typing (LRM 11.6)
-- [ ] Callable typing (function/task calls)
+- [x] Callable typing (function/task calls)
 - [ ] Struct/union/enum semantics
 - [ ] Full array semantics
-- [ ] Generate blocks and parameter elaboration
+- [x] Generate blocks and parameter elaboration
 - [ ] Interface/modport semantics
 - [ ] Performance baseline (10K lines under 1s)
