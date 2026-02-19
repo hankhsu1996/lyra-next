@@ -1,8 +1,6 @@
 // LRM 5.11: Array literals
 //
 // Array literals use assignment pattern syntax '{...}.
-// Only positional form is tested here; keyed, default, and
-// replication forms require parser support for assignment pattern keys.
 
 module array_literals_test;
 
@@ -11,5 +9,11 @@ module array_literals_test;
 
   // 2D array literal (nested)
   int b[1:2][1:3] = '{'{0, 1, 2}, '{3, 4, 5}};
+
+  // Keyed array literal
+  int c[0:2] = '{0:10, 1:20, 2:30};
+
+  // Default array literal
+  int d[0:2] = '{default:0};
 
 endmodule

@@ -1,7 +1,10 @@
 ---
 source: crates/lyra-tests/tests/corpus.rs
+assertion_line: 162
 expression: ws.dump_diagnostics()
 ---
-// file: main.sv (0 diagnostics)
+// file: main.sv (2 diagnostics)
+  error[lyra.semantic[1]] 16:10..16:10: unresolved name `a`
+  error[lyra.semantic[1]] 16:14..16:14: unresolved name `b`
 ---
 unit (0 diagnostics)
