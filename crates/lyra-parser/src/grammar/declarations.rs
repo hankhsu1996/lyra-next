@@ -230,7 +230,11 @@ fn struct_type(p: &mut Parser) {
     }
     p.expect(SyntaxKind::LBrace);
     while !p.at(SyntaxKind::RBrace) && !p.at(SyntaxKind::Eof) {
+        let cp = p.checkpoint();
         struct_member(p);
+        if !p.has_progressed(cp) {
+            p.error_bump("expected struct member");
+        }
     }
     p.expect(SyntaxKind::RBrace);
     m.complete(p, SyntaxKind::StructType);
@@ -262,7 +266,10 @@ fn is_base_type_keyword(kind: SyntaxKind) -> bool {
     )
 }
 
-pub(crate) fn is_data_type_keyword(kind: SyntaxKind) -> bool {
+// The 16 scalar SystemVerilog type keywords (LRM Table 6-1 data types minus
+// aggregate constructors enum/struct/union). Shared predicate that other
+// predicates compose from.
+pub(crate) fn is_scalar_type_keyword(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         SyntaxKind::LogicKw
@@ -281,8 +288,13 @@ pub(crate) fn is_data_type_keyword(kind: SyntaxKind) -> bool {
             | SyntaxKind::ChandleKw
             | SyntaxKind::EventKw
             | SyntaxKind::VoidKw
-            | SyntaxKind::EnumKw
-            | SyntaxKind::StructKw
-            | SyntaxKind::UnionKw
     )
+}
+
+pub(crate) fn is_data_type_keyword(kind: SyntaxKind) -> bool {
+    is_scalar_type_keyword(kind)
+        || matches!(
+            kind,
+            SyntaxKind::EnumKw | SyntaxKind::StructKw | SyntaxKind::UnionKw
+        )
 }

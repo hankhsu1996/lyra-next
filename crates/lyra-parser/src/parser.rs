@@ -11,6 +11,9 @@ const PARSER_FUEL: u32 = 256;
 pub(crate) struct Parser<'t> {
     tokens: &'t [Token],
     pos: usize,
+    // Fuel prevents runaway lookahead in broken input. Decremented by `nth()`,
+    // reset by `bump()`. Cell is needed because `nth`/`current`/`at` take
+    // `&self` for ergonomic use in boolean expressions.
     fuel: Cell<u32>,
     pub(crate) events: Vec<Event>,
     pub(crate) errors: Vec<ParseError>,
@@ -19,12 +22,12 @@ pub(crate) struct Parser<'t> {
 }
 
 pub(crate) struct Marker {
-    pos: u32,
+    pos: usize,
     completed: bool,
 }
 
 pub(crate) struct CompletedMarker {
-    pub(crate) pos: u32,
+    pub(crate) pos: usize,
 }
 
 impl<'t> Parser<'t> {
@@ -101,7 +104,7 @@ impl<'t> Parser<'t> {
     // Consume the next significant token, emitting leading trivia with it.
     pub(crate) fn bump(&mut self) {
         self.fuel.set(PARSER_FUEL);
-        let mut n_raw = 0u16;
+        let mut n_raw = 0u32;
         while self.pos < self.tokens.len() && is_trivia(self.tokens[self.pos].kind) {
             self.pos += 1;
             n_raw = n_raw.saturating_add(1);
@@ -116,8 +119,7 @@ impl<'t> Parser<'t> {
     }
 
     pub(crate) fn start(&mut self) -> Marker {
-        #[allow(clippy::cast_possible_truncation)]
-        let pos = self.events.len() as u32;
+        let pos = self.events.len();
         self.events.push(Event::Start {
             kind: SyntaxKind::ErrorNode,
             forward_parent: None,
@@ -148,6 +150,16 @@ impl<'t> Parser<'t> {
 
     pub(crate) fn at_end(&self) -> bool {
         self.current() == SyntaxKind::Eof
+    }
+
+    // Save the current token position for loop-progress detection.
+    pub(crate) fn checkpoint(&self) -> usize {
+        self.pos
+    }
+
+    // True if the parser has advanced past `checkpoint`.
+    pub(crate) fn has_progressed(&self, checkpoint: usize) -> bool {
+        self.pos > checkpoint
     }
 
     // Consume all remaining trivia tokens individually. Call before closing
@@ -185,7 +197,7 @@ impl<'t> Parser<'t> {
 impl Marker {
     pub(crate) fn complete(mut self, p: &mut Parser, kind: SyntaxKind) -> CompletedMarker {
         self.completed = true;
-        if let Event::Start { kind: k, .. } = &mut p.events[self.pos as usize] {
+        if let Event::Start { kind: k, .. } = &mut p.events[self.pos] {
             *k = kind;
         }
         p.events.push(Event::Finish);
@@ -194,7 +206,7 @@ impl Marker {
 
     pub(crate) fn abandon(mut self, p: &mut Parser) {
         self.completed = true;
-        if self.pos as usize == p.events.len() - 1
+        if self.pos == p.events.len() - 1
             && let Some(Event::Start { .. }) = p.events.last()
         {
             p.events.pop();
@@ -210,13 +222,12 @@ impl Drop for Marker {
 
 impl CompletedMarker {
     pub(crate) fn precede(self, p: &mut Parser) -> Marker {
-        #[allow(clippy::cast_possible_truncation)]
-        let new_pos = p.events.len() as u32;
+        let new_pos = p.events.len();
         p.events.push(Event::Start {
             kind: SyntaxKind::ErrorNode,
             forward_parent: None,
         });
-        if let Event::Start { forward_parent, .. } = &mut p.events[self.pos as usize] {
+        if let Event::Start { forward_parent, .. } = &mut p.events[self.pos] {
             *forward_parent = Some(new_pos - self.pos);
         }
         Marker {

@@ -52,7 +52,11 @@ fn block_stmt(p: &mut Parser) {
         p.bump();
     }
     while !p.at(SyntaxKind::EndKw) && !p.at_end() && !at_block_end(p) {
+        let cp = p.checkpoint();
         stmt(p);
+        if !p.has_progressed(cp) {
+            p.error_bump("expected statement");
+        }
     }
     if !p.eat(SyntaxKind::EndKw) {
         p.error("expected `end`");
@@ -97,7 +101,11 @@ fn case_stmt(p: &mut Parser) {
     expressions::expr(p);
     p.expect(SyntaxKind::RParen);
     while !p.at(SyntaxKind::EndcaseKw) && !p.at_end() && !at_block_end(p) {
+        let cp = p.checkpoint();
         case_item(p);
+        if !p.has_progressed(cp) {
+            p.error_bump("expected case item");
+        }
     }
     if !p.eat(SyntaxKind::EndcaseKw) {
         p.error("expected `endcase`");
