@@ -300,6 +300,8 @@ fn concat_or_replic(p: &mut Parser) -> CompletedMarker {
 
 // Parse a single item inside an assignment pattern `'{...}`.
 // Handles positional (`expr`), keyed (`expr : expr`), and default (`default : expr`).
+// All non-replication items produce an `AssignmentPatternItem` wrapper for uniform
+// downstream consumption.
 fn assignment_pattern_item(p: &mut Parser) {
     // default : expr
     if p.at(SyntaxKind::DefaultKw) && p.nth(1) == SyntaxKind::Colon {
@@ -312,6 +314,7 @@ fn assignment_pattern_item(p: &mut Parser) {
     }
     // Try to parse an expression
     let Some(cm) = expr_bp(p, 0, ExprMode::Normal) else {
+        p.error("expected expression");
         return;
     };
     // Replication: count { items }
@@ -328,14 +331,13 @@ fn assignment_pattern_item(p: &mut Parser) {
         m.complete(p, SyntaxKind::ReplicExpr);
         return;
     }
-    // If followed by colon, this is a keyed item: key : value
+    // Keyed or positional -- wrap uniformly in AssignmentPatternItem
+    let m = cm.precede(p);
     if p.at(SyntaxKind::Colon) {
-        let m = cm.precede(p);
         p.bump(); // :
         expr_bp(p, 0, ExprMode::Normal);
-        m.complete(p, SyntaxKind::AssignmentPatternItem);
     }
-    // Otherwise it's a positional item -- the expression stands alone
+    m.complete(p, SyntaxKind::AssignmentPatternItem);
 }
 
 // Binding power for binary/infix operators.
