@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.semantic[2]] 2:8..2:8: duplicate definition of `x`
+---
+unit (0 diagnostics)
