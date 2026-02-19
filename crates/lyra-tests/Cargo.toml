@@ -17,3 +17,6 @@ lyra-diag.workspace = true
 
 [dev-dependencies]
 insta = { workspace = true }
+walkdir = { workspace = true }
+serde = { workspace = true }
+serde_yaml = "0.9"

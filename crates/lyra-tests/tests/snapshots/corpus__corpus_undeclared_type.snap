@@ -1,9 +1,0 @@
----
-source: crates/lyra-tests/tests/corpus.rs
-expression: ws.dump_diagnostics()
----
-// file: main.sv (2 diagnostics)
-  error[lyra.type[2]] 1:9..1:9: undeclared type `unknown_t`
-  error[lyra.type[3]] 1:34..1:34: `my_var` is not a type
----
-unit (0 diagnostics)
