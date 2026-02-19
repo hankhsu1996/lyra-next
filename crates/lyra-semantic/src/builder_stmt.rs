@@ -124,6 +124,26 @@ fn collect_name_refs_from_expr(
         return;
     }
     for child in node.children() {
-        collect_name_refs_from_expr(ctx, &child, scope);
+        if child.kind() == SyntaxKind::AssignmentPatternItem {
+            let is_keyed = child
+                .children_with_tokens()
+                .any(|ct| ct.kind() == SyntaxKind::Colon);
+            if is_keyed {
+                let mut first = true;
+                for item_child in child.children() {
+                    if first {
+                        first = false;
+                        if item_child.kind() == SyntaxKind::NameRef {
+                            continue;
+                        }
+                    }
+                    collect_name_refs_from_expr(ctx, &item_child, scope);
+                }
+            } else {
+                collect_name_refs_from_expr(ctx, &child, scope);
+            }
+        } else {
+            collect_name_refs_from_expr(ctx, &child, scope);
+        }
     }
 }
