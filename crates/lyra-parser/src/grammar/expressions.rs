@@ -146,6 +146,21 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
             p.expect(SyntaxKind::RBrace);
             Some(m.complete(p, SyntaxKind::ConcatExpr))
         }
+        SyntaxKind::NewKw => {
+            let m = p.start();
+            p.bump(); // new
+            if p.at(SyntaxKind::LBracket) {
+                p.bump(); // [
+                expr_bp(p, 0, ExprMode::Normal);
+                p.expect(SyntaxKind::RBracket);
+                if p.at(SyntaxKind::LParen) {
+                    arg_list(p);
+                }
+            } else if p.at(SyntaxKind::LParen) {
+                arg_list(p);
+            }
+            Some(m.complete(p, SyntaxKind::NewExpr))
+        }
         _ => None,
     }
 }
@@ -299,6 +314,20 @@ fn assignment_pattern_item(p: &mut Parser) {
     let Some(cm) = expr_bp(p, 0, ExprMode::Normal) else {
         return;
     };
+    // Replication: count { items }
+    if p.at(SyntaxKind::LBrace) {
+        let m = cm.precede(p);
+        p.bump(); // inner {
+        if !p.at(SyntaxKind::RBrace) {
+            expr_bp(p, 0, ExprMode::Normal);
+            while p.eat(SyntaxKind::Comma) {
+                expr_bp(p, 0, ExprMode::Normal);
+            }
+        }
+        p.expect(SyntaxKind::RBrace);
+        m.complete(p, SyntaxKind::ReplicExpr);
+        return;
+    }
     // If followed by colon, this is a keyed item: key : value
     if p.at(SyntaxKind::Colon) {
         let m = cm.precede(p);

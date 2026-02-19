@@ -16,4 +16,7 @@ module array_literals_test;
   // Default array literal
   int d[0:2] = '{default:0};
 
+  // Replication in assignment pattern
+  int e[0:2] = '{3{4}};
+
 endmodule
