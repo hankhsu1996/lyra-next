@@ -937,6 +937,25 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
         } else if child.kind() == SyntaxKind::Declarator {
             // Skip declarator names but collect refs in their initializers
             // (already handled by collect_declarators)
+        } else if child.kind() == SyntaxKind::AssignmentPatternItem {
+            let is_keyed = child
+                .children_with_tokens()
+                .any(|ct| ct.kind() == SyntaxKind::Colon);
+            if is_keyed {
+                let mut first = true;
+                for item_child in child.children() {
+                    if first {
+                        first = false;
+                        // Bare NameRef key is a struct field name, not a variable
+                        if item_child.kind() == SyntaxKind::NameRef {
+                            continue;
+                        }
+                    }
+                    collect_name_refs(ctx, &item_child, scope);
+                }
+            } else {
+                collect_name_refs(ctx, &child, scope);
+            }
         } else {
             collect_name_refs(ctx, &child, scope);
         }

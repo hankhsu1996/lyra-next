@@ -15,8 +15,6 @@ module structure_literals_test;
   // Keyed assignment pattern
   initial begin
     c = '{a:0, b:1};
-    //    ^ error[lyra.semantic[1]]: unresolved name `a`
-    //        ^ error[lyra.semantic[1]]: unresolved name `b`
   end
 
   // Default assignment pattern
@@ -28,6 +26,13 @@ module structure_literals_test;
   ab arr[1:0];
   initial begin
     arr = '{'{1, 2}, '{3, 4}};
+  end
+
+  // Keyed pattern in case item (exercises collect_name_refs_from_expr path)
+  initial begin
+    case (c)
+      '{a:0, b:1}: $display("match");
+    endcase
   end
 
 endmodule
