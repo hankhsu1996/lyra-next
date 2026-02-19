@@ -6,12 +6,6 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 5: Lexical conventions
 
-### 5.10 Keyed and default assignment patterns
-
-Keyed assignment patterns (`'{a:0, b:1}`) and default patterns (`'{default:0}`) in structure and array literals cause a parser panic (rowan builder assertion failure). The parser's `ConcatExpr` handler does not recognize the `key : value` form inside `'{...}`. Blocked by: parser support for keyed assignment pattern syntax.
-
-Test to add: keyed and default forms in `lrm/ch05/structure_literals` and `lrm/ch05/array_literals`
-
 ### 5.11 Replication in assignment patterns
 
 Replication inside assignment patterns (`'{3{4}}`) fails to parse. The parser's replication handler does not work inside `'{...}` context. Blocked by: parser support for replication within assignment patterns.

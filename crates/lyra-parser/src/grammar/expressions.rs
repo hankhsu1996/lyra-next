@@ -134,13 +134,13 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
         }
         SyntaxKind::LBrace => Some(concat_or_replic(p)),
         SyntaxKind::TickBrace => {
-            // Assignment pattern `'{expr, expr, ...}`
+            // Assignment pattern `'{expr, ...}`, `'{key:val, ...}`, `'{default:val}`
             let m = p.start();
             p.bump(); // '{
             if !p.at(SyntaxKind::RBrace) {
-                expr_bp(p, 0, ExprMode::Normal);
+                assignment_pattern_item(p);
                 while p.eat(SyntaxKind::Comma) {
-                    expr_bp(p, 0, ExprMode::Normal);
+                    assignment_pattern_item(p);
                 }
             }
             p.expect(SyntaxKind::RBrace);
@@ -281,6 +281,32 @@ fn concat_or_replic(p: &mut Parser) -> CompletedMarker {
         p.expect(SyntaxKind::RBrace);
         m.complete(p, SyntaxKind::ConcatExpr)
     }
+}
+
+// Parse a single item inside an assignment pattern `'{...}`.
+// Handles positional (`expr`), keyed (`expr : expr`), and default (`default : expr`).
+fn assignment_pattern_item(p: &mut Parser) {
+    // default : expr
+    if p.at(SyntaxKind::DefaultKw) && p.nth(1) == SyntaxKind::Colon {
+        let m = p.start();
+        p.bump(); // default
+        p.bump(); // :
+        expr_bp(p, 0, ExprMode::Normal);
+        m.complete(p, SyntaxKind::AssignmentPatternItem);
+        return;
+    }
+    // Try to parse an expression
+    let Some(cm) = expr_bp(p, 0, ExprMode::Normal) else {
+        return;
+    };
+    // If followed by colon, this is a keyed item: key : value
+    if p.at(SyntaxKind::Colon) {
+        let m = cm.precede(p);
+        p.bump(); // :
+        expr_bp(p, 0, ExprMode::Normal);
+        m.complete(p, SyntaxKind::AssignmentPatternItem);
+    }
+    // Otherwise it's a positional item -- the expression stands alone
 }
 
 // Binding power for binary/infix operators.
