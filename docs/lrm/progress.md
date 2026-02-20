@@ -29,7 +29,7 @@ Chapter status for IEEE 1800-2023. See `docs/lrm-signoff.md` for definitions.
 | 23  | Modules and hierarchy                   | Not started |              |                 |
 | 24  | Programs                                | Not started |              |                 |
 | 25  | Interfaces                              | Not started |              |                 |
-| 26  | Packages                                | Not started |              |                 |
+| 26  | Packages                                | In progress | lrm/ch26/\*  |                 |
 | 27  | Generate constructs                     | Not started |              |                 |
 | 28  | Gate-level and switch-level modeling    | Not started |              |                 |
 | 29  | User-defined primitives                 | Not started |              |                 |
