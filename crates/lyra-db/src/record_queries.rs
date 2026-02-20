@@ -1,6 +1,6 @@
-use lyra_semantic::aggregate::{FieldSem, StructId, StructSem, TypeRef};
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
+use lyra_semantic::record::{FieldSem, RecordId, RecordSem, TypeRef};
 use lyra_semantic::resolve_index::{CoreResolution, CoreResolveResult};
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{ConstInt, Ty};
@@ -14,40 +14,40 @@ use crate::semantic::{
 use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, source_file_by_id};
 
-/// Identifies a struct for semantic resolution.
+/// Identifies a record (struct/union) for semantic resolution.
 #[salsa::interned]
-pub struct StructRef<'db> {
+pub struct RecordRef<'db> {
     pub unit: CompilationUnit,
-    pub struct_id: StructId,
+    pub record_id: RecordId,
 }
 
-/// Resolve a struct's field types (Salsa-tracked).
+/// Resolve a record's field types (Salsa-tracked).
 ///
-/// Looks up the `StructDef` from the definition index, resolves each
-/// field's `TypeRef` in the struct's defining scope, and builds the
+/// Looks up the `RecordDef` from the definition index, resolves each
+/// field's `TypeRef` in the record's defining scope, and builds the
 /// sorted field lookup table.
 #[salsa::tracked]
-pub fn struct_sem<'db>(db: &'db dyn salsa::Database, sref: StructRef<'db>) -> StructSem {
-    let unit = sref.unit(db);
-    let struct_id = sref.struct_id(db);
-    let file_id = struct_id.file;
+pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> RecordSem {
+    let unit = rref.unit(db);
+    let record_id = rref.record_id(db);
+    let file_id = record_id.file;
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
-        return empty_struct_sem();
+        return empty_record_sem();
     };
 
     let def = def_index_file(db, source_file);
 
-    // Find the StructDef by owner + ordinal
-    let struct_def = def
-        .struct_defs
+    // Find the RecordDef by owner + ordinal
+    let record_def = def
+        .record_defs
         .iter()
-        .find(|sd| sd.owner == struct_id.owner && sd.ordinal == struct_id.ordinal);
-    let Some(struct_def) = struct_def else {
-        return empty_struct_sem();
+        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal);
+    let Some(record_def) = record_def else {
+        return empty_record_sem();
     };
 
-    // Get resolution context for the struct's defining file
+    // Get resolution context for the record's defining file
     let graph = name_graph_file(db, source_file);
     let global = global_def_index(db, unit);
     let pkg_scope = package_scope_index(db, unit);
@@ -61,7 +61,7 @@ pub fn struct_sem<'db>(db: &'db dyn salsa::Database, sref: StructRef<'db>) -> St
     let mut fields = Vec::new();
     let mut diags = Vec::new();
 
-    for field in &*struct_def.fields {
+    for field in &*record_def.fields {
         let (ty, span) = match &field.ty {
             TypeRef::Resolved(ty) => {
                 let span = lyra_source::Span {
@@ -76,7 +76,7 @@ pub fn struct_sem<'db>(db: &'db dyn salsa::Database, sref: StructRef<'db>) -> St
                     global,
                     pkg_scope,
                     cu_env,
-                    struct_def.scope,
+                    record_def.scope,
                     name,
                     ExpectedNs::TypeThenValue,
                 );
@@ -119,7 +119,7 @@ pub fn struct_sem<'db>(db: &'db dyn salsa::Database, sref: StructRef<'db>) -> St
         .collect();
     lookup.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-    StructSem {
+    RecordSem {
         fields: fields.into_boxed_slice(),
         field_lookup: lookup.into_boxed_slice(),
         diags: diags.into_boxed_slice(),
@@ -185,8 +185,8 @@ fn resolve_result_to_ty(
     }
 }
 
-fn empty_struct_sem() -> StructSem {
-    StructSem {
+fn empty_record_sem() -> RecordSem {
+    RecordSem {
         fields: Box::new([]),
         field_lookup: Box::new([]),
         diags: Box::new([]),

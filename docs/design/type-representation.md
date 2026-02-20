@@ -34,7 +34,7 @@ Only integral types have packed dimensions. Non-integral types (`Real`, `String`
 
 ### Aggregate identity
 
-`Ty::Enum(EnumId)` and `Ty::Struct(StructId)` carry an ID that identifies the aggregate definition. The ID includes a `FileId` and an ordinal within the defining scope. Names are not stored in the type -- name lookup requires access to the def index.
+`Ty::Enum(EnumId)` and `Ty::Record(RecordId)` carry an ID that identifies the aggregate definition. The ID includes a `FileId` and an ordinal within the defining scope. Names are not stored in the type -- name lookup requires access to the def index.
 
 IDs are internal-only. Ordinal churn is accepted for now. Revisit when finer-grained intra-file invalidation or external persistence is needed.
 
@@ -46,7 +46,7 @@ IDs are internal-only. Ordinal churn is accepted for now. Revisit when finer-gra
 
 - **Pure**: no database or external state needed.
 - **Lossless**: includes all packed dims, unpacked dims, and signedness overrides. No information is dropped.
-- **Enum/struct-unaware**: prints bare keywords (`enum`, `struct`) without names, because names require DB access.
+- **Enum/record-unaware**: prints bare keywords (`enum`, `record`) without names, because names require DB access.
 
 All `pretty()` methods on `SymbolType`, `ExprType`, `BitVecType`, and `TypeAtResult` delegate to `Ty::pretty()` and are equally lossless.
 

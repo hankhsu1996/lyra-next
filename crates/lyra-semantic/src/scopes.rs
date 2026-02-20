@@ -175,7 +175,7 @@ mod tests {
     use smol_str::SmolStr;
 
     use super::*;
-    use crate::aggregate::TypeOrigin;
+    use crate::record::TypeOrigin;
     use crate::symbols::{Symbol, SymbolKind, SymbolTableBuilder};
 
     #[test]

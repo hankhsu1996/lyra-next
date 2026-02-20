@@ -2,7 +2,7 @@ use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
-use crate::aggregate::TypeOrigin;
+use crate::record::TypeOrigin;
 use crate::scopes::ScopeId;
 
 /// Bitmask for namespace overlap checking.

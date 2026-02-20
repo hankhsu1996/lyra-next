@@ -157,7 +157,7 @@ impl ExprType {
             | Ty::Event
             | Ty::Void
             | Ty::Enum(_)
-            | Ty::Struct(_)
+            | Ty::Record(_)
             | Ty::Array { .. } => ExprType {
                 ty: ty.clone(),
                 view: ExprView::Plain,
@@ -288,7 +288,7 @@ pub struct MemberInfo {
 
 /// What kind of member was accessed.
 pub enum MemberKind {
-    StructField { index: u32 },
+    Field { index: u32 },
 }
 
 /// Reasons a member lookup can fail.

@@ -14,7 +14,7 @@ use crate::types::Ty;
 pub struct EnumDefIdx(pub(crate) u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StructDefIdx(pub(crate) u32);
+pub struct RecordDefIdx(pub(crate) u32);
 
 // Global IDs (offset-independent, scope-owner-local ordinal)
 
@@ -26,13 +26,28 @@ pub struct EnumId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StructId {
+pub struct RecordId {
     pub file: FileId,
     pub owner: Option<SmolStr>,
     pub ordinal: u32,
 }
 
-// TypeRef: preserves span + name for struct fields and enum base type
+/// Whether a record is a struct, union, or tagged union.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RecordKind {
+    Struct,
+    Union,
+    TaggedUnion,
+}
+
+/// Whether a record is packed or unpacked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Packing {
+    Packed,
+    Unpacked,
+}
+
+// TypeRef: preserves span + name for record fields and enum base type
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeRef {
@@ -65,25 +80,23 @@ pub struct EnumVariant {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructDef {
+pub struct RecordDef {
     pub name: Option<SmolStr>,
     pub owner: Option<SmolStr>,
     pub ordinal: u32,
-    pub packed: bool,
-    pub is_union: bool,
+    pub kind: RecordKind,
+    pub packing: Packing,
     pub scope: ScopeId,
-    pub fields: Box<[StructField]>,
+    pub fields: Box<[RecordField]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructField {
+pub struct RecordField {
     pub name: SmolStr,
     pub ty: TypeRef,
 }
 
-// Resolved struct semantic information
-
-/// A resolved struct field with its semantic type.
+/// A resolved record field with its semantic type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldSem {
     pub name: SmolStr,
@@ -91,19 +104,19 @@ pub struct FieldSem {
     pub span: Span,
 }
 
-/// Resolved struct type information.
+/// Resolved record type information.
 ///
 /// Contains resolved field types and a sorted lookup table for
 /// efficient field-by-name access. Deterministic and compact --
 /// suitable as a Salsa query return value.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructSem {
+pub struct RecordSem {
     pub fields: Box<[FieldSem]>,
     pub field_lookup: Box<[(SmolStr, u32)]>,
     pub diags: Box<[crate::diagnostic::SemanticDiag]>,
 }
 
-impl StructSem {
+impl RecordSem {
     pub fn field_by_name(&self, name: &str) -> Option<(u32, &FieldSem)> {
         let i = self
             .field_lookup
@@ -157,7 +170,7 @@ pub enum PortDirection {
 pub enum TypeOrigin {
     TypeSpec,
     Enum(EnumDefIdx),
-    Struct(StructDefIdx),
+    Record(RecordDefIdx),
 }
 
 // Extract a TypeRef from a TypeSpec syntax node.

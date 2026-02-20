@@ -1,4 +1,3 @@
-pub mod aggregate;
 pub(crate) mod builder;
 mod builder_stmt;
 pub mod coerce;
@@ -9,6 +8,7 @@ pub mod expr_helpers;
 pub mod global_index;
 pub(crate) mod literal;
 pub mod name_graph;
+pub mod record;
 mod resolve;
 pub mod resolve_index;
 pub mod scopes;
