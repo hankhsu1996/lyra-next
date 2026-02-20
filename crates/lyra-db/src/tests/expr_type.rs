@@ -453,7 +453,7 @@ fn expr_type_replic() {
         "module m; logic [7:0] a; parameter P = {3{a}}; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(24));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(24));
 }
 
 #[test]

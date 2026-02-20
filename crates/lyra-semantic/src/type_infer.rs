@@ -561,10 +561,10 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     // Check for ConcatExpr child
     let concat_child = children.iter().find(|c| c.kind() == SyntaxKind::ConcatExpr);
 
-    let inner_width = if let Some(concat) = concat_child {
+    let (inner_width, inner_four_state) = if let Some(concat) = concat_child {
         let inner = infer_concat(concat, ctx);
         match &inner {
-            ExprType::BitVec(bv) => bv.width,
+            ExprType::BitVec(bv) => (bv.width, bv.four_state),
             ExprType::Error(_) => return inner,
             ExprType::NonBit(_) => {
                 return ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand);
@@ -576,28 +576,33 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         // Sum widths of inner items
         let mut total: Option<u32> = Some(0);
         let mut all_known = true;
+        let mut any_four_state = false;
         for item in inner_items {
             let item_ty = infer_expr_type(item, ctx, None);
             match &item_ty {
-                ExprType::BitVec(bv) => match bv.width.self_determined() {
-                    Some(w) => {
-                        if let Some(ref mut t) = total {
-                            *t = t.saturating_add(w);
+                ExprType::BitVec(bv) => {
+                    any_four_state = any_four_state || bv.four_state;
+                    match bv.width.self_determined() {
+                        Some(w) => {
+                            if let Some(ref mut t) = total {
+                                *t = t.saturating_add(w);
+                            }
                         }
+                        None => all_known = false,
                     }
-                    None => all_known = false,
-                },
+                }
                 ExprType::NonBit(_) => {
                     return ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand);
                 }
                 ExprType::Error(_) => return item_ty,
             }
         }
-        if all_known {
+        let width = if all_known {
             BitWidth::Known(total.unwrap_or(0))
         } else {
             BitWidth::Unknown
-        }
+        };
+        (width, any_four_state)
     };
 
     let result_width = match (replic_count, inner_width.self_determined()) {
@@ -608,7 +613,7 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     ExprType::BitVec(BitVecType {
         width: result_width,
         signed: Signedness::Unsigned,
-        four_state: false,
+        four_state: inner_four_state,
     })
 }
 
