@@ -1,3 +1,4 @@
+use lyra_semantic::record::{Packing, RecordKind};
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{
     ConstEvalError, ConstInt, IntegralKw, NetKind, SymbolType, SymbolTypeError, Ty, UnpackedDim,
@@ -892,4 +893,109 @@ fn type_of_typedef_integral_unpacked() {
         }
         other => panic!("expected Value(Array(Integral, 4)), got {other:?}"),
     }
+}
+
+// Union type tests
+
+#[test]
+fn type_of_typedef_union_unpacked() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union { int i; shortreal f; } num; num x; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let var = get_type(&db, file, unit, "x");
+    match var {
+        SymbolType::Value(Ty::Record(ref id)) => {
+            let def = def_index_file(&db, file);
+            let rec = &def.record_defs[0];
+            assert_eq!(rec.kind, RecordKind::Union);
+            assert_eq!(rec.packing, Packing::Unpacked);
+            assert_eq!(id.owner.as_deref(), Some("m"));
+        }
+        other => panic!("expected Value(Record) for union, got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_typedef_union_packed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union packed { logic [7:0] a; logic [7:0] b; } u_t; u_t x; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let var = get_type(&db, file, unit, "x");
+    match var {
+        SymbolType::Value(Ty::Record(ref id)) => {
+            let def = def_index_file(&db, file);
+            let rec = &def.record_defs[0];
+            assert_eq!(rec.kind, RecordKind::Union);
+            assert_eq!(rec.packing, Packing::Packed);
+            assert_eq!(id.owner.as_deref(), Some("m"));
+        }
+        other => panic!("expected Value(Record) for packed union, got {other:?}"),
+    }
+}
+
+#[test]
+fn type_of_inline_union() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; union { int a; logic [31:0] b; } u; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let var = get_type(&db, file, unit, "u");
+    assert!(
+        matches!(var, SymbolType::Value(Ty::Record(_))),
+        "inline union should be Value(Record), got {var:?}"
+    );
+}
+
+#[test]
+fn union_def_fields_stable() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union packed { logic [7:0] data; logic [7:0] alt; } u_t; endmodule",
+    );
+    let def = def_index_file(&db, file);
+    assert_eq!(def.record_defs.len(), 1);
+    let names: Vec<&str> = def.record_defs[0]
+        .fields
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["data", "alt"]);
+    assert_eq!(def.record_defs[0].kind, RecordKind::Union);
+    assert_eq!(def.record_defs[0].packing, Packing::Packed);
+}
+
+#[test]
+fn tagged_union_rejected() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union tagged { int a; int b; } instr_t; instr_t x; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let var = get_type(&db, file, unit, "x");
+    assert_eq!(
+        var,
+        SymbolType::Value(Ty::Error),
+        "tagged union typedef should resolve to Ty::Error"
+    );
+    let diags = file_diagnostics(&db, file, unit);
+    let has_tagged = diags.iter().any(|d| {
+        d.render_message()
+            .contains("tagged unions are not yet supported")
+    });
+    assert!(has_tagged, "should emit tagged union diagnostic: {diags:?}");
 }

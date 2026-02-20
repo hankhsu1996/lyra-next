@@ -58,7 +58,8 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 
 - [x] Context-determined typing (LRM 11.6)
 - [x] Callable typing (function/task calls)
-- [ ] Struct/union/enum semantics
+- [x] Plain struct/union member typing (tagged unions deferred, see gaps)
+- [ ] Enum semantics
 - [ ] Full array semantics
 - [x] Generate blocks and parameter elaboration
 - [ ] Interface/modport semantics

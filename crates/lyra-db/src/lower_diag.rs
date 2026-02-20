@@ -145,6 +145,12 @@ fn lower_semantic_diag(
             name,
             primary_span,
         ),
+        SemanticDiagKind::UnsupportedTaggedUnion => lower_args_diag(
+            DiagnosticCode::UNSUPPORTED_TAGGED_UNION,
+            MessageId::UnsupportedTaggedUnion,
+            vec![],
+            primary_span,
+        ),
     }
 }
 

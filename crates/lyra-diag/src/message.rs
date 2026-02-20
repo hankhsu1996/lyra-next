@@ -23,6 +23,7 @@ pub enum MessageId {
     BitsWide,
     UndeclaredType,
     NotAType,
+    UnsupportedTaggedUnion,
     // Elaboration messages
     UnresolvedModuleInst,
     NotAModule,
@@ -155,6 +156,7 @@ pub fn render_message(msg: &Message) -> String {
         }
         MessageId::UndeclaredType => format!("undeclared type `{}`", name()),
         MessageId::NotAType => format!("`{}` is not a type", name()),
+        MessageId::UnsupportedTaggedUnion => "tagged unions are not yet supported".into(),
         MessageId::NotFoundInScope => "not found in this scope".into(),
         MessageId::NotFoundAsType => "not found as a type in this scope".into(),
         MessageId::ValueNotType => "this is a value, not a type".into(),

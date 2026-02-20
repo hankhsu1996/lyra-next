@@ -47,6 +47,10 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 7,
     };
+    pub const UNSUPPORTED_TAGGED_UNION: Self = Self {
+        namespace: "lyra.semantic",
+        number: 8,
+    };
     pub const WIDTH_MISMATCH: Self = Self {
         namespace: "lyra.type",
         number: 1,
