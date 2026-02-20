@@ -949,7 +949,7 @@ fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) 
             SymbolOrigin::Record(idx) => {
                 ctx.record_defs[idx.0 as usize].name = Some(typedef_name.clone());
             }
-            SymbolOrigin::TypeSpec | SymbolOrigin::Error => {}
+            SymbolOrigin::TypeSpec | SymbolOrigin::Error | SymbolOrigin::EnumVariant { .. } => {}
         }
         let sym_id = ctx.add_symbol_with_origin(
             typedef_name,
@@ -994,7 +994,7 @@ fn detect_aggregate_type(
     SymbolOrigin::TypeSpec
 }
 
-fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, _scope: ScopeId) -> EnumDefIdx {
+fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: ScopeId) -> EnumDefIdx {
     let owner = ctx.current_owner.clone();
     let ordinal = ctx.enum_ordinals.entry(owner.clone()).or_insert(0);
     let ord = *ordinal;
@@ -1008,29 +1008,41 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, _scope: Scop
         TypeRef::Resolved(Ty::int())
     };
 
-    // Extract variants
-    let variants: Box<[EnumVariant]> = enum_type
-        .members()
-        .filter_map(|member| {
-            let name_tok = member.name()?;
-            let init = member
-                .syntax()
-                .children()
-                .find(|c| is_expression_kind(c.kind()))
-                .and_then(|expr| ctx.ast_id_map.erased_ast_id(&expr));
-            Some(EnumVariant {
-                name: SmolStr::new(name_tok.text()),
-                init,
-            })
-        })
-        .collect();
+    // Extract variants and inject each as a value-namespace symbol
+    let mut variants = Vec::new();
+    let mut variant_ordinal: u32 = 0;
+    for member in enum_type.members() {
+        let Some(name_tok) = member.name() else {
+            continue;
+        };
+        let name = SmolStr::new(name_tok.text());
+        let init = member
+            .init_expr()
+            .and_then(|expr| ctx.ast_id_map.erased_ast_id(expr.syntax()));
+        variants.push(EnumVariant {
+            name: name.clone(),
+            init,
+        });
+
+        ctx.add_symbol_with_origin(
+            name,
+            SymbolKind::EnumMember,
+            name_tok.text_range(),
+            scope,
+            SymbolOrigin::EnumVariant {
+                enum_idx: idx,
+                variant_ordinal,
+            },
+        );
+        variant_ordinal += 1;
+    }
 
     ctx.enum_defs.push(EnumDef {
         name: None,
         owner,
         ordinal: ord,
         base,
-        variants,
+        variants: variants.into_boxed_slice(),
     });
     idx
 }

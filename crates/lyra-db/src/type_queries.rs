@@ -77,6 +77,10 @@ pub fn type_of_symbol_raw<'db>(
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
+        SymbolOrigin::EnumVariant { enum_idx, .. } => {
+            let id = def.enum_id(enum_idx);
+            return classify(Ty::Enum(id), sym.kind);
+        }
         SymbolOrigin::Error => {
             return classify(Ty::Error, sym.kind);
         }

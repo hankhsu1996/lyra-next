@@ -118,6 +118,9 @@ pub enum SymbolKind {
     Config,
     Function,
     Task,
+    /// Enum variant injected into the enclosing scope as a value-namespace
+    /// constant with the parent enum's type.
+    EnumMember,
     /// Navigation/diagnostics only. Not added to scope bindings; resolved
     /// exclusively via `DefIndex.modport_name_map` when the LHS is an
     /// interface type.
@@ -144,6 +147,7 @@ impl SymbolKind {
             | Self::Parameter
             | Self::Function
             | Self::Task
+            | Self::EnumMember
             | Self::Modport => Namespace::Value,
             Self::Typedef => Namespace::Type,
         }

@@ -26,6 +26,12 @@ pub struct EnumId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnumVariantId {
+    pub enum_id: EnumId,
+    pub variant_ordinal: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RecordId {
     pub file: FileId,
     pub owner: Option<SmolStr>,
@@ -168,9 +174,18 @@ pub enum PortDirection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolOrigin {
+    /// Type derived from the `TypeSpec` AST node in the declaration.
     TypeSpec,
+    /// Symbol IS an enum type (typedef or inline enum variable).
     Enum(EnumDefIdx),
+    /// Symbol IS a record type (struct/union typedef or inline).
     Record(RecordDefIdx),
+    /// Symbol is an enum variant (value-namespace constant).
+    EnumVariant {
+        enum_idx: EnumDefIdx,
+        variant_ordinal: u32,
+    },
+    /// Poisoned origin: type extraction failed or was suppressed.
     Error,
 }
 

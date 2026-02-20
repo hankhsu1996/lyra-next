@@ -999,3 +999,98 @@ fn tagged_union_rejected() {
     });
     assert!(has_tagged, "should emit tagged union diagnostic: {diags:?}");
 }
+
+// Enum member name resolution tests
+
+#[test]
+fn type_of_enum_member() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef enum { IDLE, RUNNING } state_t; state_t s; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let idle_ty = get_type(&db, file, unit, "IDLE");
+    let s_ty = get_type(&db, file, unit, "s");
+    // Both should be Value(Enum) with the same EnumId
+    match (&idle_ty, &s_ty) {
+        (SymbolType::Value(Ty::Enum(id1)), SymbolType::Value(Ty::Enum(id2))) => {
+            assert_eq!(id1, id2, "IDLE and s should share the same EnumId");
+        }
+        _ => panic!("expected Value(Enum) for both, got IDLE={idle_ty:?}, s={s_ty:?}"),
+    }
+}
+
+#[test]
+fn type_of_inline_enum_member() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; enum { A, B } x; endmodule");
+    let unit = single_file_unit(&db, file);
+    let a_ty = get_type(&db, file, unit, "A");
+    assert!(
+        matches!(a_ty, SymbolType::Value(Ty::Enum(_))),
+        "inline enum member A should be Value(Enum), got {a_ty:?}"
+    );
+}
+
+#[test]
+fn type_of_enum_member_variant_id() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef enum { IDLE, RUNNING } state_t; endmodule",
+    );
+    let def = def_index_file(&db, file);
+    // Find IDLE and RUNNING symbols and verify their origins
+    let idle = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name == "IDLE")
+        .expect("IDLE symbol");
+    let running = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name == "RUNNING")
+        .expect("RUNNING symbol");
+    match idle.1.origin {
+        lyra_semantic::record::SymbolOrigin::EnumVariant {
+            variant_ordinal, ..
+        } => {
+            assert_eq!(variant_ordinal, 0, "IDLE should be ordinal 0");
+        }
+        other => panic!("expected EnumVariant origin for IDLE, got {other:?}"),
+    }
+    match running.1.origin {
+        lyra_semantic::record::SymbolOrigin::EnumVariant {
+            variant_ordinal, ..
+        } => {
+            assert_eq!(variant_ordinal, 1, "RUNNING should be ordinal 1");
+        }
+        other => panic!("expected EnumVariant origin for RUNNING, got {other:?}"),
+    }
+}
+
+#[test]
+fn enum_member_name_collision() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { IDLE, RUN } a_t;\n\
+         typedef enum { IDLE, STOP } b_t;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let dup_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.render_message().contains("duplicate"))
+        .collect();
+    assert!(
+        !dup_diags.is_empty(),
+        "should diagnose duplicate IDLE in value namespace: {diags:?}"
+    );
+}

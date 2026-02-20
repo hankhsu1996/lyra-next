@@ -1074,3 +1074,47 @@ fn expr_type_union_unknown_member() {
         ExprType::error(ExprTypeErrorKind::UnknownMember),
     );
 }
+
+// Enum member expression tests
+
+#[test]
+fn expr_type_enum_member_ref() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { IDLE, RUNNING } state_t;\n\
+         parameter P = IDLE;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let result = expr_type_of_first_param(&db, file, unit);
+    assert!(
+        matches!(result.view, ExprView::Plain),
+        "enum member ref should be Plain, got {result:?}"
+    );
+}
+
+#[test]
+fn expr_type_enum_member_in_assign() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { IDLE, RUNNING } state_t;\n\
+         state_t s;\n\
+         assign s = RUNNING;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let has_unresolved = diags
+        .iter()
+        .any(|d| d.render_message().contains("undeclared"));
+    assert!(
+        !has_unresolved,
+        "RUNNING should resolve without errors: {diags:?}"
+    );
+}
