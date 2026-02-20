@@ -252,6 +252,9 @@ fn module_item(p: &mut Parser) -> bool {
             // Could be module instantiation or declaration with user-defined type.
             // Heuristic: Ident followed by Ident is module_inst or typedef-based decl.
             // Ident followed by #( is module instantiation with parameters.
+            // Known limitation: this 3-token lookahead can misclassify edge cases
+            // as grammar coverage expands (interfaces, modports, class names).
+            // A semantic pass will be needed for fully accurate disambiguation.
             if p.nth(1) == SyntaxKind::Hash {
                 module_instantiation(p);
             } else if p.nth(1) == SyntaxKind::Ident {
@@ -633,7 +636,11 @@ fn generate_case(p: &mut Parser) {
     expressions::expr(p);
     p.expect(SyntaxKind::RParen);
     while !p.at(SyntaxKind::EndcaseKw) && !p.at_end() && !at_gen_end(p) {
+        let cp = p.checkpoint();
         generate_case_item(p);
+        if !p.has_progressed(cp) {
+            p.error_bump("expected case item");
+        }
     }
     if !p.eat(SyntaxKind::EndcaseKw) {
         p.error("expected `endcase`");
@@ -740,7 +747,11 @@ pub(crate) fn function_decl(p: &mut Parser) {
 
     // Body: statements and declarations until endfunction
     while !p.at(SyntaxKind::EndfunctionKw) && !p.at_end() && !at_func_task_end(p) {
+        let cp = p.checkpoint();
         statements::stmt(p);
+        if !p.has_progressed(cp) {
+            p.error_bump("expected statement");
+        }
     }
 
     if !p.eat(SyntaxKind::EndfunctionKw) {
@@ -777,7 +788,11 @@ pub(crate) fn task_decl(p: &mut Parser) {
 
     // Body: statements and declarations until endtask
     while !p.at(SyntaxKind::EndtaskKw) && !p.at_end() && !at_func_task_end(p) {
+        let cp = p.checkpoint();
         statements::stmt(p);
+        if !p.has_progressed(cp) {
+            p.error_bump("expected statement");
+        }
     }
 
     if !p.eat(SyntaxKind::EndtaskKw) {
@@ -814,7 +829,7 @@ fn tf_port_decl(p: &mut Parser) {
     let m = p.start();
 
     // Optional direction
-    if is_tf_direction(p.current()) {
+    if ports::is_direction(p.current()) {
         p.bump();
     }
 
@@ -832,7 +847,7 @@ fn tf_port_decl(p: &mut Parser) {
     // Additional names sharing the same type: `, name [= default]`
     // Only if next comma is followed by a plain Ident (not a direction or type keyword)
     while p.at(SyntaxKind::Comma)
-        && !is_tf_direction(p.nth(1))
+        && !ports::is_direction(p.nth(1))
         && !declarations::is_data_type_keyword(p.nth(1))
         && p.nth(1) == SyntaxKind::Ident
         && p.nth(2) != SyntaxKind::Ident
@@ -857,13 +872,6 @@ fn tf_declarator(p: &mut Parser) {
         expressions::expr(p);
     }
     d.complete(p, SyntaxKind::Declarator);
-}
-
-fn is_tf_direction(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::InputKw | SyntaxKind::OutputKw | SyntaxKind::InoutKw | SyntaxKind::RefKw
-    )
 }
 
 // Outer-construct boundary check for function/task body recovery

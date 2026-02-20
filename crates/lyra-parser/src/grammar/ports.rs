@@ -106,7 +106,7 @@ fn unpacked_dimension(p: &mut Parser) {
     m.complete(p, SyntaxKind::UnpackedDimension);
 }
 
-fn is_direction(kind: SyntaxKind) -> bool {
+pub(crate) fn is_direction(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         SyntaxKind::InputKw | SyntaxKind::OutputKw | SyntaxKind::InoutKw | SyntaxKind::RefKw
@@ -114,25 +114,6 @@ fn is_direction(kind: SyntaxKind) -> bool {
 }
 
 pub(crate) fn is_type_start(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::LogicKw
-            | SyntaxKind::RegKw
-            | SyntaxKind::WireKw
-            | SyntaxKind::BitKw
-            | SyntaxKind::IntegerKw
-            | SyntaxKind::IntKw
-            | SyntaxKind::ShortintKw
-            | SyntaxKind::LongintKw
-            | SyntaxKind::ByteKw
-            | SyntaxKind::TimeKw
-            | SyntaxKind::RealtimeKw
-            | SyntaxKind::RealKw
-            | SyntaxKind::ShortRealKw
-            | SyntaxKind::StringKw
-            | SyntaxKind::ChandleKw
-            | SyntaxKind::EventKw
-            | SyntaxKind::VoidKw
-            | SyntaxKind::Ident
-    )
+    super::declarations::is_scalar_type_keyword(kind)
+        || matches!(kind, SyntaxKind::WireKw | SyntaxKind::Ident)
 }

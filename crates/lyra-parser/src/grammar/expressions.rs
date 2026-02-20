@@ -228,7 +228,7 @@ fn system_tf_arg_list(p: &mut Parser) {
     let m = p.start();
     p.bump(); // (
     if !p.at(SyntaxKind::RParen) {
-        if is_builtin_type_keyword(p.current()) {
+        if super::declarations::is_scalar_type_keyword(p.current()) {
             super::declarations::type_spec(p);
         } else {
             expr_bp(p, 0, ExprMode::Normal);
@@ -239,28 +239,6 @@ fn system_tf_arg_list(p: &mut Parser) {
     }
     p.expect(SyntaxKind::RParen);
     m.complete(p, SyntaxKind::SystemTfArgList);
-}
-
-fn is_builtin_type_keyword(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::LogicKw
-            | SyntaxKind::RegKw
-            | SyntaxKind::BitKw
-            | SyntaxKind::IntegerKw
-            | SyntaxKind::IntKw
-            | SyntaxKind::ShortintKw
-            | SyntaxKind::LongintKw
-            | SyntaxKind::ByteKw
-            | SyntaxKind::TimeKw
-            | SyntaxKind::RealtimeKw
-            | SyntaxKind::RealKw
-            | SyntaxKind::ShortRealKw
-            | SyntaxKind::StringKw
-            | SyntaxKind::ChandleKw
-            | SyntaxKind::EventKw
-            | SyntaxKind::VoidKw
-    )
 }
 
 // `{ expr, expr }` or `{ count { expr } }` (replication)

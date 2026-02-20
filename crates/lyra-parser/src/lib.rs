@@ -88,7 +88,7 @@ fn replay(events: &[Event], tokens: &[Token], src: &str) -> rowan::GreenNode {
                 let mut idx = i;
                 let mut fp = *forward_parent;
                 while let Some(delta) = fp {
-                    idx += delta as usize;
+                    idx += delta;
                     processed[idx] = true;
                     if let Event::Start {
                         kind,
