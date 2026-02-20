@@ -160,8 +160,16 @@ fn resolve_result_to_ty(
             let sym_ref = SymbolRef::new(db, unit, gsym);
             let sym_type = type_of_symbol(db, sym_ref);
             match &sym_type {
-                lyra_semantic::types::SymbolType::Value(ty)
-                | lyra_semantic::types::SymbolType::TypeAlias(ty) => ty.clone(),
+                lyra_semantic::types::SymbolType::TypeAlias(ty) => ty.clone(),
+                lyra_semantic::types::SymbolType::Value(_) => {
+                    diags.push(SemanticDiag {
+                        kind: SemanticDiagKind::NotAType {
+                            name: SmolStr::new(name),
+                        },
+                        range,
+                    });
+                    Ty::Error
+                }
                 _ => Ty::Error,
             }
         }

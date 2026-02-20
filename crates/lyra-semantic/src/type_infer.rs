@@ -745,6 +745,11 @@ fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 
     let lhs_type = infer_expr_type(&lhs, ctx, None);
 
+    // Propagate LHS errors rather than masking them
+    if let ExprView::Error(_) = &lhs_type.view {
+        return lhs_type;
+    }
+
     match ctx.member_lookup(&lhs_type.ty, field_tok.text()) {
         Ok(info) => ExprType::from_ty(&info.ty),
         Err(MemberLookupError::NotComposite) => {
