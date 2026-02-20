@@ -67,7 +67,7 @@ Simple fixes may need only Summary. Don't force sections that have nothing meani
 ## Instructions
 
 1. Check context above; ensure working tree is clean
-2. If commits behind main > 0, rebase first: `git rebase origin/main`
+2. If commits behind main > 0, rebase first: `git rebase origin/main`, then re-run `cargo fmt`. If formatting changed, amend the last commit with the fix.
 3. **Read the full diff** (`git diff origin/main..HEAD`) before writing the PR description. The `--stat` above is not sufficient - you must see the actual code changes.
 4. Push if needed: `git push -u origin <branch>`
 5. Create PR: `gh pr create --title "..." --body "..."`
