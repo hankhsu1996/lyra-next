@@ -2,13 +2,15 @@ use std::sync::Arc;
 
 use lyra_ast::{AstNode, FunctionDecl, TaskDecl};
 use lyra_lexer::SyntaxKind;
+use lyra_semantic::UserTypeRef;
+use lyra_semantic::record::InterfaceDefId;
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
-use lyra_semantic::types::{SymbolType, Ty};
+use lyra_semantic::types::{InterfaceType, SymbolType, Ty};
 use smol_str::SmolStr;
 
 use crate::module_sig::{CallableKind, CallableSig, PortDirection, TfPortSig};
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::semantic::{def_index_file, resolve_index_file};
+use crate::semantic::{def_index_file, global_def_index, resolve_index_file};
 use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, source_file_by_id};
 
@@ -87,23 +89,62 @@ impl SigCtx<'_> {
     /// types (typedefs, enums, structs) by going through the DB resolve path.
     fn resolve_typespec_ty(&self, ts: &lyra_parser::SyntaxNode) -> Ty {
         // Check for user-defined type (NameRef/QualifiedName/DottedName inside TypeSpec)
-        if let Some(utr) = lyra_semantic::user_type_ref(ts) {
-            let Some(name_ast_id) = self.id_map.erased_ast_id(utr.resolve_node()) else {
-                return Ty::Error;
-            };
-            let resolve = resolve_index_file(self.db, self.source_file, self.unit);
-            let Some(res) = resolve.resolutions.get(&name_ast_id) else {
-                return Ty::Error;
-            };
-            let sym_ref = SymbolRef::new(self.db, self.unit, res.symbol);
-            let sym_type = type_of_symbol(self.db, sym_ref);
-            return match sym_type {
-                SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => ty,
-                _ => Ty::Error,
-            };
+        let Some(utr) = lyra_semantic::user_type_ref(ts) else {
+            // Keyword-based type
+            return lyra_semantic::extract_base_ty_from_typespec(ts, self.id_map);
+        };
+        let Some(name_ast_id) = self.id_map.erased_ast_id(utr.resolve_node()) else {
+            return Ty::Error;
+        };
+        let resolve = resolve_index_file(self.db, self.source_file, self.unit);
+        let Some(res) = resolve.resolutions.get(&name_ast_id) else {
+            return Ty::Error;
+        };
+        let target = res.symbol;
+        let Some(target_file) = source_file_by_id(self.db, self.unit, target.file) else {
+            return Ty::Error;
+        };
+        let target_def = def_index_file(self.db, target_file);
+        let target_info = target_def.symbols.get(target.local);
+
+        if target_info.kind == SymbolKind::Interface {
+            return self.resolve_interface_ty(&utr, target_def, target.local);
         }
-        // Keyword-based type
-        lyra_semantic::extract_base_ty_from_typespec(ts, self.id_map)
+
+        let sym_ref = SymbolRef::new(self.db, self.unit, target);
+        let sym_type = type_of_symbol(self.db, sym_ref);
+        match sym_type {
+            SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => ty,
+            _ => Ty::Error,
+        }
+    }
+
+    fn resolve_interface_ty(
+        &self,
+        utr: &UserTypeRef,
+        target_def: &lyra_semantic::def_index::DefIndex,
+        local_sym: lyra_semantic::symbols::SymbolId,
+    ) -> Ty {
+        let Some(def_id) = target_def.symbol_global_def(local_sym) else {
+            return Ty::Error;
+        };
+        let global = global_def_index(self.db, self.unit);
+        let Some(iface_def) = InterfaceDefId::try_from_global_index(global, def_id) else {
+            return Ty::Error;
+        };
+        let modport = match utr {
+            UserTypeRef::InterfaceModport { modport_name, .. } => {
+                match target_def.modport_by_name(iface_def, modport_name.as_str()) {
+                    Some(mp_def) => Some(mp_def.id),
+                    None => return Ty::Error,
+                }
+            }
+            _ => None,
+        };
+        Ty::Interface(InterfaceType {
+            iface: iface_def,
+            modport,
+        })
     }
 }
 

@@ -734,6 +734,7 @@ fn tf_port_decl(p: &mut Parser) {
     if declarations::is_data_type_keyword(p.current())
         || (p.at(SyntaxKind::Ident) && p.nth(1) == SyntaxKind::Ident)
         || (p.at(SyntaxKind::Ident) && p.nth(1) == SyntaxKind::ColonColon)
+        || (p.at(SyntaxKind::Ident) && p.nth(1) == SyntaxKind::Dot)
     {
         declarations::type_spec(p);
     }
