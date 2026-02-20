@@ -164,10 +164,10 @@ pub enum PortDirection {
     Ref,
 }
 
-// TypeOrigin: binding from symbol to its type source
+// SymbolOrigin: binding from symbol to its type source
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypeOrigin {
+pub enum SymbolOrigin {
     TypeSpec,
     Enum(EnumDefIdx),
     Record(RecordDefIdx),

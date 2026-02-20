@@ -16,7 +16,7 @@ use crate::def_index::{
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
 use crate::record::{
     EnumDef, EnumDefIdx, EnumVariant, ModportDef, ModportDefId, ModportEntry, Packing,
-    PortDirection, RecordDef, RecordDefIdx, RecordField, RecordKind, TypeOrigin, TypeRef,
+    PortDirection, RecordDef, RecordDefIdx, RecordField, RecordKind, SymbolOrigin, TypeRef,
     extract_typeref_from_typespec,
 };
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
@@ -167,7 +167,7 @@ impl<'a> DefContext<'a> {
         def_range: TextRange,
         scope: ScopeId,
     ) -> SymbolId {
-        self.add_symbol_with_origin(name, kind, def_range, scope, TypeOrigin::TypeSpec)
+        self.add_symbol_with_origin(name, kind, def_range, scope, SymbolOrigin::TypeSpec)
     }
 
     pub(crate) fn add_symbol_with_origin(
@@ -176,14 +176,14 @@ impl<'a> DefContext<'a> {
         kind: SymbolKind,
         def_range: TextRange,
         scope: ScopeId,
-        type_origin: TypeOrigin,
+        origin: SymbolOrigin,
     ) -> SymbolId {
         let id = self.symbols.push(Symbol {
             name,
             kind,
             def_range,
             scope,
-            type_origin,
+            origin,
         });
         self.symbol_to_decl.push(None);
         self.scopes.add_binding(scope, id, kind);
@@ -228,7 +228,7 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
             kind: SymbolKind::Module,
             def_range: range,
             scope: module_scope,
-            type_origin: TypeOrigin::TypeSpec,
+            origin: SymbolOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
@@ -278,7 +278,7 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
             kind: SymbolKind::Package,
             def_range: range,
             scope: package_scope,
-            type_origin: TypeOrigin::TypeSpec,
+            origin: SymbolOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_packages.push(sym_id);
@@ -312,7 +312,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             kind: SymbolKind::Interface,
             def_range: range,
             scope: iface_scope,
-            type_origin: TypeOrigin::TypeSpec,
+            origin: SymbolOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
@@ -368,7 +368,7 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             kind: SymbolKind::Program,
             def_range: range,
             scope: prog_scope,
-            type_origin: TypeOrigin::TypeSpec,
+            origin: SymbolOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
@@ -418,7 +418,7 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             kind: SymbolKind::Primitive,
             def_range: range,
             scope: prim_scope,
-            type_origin: TypeOrigin::TypeSpec,
+            origin: SymbolOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
@@ -444,7 +444,7 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             kind: SymbolKind::Config,
             def_range: range,
             scope: cfg_scope,
-            type_origin: TypeOrigin::TypeSpec,
+            origin: SymbolOrigin::TypeSpec,
         });
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
@@ -859,7 +859,7 @@ pub(crate) fn collect_declarators(
     scope: ScopeId,
 ) {
     // Detect inline enum/struct in the TypeSpec child
-    let type_origin = detect_aggregate_type(ctx, node, scope);
+    let origin = detect_aggregate_type(ctx, node, scope);
     for child in node.children() {
         if child.kind() == SyntaxKind::TypeSpec {
             collect_type_spec_refs(ctx, &child, scope);
@@ -870,7 +870,7 @@ pub(crate) fn collect_declarators(
                     kind,
                     name_tok.text_range(),
                     scope,
-                    type_origin,
+                    origin,
                 );
                 if let Some(decl) = lyra_ast::Declarator::cast(child.clone())
                     && let Some(ast_id) = ctx.ast_id_map.ast_id(&decl)
@@ -931,7 +931,7 @@ fn collect_type_spec_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sc
 
 fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     // Detect enum/struct in the TypeSpec child
-    let type_origin = detect_aggregate_type(ctx, node, scope);
+    let origin = detect_aggregate_type(ctx, node, scope);
     for child in node.children() {
         if child.kind() == SyntaxKind::TypeSpec {
             collect_type_spec_refs(ctx, &child, scope);
@@ -942,21 +942,21 @@ fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) 
     {
         let typedef_name = SmolStr::new(name_tok.text());
         // Update the def name if we collected an aggregate
-        match type_origin {
-            TypeOrigin::Enum(idx) => {
+        match origin {
+            SymbolOrigin::Enum(idx) => {
                 ctx.enum_defs[idx.0 as usize].name = Some(typedef_name.clone());
             }
-            TypeOrigin::Record(idx) => {
+            SymbolOrigin::Record(idx) => {
                 ctx.record_defs[idx.0 as usize].name = Some(typedef_name.clone());
             }
-            TypeOrigin::TypeSpec | TypeOrigin::Error => {}
+            SymbolOrigin::TypeSpec | SymbolOrigin::Error => {}
         }
         let sym_id = ctx.add_symbol_with_origin(
             typedef_name,
             SymbolKind::Typedef,
             name_tok.text_range(),
             scope,
-            type_origin,
+            origin,
         );
         if let Some(ast_id) = ctx.ast_id_map.ast_id(&td) {
             let erased = ast_id.erase();
@@ -967,31 +967,31 @@ fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) 
 }
 
 // Detect enum/struct type in a declaration's TypeSpec child.
-// If found, build the def table entry and return the appropriate TypeOrigin.
+// If found, build the def table entry and return the appropriate SymbolOrigin.
 fn detect_aggregate_type(
     ctx: &mut DefContext<'_>,
     decl_node: &SyntaxNode,
     scope: ScopeId,
-) -> TypeOrigin {
+) -> SymbolOrigin {
     for child in decl_node.children() {
         if child.kind() == SyntaxKind::TypeSpec {
             for ts_child in child.children() {
                 if ts_child.kind() == SyntaxKind::EnumType
                     && let Some(et) = EnumType::cast(ts_child.clone())
                 {
-                    return TypeOrigin::Enum(collect_enum_def(ctx, &et, scope));
+                    return SymbolOrigin::Enum(collect_enum_def(ctx, &et, scope));
                 } else if ts_child.kind() == SyntaxKind::StructType
                     && let Some(st) = StructType::cast(ts_child)
                 {
                     return match collect_record_def(ctx, &st, scope) {
-                        Some(idx) => TypeOrigin::Record(idx),
-                        None => TypeOrigin::Error,
+                        Some(idx) => SymbolOrigin::Record(idx),
+                        None => SymbolOrigin::Error,
                     };
                 }
             }
         }
     }
-    TypeOrigin::TypeSpec
+    SymbolOrigin::TypeSpec
 }
 
 fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, _scope: ScopeId) -> EnumDefIdx {

@@ -2,7 +2,7 @@ use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
-use crate::record::TypeOrigin;
+use crate::record::SymbolOrigin;
 use crate::scopes::ScopeId;
 
 /// Bitmask for namespace overlap checking.
@@ -160,7 +160,7 @@ pub struct Symbol {
     pub kind: SymbolKind,
     pub def_range: TextRange,
     pub scope: ScopeId,
-    pub type_origin: TypeOrigin,
+    pub origin: SymbolOrigin,
 }
 
 /// Per-file symbol store, indexed by `SymbolId`.
