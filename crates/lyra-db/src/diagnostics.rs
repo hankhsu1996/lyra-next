@@ -1,8 +1,9 @@
+use lyra_semantic::coerce::IntegralCtx;
 use lyra_semantic::type_check::{TypeCheckCtx, TypeCheckKind};
 use lyra_semantic::type_infer::ExprType;
 use lyra_semantic::types::SymbolType;
 
-use crate::expr_queries::ExprRef;
+use crate::expr_queries::{ExprRef, IntegralCtxKey};
 use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
 use crate::semantic::{def_index_file, global_def_index, resolve_index_file};
 use crate::type_queries::{SymbolRef, type_of_symbol};
@@ -49,7 +50,7 @@ pub fn type_diagnostics(
     let mut diags = Vec::new();
     for item in &items {
         match &item.kind {
-            TypeCheckKind::WidthMismatch {
+            TypeCheckKind::Truncation {
                 lhs_width,
                 rhs_width,
             } => {
@@ -131,6 +132,15 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         };
         let expr_ref = ExprRef::new(self.db, self.unit, ast_id);
         crate::expr_queries::type_of_expr(self.db, expr_ref)
+    }
+
+    fn expr_type_in_ctx(&self, node: &lyra_parser::SyntaxNode, ctx: &IntegralCtx) -> ExprType {
+        let Some(ast_id) = self.ast_id_map.erased_ast_id(node) else {
+            return ExprType::Error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
+        };
+        let expr_ref = ExprRef::new(self.db, self.unit, ast_id);
+        let ctx_key = IntegralCtxKey::new(self.db, ctx.width, ctx.signed, ctx.four_state);
+        crate::expr_queries::type_of_expr_in_ctx(self.db, expr_ref, ctx_key)
     }
 
     fn symbol_type_of_declarator(

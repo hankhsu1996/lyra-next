@@ -132,7 +132,7 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::WidthMismatch => {
             let lhs_w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
             let rhs_w = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
-            format!("width mismatch in assignment: LHS is {lhs_w} bits, RHS is {rhs_w} bits")
+            format!("implicit truncation: {rhs_w}-bit value assigned to {lhs_w}-bit target")
         }
         MessageId::BitsWide => {
             let w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);

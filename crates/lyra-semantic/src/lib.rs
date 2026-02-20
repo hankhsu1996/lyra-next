@@ -1,9 +1,11 @@
 pub mod aggregate;
 pub(crate) mod builder;
 mod builder_stmt;
+pub mod coerce;
 pub mod const_eval;
 pub mod def_index;
 pub mod diagnostic;
+pub mod expr_helpers;
 pub mod global_index;
 pub(crate) mod literal;
 pub mod name_graph;

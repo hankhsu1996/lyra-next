@@ -2,6 +2,7 @@ use lyra_ast::AstIdMap;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
 
+use crate::expr_helpers::is_expression_kind;
 use crate::types::{
     ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType, PackedDim, RealKw,
     SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
@@ -445,27 +446,6 @@ fn net_keyword(node: &SyntaxNode) -> Option<NetKind> {
 
 fn find_child(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
     node.children().find(|c| c.kind() == kind)
-}
-
-fn is_expression_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Expression
-            | SyntaxKind::BinExpr
-            | SyntaxKind::PrefixExpr
-            | SyntaxKind::ParenExpr
-            | SyntaxKind::CondExpr
-            | SyntaxKind::ConcatExpr
-            | SyntaxKind::ReplicExpr
-            | SyntaxKind::IndexExpr
-            | SyntaxKind::RangeExpr
-            | SyntaxKind::FieldExpr
-            | SyntaxKind::CallExpr
-            | SyntaxKind::SystemTfCall
-            | SyntaxKind::NameRef
-            | SyntaxKind::Literal
-            | SyntaxKind::QualifiedName
-    )
 }
 
 #[cfg(test)]

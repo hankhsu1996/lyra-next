@@ -2,6 +2,8 @@ use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_source::TextRange;
 
+use crate::coerce::IntegralCtx;
+use crate::expr_helpers::is_expression_kind;
 use crate::type_infer::{BitVecType, BitWidth, ExprType};
 use crate::types::SymbolType;
 
@@ -18,13 +20,15 @@ pub struct TypeCheckItem {
 }
 
 pub enum TypeCheckKind {
-    WidthMismatch { lhs_width: u32, rhs_width: u32 },
+    Truncation { lhs_width: u32, rhs_width: u32 },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
 pub trait TypeCheckCtx {
-    /// Infer the type of an expression node.
+    /// Infer the type of an expression node (self-determined).
     fn expr_type(&self, node: &SyntaxNode) -> ExprType;
+    /// Infer the type of an expression node under an integral context.
+    fn expr_type_in_ctx(&self, node: &SyntaxNode, ctx: &IntegralCtx) -> ExprType;
     /// Get the declared type of a symbol via its Declarator node.
     fn symbol_type_of_declarator(&self, declarator: &SyntaxNode) -> Option<SymbolType>;
 }
@@ -88,21 +92,27 @@ fn check_var_decl(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<Typ
             continue;
         };
 
-        let Some(lhs_w) = symbol_type_bitvec_width(&sym_type) else {
+        let Some(lhs_bv) = symbol_type_bitvec(&sym_type) else {
+            continue;
+        };
+        let Some(lhs_w) = lhs_bv.width.self_determined() else {
             continue;
         };
 
         let rhs_type = ctx.expr_type(&init_expr);
+        if is_context_dependent(&rhs_type) {
+            continue;
+        }
         let Some(rhs_w) = bitvec_known_width(&rhs_type) else {
             continue;
         };
 
-        if lhs_w != rhs_w {
+        if rhs_w > lhs_w {
             items.push(TypeCheckItem {
                 assign_range: node.text_range(),
                 lhs_range: child.text_range(),
                 rhs_range: init_expr.text_range(),
-                kind: TypeCheckKind::WidthMismatch {
+                kind: TypeCheckKind::Truncation {
                     lhs_width: lhs_w,
                     rhs_width: rhs_w,
                 },
@@ -142,15 +152,18 @@ fn check_assignment_pair(
         return;
     };
     let rhs_type = ctx.expr_type(rhs);
+    if is_context_dependent(&rhs_type) {
+        return;
+    }
     let Some(rhs_w) = bitvec_known_width(&rhs_type) else {
         return;
     };
-    if lhs_w != rhs_w {
+    if rhs_w > lhs_w {
         items.push(TypeCheckItem {
             assign_range: stmt_node.text_range(),
             lhs_range: lhs.text_range(),
             rhs_range: rhs.text_range(),
-            kind: TypeCheckKind::WidthMismatch {
+            kind: TypeCheckKind::Truncation {
                 lhs_width: lhs_w,
                 rhs_width: rhs_w,
             },
@@ -171,6 +184,16 @@ fn simple_lvalue_width(lhs: &SyntaxNode, ctx: &dyn TypeCheckCtx) -> Option<u32> 
     }
 }
 
+fn is_context_dependent(ty: &ExprType) -> bool {
+    matches!(
+        ty,
+        ExprType::BitVec(BitVecType {
+            width: BitWidth::ContextDependent,
+            ..
+        })
+    )
+}
+
 fn bitvec_known_width(ty: &ExprType) -> Option<u32> {
     match ty {
         ExprType::BitVec(BitVecType {
@@ -181,27 +204,9 @@ fn bitvec_known_width(ty: &ExprType) -> Option<u32> {
     }
 }
 
-fn symbol_type_bitvec_width(st: &SymbolType) -> Option<u32> {
-    bitvec_known_width(&ExprType::from_symbol_type(st))
-}
-
-fn is_expression_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Expression
-            | SyntaxKind::BinExpr
-            | SyntaxKind::PrefixExpr
-            | SyntaxKind::ParenExpr
-            | SyntaxKind::CondExpr
-            | SyntaxKind::ConcatExpr
-            | SyntaxKind::ReplicExpr
-            | SyntaxKind::IndexExpr
-            | SyntaxKind::RangeExpr
-            | SyntaxKind::FieldExpr
-            | SyntaxKind::CallExpr
-            | SyntaxKind::SystemTfCall
-            | SyntaxKind::NameRef
-            | SyntaxKind::Literal
-            | SyntaxKind::QualifiedName
-    )
+fn symbol_type_bitvec(st: &SymbolType) -> Option<BitVecType> {
+    match ExprType::from_symbol_type(st) {
+        ExprType::BitVec(bv) => Some(bv),
+        _ => None,
+    }
 }
