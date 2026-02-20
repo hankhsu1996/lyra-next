@@ -18,10 +18,6 @@ LRM 26.3 Examples 1-4 define complex lexical scoping rules for wildcard imports:
 
 "If a wildcard imported symbol is made locally visible in a scope, any later locally visible declaration of the same name in that scope shall be illegal" (LRM 26.3 Example 1 line 5). Error case not tested. Blocked by: semantic (conflict detection between wildcard import and later local decl). Test: `lrm/ch26/wildcard_local_conflict`.
 
-### 26.6: Same declaration through multiple export paths
-
-Importing the same original declaration through multiple export paths shall not be a conflict (LRM p5 example: `export p1::x; export p4::x;` where both refer to the same `p1::x`). Not tested. Blocked by: semantic (identity-based dedup in import resolution). Test: `lrm/ch26/export_multi_path`.
-
 ### 26.6: Export makes import a reference (later local decl illegal)
 
 An export of an unreferenced candidate for import counts as a reference, importing the declaration. A subsequent local declaration of the same name is then illegal (LRM p6 example). Error case not tested. Blocked by: semantic (export-triggers-import semantics). Test: `lrm/ch26/export_triggers_import`.
