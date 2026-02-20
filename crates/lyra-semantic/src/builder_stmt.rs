@@ -99,6 +99,7 @@ fn collect_name_refs_from_expr(
                 range: name_ref.text_range(),
                 scope,
                 ast_id: ast_id.erase(),
+                order_key: 0,
             });
         }
         return;
@@ -118,6 +119,7 @@ fn collect_name_refs_from_expr(
                     range: qn.text_range(),
                     scope,
                     ast_id: ast_id.erase(),
+                    order_key: 0,
                 });
             }
         }

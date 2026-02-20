@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.semantic[1]] 10:9..10:9: unresolved name `x`
+  error[lyra.semantic[7]] 12:8..12:8: import of `x` from package `q` conflicts with wildcard import from package `p`
+---
+unit (0 diagnostics)

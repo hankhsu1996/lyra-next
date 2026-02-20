@@ -141,6 +141,9 @@ pub struct UseSite {
     pub range: TextRange,
     pub scope: ScopeId,
     pub ast_id: ErasedAstId,
+    /// File-local monotonic rank from preorder syntax traversal.
+    /// Used by the resolver for LRM 26.3 positional visibility.
+    pub order_key: u32,
 }
 
 /// An import declaration record.
@@ -155,6 +158,10 @@ pub struct Import {
     pub name: ImportName,
     pub scope: ScopeId,
     pub range: TextRange,
+    pub ast_id: ErasedAstId,
+    /// File-local monotonic rank from preorder syntax traversal.
+    /// Used by the resolver for LRM 26.3 positional visibility.
+    pub order_key: u32,
 }
 
 /// Whether an import is explicit (`pkg::sym`) or wildcard (`pkg::*`).

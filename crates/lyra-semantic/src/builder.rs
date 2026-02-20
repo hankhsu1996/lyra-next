@@ -10,6 +10,8 @@ use lyra_parser::{Parse, SyntaxNode};
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
+use crate::builder_order::{assign_order_keys, detect_duplicates};
+
 use crate::def_index::{
     DefIndex, ExpectedNs, ExportDeclId, ExportKey, Exports, Import, ImportName, NamePath, UseSite,
 };
@@ -30,6 +32,10 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
     // Root file scope
     let file_scope = ctx.scopes.push(ScopeKind::File, None);
     collect_source_file(&mut ctx, &root, file_scope);
+
+    // Assign order keys via preorder walk matching by ErasedAstId.
+    // IMPORTANT: root must be from the same parse result that produced ast_id_map.
+    assign_order_keys(&mut ctx, &root);
 
     // Freeze symbols first, then scopes (which need symbol names for sorting)
     let symbols = ctx.symbols.freeze();
@@ -77,26 +83,6 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         modport_name_map: ctx.modport_name_map,
         export_decls: ctx.export_decls.into_boxed_slice(),
         diagnostics: diagnostics.into_boxed_slice(),
-    }
-}
-
-fn detect_duplicates(
-    symbols: &crate::symbols::SymbolTable,
-    bindings: &[SymbolId],
-    diagnostics: &mut Vec<SemanticDiag>,
-) {
-    for i in 1..bindings.len() {
-        let prev = symbols.get(bindings[i - 1]);
-        let curr = symbols.get(bindings[i]);
-        if prev.name == curr.name {
-            diagnostics.push(SemanticDiag {
-                kind: SemanticDiagKind::DuplicateDefinition {
-                    name: curr.name.clone(),
-                    original: prev.def_range,
-                },
-                range: curr.def_range,
-            });
-        }
     }
 }
 
@@ -544,6 +530,7 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                     range: name_tok.text_range(),
                     scope,
                     ast_id: ast_id.erase(),
+                    order_key: 0,
                 });
             }
             // Still collect NameRefs in port connection expressions
@@ -560,6 +547,19 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         }
         SyntaxKind::ModportDecl => {
             collect_modport_decl(ctx, node, scope);
+        }
+        SyntaxKind::IfStmt => {
+            // Conditional generate: recurse into children (BlockStmt, etc.)
+            for child in node.children() {
+                collect_module_item(ctx, &child, scope);
+            }
+        }
+        SyntaxKind::BlockStmt => {
+            // Generate block: create a new scope and collect items inside
+            let gen_scope = ctx.scopes.push(ScopeKind::Generate, Some(scope));
+            for child in node.children() {
+                collect_module_item(ctx, &child, gen_scope);
+            }
         }
         _ => {}
     }
@@ -741,6 +741,10 @@ fn collect_import_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
 }
 
 fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    let Some(ast_id) = ctx.ast_id_map.erased_ast_id(node) else {
+        return;
+    };
+
     // Determine if wildcard or explicit
     let has_star = node
         .children_with_tokens()
@@ -755,6 +759,8 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                 name: ImportName::Wildcard,
                 scope,
                 range: node.text_range(),
+                ast_id,
+                order_key: 0,
             });
         }
     } else if let Some(qn) = node
@@ -773,6 +779,8 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                 name: ImportName::Explicit(SmolStr::new(idents[1].text())),
                 scope,
                 range: node.text_range(),
+                ast_id,
+                order_key: 0,
             });
         }
     }
@@ -899,6 +907,7 @@ fn collect_type_spec_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sc
                         range: name_ref.text_range(),
                         scope,
                         ast_id: ast_id.erase(),
+                        order_key: 0,
                     });
                 }
             }
@@ -917,6 +926,7 @@ fn collect_type_spec_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sc
                             range: qn.text_range(),
                             scope,
                             ast_id: ast_id.erase(),
+                            order_key: 0,
                         });
                     }
                 }
@@ -1129,6 +1139,7 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                     range: name_ref.text_range(),
                     scope,
                     ast_id: ast_id.erase(),
+                    order_key: 0,
                 });
             }
         } else if child.kind() == SyntaxKind::QualifiedName {
@@ -1146,6 +1157,7 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                         range: qn.text_range(),
                         scope,
                         ast_id: ast_id.erase(),
+                        order_key: 0,
                     });
                 }
             }
@@ -1180,28 +1192,7 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
 }
 
 pub(crate) use crate::expr_helpers::is_expression_kind;
-
-fn first_ident_token(node: &SyntaxNode) -> Option<lyra_parser::SyntaxToken> {
-    node.children_with_tokens()
-        .filter_map(lyra_parser::SyntaxElement::into_token)
-        .find(|tok| tok.kind() == SyntaxKind::Ident)
-}
-
-fn port_name_ident(port_node: &SyntaxNode) -> Option<lyra_parser::SyntaxToken> {
-    // In an ANSI port declaration, the port name is the Ident token
-    // that is a direct child of the Port node (not inside TypeSpec).
-    // If there's a TypeSpec, the port name follows it.
-    let mut last_ident = None;
-    for el in port_node.children_with_tokens() {
-        match el {
-            lyra_parser::SyntaxElement::Token(tok) if tok.kind() == SyntaxKind::Ident => {
-                last_ident = Some(tok);
-            }
-            _ => {}
-        }
-    }
-    last_ident
-}
+use crate::syntax_helpers::{first_ident_token, port_name_ident};
 
 #[cfg(test)]
 #[path = "builder_tests.rs"]
