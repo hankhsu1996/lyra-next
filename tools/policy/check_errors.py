@@ -75,7 +75,19 @@ def should_check_file(filepath: str) -> bool:
         path.suffix in EXTENSIONS
         and any(filepath.startswith(inc) for inc in INCLUDE_PATHS)
         and "/tests/" not in filepath
+        and not _is_test_filename(path.name)
     )
+
+
+def _is_test_filename(name: str) -> bool:
+    """Recognize test-only source files by naming convention.
+
+    Files named ``tests.rs`` or ``*_tests.rs`` are always test code
+    (loaded via ``#[cfg(test)] mod tests;`` or similar in a parent
+    module).  Exempt them from R001/R002 the same way ``/tests/``
+    directories are exempted.
+    """
+    return name == "tests.rs" or name.endswith("_tests.rs")
 
 
 def is_in_test_context(lines: list[str], lineno: int) -> bool:
