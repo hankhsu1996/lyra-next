@@ -108,6 +108,15 @@ impl ImportOrigin {
     }
 }
 
+/// Intermediate record for accumulating wildcard conflict info across namespaces.
+struct WcConflictEntry {
+    name: SmolStr,
+    explicit_package: SmolStr,
+    wildcard_package: SmolStr,
+    ns: NsMask,
+    export_sources: SmallVec<[ExportDeclId; 1]>,
+}
+
 /// Canonical sort key for deterministic origin ordering:
 /// `Explicit` (0) before `ExportTriggered` (1), then package name, then ordinal.
 fn origin_sort_key(o: &ImportOrigin) -> (u8, &str, u32) {
@@ -261,14 +270,6 @@ pub fn detect_import_conflicts(
             };
             if has_local {
                 let package = binding.origins[0].package().clone();
-                let export_sources: SmallVec<[ExportDeclId; 1]> = binding
-                    .origins
-                    .iter()
-                    .filter_map(|o| match o {
-                        ImportOrigin::ExportTriggered { id, .. } => Some(*id),
-                        ImportOrigin::Explicit { .. } => None,
-                    })
-                    .collect();
                 conflicts.push(ImportConflict {
                     scope: scope_id,
                     name: binding.name.clone(),
@@ -276,47 +277,104 @@ pub fn detect_import_conflicts(
                         package,
                         ns: NsMask::from_namespace(binding.ns),
                     },
-                    export_sources,
+                    export_sources: export_sources_from(binding),
                 });
             }
         }
 
-        // Check 2 (26.5b): explicit vs wildcard
-        for imp in graph.imports_for_scope(scope_id) {
-            let ImportName::Explicit(ref member) = imp.name else {
+        // Check 2 (26.5b): realized binding vs wildcard from different package
+        detect_wildcard_conflicts(graph, pkg_scope, scope_id, &effective, &mut conflicts);
+    }
+
+    conflicts.into_boxed_slice()
+}
+
+fn export_sources_from(binding: &RealizedBinding) -> SmallVec<[ExportDeclId; 1]> {
+    binding
+        .origins
+        .iter()
+        .filter_map(|o| match o {
+            ImportOrigin::ExportTriggered { id, .. } => Some(*id),
+            ImportOrigin::Explicit { .. } => None,
+        })
+        .collect()
+}
+
+/// Check 2 (26.5b): realized binding vs wildcard from a different package.
+/// Covers both explicit imports and export-triggered promotions.
+fn detect_wildcard_conflicts(
+    graph: &NameGraph,
+    pkg_scope: &PackageScopeIndex,
+    scope_id: ScopeId,
+    effective: &[RealizedBinding],
+    conflicts: &mut Vec<ImportConflict>,
+) {
+    let wildcard_packages: SmallVec<[&SmolStr; 4]> = graph
+        .imports_for_scope(scope_id)
+        .iter()
+        .filter(|i| i.name == ImportName::Wildcard)
+        .map(|i| &i.package)
+        .collect();
+
+    // Accumulate NsMask per (name, explicit_pkg, wildcard_pkg) to avoid
+    // duplicate diagnostics when both namespaces conflict.
+    let mut entries: Vec<WcConflictEntry> = Vec::new();
+
+    for binding in effective {
+        let explicit_pkg = binding.origins[0].package();
+        for &wc_pkg in &wildcard_packages {
+            if wc_pkg == explicit_pkg {
                 continue;
-            };
-            for wc in graph.imports_for_scope(scope_id) {
-                if wc.name != ImportName::Wildcard || wc.package == imp.package {
-                    continue;
-                }
-                let mut wc_conflict_ns = NsMask::EMPTY;
-                for &ns in &[Namespace::Value, Namespace::Type] {
-                    let explicit_id = pkg_scope.resolve(&imp.package, member, ns);
-                    let wildcard_id = pkg_scope.resolve(&wc.package, member, ns);
-                    if let (Some(eid), Some(wid)) = (explicit_id, wildcard_id)
-                        && eid != wid
-                    {
-                        wc_conflict_ns = wc_conflict_ns.union(NsMask::from_namespace(ns));
-                    }
-                }
-                if !wc_conflict_ns.is_empty() {
-                    conflicts.push(ImportConflict {
-                        scope: scope_id,
-                        name: member.clone(),
-                        kind: ImportConflictKind::ExplicitVsWildcard {
-                            explicit_package: imp.package.clone(),
-                            wildcard_package: wc.package.clone(),
-                            ns: wc_conflict_ns,
-                        },
-                        export_sources: SmallVec::new(),
-                    });
-                }
+            }
+            if let Some(wid) = pkg_scope.resolve(wc_pkg, &binding.name, binding.ns)
+                && wid != binding.target
+            {
+                entries.push(WcConflictEntry {
+                    name: binding.name.clone(),
+                    explicit_package: explicit_pkg.clone(),
+                    wildcard_package: wc_pkg.clone(),
+                    ns: NsMask::from_namespace(binding.ns),
+                    export_sources: export_sources_from(binding),
+                });
             }
         }
     }
 
-    conflicts.into_boxed_slice()
+    // Sort by (name, explicit_pkg, wildcard_pkg), then merge adjacent entries
+    entries.sort_by(|a, b| {
+        (&a.name, &a.explicit_package, &a.wildcard_package).cmp(&(
+            &b.name,
+            &b.explicit_package,
+            &b.wildcard_package,
+        ))
+    });
+    entries.dedup_by(|b, a| {
+        a.name == b.name
+            && a.explicit_package == b.explicit_package
+            && a.wildcard_package == b.wildcard_package
+            && {
+                a.ns = a.ns.union(b.ns);
+                for id in b.export_sources.drain(..) {
+                    if !a.export_sources.contains(&id) {
+                        a.export_sources.push(id);
+                    }
+                }
+                true
+            }
+    });
+
+    for entry in entries {
+        conflicts.push(ImportConflict {
+            scope: scope_id,
+            name: entry.name,
+            kind: ImportConflictKind::ExplicitVsWildcard {
+                explicit_package: entry.explicit_package,
+                wildcard_package: entry.wildcard_package,
+                ns: entry.ns,
+            },
+            export_sources: entry.export_sources,
+        });
+    }
 }
 
 fn ns_list(expected: ExpectedNs) -> ([Namespace; 2], usize) {
