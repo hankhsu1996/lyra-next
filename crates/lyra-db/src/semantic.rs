@@ -125,7 +125,7 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
                 type_ns,
                 imports: import_names,
                 import_packages,
-                export_decls: graph.export_decls().to_vec(),
+                export_decls: graph.export_decls().iter().map(|e| e.key.clone()).collect(),
             });
         }
     }
@@ -133,13 +133,15 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
     // Phase 2: Build initial package scopes (local defs only, no export resolution)
     let mut base_scopes: Vec<PackageScope> = all_facts
         .iter()
-        .map(|f| PackageScope {
-            name: f.name.clone(),
-            value_ns: f.value_ns.clone().into_boxed_slice(),
-            type_ns: f.type_ns.clone().into_boxed_slice(),
+        .map(|f| {
+            PackageScope::new(
+                f.name.clone(),
+                f.value_ns.clone().into_boxed_slice(),
+                f.type_ns.clone().into_boxed_slice(),
+            )
         })
         .collect();
-    base_scopes.sort_by(|a, b| a.name.cmp(&b.name));
+    base_scopes.sort_by(|a, b| a.pkg_name().cmp(b.pkg_name()));
 
     // Phase 3: Resolve exports for packages that have export declarations
     let has_exports = all_facts.iter().any(|f| !f.export_decls.is_empty());
@@ -148,15 +150,15 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
             .iter()
             .map(|facts| {
                 if facts.export_decls.is_empty() {
-                    PackageScope {
-                        name: facts.name.clone(),
-                        value_ns: facts.value_ns.clone().into_boxed_slice(),
-                        type_ns: facts.type_ns.clone().into_boxed_slice(),
-                    }
+                    PackageScope::new(
+                        facts.name.clone(),
+                        facts.value_ns.clone().into_boxed_slice(),
+                        facts.type_ns.clone().into_boxed_slice(),
+                    )
                 } else {
                     lyra_semantic::global_index::compute_public_surface(facts, &|dep_name| {
                         base_scopes
-                            .binary_search_by(|p| p.name.as_str().cmp(dep_name))
+                            .binary_search_by(|p| p.pkg_name().as_str().cmp(dep_name))
                             .ok()
                             .map(|idx| base_scopes[idx].clone())
                     })
@@ -168,13 +170,13 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
     };
 
     // Phase 4: Add builtin std package if no user-defined std exists
-    let has_std = packages.iter().any(|p| p.name == "std");
+    let has_std = packages.iter().any(|p| p.pkg_name() == "std");
     if !has_std {
-        packages.push(PackageScope {
-            name: SmolStr::new_static("std"),
-            value_ns: Box::new([]),
-            type_ns: Box::new([]),
-        });
+        packages.push(PackageScope::new(
+            SmolStr::new_static("std"),
+            Box::new([]),
+            Box::new([]),
+        ));
     }
 
     lyra_semantic::global_index::build_package_scope_index(packages)

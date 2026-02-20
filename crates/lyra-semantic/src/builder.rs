@@ -11,7 +11,7 @@ use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
 use crate::def_index::{
-    DefIndex, ExpectedNs, ExportEntry, Exports, Import, ImportName, NamePath, UseSite,
+    DefIndex, ExpectedNs, ExportDeclId, ExportKey, Exports, Import, ImportName, NamePath, UseSite,
 };
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
 use crate::record::{
@@ -48,6 +48,15 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         detect_duplicates(&symbols, &s.value_ns, &mut diagnostics);
         detect_duplicates(&symbols, &s.type_ns, &mut diagnostics);
     }
+
+    // Sort export_decls by (scope, ordinal) for binary-search range lookup
+    ctx.export_decls
+        .sort_by(|a, b| (a.id.scope, a.id.ordinal).cmp(&(b.id.scope, b.id.ordinal)));
+    debug_assert!(
+        ctx.export_decls
+            .windows(2)
+            .all(|w| (w[0].id.scope, w[0].id.ordinal) < (w[1].id.scope, w[1].id.ordinal))
+    );
 
     DefIndex {
         file,
@@ -112,7 +121,8 @@ pub(crate) struct DefContext<'a> {
     pub(crate) record_defs: Vec<RecordDef>,
     pub(crate) modport_defs: HashMap<ModportDefId, ModportDef>,
     pub(crate) modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
-    pub(crate) export_decls: Vec<ExportEntry>,
+    pub(crate) export_decls: Vec<crate::def_index::ExportDecl>,
+    pub(crate) export_ordinals: HashMap<ScopeId, u32>,
     pub(crate) current_owner: Option<SmolStr>,
     pub(crate) current_iface_def_id: Option<crate::symbols::GlobalDefId>,
     pub(crate) modport_ordinal: u32,
@@ -140,6 +150,7 @@ impl<'a> DefContext<'a> {
             modport_defs: HashMap::new(),
             modport_name_map: HashMap::new(),
             export_decls: Vec::new(),
+            export_ordinals: HashMap::new(),
             current_owner: None,
             current_iface_def_id: None,
             modport_ordinal: 0,
@@ -451,7 +462,7 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
 fn collect_package_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
         if ExportDecl::cast(child.clone()).is_some() {
-            collect_export_decl(ctx, &child);
+            collect_export_decl(ctx, &child, scope);
         } else {
             collect_module_item(ctx, &child, scope);
         }
@@ -767,30 +778,44 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
     }
 }
 
-fn collect_export_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
+fn collect_export_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     let Some(decl) = ExportDecl::cast(node.clone()) else {
         return;
     };
     for item in decl.items() {
-        collect_export_item(ctx, &item);
+        collect_export_item(ctx, &item, scope);
     }
 }
 
-fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem) {
-    if item.is_all_wildcard() {
-        ctx.export_decls.push(ExportEntry::AllWildcard);
+fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem, scope: ScopeId) {
+    let key = if item.is_all_wildcard() {
+        ExportKey::AllWildcard
     } else if let Some(pkg_tok) = item.package_name() {
         let package = SmolStr::new(pkg_tok.text());
         if item.is_wildcard() {
-            ctx.export_decls
-                .push(ExportEntry::PackageWildcard { package });
+            ExportKey::PackageWildcard { package }
         } else if let Some(member_tok) = item.member_name() {
-            ctx.export_decls.push(ExportEntry::Explicit {
+            ExportKey::Explicit {
                 package,
                 name: SmolStr::new(member_tok.text()),
-            });
+            }
+        } else {
+            return;
         }
-    }
+    } else {
+        return;
+    };
+    let ordinal = ctx.export_ordinals.entry(scope).or_insert(0);
+    let ord = *ordinal;
+    *ordinal += 1;
+    ctx.export_decls.push(crate::def_index::ExportDecl {
+        id: ExportDeclId {
+            scope,
+            ordinal: ord,
+        },
+        key,
+        range: item.syntax().text_range(),
+    });
 }
 
 fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {

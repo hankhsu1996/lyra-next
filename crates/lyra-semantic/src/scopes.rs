@@ -17,7 +17,7 @@ impl SymbolNameLookup for SymbolTable {
 }
 
 /// Scope identifier, per-file index.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ScopeId(pub(crate) u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
-use crate::def_index::{DefIndex, ExpectedNs, ExportEntry, ImportName, NamePath};
+use crate::def_index::{DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, NamePath};
 use crate::scopes::{ScopeId, ScopeTree, SymbolNameLookup};
 use crate::symbols::{SymbolId, SymbolKind};
 
@@ -21,6 +21,13 @@ pub struct NameGraph {
     pub(crate) use_entries: Box<[UseEntry]>,
     pub(crate) imports: Box<[ImportEntry]>,
     pub(crate) export_decls: Box<[ExportEntry]>,
+}
+
+/// Offset-independent export entry in `NameGraph`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportEntry {
+    pub id: ExportDeclId,
+    pub key: ExportKey,
 }
 
 /// Offset-independent use-site key.
@@ -56,6 +63,20 @@ impl NameGraph {
         &self.export_decls
     }
 
+    /// Exports owned by `scope`, O(log n) via binary search into sorted slice.
+    pub fn exports_for_scope(&self, scope: ScopeId) -> &[ExportEntry] {
+        let start = self.export_decls.partition_point(|e| e.id.scope < scope);
+        let end = self.export_decls[start..].partition_point(|e| e.id.scope == scope) + start;
+        &self.export_decls[start..end]
+    }
+
+    /// Imports owned by `scope`, O(log n) via binary search into sorted slice.
+    pub fn imports_for_scope(&self, scope: ScopeId) -> &[ImportEntry] {
+        let start = self.imports.partition_point(|i| i.scope < scope);
+        let end = self.imports[start..].partition_point(|i| i.scope == scope) + start;
+        &self.imports[start..end]
+    }
+
     /// Project offset-independent facts from a `DefIndex`.
     pub fn from_def_index(def: &DefIndex) -> Self {
         let symbol_names: Box<[SmolStr]> = def
@@ -76,7 +97,7 @@ impl NameGraph {
             })
             .collect();
 
-        let imports: Box<[ImportEntry]> = def
+        let mut imports: Vec<ImportEntry> = def
             .imports
             .iter()
             .map(|imp| ImportEntry {
@@ -85,6 +106,17 @@ impl NameGraph {
                 scope: imp.scope,
             })
             .collect();
+        imports.sort_by_key(|i| i.scope);
+
+        let mut export_decls: Vec<ExportEntry> = def
+            .export_decls
+            .iter()
+            .map(|e| ExportEntry {
+                id: e.id,
+                key: e.key.clone(),
+            })
+            .collect();
+        export_decls.sort_by(|a, b| (a.id.scope, a.id.ordinal).cmp(&(b.id.scope, b.id.ordinal)));
 
         Self {
             file: def.file,
@@ -92,8 +124,8 @@ impl NameGraph {
             symbol_kinds,
             scopes: def.scopes.clone(),
             use_entries,
-            imports,
-            export_decls: def.export_decls.clone(),
+            imports: imports.into_boxed_slice(),
+            export_decls: export_decls.into_boxed_slice(),
         }
     }
 }

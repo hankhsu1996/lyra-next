@@ -170,14 +170,8 @@ pub(crate) fn lower_import_conflicts(
     diags
 }
 
-fn lower_single_import_conflict(
-    file_id: FileId,
-    pp: &PreprocOutput,
-    def: &DefIndex,
-    conflict: &ImportConflict,
-) -> Option<Diagnostic> {
-    // Find the import range by scanning def.imports for a match on (package, name, scope)
-    let import_range = def.imports.iter().find_map(|imp| {
+fn find_import_range(def: &DefIndex, conflict: &ImportConflict) -> Option<TextRange> {
+    def.imports.iter().find_map(|imp| {
         if imp.scope != conflict.scope {
             return None;
         }
@@ -195,9 +189,27 @@ fn lower_single_import_conflict(
             _ => false,
         };
         if matches { Some(imp.range) } else { None }
-    });
+    })
+}
 
-    let range = import_range?;
+fn lower_single_import_conflict(
+    file_id: FileId,
+    pp: &PreprocOutput,
+    def: &DefIndex,
+    conflict: &ImportConflict,
+) -> Option<Diagnostic> {
+    // For export-triggered conflicts, use the export declaration range.
+    // For pure explicit import conflicts, scan imports by (package, name, scope).
+    let range = if let Some(export_id) = conflict.export_sources.first() {
+        def.export_decls
+            .binary_search_by_key(&(export_id.scope, export_id.ordinal), |e| {
+                (e.id.scope, e.id.ordinal)
+            })
+            .ok()
+            .map(|idx| def.export_decls[idx].range)?
+    } else {
+        find_import_range(def, conflict)?
+    };
     let (span, _) = map_span_or_fallback(file_id, &pp.source_map, range);
 
     let d = match &conflict.kind {

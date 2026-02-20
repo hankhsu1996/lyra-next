@@ -56,7 +56,7 @@ impl NsMask {
 /// non-nested module, primitive, program, and interface identifiers.
 /// These are global within a compilation unit and are NOT resolved
 /// through lexical scope chains.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Namespace {
     Value,
     Type,
