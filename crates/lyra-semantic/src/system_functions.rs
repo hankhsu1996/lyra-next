@@ -7,6 +7,8 @@ use crate::type_infer::{ExprType, ExprTypeErrorKind, InferCtx, infer_expr_type};
 
 enum SystemFnKind {
     Clog2,
+    Signed,
+    Unsigned,
 }
 
 struct SystemFnEntry {
@@ -16,12 +18,26 @@ struct SystemFnEntry {
     kind: SystemFnKind,
 }
 
-static BUILTINS: &[SystemFnEntry] = &[SystemFnEntry {
-    name: "$clog2",
-    min_args: 1,
-    max_args: Some(1),
-    kind: SystemFnKind::Clog2,
-}];
+static BUILTINS: &[SystemFnEntry] = &[
+    SystemFnEntry {
+        name: "$clog2",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::Clog2,
+    },
+    SystemFnEntry {
+        name: "$signed",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::Signed,
+    },
+    SystemFnEntry {
+        name: "$unsigned",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::Unsigned,
+    },
+];
 
 /// Iterate argument nodes in a system task/function argument list.
 ///
@@ -74,6 +90,8 @@ pub(crate) fn infer_system_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprTy
     }
     match entry.kind {
         SystemFnKind::Clog2 => infer_clog2(&args, ctx),
+        SystemFnKind::Signed => infer_signedness_cast(&args, ctx, true),
+        SystemFnKind::Unsigned => infer_signedness_cast(&args, ctx, false),
     }
 }
 
@@ -87,6 +105,28 @@ fn infer_clog2(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         signed: Signedness::Signed,
         four_state: false,
     })
+}
+
+fn infer_signedness_cast(args: &SyntaxNode, ctx: &dyn InferCtx, target_signed: bool) -> ExprType {
+    use crate::type_infer::ExprView;
+    use crate::types::{Integral, Ty};
+
+    let Some(arg_node) = nth_arg(args, 0) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let arg = infer_expr_type(&arg_node, ctx, None);
+    if let ExprView::Error(_) = &arg.view {
+        return arg;
+    }
+    let new_ty = match &arg.ty {
+        Ty::Integral(i) => Ty::Integral(Integral {
+            keyword: i.keyword,
+            signed: target_signed,
+            packed: i.packed.clone(),
+        }),
+        other => other.clone(),
+    };
+    ExprType::from_ty(&new_ty)
 }
 
 #[cfg(test)]
