@@ -181,7 +181,7 @@ Simple fixes may need only Summary. Don't force sections that have nothing meani
 
 ### PR Instructions
 
-1. If commits behind main > 0, rebase first: `git rebase origin/main`
+1. If commits behind main > 0, rebase first: `git rebase origin/main`, then re-run `cargo fmt`. If formatting changed, amend the last commit with the fix.
 2. **Read the full diff** (`git diff origin/main..HEAD`) before writing the PR description. The `--stat` above is not sufficient - you must see the actual code changes.
 3. Push: `git push -u origin <branch>`
 4. Create PR: `gh pr create --title "..." --body "..."`
