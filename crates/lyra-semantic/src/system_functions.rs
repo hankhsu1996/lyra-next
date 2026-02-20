@@ -10,6 +10,8 @@ enum SystemFnKind {
     Signed,
     Unsigned,
     Bits,
+    ReturnsInt,
+    ReturnsBit,
 }
 
 struct SystemFnEntry {
@@ -43,6 +45,36 @@ static BUILTINS: &[SystemFnEntry] = &[
         min_args: 1,
         max_args: Some(1),
         kind: SystemFnKind::Bits,
+    },
+    SystemFnEntry {
+        name: "$countones",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::ReturnsInt,
+    },
+    SystemFnEntry {
+        name: "$countbits",
+        min_args: 2,
+        max_args: None,
+        kind: SystemFnKind::ReturnsInt,
+    },
+    SystemFnEntry {
+        name: "$onehot",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::ReturnsBit,
+    },
+    SystemFnEntry {
+        name: "$onehot0",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::ReturnsBit,
+    },
+    SystemFnEntry {
+        name: "$isunknown",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::ReturnsBit,
     },
 ];
 
@@ -100,6 +132,11 @@ pub(crate) fn infer_system_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprTy
         SystemFnKind::Signed => infer_signedness_cast(&args, ctx, true),
         SystemFnKind::Unsigned => infer_signedness_cast(&args, ctx, false),
         SystemFnKind::Bits => infer_bits(),
+        SystemFnKind::ReturnsInt => ExprType::from_ty(&crate::types::Ty::int()),
+        SystemFnKind::ReturnsBit => ExprType::from_ty(&crate::types::Ty::bit(
+            crate::types::PackedDims::empty(),
+            false,
+        )),
     }
 }
 

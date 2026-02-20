@@ -177,6 +177,72 @@ fn bits_typedef() {
 }
 
 #[test]
+fn countones() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; parameter P = $countones(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int())
+    );
+}
+
+#[test]
+fn countbits() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; parameter P = $countbits(x, 1'b1); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int())
+    );
+}
+
+#[test]
+fn onehot() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; parameter P = $onehot(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(1));
+}
+
+#[test]
+fn onehot0() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; parameter P = $onehot0(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(1));
+}
+
+#[test]
+fn isunknown() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; parameter P = $isunknown(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(1));
+}
+
+#[test]
 fn tyref_structural_interning() {
     let db = LyraDatabase::default();
     let ty1 = Ty::int();
