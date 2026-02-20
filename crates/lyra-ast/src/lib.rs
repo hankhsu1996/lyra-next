@@ -10,11 +10,11 @@ pub use nodes::{
     CondExpr, ConfigDecl, ContinuousAssign, Declarator, EnumMember, EnumType, ErrorNode, EventExpr,
     EventItem, ExportDecl, ExportItem, Expression, FieldExpr, ForStmt, ForeverStmt, FunctionDecl,
     IfStmt, ImportDecl, ImportItem, IndexExpr, InitialBlock, InstancePort, InstancePortList,
-    InterfaceBody, InterfaceDecl, Literal, ModuleBody, ModuleDecl, ModuleInstantiation, NameRef,
-    NetDecl, PackageBody, PackageDecl, PackedDimension, ParamDecl, ParamPortList, ParenExpr, Port,
-    PortList, PrefixExpr, PrimitiveDecl, ProgramBody, ProgramDecl, QualifiedName, RangeExpr,
-    RepeatStmt, ReplicExpr, SourceFile, StructMember, StructType, SystemTfArgList, SystemTfCall,
-    TaskDecl, TfPortDecl, TimingControl, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl,
-    WhileStmt,
+    InterfaceBody, InterfaceDecl, Literal, ModportDecl, ModportItem, ModportPort, ModuleBody,
+    ModuleDecl, ModuleInstantiation, NameRef, NetDecl, PackageBody, PackageDecl, PackedDimension,
+    ParamDecl, ParamPortList, ParenExpr, Port, PortList, PrefixExpr, PrimitiveDecl, ProgramBody,
+    ProgramDecl, QualifiedName, RangeExpr, RepeatStmt, ReplicExpr, SourceFile, StructMember,
+    StructType, SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl, TimingControl, TypeSpec,
+    TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
 };
 pub use support::AstChildren;

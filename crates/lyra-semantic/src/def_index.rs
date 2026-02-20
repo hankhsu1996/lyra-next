@@ -4,7 +4,9 @@ use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
-use crate::aggregate::{EnumDef, EnumDefIdx, EnumId, StructDef, StructDefIdx, StructId};
+use crate::aggregate::{
+    EnumDef, EnumDefIdx, EnumId, ModportDef, ModportDefId, StructDef, StructDefIdx, StructId,
+};
 use crate::diagnostic::SemanticDiag;
 use crate::scopes::{ScopeId, ScopeTree};
 use crate::symbols::{Namespace, SymbolId, SymbolTable};
@@ -48,6 +50,8 @@ pub struct DefIndex {
     pub decl_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
     pub enum_defs: Box<[EnumDef]>,
     pub struct_defs: Box<[StructDef]>,
+    pub modport_defs: Box<[ModportDef]>,
+    pub modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportEntry]>,
     pub diagnostics: Box<[SemanticDiag]>,
 }
@@ -68,6 +72,15 @@ impl DefIndex {
             owner: def.owner.clone(),
             ordinal: def.ordinal,
         }
+    }
+
+    pub fn modport_by_name(
+        &self,
+        iface: crate::symbols::GlobalDefId,
+        name: &str,
+    ) -> Option<&ModportDef> {
+        let id = self.modport_name_map.get(&(iface, SmolStr::new(name)))?;
+        self.modport_defs.iter().find(|d| d.id == *id)
     }
 
     pub fn struct_id(&self, idx: StructDefIdx) -> StructId {
