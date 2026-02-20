@@ -1,5 +1,4 @@
 // LRM 5.6: Identifiers, keywords, and system names
-// ALLOW-EXTRA-DIAGS
 
 // 5.6 Simple identifiers: letters, digits, $, _
 // First character must be letter or underscore, not digit or $
