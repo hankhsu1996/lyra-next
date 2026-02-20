@@ -60,7 +60,7 @@ pub struct IntegralCtxKey<'db> {
 }
 
 impl IntegralCtxKey<'_> {
-    pub fn to_ctx(&self, db: &dyn salsa::Database) -> IntegralCtx {
+    pub fn to_ctx(self, db: &dyn salsa::Database) -> IntegralCtx {
         IntegralCtx {
             width: self.width(db),
             signed: self.signed(db),

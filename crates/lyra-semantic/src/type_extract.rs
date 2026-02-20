@@ -630,7 +630,7 @@ mod tests {
         let call_count = std::sync::atomic::AtomicU32::new(0);
         let eval = |_id: lyra_ast::ErasedAstId| -> ConstInt {
             let n = call_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if n % 2 == 0 {
+            if n.is_multiple_of(2) {
                 ConstInt::Known(7)
             } else {
                 ConstInt::Known(0)

@@ -2,7 +2,7 @@ use lyra_semantic::types::ConstInt;
 
 use super::*;
 
-/// Helper: find the first parameter's init expression AstId and evaluate it.
+/// Helper: find the first parameter's init expression `AstId` and evaluate it.
 pub(crate) fn eval_first_param(
     db: &dyn salsa::Database,
     file: SourceFile,
@@ -25,7 +25,7 @@ pub(crate) fn eval_first_param(
     eval_const_int(db, expr_ref)
 }
 
-/// Helper: find a named parameter's init expression AstId and evaluate it.
+/// Helper: find a named parameter's init expression `AstId` and evaluate it.
 pub(crate) fn eval_named_param(
     db: &dyn salsa::Database,
     file: SourceFile,
@@ -124,8 +124,7 @@ fn const_eval_no_initializer() {
     let init_opt = def.decl_to_init_expr.get(&decl_ast_id);
     // Parameter with no initializer should have None value
     match init_opt {
-        Some(None) => {} // Expected: tracked but no init
-        None => {}       // Also acceptable: not tracked at all
+        Some(None) | None => {} // No initializer
         Some(Some(init_id)) => {
             // If it has an init_id, evaluating should give Unresolved
             let expr_ref = ConstExprRef::new(&db, unit, *init_id);

@@ -3,7 +3,7 @@ use lyra_semantic::types::{ConstEvalError, RealKw, Ty};
 
 use super::*;
 
-/// Find the first parameter's init expression AstId and return its ExprType.
+/// Find the first parameter's init expression `AstId` and return its `ExprType`.
 fn expr_type_of_first_param(
     db: &dyn salsa::Database,
     file: SourceFile,
@@ -25,7 +25,7 @@ fn expr_type_of_first_param(
     type_of_expr(db, expr_ref)
 }
 
-/// Find a named parameter's init expression and return its ExprType.
+/// Find a named parameter's init expression and return its `ExprType`.
 fn expr_type_of_named_param(
     db: &dyn salsa::Database,
     file: SourceFile,
@@ -76,10 +76,6 @@ fn bv_context() -> ExprType {
 
 fn bv_s(width: u32) -> ExprType {
     bv(width, Signedness::Signed, false)
-}
-
-fn bv_s4(width: u32) -> ExprType {
-    bv(width, Signedness::Signed, true)
 }
 
 fn one_bit() -> ExprType {
@@ -575,8 +571,9 @@ fn expr_type_typedef_name_in_expr() {
     assert!(
         matches!(
             result,
-            ExprType::Error(ExprTypeErrorKind::Unresolved)
-                | ExprType::Error(ExprTypeErrorKind::NameRefIsTypeNotValue)
+            ExprType::Error(
+                ExprTypeErrorKind::Unresolved | ExprTypeErrorKind::NameRefIsTypeNotValue
+            )
         ),
         "expected Unresolved or NameRefIsTypeNotValue, got {result:?}"
     );
