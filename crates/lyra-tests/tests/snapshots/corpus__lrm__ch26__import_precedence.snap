@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.semantic[5]] 35:20..35:20: name `C` is ambiguous: imported from packages `P`, `Q`
+---
+unit (0 diagnostics)
