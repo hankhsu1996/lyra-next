@@ -10,6 +10,9 @@ pub(crate) enum ExprMode {
     Normal,
     /// Statement context: `<=` stops expression (caller handles as NBA).
     StmtLhs,
+    /// Inside `[...]`: `+:` and `-:` stop the expression for indexed
+    /// part-select handling (LRM 11.5.1).
+    Bracket,
 }
 
 // Parse an expression (normal mode). Returns None if no expression could be parsed.
@@ -46,6 +49,14 @@ fn expr_bp(p: &mut Parser, min_bp: u8, mode: ExprMode) -> Option<CompletedMarker
 
         // In StmtLhs mode, `<=` stops the expression for NBA handling
         if mode == ExprMode::StmtLhs && p.at(SyntaxKind::LtEq) {
+            break;
+        }
+
+        // In Bracket mode, `+:` and `-:` stop for indexed part-select
+        if mode == ExprMode::Bracket
+            && matches!(p.current(), SyntaxKind::Plus | SyntaxKind::Minus)
+            && p.nth(1) == SyntaxKind::Colon
+        {
             break;
         }
 
@@ -192,7 +203,8 @@ fn postfix(p: &mut Parser, mut lhs: CompletedMarker) -> CompletedMarker {
 fn parse_index_or_range(p: &mut Parser, lhs: CompletedMarker) -> CompletedMarker {
     let m = lhs.precede(p);
     p.bump(); // [
-    expr_bp(p, 0, ExprMode::Normal);
+    // Use Bracket mode so `+:` and `-:` are not consumed as binary ops
+    expr_bp(p, 0, ExprMode::Bracket);
     if p.eat(SyntaxKind::Colon) {
         // Part select: [hi:lo]
         expr_bp(p, 0, ExprMode::Normal);

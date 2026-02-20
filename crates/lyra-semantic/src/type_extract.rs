@@ -4,8 +4,8 @@ use lyra_parser::{SyntaxElement, SyntaxNode};
 
 use crate::expr_helpers::is_expression_kind;
 use crate::types::{
-    ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType, PackedDim, RealKw,
-    SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
+    ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType, PackedDim, PackedDims,
+    RealKw, SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
 };
 
 /// Extract a `SymbolType` from a declaration container node.
@@ -196,7 +196,7 @@ fn extract_net_decl(
     let ty = Ty::Integral(Integral {
         keyword: IntegralKw::Logic,
         signed,
-        packed: packed.into_boxed_slice(),
+        packed: PackedDims::from(packed),
     });
     SymbolType::Net(NetType {
         kind: net_kind,
@@ -372,7 +372,7 @@ fn build_base_ty(base: Option<Ty>, signed_override: Option<bool>, packed: Vec<Pa
             if let Some(s) = signed_override {
                 i.signed = s;
             }
-            i.packed = packed.into_boxed_slice();
+            i.packed = PackedDims::from(packed);
             Ty::Integral(i)
         }
         Some(other) => other,
@@ -386,7 +386,7 @@ fn keyword_to_ty(kind: SyntaxKind) -> Option<Ty> {
         return Some(Ty::Integral(Integral {
             keyword: kw,
             signed: kw.default_signed(),
-            packed: Box::new([]),
+            packed: PackedDims::empty(),
         }));
     }
     match kind {

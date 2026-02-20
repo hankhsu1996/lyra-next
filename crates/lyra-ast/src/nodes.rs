@@ -302,6 +302,34 @@ impl FieldExpr {
     }
 }
 
+/// The kind of a range expression inside `[]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeKind {
+    /// `[hi:lo]` -- fixed part-select.
+    Fixed,
+    /// `[base+:width]` -- indexed part-select (ascending).
+    IndexedPlus,
+    /// `[base-:width]` -- indexed part-select (descending).
+    IndexedMinus,
+}
+
+impl RangeExpr {
+    /// Classify the range form by looking for direct `+` or `-` token children.
+    ///
+    /// Uses `support::token()` which only searches direct children of this
+    /// node. A `+` inside a `BinExpr` child (e.g. `a[i+1:j]`) is NOT a
+    /// direct child and will not trigger `IndexedPlus`.
+    pub fn range_kind(&self) -> RangeKind {
+        if support::token(&self.syntax, SyntaxKind::Plus).is_some() {
+            RangeKind::IndexedPlus
+        } else if support::token(&self.syntax, SyntaxKind::Minus).is_some() {
+            RangeKind::IndexedMinus
+        } else {
+            RangeKind::Fixed
+        }
+    }
+}
+
 impl EnumMember {
     pub fn init_expr(&self) -> Option<Expression> {
         support::child(&self.syntax)
@@ -601,5 +629,47 @@ impl<I: Iterator<Item = rowan::NodeOrToken<lyra_parser::SyntaxNode, SyntaxToken>
             return Some((name, None));
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_range_expr(src: &str) -> RangeExpr {
+        let tokens = lyra_lexer::lex(src);
+        let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, src);
+        let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
+        fn find_range(node: &lyra_parser::SyntaxNode) -> Option<RangeExpr> {
+            if node.kind() == SyntaxKind::RangeExpr {
+                return RangeExpr::cast(node.clone());
+            }
+            for child in node.children() {
+                if let Some(r) = find_range(&child) {
+                    return Some(r);
+                }
+            }
+            None
+        }
+        find_range(&parse.syntax()).expect("should contain a RangeExpr")
+    }
+
+    #[test]
+    fn range_kind_indexed_plus() {
+        let re = parse_range_expr("module m; parameter P = a[i+:4]; endmodule");
+        assert_eq!(re.range_kind(), RangeKind::IndexedPlus);
+    }
+
+    #[test]
+    fn range_kind_indexed_minus() {
+        let re = parse_range_expr("module m; parameter P = a[i-:4]; endmodule");
+        assert_eq!(re.range_kind(), RangeKind::IndexedMinus);
+    }
+
+    #[test]
+    fn range_kind_fixed_with_plus_in_expr() {
+        // a[i+1:j] -- the + is inside BinExpr, not a direct child
+        let re = parse_range_expr("module m; parameter P = a[i+1:j]; endmodule");
+        assert_eq!(re.range_kind(), RangeKind::Fixed);
     }
 }

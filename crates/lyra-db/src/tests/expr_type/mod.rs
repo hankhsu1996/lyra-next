@@ -11,6 +11,7 @@ use lyra_semantic::types::{ConstEvalError, RealKw, Ty};
 
 use super::*;
 
+/// Find the first parameter's init expression `AstId` and return its `ExprType`.
 pub(super) fn expr_type_of_first_param(
     db: &dyn salsa::Database,
     file: SourceFile,
@@ -32,6 +33,7 @@ pub(super) fn expr_type_of_first_param(
     type_of_expr(db, expr_ref)
 }
 
+/// Find a named parameter's init expression and return its `ExprType`.
 pub(super) fn expr_type_of_named_param(
     db: &dyn salsa::Database,
     file: SourceFile,

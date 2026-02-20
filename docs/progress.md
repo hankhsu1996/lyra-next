@@ -60,7 +60,7 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Callable typing (function/task calls)
 - [x] Plain struct/union member typing (tagged unions deferred, see gaps)
 - [x] Enum member name resolution (base type, methods, type compat deferred, see gaps)
-- [ ] Full array semantics
+- [x] Indexing and part-select typing (dynamic/queue/assoc/streaming deferred, see gaps)
 - [x] Generate blocks and parameter elaboration
 - [ ] Interface/modport semantics
 - [ ] Performance baseline (10K lines under 1s)

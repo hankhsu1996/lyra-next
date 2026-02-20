@@ -26,6 +26,16 @@ Assignment between different enum types, enum-to-integral casting rules are not 
 
 Enum member names are injected into the enclosing scope unconditionally. The LRM's ordering/visibility rules for when a name becomes visible vs later local declarations are not modeled. Collisions between enum members and other declarations are diagnosed as duplicates under the current model. This is the same class of problem as Ch26 wildcard import ordering. Test: `lrm/ch06/enum_member_ordering`.
 
+## Chapter 7 -- Aggregate Types
+
+### 7.4: Dynamic arrays, queues, and associative arrays
+
+`UnpackedDim` only represents fixed-size dimensions. No dynamic (`[]`), queue (`[$]`), or associative (`[string]`) dims. Blocked by: unpacked dim model extension. Tests: `lrm/ch07/dynamic_array`, `lrm/ch07/queue`, `lrm/ch07/assoc_array`.
+
+### 7.4.6: Array slicing
+
+`a[i:j]` on unpacked arrays is not handled. Part-select currently applies only to packed integral types. Blocked by: unpacked array slice semantics. Test: `lrm/ch07/array_slice`.
+
 ## Chapter 7 -- Structures and Unions
 
 ### 7.3.1: Soft packed unions
@@ -39,6 +49,20 @@ Packed union members must satisfy LRM compatibility rules for packed widths. No 
 ### 7.3.2: Tagged unions
 
 The `tagged` qualifier is parsed and diagnosed as unsupported; the type resolves to error. Full support requires tagged expressions (11.9), pattern matching (12.6), tag tracking, and void members. `RecordKind::TaggedUnion` exists but is never constructed. Test: `lrm/ch07/tagged_union`.
+
+## Chapter 11 -- Operators and Expressions
+
+### 11.4.14: Streaming operators
+
+`{>>{ }}` and `{<<{ }}` are not parsed or typed. Blocked by: parser and type inference extension. Test: `lrm/ch11/streaming_operators`.
+
+### 11.5.1: Fixed part-select with non-constant bounds
+
+Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Supporting non-constant bounds needs symbolic/dynamic width representation. Blocked by: dynamic width model. Test: `lrm/ch11/part_select_nonconstant`.
+
+### 11.5.1: Bit-select and part-select signedness
+
+Bit-select and part-select currently return unsigned (engine policy). LRM signedness rules for these in different contexts need verification. Blocked by: signedness rule audit. Test: `lrm/ch11/select_signedness`.
 
 ## Chapter 26 -- Packages
 

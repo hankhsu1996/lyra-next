@@ -1,0 +1,5 @@
+kind: lrm
+lrm:
+  chapter: 11
+  section: "11.5.1"
+  title: "Bit-select and part-select addressing"

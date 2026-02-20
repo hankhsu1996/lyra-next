@@ -10,7 +10,9 @@ use crate::expr_helpers::{find_binary_op, find_operator_token, is_expression_kin
 use crate::literal::parse_literal_shape;
 use crate::symbols::{GlobalSymbolId, SymbolId, SymbolKind};
 use crate::syntax_helpers::system_tf_name;
-use crate::types::{ConstEvalError, ConstInt, RealKw, SymbolType, Ty};
+use crate::types::{
+    ConstEvalError, ConstInt, Integral, IntegralKw, PackedDim, PackedDims, RealKw, SymbolType, Ty,
+};
 
 /// Signedness for bit-vector expression typing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,11 +97,13 @@ pub enum ExprTypeErrorKind {
     InvalidReplicationCount,
     ReplicationConstEvalFailed(ConstEvalError),
     IndexNonIndexable,
+    PartSelectNonIntegral,
+    PartSelectBoundsNonConst,
+    PartSelectWidthNonConst,
     MemberAccessOnNonComposite,
     UnknownMember,
     MemberNotInModport,
     UserCallUnsupported,
-    RangeUnsupported,
     UnsupportedCalleeForm(CalleeFormKind),
     UnresolvedCall,
     NotACallable(SymbolKind),
@@ -189,19 +193,19 @@ impl ExprType {
     /// Construct a bit-vector `ExprType` from raw `BitVecType`.
     pub fn bitvec(bv: BitVecType) -> ExprType {
         ExprType {
-            ty: Ty::Integral(crate::types::Integral {
+            ty: Ty::Integral(Integral {
                 keyword: if bv.four_state {
-                    crate::types::IntegralKw::Logic
+                    IntegralKw::Logic
                 } else {
-                    crate::types::IntegralKw::Bit
+                    IntegralKw::Bit
                 },
                 signed: bv.signed == Signedness::Signed,
                 packed: match bv.width {
-                    BitWidth::Known(w) if w > 1 => Box::new([crate::types::PackedDim {
-                        msb: crate::types::ConstInt::Known(i64::from(w) - 1),
-                        lsb: crate::types::ConstInt::Known(0),
+                    BitWidth::Known(w) if w > 1 => PackedDims::from(vec![PackedDim {
+                        msb: ConstInt::Known(i64::from(w) - 1),
+                        lsb: ConstInt::Known(0),
                     }]),
-                    _ => Box::new([]),
+                    _ => PackedDims::empty(),
                 },
             }),
             view: ExprView::BitVec(bv),
@@ -305,8 +309,6 @@ pub enum MemberLookupError {
 pub trait InferCtx {
     /// Resolve a `NameRef`/`QualifiedName` to its type.
     fn type_of_name(&self, name_node: &SyntaxNode) -> ExprType;
-    /// Resolve a `NameRef`/`QualifiedName` to its `SymbolType` (for unpacked dim peeling).
-    fn symbol_type_of_name(&self, name_node: &SyntaxNode) -> Option<SymbolType>;
     /// Evaluate a constant expression (for replication count).
     fn const_eval(&self, expr_node: &SyntaxNode) -> ConstInt;
     /// Resolve a callee name node to a callable symbol.
@@ -342,7 +344,7 @@ pub fn infer_expr_type(
         SyntaxKind::ConcatExpr => infer_concat(expr, ctx),
         SyntaxKind::ReplicExpr => infer_replic(expr, ctx),
         SyntaxKind::IndexExpr => infer_index(expr, ctx),
-        SyntaxKind::RangeExpr => ExprType::error(ExprTypeErrorKind::RangeUnsupported),
+        SyntaxKind::RangeExpr => infer_range(expr, ctx),
         SyntaxKind::FieldExpr => infer_field_access(expr, ctx),
         SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => infer_call(expr, ctx),
         _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
@@ -691,46 +693,164 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     })
 }
 
+/// What kind of indexing operation `a[i]` performs on a given base type.
+enum IndexKind {
+    /// Base is `Ty::Array` -- peel outermost unpacked dimension.
+    UnpackedElem,
+    /// Base is integral with >= 2 packed dims -- peel outermost packed dim.
+    PackedArrayDim,
+    /// Base is integral with <= 1 packed dim -- bit-select (1-bit result).
+    BitSelect,
+}
+
+fn classify_index(ty: &Ty) -> Result<IndexKind, ExprTypeErrorKind> {
+    match ty {
+        Ty::Array { .. } => Ok(IndexKind::UnpackedElem),
+        Ty::Integral(i) if i.packed.len() >= 2 => Ok(IndexKind::PackedArrayDim),
+        Ty::Integral(_) => Ok(IndexKind::BitSelect),
+        _ => Err(ExprTypeErrorKind::IndexNonIndexable),
+    }
+}
+
 fn infer_index(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     let children: Vec<SyntaxNode> = node
         .children()
         .filter(|c| is_expression_kind(c.kind()))
         .collect();
-    if children.is_empty() {
+    if children.len() < 2 {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     }
 
-    let base_node = &children[0];
+    let base = infer_expr_type(&children[0], ctx, None);
+    if matches!(base.view, ExprView::Error(_)) {
+        return base;
+    }
 
-    // Try to get the full symbol type (with unpacked dims) for the base
-    let base_sym_ty = if matches!(
-        base_node.kind(),
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName
-    ) {
-        ctx.symbol_type_of_name(base_node)
-    } else {
-        None
+    let idx = infer_expr_type(&children[1], ctx, None);
+    if matches!(idx.view, ExprView::Error(_)) {
+        return idx;
+    }
+
+    apply_index(&base)
+}
+
+/// Apply one index to a base type.
+fn apply_index(base: &ExprType) -> ExprType {
+    match classify_index(&base.ty) {
+        Ok(IndexKind::UnpackedElem) => match base.ty.peel_unpacked_dim() {
+            Some(elem) => ExprType::from_ty(&elem),
+            None => ExprType::error(ExprTypeErrorKind::IndexNonIndexable),
+        },
+        Ok(IndexKind::PackedArrayDim) => match base.ty.peel_packed_array_dim() {
+            Some(inner) => ExprType::from_ty(&inner),
+            None => ExprType::error(ExprTypeErrorKind::IndexNonIndexable),
+        },
+        Ok(IndexKind::BitSelect) => match base.ty.bit_select_result() {
+            Some(bit) => ExprType::from_ty(&bit),
+            None => ExprType::error(ExprTypeErrorKind::IndexNonIndexable),
+        },
+        Err(e) => ExprType::error(e),
+    }
+}
+
+fn infer_range(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    use lyra_ast::{AstNode, RangeExpr, RangeKind};
+
+    let range_expr = RangeExpr::cast(node.clone());
+    let range_kind = range_expr
+        .as_ref()
+        .map_or(RangeKind::Fixed, |r| r.range_kind());
+
+    let children: Vec<SyntaxNode> = node
+        .children()
+        .filter(|c| is_expression_kind(c.kind()))
+        .collect();
+    if children.len() < 2 {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    }
+
+    // Infer base expression
+    let base = infer_expr_type(&children[0], ctx, None);
+    if matches!(base.view, ExprView::Error(_)) {
+        return base;
+    }
+
+    // Part-select valid only on integral types
+    let four_state = match &base.ty {
+        Ty::Integral(i) => i.keyword.four_state(),
+        _ => return ExprType::error(ExprTypeErrorKind::PartSelectNonIntegral),
     };
 
-    // Check for unpacked dim peeling first
-    if let Some(ref st) = base_sym_ty {
-        let ty = match st {
-            SymbolType::Value(ty) | SymbolType::TypeAlias(ty) => Some(ty),
-            SymbolType::Net(net) => Some(&net.data),
-            SymbolType::Error(_) => None,
-        };
-        if let Some(peeled) = ty.and_then(|t| t.peel_unpacked_dim()) {
-            return ExprType::from_ty(&peeled);
+    let width: u32 = match range_kind {
+        RangeKind::IndexedPlus | RangeKind::IndexedMinus => {
+            // Infer base index expr -- propagate errors
+            let base_idx = infer_expr_type(&children[1], ctx, None);
+            if matches!(base_idx.view, ExprView::Error(_)) {
+                return base_idx;
+            }
+            // Width expr: infer for error propagation, then const-eval
+            let width_node = &children[children.len() - 1];
+            let width_et = infer_expr_type(width_node, ctx, None);
+            if matches!(width_et.view, ExprView::Error(_)) {
+                return width_et;
+            }
+            match ctx.const_eval(width_node) {
+                ConstInt::Known(w) if w > 0 => match u32::try_from(w) {
+                    Ok(v) => v,
+                    Err(_) => return ExprType::error(ExprTypeErrorKind::PartSelectWidthNonConst),
+                },
+                _ => return ExprType::error(ExprTypeErrorKind::PartSelectWidthNonConst),
+            }
         }
-    }
+        RangeKind::Fixed => {
+            if children.len() < 3 {
+                return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+            }
+            // Infer hi and lo exprs for error propagation, then const-eval
+            let hi_et = infer_expr_type(&children[1], ctx, None);
+            if matches!(hi_et.view, ExprView::Error(_)) {
+                return hi_et;
+            }
+            let lo_et = infer_expr_type(&children[2], ctx, None);
+            if matches!(lo_et.view, ExprView::Error(_)) {
+                return lo_et;
+            }
+            let hi = ctx.const_eval(&children[1]);
+            let lo = ctx.const_eval(&children[2]);
+            match (hi, lo) {
+                (ConstInt::Known(h), ConstInt::Known(l)) => {
+                    let diff = (i128::from(h) - i128::from(l)).unsigned_abs() + 1;
+                    match u32::try_from(diff) {
+                        Ok(v) => v,
+                        Err(_) => {
+                            return ExprType::error(ExprTypeErrorKind::PartSelectBoundsNonConst);
+                        }
+                    }
+                }
+                _ => return ExprType::error(ExprTypeErrorKind::PartSelectBoundsNonConst),
+            }
+        }
+    };
 
-    // No unpacked dims to peel -- check if base is bitvec for packed bit-select
-    let base_ty = infer_expr_type(base_node, ctx, None);
-    match &base_ty.view {
-        ExprView::BitVec(_) => ExprType::one_bit(),
-        ExprView::Error(_) => base_ty,
-        ExprView::Plain => ExprType::error(ExprTypeErrorKind::IndexNonIndexable),
-    }
+    // Result: unsigned integral with computed width
+    let kw = if four_state {
+        IntegralKw::Logic
+    } else {
+        IntegralKw::Bit
+    };
+    let packed = if width > 1 {
+        PackedDims::from(vec![PackedDim {
+            msb: ConstInt::Known(i64::from(width) - 1),
+            lsb: ConstInt::Known(0),
+        }])
+    } else {
+        PackedDims::empty()
+    };
+    ExprType::from_ty(&Ty::Integral(Integral {
+        keyword: kw,
+        signed: false,
+        packed,
+    }))
 }
 
 fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {

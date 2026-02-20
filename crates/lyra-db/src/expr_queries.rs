@@ -129,17 +129,6 @@ impl InferCtx for DbInferCtx<'_> {
         ExprType::from_symbol_type(&sym_type)
     }
 
-    fn symbol_type_of_name(
-        &self,
-        name_node: &lyra_parser::SyntaxNode,
-    ) -> Option<lyra_semantic::types::SymbolType> {
-        let name_ast_id = self.ast_id_map.erased_ast_id(name_node)?;
-        let resolve = resolve_index_file(self.db, self.source_file, self.unit);
-        let resolution = resolve.resolutions.get(&name_ast_id)?;
-        let sym_ref = SymbolRef::new(self.db, self.unit, resolution.symbol);
-        Some(type_of_symbol(self.db, sym_ref))
-    }
-
     fn const_eval(&self, expr_node: &lyra_parser::SyntaxNode) -> ConstInt {
         let Some(ast_id) = self.ast_id_map.erased_ast_id(expr_node) else {
             return ConstInt::Error(lyra_semantic::types::ConstEvalError::Unsupported);

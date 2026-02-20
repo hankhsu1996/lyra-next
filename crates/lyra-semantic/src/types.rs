@@ -1,3 +1,5 @@
+use std::sync::{Arc, LazyLock};
+
 use lyra_ast::ErasedAstId;
 use smallvec::SmallVec;
 use smol_str::SmolStr;
@@ -63,6 +65,101 @@ impl UnpackedDim {
     }
 }
 
+/// Shared packed dimension list with O(1) peeling via start offset.
+///
+/// Backed by `Arc<[PackedDim]>` so cloning and peeling are cheap.
+/// `PartialEq`/`Eq` compare the viewed slice (from `start`), which is O(n)
+/// for remaining dims (tiny in practice, typically 1-2). No `Hash` impl --
+/// if `Hash` is added later, it must hash the viewed slice to match `Eq`.
+#[derive(Debug, Clone)]
+pub struct PackedDims {
+    dims: Arc<[PackedDim]>,
+    start: u32,
+}
+
+static EMPTY_PACKED: LazyLock<Arc<[PackedDim]>> = LazyLock::new(|| Arc::from(Vec::new()));
+
+impl PackedDims {
+    pub fn empty() -> Self {
+        Self {
+            dims: Arc::clone(&EMPTY_PACKED),
+            start: 0,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.dims.len() - self.start as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn as_slice(&self) -> &[PackedDim] {
+        &self.dims[self.start as usize..]
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &PackedDim> {
+        self.as_slice().iter()
+    }
+
+    /// Remove the outermost packed dimension, returning the rest.
+    ///
+    /// # Panics
+    ///
+    /// Panics if empty.
+    #[must_use]
+    pub fn peel_one(&self) -> Self {
+        assert!(!self.is_empty(), "peel_one on empty PackedDims");
+        Self {
+            dims: Arc::clone(&self.dims),
+            start: self.start + 1,
+        }
+    }
+}
+
+impl PartialEq for PackedDims {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl Eq for PackedDims {}
+
+impl std::ops::Index<usize> for PackedDims {
+    type Output = PackedDim;
+    fn index(&self, idx: usize) -> &PackedDim {
+        &self.dims[self.start as usize + idx]
+    }
+}
+
+impl From<Vec<PackedDim>> for PackedDims {
+    fn from(v: Vec<PackedDim>) -> Self {
+        if v.is_empty() {
+            return Self::empty();
+        }
+        Self {
+            dims: Arc::from(v),
+            start: 0,
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a PackedDims {
+    type Item = &'a PackedDim;
+    type IntoIter = std::slice::Iter<'a, PackedDim>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_slice().iter()
+    }
+}
+
+impl FromIterator<PackedDim> for PackedDims {
+    fn from_iter<I: IntoIterator<Item = PackedDim>>(iter: I) -> Self {
+        let v: Vec<PackedDim> = iter.into_iter().collect();
+        Self::from(v)
+    }
+}
+
 /// The keyword that produced an integral type, preserving LRM identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntegralKw {
@@ -119,7 +216,7 @@ impl IntegralKw {
 pub struct Integral {
     pub keyword: IntegralKw,
     pub signed: bool,
-    pub packed: Box<[PackedDim]>,
+    pub packed: PackedDims,
 }
 
 impl Integral {
@@ -219,7 +316,7 @@ pub enum Ty {
 }
 
 impl Ty {
-    pub fn logic(packed: Box<[PackedDim]>, signed: bool) -> Self {
+    pub fn logic(packed: PackedDims, signed: bool) -> Self {
         Self::Integral(Integral {
             keyword: IntegralKw::Logic,
             signed,
@@ -227,7 +324,7 @@ impl Ty {
         })
     }
 
-    pub fn reg(packed: Box<[PackedDim]>, signed: bool) -> Self {
+    pub fn reg(packed: PackedDims, signed: bool) -> Self {
         Self::Integral(Integral {
             keyword: IntegralKw::Reg,
             signed,
@@ -235,7 +332,7 @@ impl Ty {
         })
     }
 
-    pub fn bit(packed: Box<[PackedDim]>, signed: bool) -> Self {
+    pub fn bit(packed: PackedDims, signed: bool) -> Self {
         Self::Integral(Integral {
             keyword: IntegralKw::Bit,
             signed,
@@ -244,14 +341,14 @@ impl Ty {
     }
 
     pub fn simple_logic() -> Self {
-        Self::logic(Box::new([]), false)
+        Self::logic(PackedDims::empty(), false)
     }
 
     pub fn int() -> Self {
         Self::Integral(Integral {
             keyword: IntegralKw::Int,
             signed: IntegralKw::Int.default_signed(),
-            packed: Box::new([]),
+            packed: PackedDims::empty(),
         })
     }
 
@@ -259,7 +356,7 @@ impl Ty {
         Self::Integral(Integral {
             keyword: IntegralKw::Integer,
             signed: IntegralKw::Integer.default_signed(),
-            packed: Box::new([]),
+            packed: PackedDims::empty(),
         })
     }
 
@@ -267,7 +364,7 @@ impl Ty {
         Self::Integral(Integral {
             keyword: IntegralKw::Byte,
             signed: IntegralKw::Byte.default_signed(),
-            packed: Box::new([]),
+            packed: PackedDims::empty(),
         })
     }
 
@@ -275,7 +372,7 @@ impl Ty {
         Self::Integral(Integral {
             keyword: IntegralKw::Shortint,
             signed: IntegralKw::Shortint.default_signed(),
-            packed: Box::new([]),
+            packed: PackedDims::empty(),
         })
     }
 
@@ -283,7 +380,7 @@ impl Ty {
         Self::Integral(Integral {
             keyword: IntegralKw::Longint,
             signed: IntegralKw::Longint.default_signed(),
-            packed: Box::new([]),
+            packed: PackedDims::empty(),
         })
     }
 
@@ -291,7 +388,7 @@ impl Ty {
         Self::Integral(Integral {
             keyword: IntegralKw::Time,
             signed: IntegralKw::Time.default_signed(),
-            packed: Box::new([]),
+            packed: PackedDims::empty(),
         })
     }
 
@@ -299,6 +396,43 @@ impl Ty {
     pub fn peel_unpacked_dim(&self) -> Option<Ty> {
         match self {
             Self::Array { elem, .. } => Some(elem.as_ref().clone()),
+            _ => None,
+        }
+    }
+
+    /// Peel one packed array dimension (multi-dim packed only: len >= 2).
+    ///
+    /// For `logic [3:0][7:0]`, returns `logic [7:0]`. Returns None when
+    /// packed dims < 2 (use `bit_select_result` for 1D vectors).
+    pub fn peel_packed_array_dim(&self) -> Option<Ty> {
+        match self {
+            Self::Integral(i) if i.packed.len() >= 2 => Some(Self::Integral(Integral {
+                keyword: i.keyword,
+                signed: i.signed,
+                packed: i.packed.peel_one(),
+            })),
+            _ => None,
+        }
+    }
+
+    /// Produce a 1-bit result for bit-select on an integral type.
+    ///
+    /// Preserves 4-state/2-state. Returns unsigned (engine policy -- see
+    /// gaps.md for signedness verification status).
+    pub fn bit_select_result(&self) -> Option<Ty> {
+        match self {
+            Self::Integral(i) => {
+                let kw = if i.keyword.four_state() {
+                    IntegralKw::Logic
+                } else {
+                    IntegralKw::Bit
+                };
+                Some(Self::Integral(Integral {
+                    keyword: kw,
+                    signed: false,
+                    packed: PackedDims::empty(),
+                }))
+            }
             _ => None,
         }
     }
@@ -677,7 +811,7 @@ mod tests {
     #[test]
     fn packed_width_single_dim() {
         let ty = Ty::logic(
-            Box::new([PackedDim {
+            PackedDims::from(vec![PackedDim {
                 msb: ConstInt::Known(7),
                 lsb: ConstInt::Known(0),
             }]),
@@ -693,7 +827,7 @@ mod tests {
     #[test]
     fn packed_width_multi_dim() {
         let ty = Ty::logic(
-            Box::new([
+            PackedDims::from(vec![
                 PackedDim {
                     msb: ConstInt::Known(7),
                     lsb: ConstInt::Known(0),
@@ -724,7 +858,7 @@ mod tests {
     #[test]
     fn packed_width_unevaluated() {
         let ty = Ty::logic(
-            Box::new([PackedDim {
+            PackedDims::from(vec![PackedDim {
                 msb: ConstInt::Unevaluated(dummy_ast_id()),
                 lsb: ConstInt::Known(0),
             }]),
@@ -750,7 +884,7 @@ mod tests {
     #[test]
     fn pretty_logic_unsigned_with_dim() {
         let ty = Ty::logic(
-            Box::new([PackedDim {
+            PackedDims::from(vec![PackedDim {
                 msb: ConstInt::Known(7),
                 lsb: ConstInt::Known(0),
             }]),
@@ -762,7 +896,7 @@ mod tests {
     #[test]
     fn pretty_logic_signed_with_dim() {
         let ty = Ty::logic(
-            Box::new([PackedDim {
+            PackedDims::from(vec![PackedDim {
                 msb: ConstInt::Known(7),
                 lsb: ConstInt::Known(0),
             }]),
@@ -776,7 +910,7 @@ mod tests {
         let ty = Ty::Integral(Integral {
             keyword: IntegralKw::Int,
             signed: false,
-            packed: Box::new([]),
+            packed: PackedDims::empty(),
         });
         assert_eq!(ty.pretty(), "int unsigned");
     }
@@ -808,7 +942,7 @@ mod tests {
     #[test]
     fn pretty_unevaluated_dim() {
         let ty = Ty::logic(
-            Box::new([PackedDim {
+            PackedDims::from(vec![PackedDim {
                 msb: ConstInt::Unevaluated(dummy_ast_id()),
                 lsb: ConstInt::Known(0),
             }]),
@@ -820,7 +954,7 @@ mod tests {
     #[test]
     fn pretty_error_dim() {
         let ty = Ty::logic(
-            Box::new([PackedDim {
+            PackedDims::from(vec![PackedDim {
                 msb: ConstInt::Known(7),
                 lsb: ConstInt::Error(ConstEvalError::Overflow),
             }]),
