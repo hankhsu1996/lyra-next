@@ -16,13 +16,20 @@ fn diag_message(d: &lyra_diag::Diagnostic) -> String {
 }
 
 #[test]
-fn width_mismatch_continuous_assign() {
+fn extension_continuous_assign_no_diag() {
     let src = "module m; logic [7:0] a; logic [3:0] b; assign a = b; endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(diags.is_empty(), "extension (4 -> 8 bits) should not warn");
+}
+
+#[test]
+fn truncation_continuous_assign() {
+    let src = "module m; logic [3:0] a; logic [7:0] b; assign a = b; endmodule";
     let diags = type_diag_warnings(src);
     assert_eq!(diags.len(), 1);
     let msg = diag_message(&diags[0]);
-    assert!(msg.contains("8 bits"), "msg: {msg}");
-    assert!(msg.contains("4 bits"), "msg: {msg}");
+    assert!(msg.contains("4-bit"), "msg: {msg}");
+    assert!(msg.contains("8-bit"), "msg: {msg}");
     assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::WIDTH_MISMATCH);
 }
 
@@ -42,23 +49,30 @@ fn width_unknown_no_diag() {
 }
 
 #[test]
-fn width_mismatch_blocking_assign() {
+fn extension_blocking_assign_no_diag() {
     let src = "module m; logic [7:0] a; logic [3:0] b; always_comb begin a = b; end endmodule";
     let diags = type_diag_warnings(src);
-    assert_eq!(diags.len(), 1);
-    let msg = diag_message(&diags[0]);
-    assert!(msg.contains("8 bits"), "msg: {msg}");
-    assert!(msg.contains("4 bits"), "msg: {msg}");
+    assert!(diags.is_empty(), "extension (4 -> 8 bits) should not warn");
 }
 
 #[test]
-fn width_mismatch_var_init() {
+fn truncation_blocking_assign() {
+    let src = "module m; logic [3:0] a; logic [7:0] b; always_comb begin a = b; end endmodule";
+    let diags = type_diag_warnings(src);
+    assert_eq!(diags.len(), 1);
+    let msg = diag_message(&diags[0]);
+    assert!(msg.contains("4-bit"), "msg: {msg}");
+    assert!(msg.contains("8-bit"), "msg: {msg}");
+}
+
+#[test]
+fn truncation_var_init() {
     let src = "module m; logic [7:0] x = 16'hFFFF; endmodule";
     let diags = type_diag_warnings(src);
     assert_eq!(diags.len(), 1);
     let msg = diag_message(&diags[0]);
-    assert!(msg.contains("8 bits"), "msg: {msg}");
-    assert!(msg.contains("16 bits"), "msg: {msg}");
+    assert!(msg.contains("8-bit"), "msg: {msg}");
+    assert!(msg.contains("16-bit"), "msg: {msg}");
 }
 
 #[test]
@@ -106,8 +120,8 @@ fn unbased_unsized_blocking_assign_no_diag() {
 }
 
 #[test]
-fn width_mismatch_has_labels() {
-    let src = "module m; logic [7:0] a; logic [3:0] b; assign a = b; endmodule";
+fn truncation_has_labels() {
+    let src = "module m; logic [3:0] a; logic [7:0] b; assign a = b; endmodule";
     let diags = type_diag_warnings(src);
     assert_eq!(diags.len(), 1);
     // Should have primary + 2 secondary labels
@@ -115,4 +129,41 @@ fn width_mismatch_has_labels() {
     assert_eq!(diags[0].labels[0].kind, lyra_diag::LabelKind::Primary);
     assert_eq!(diags[0].labels[1].kind, lyra_diag::LabelKind::Secondary);
     assert_eq!(diags[0].labels[2].kind, lyra_diag::LabelKind::Secondary);
+}
+
+#[test]
+fn extension_var_init_no_diag() {
+    let src = "module m; logic [15:0] x = 8'hFF; endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(diags.is_empty(), "extension (8 -> 16 bits) should not warn");
+}
+
+#[test]
+fn context_determined_literal_no_diag() {
+    let src = "module m; logic [15:0] x = '1; endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(
+        diags.is_empty(),
+        "context-determined literal expands to fit LHS"
+    );
+}
+
+#[test]
+fn comparison_result_ignores_outer_context() {
+    // (a < b) is always 1-bit, even in 16-bit context.
+    // This should truncate if assigned to wider target? No, 1 < 16 -> extension, no warn.
+    let src = "module m; logic [3:0] a, b; logic [15:0] z; assign z = (a < b); endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(
+        diags.is_empty(),
+        "comparison result is 1-bit, extension to 16-bit should not warn"
+    );
+}
+
+#[test]
+fn comparison_truncation_to_narrower() {
+    // Assigning 1-bit comparison result to 1-bit target -> no warning
+    let src = "module m; logic [3:0] a, b; logic c; assign c = (a < b); endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(diags.is_empty(), "1-bit result to 1-bit target: no warning");
 }

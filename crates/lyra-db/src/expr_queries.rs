@@ -1,7 +1,8 @@
+use lyra_semantic::coerce::IntegralCtx;
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::type_infer::{
     CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx,
-    ResolveCallableError,
+    ResolveCallableError, Signedness,
 };
 use lyra_semantic::types::ConstInt;
 
@@ -48,6 +49,57 @@ pub fn type_of_expr<'db>(db: &'db dyn salsa::Database, expr_ref: ExprRef<'db>) -
     };
 
     lyra_semantic::type_infer::infer_expr_type(&node, &ctx, None)
+}
+
+/// Salsa-interned key for an integral context (width, signedness, four-state).
+#[salsa::interned]
+pub struct IntegralCtxKey<'db> {
+    pub width: Option<u32>,
+    pub signed: Signedness,
+    pub four_state: bool,
+}
+
+impl IntegralCtxKey<'_> {
+    pub fn to_ctx(self, db: &dyn salsa::Database) -> IntegralCtx {
+        IntegralCtx {
+            width: self.width(db),
+            signed: self.signed(db),
+            four_state: self.four_state(db),
+        }
+    }
+}
+
+/// Infer the type of an expression under a given integral context (Salsa-tracked).
+#[salsa::tracked]
+pub fn type_of_expr_in_ctx<'db>(
+    db: &'db dyn salsa::Database,
+    expr_ref: ExprRef<'db>,
+    ctx_key: IntegralCtxKey<'db>,
+) -> ExprType {
+    let unit = expr_ref.unit(db);
+    let expr_ast_id = expr_ref.expr_ast_id(db);
+    let file_id = expr_ast_id.file();
+
+    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
+        return ExprType::Error(ExprTypeErrorKind::Unresolved);
+    };
+
+    let parse = parse_file(db, source_file);
+    let map = ast_id_map(db, source_file);
+
+    let Some(node) = map.get_node(&parse.syntax(), expr_ast_id) else {
+        return ExprType::Error(ExprTypeErrorKind::Unresolved);
+    };
+
+    let ctx = DbInferCtx {
+        db,
+        unit,
+        source_file,
+        ast_id_map: map,
+    };
+
+    let integral_ctx = ctx_key.to_ctx(db);
+    lyra_semantic::type_infer::infer_expr_type(&node, &ctx, Some(&integral_ctx))
 }
 
 /// Database-backed implementation of `InferCtx`.

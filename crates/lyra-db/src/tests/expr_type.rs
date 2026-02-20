@@ -3,7 +3,7 @@ use lyra_semantic::types::{ConstEvalError, RealKw, Ty};
 
 use super::*;
 
-/// Find the first parameter's init expression AstId and return its ExprType.
+/// Find the first parameter's init expression `AstId` and return its `ExprType`.
 fn expr_type_of_first_param(
     db: &dyn salsa::Database,
     file: SourceFile,
@@ -25,7 +25,7 @@ fn expr_type_of_first_param(
     type_of_expr(db, expr_ref)
 }
 
-/// Find a named parameter's init expression and return its ExprType.
+/// Find a named parameter's init expression and return its `ExprType`.
 fn expr_type_of_named_param(
     db: &dyn salsa::Database,
     file: SourceFile,
@@ -50,30 +50,40 @@ fn expr_type_of_named_param(
     type_of_expr(db, expr_ref)
 }
 
-fn bv(width: u32, signed: Signedness) -> ExprType {
+fn bv(width: u32, signed: Signedness, four_state: bool) -> ExprType {
     ExprType::BitVec(BitVecType {
         width: BitWidth::Known(width),
         signed,
+        four_state,
     })
 }
 
 fn bv_u(width: u32) -> ExprType {
-    bv(width, Signedness::Unsigned)
+    bv(width, Signedness::Unsigned, false)
 }
 
-fn bv_context(fallback: u32) -> ExprType {
+fn bv_u4(width: u32) -> ExprType {
+    bv(width, Signedness::Unsigned, true)
+}
+
+fn bv_context() -> ExprType {
     ExprType::BitVec(BitVecType {
-        width: BitWidth::ContextDetermined(fallback),
+        width: BitWidth::ContextDependent,
         signed: Signedness::Unsigned,
+        four_state: false,
     })
 }
 
 fn bv_s(width: u32) -> ExprType {
-    bv(width, Signedness::Signed)
+    bv(width, Signedness::Signed, false)
 }
 
 fn one_bit() -> ExprType {
     bv_u(1)
+}
+
+fn one_bit_4() -> ExprType {
+    bv_u4(1)
 }
 
 // Literal tests
@@ -107,7 +117,7 @@ fn expr_type_unbased_unsized() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "module m; parameter P = '1; endmodule");
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_context(1));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_context());
 }
 
 #[test]
@@ -119,8 +129,8 @@ fn expr_type_unbased_unsized_in_binop() {
         "module m; logic [7:0] a; parameter P = a + '1; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    // ContextDetermined(1) consumed by merge_bitvec -> Known(max(8,1)) = Known(8)
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    // ContextDependent consumed by merge_bitvec -> Known(max(8,1)) = Known(8)
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 #[test]
@@ -149,6 +159,50 @@ fn expr_type_real_literal() {
     );
 }
 
+#[test]
+fn expr_type_literal_with_xz_is_four_state() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; parameter P = 8'hxF; endmodule");
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
+}
+
+#[test]
+fn expr_type_literal_without_xz_is_two_state() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; parameter P = 8'hFF; endmodule");
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+}
+
+#[test]
+fn expr_type_case_equality_is_two_state() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] a, b; parameter P = a === b; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    // Case equality (===) always produces 0/1, never X
+    assert_eq!(expr_type_of_first_param(&db, file, unit), one_bit());
+}
+
+#[test]
+fn expr_type_unbased_unsized_xz_is_four_state() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; parameter P = 'x; endmodule");
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::BitVec(BitVecType {
+            width: BitWidth::ContextDependent,
+            signed: Signedness::Unsigned,
+            four_state: true,
+        })
+    );
+}
+
 // Name reference tests
 
 #[test]
@@ -160,7 +214,7 @@ fn expr_type_name_ref() {
         "module m; logic [7:0] x; parameter P = x; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 // Parenthesized expression
@@ -174,7 +228,7 @@ fn expr_type_paren() {
         "module m; logic [7:0] x; parameter P = (x); endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 // Prefix expression tests
@@ -188,7 +242,7 @@ fn expr_type_prefix_neg() {
         "module m; logic [7:0] x; parameter P = -x; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 #[test]
@@ -212,7 +266,7 @@ fn expr_type_prefix_bitwise_not() {
         "module m; logic [7:0] x; parameter P = ~x; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 #[test]
@@ -238,7 +292,7 @@ fn expr_type_bin_add() {
         "module m; logic [7:0] a; logic [3:0] b; parameter P = a + b; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 #[test]
@@ -262,7 +316,7 @@ fn expr_type_bin_mixed_sign() {
         "module m; int a; logic [7:0] b; parameter P = a + b; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(32));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(32));
 }
 
 #[test]
@@ -275,7 +329,7 @@ fn expr_type_shift() {
     );
     let unit = single_file_unit(&db, file);
     // Shift: width = lhs width, sign = lhs sign
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 #[test]
@@ -287,7 +341,8 @@ fn expr_type_relational() {
         "module m; logic [7:0] a; logic [7:0] b; parameter P = a < b; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), one_bit());
+    // Relational result is 4-state (can produce X when operands contain X/Z)
+    assert_eq!(expr_type_of_first_param(&db, file, unit), one_bit_4());
 }
 
 #[test]
@@ -299,7 +354,8 @@ fn expr_type_equality() {
         "module m; logic [7:0] a; logic [7:0] b; parameter P = a == b; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), one_bit());
+    // Equality (==) result is 4-state (can produce X)
+    assert_eq!(expr_type_of_first_param(&db, file, unit), one_bit_4());
 }
 
 #[test]
@@ -311,11 +367,12 @@ fn expr_type_logical_and() {
         "module m; logic a; logic b; parameter P = a && b; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), one_bit());
+    // Logical && result is 4-state (can produce X when operand is X)
+    assert_eq!(expr_type_of_first_param(&db, file, unit), one_bit_4());
 }
 
 #[test]
-fn expr_type_power_unsupported() {
+fn expr_type_power() {
     let db = LyraDatabase::default();
     let file = new_file(
         &db,
@@ -323,10 +380,8 @@ fn expr_type_power_unsupported() {
         "module m; logic [7:0] a; logic [7:0] b; parameter P = a ** b; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(
-        expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::UnsupportedBinaryOp)
-    );
+    // Power operator (**) is ContextBoth, result is max(operand widths)
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 // Conditional expression tests
@@ -340,7 +395,7 @@ fn expr_type_cond() {
         "module m; logic c; logic [7:0] a; logic [3:0] b; parameter P = c ? a : b; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 #[test]
@@ -369,7 +424,7 @@ fn expr_type_concat() {
         "module m; logic [7:0] a; logic [3:0] b; parameter P = {a, b}; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(12));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(12));
 }
 
 #[test]
@@ -394,7 +449,7 @@ fn expr_type_replic() {
         "module m; logic [7:0] a; parameter P = {3{a}}; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(24));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(24));
 }
 
 #[test]
@@ -426,7 +481,7 @@ fn expr_type_unpacked_index() {
     );
     let unit = single_file_unit(&db, file);
     // Unpacked index peels off the first unpacked dim, result is scalar logic
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(1));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(1));
 }
 
 #[test]
@@ -516,8 +571,9 @@ fn expr_type_typedef_name_in_expr() {
     assert!(
         matches!(
             result,
-            ExprType::Error(ExprTypeErrorKind::Unresolved)
-                | ExprType::Error(ExprTypeErrorKind::NameRefIsTypeNotValue)
+            ExprType::Error(
+                ExprTypeErrorKind::Unresolved | ExprTypeErrorKind::NameRefIsTypeNotValue
+            )
         ),
         "expected Unresolved or NameRefIsTypeNotValue, got {result:?}"
     );
@@ -534,7 +590,7 @@ fn expr_type_param_expr() {
         "module m; parameter int W = 8; logic [W-1:0] x; parameter P = x; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_named_param(&db, file, unit, "P"), bv_u(8));
+    assert_eq!(expr_type_of_named_param(&db, file, unit, "P"), bv_u4(8));
 }
 
 // Cross-file name resolution
@@ -549,7 +605,7 @@ fn expr_type_cross_file_name() {
         "module m; import pkg::*; logic [DATA_W-1:0] x; parameter P = x; endmodule",
     );
     let unit = new_compilation_unit(&db, vec![file_a, file_b]);
-    assert_eq!(expr_type_of_named_param(&db, file_b, unit, "P"), bv_u(16));
+    assert_eq!(expr_type_of_named_param(&db, file_b, unit, "P"), bv_u4(16));
 }
 
 // Function call tests
@@ -568,7 +624,7 @@ fn expr_type_function_call_returns_type() {
          endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 #[test]
@@ -734,7 +790,7 @@ fn callable_sig_projection_matches_db_sig() {
 
     // Via expression inference (exercises the projection path)
     let result = expr_type_of_first_param(&db, file, unit);
-    assert_eq!(result, bv_u(16));
+    assert_eq!(result, bv_u4(16));
 
     // Via DB-level callable_signature directly
     let def = def_index_file(&db, file);
@@ -771,8 +827,8 @@ fn expr_type_function_implicit_return_type() {
          endmodule",
     );
     let unit = single_file_unit(&db, file);
-    // Implicit return type is logic (1-bit unsigned)
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(1));
+    // Implicit return type is logic (1-bit unsigned, 4-state)
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(1));
 }
 
 #[test]
@@ -791,7 +847,7 @@ fn expr_type_function_typedef_return() {
          endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(16));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(16));
 }
 
 #[test]
@@ -810,7 +866,7 @@ fn expr_type_function_typedef_port() {
          endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
 
 #[test]
@@ -829,5 +885,5 @@ fn expr_type_function_implicit_port_type() {
     );
     let unit = single_file_unit(&db, file);
     // Return type is explicit logic [7:0]
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(8));
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }

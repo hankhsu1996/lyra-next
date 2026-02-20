@@ -14,7 +14,7 @@ fn elab_diags(files: &[&str], top: &str) -> Vec<lyra_diag::Diagnostic> {
     }
     let unit = new_compilation_unit(&db, source_files);
     let top_mod = TopModule::new(&db, unit, SmolStr::new(top));
-    elab_diagnostics(&db, top_mod).to_vec()
+    elab_diagnostics(&db, top_mod).clone()
 }
 
 fn elab_tree(files: &[&str], top: &str) -> (LyraDatabase, ElabTree) {
@@ -79,10 +79,10 @@ fn collect_inst_names(tree: &ElabTree, node: ElabNodeId, names: &mut Vec<String>
 
 fn find_child_inst_by_name(tree: &ElabTree, parent: InstId, name: &str) -> InstId {
     for child in &tree.inst(parent).children {
-        if let ElabNodeId::Inst(cid) = child {
-            if tree.inst(*cid).instance_name == name {
-                return *cid;
-            }
+        if let ElabNodeId::Inst(cid) = child
+            && tree.inst(*cid).instance_name == name
+        {
+            return *cid;
         }
     }
     panic!("child instance '{name}' not found under parent");
@@ -786,7 +786,7 @@ fn param_env_dedup() {
         .iter()
         .filter_map(|ck| match ck {
             ElabNodeId::Inst(iid) => Some(tree.inst(*iid).param_env),
-            _ => None,
+            ElabNodeId::GenScope(_) => None,
         })
         .collect();
     assert_eq!(ids.len(), 2);

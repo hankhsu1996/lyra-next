@@ -2,35 +2,49 @@ use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
 
+use crate::coerce::{
+    IntegralCtx, OpCategory, apply_outer_context, coerce_integral, comparison_context, op_spec,
+    operator_result_self,
+};
+use crate::expr_helpers::{find_binary_op, find_operator_token, is_expression_kind};
 use crate::literal::parse_literal_shape;
 use crate::symbols::{GlobalSymbolId, SymbolKind};
 use crate::syntax_helpers::system_tf_name;
 use crate::types::{ConstEvalError, ConstInt, RealKw, SymbolType, Ty};
 
 /// Signedness for bit-vector expression typing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Signedness {
     Signed,
     Unsigned,
 }
 
-/// Bit width: known or unknown (e.g. unevaluated dim bounds).
+/// Bit width: known, unknown, context-dependent, or error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BitWidth {
     Known(u32),
     Unknown,
-    /// Width adapts to assignment context. The u32 is the self-determined
-    /// fallback (1 for unbased unsized literals, LRM 5.7.1).
-    ContextDetermined(u32),
+    /// Width adapts to assignment context (LRM 11.6). No payload -- the
+    /// width is unknown until context supplies it. The "default 1-bit in
+    /// self-determined context" rule (LRM 5.7.1) is handled by
+    /// `self_determined()`, not by storing a fallback here.
+    ContextDependent,
+    /// Width computation failed (distinct from Unknown, which means
+    /// "not yet evaluated").
+    Error,
 }
 
 impl BitWidth {
-    /// Concrete width in self-determined context: `Known` and
-    /// `ContextDetermined` resolve to their inner value, `Unknown` to `None`.
+    /// Resolve to a concrete width in self-determined context.
+    ///
+    /// `ContextDependent` -> 1 bit per LRM 5.7.1.
+    /// Call this only when the expression is genuinely in a self-determined
+    /// position (concat/replication operands, shift RHS, logical operands).
     pub fn self_determined(&self) -> Option<u32> {
         match self {
-            BitWidth::Known(w) | BitWidth::ContextDetermined(w) => Some(*w),
-            BitWidth::Unknown => None,
+            BitWidth::Known(w) => Some(*w),
+            BitWidth::ContextDependent => Some(1),
+            BitWidth::Unknown | BitWidth::Error => None,
         }
     }
 }
@@ -40,23 +54,25 @@ impl BitWidth {
 pub struct BitVecType {
     pub width: BitWidth,
     pub signed: Signedness,
+    /// True for 4-state types (logic/reg/integer/time or x/z-containing literals).
+    pub four_state: bool,
 }
 
 impl BitVecType {
-    /// Human-readable representation. Always uses `logic` keyword since
-    /// expression results normalize to logic-like bitvec.
+    /// Human-readable representation. Uses `logic` (4-state) or `bit`
+    /// (2-state) depending on `four_state`.
     pub fn pretty(&self) -> SmolStr {
-        let mut s = String::from("logic");
+        let mut s = String::from(if self.four_state { "logic" } else { "bit" });
         if self.signed == Signedness::Signed {
             s.push_str(" signed");
         }
         match self.width {
-            BitWidth::Known(1) | BitWidth::ContextDetermined(1) => {}
-            BitWidth::Known(w) | BitWidth::ContextDetermined(w) => {
+            BitWidth::Known(1) | BitWidth::ContextDependent => {}
+            BitWidth::Known(w) => {
                 use core::fmt::Write;
                 let _ = write!(s, " [{}:0]", w - 1);
             }
-            BitWidth::Unknown => {
+            BitWidth::Unknown | BitWidth::Error => {
                 s.push_str(" [?:?]");
             }
         }
@@ -114,7 +130,12 @@ impl ExprType {
                 } else {
                     Signedness::Unsigned
                 };
-                ExprType::BitVec(BitVecType { width, signed })
+                let four_state = i.keyword.four_state();
+                ExprType::BitVec(BitVecType {
+                    width,
+                    signed,
+                    four_state,
+                })
             }
             Ty::Real(_) | Ty::String | Ty::Chandle | Ty::Event | Ty::Void => {
                 ExprType::NonBit(ty.clone())
@@ -134,19 +155,21 @@ impl ExprType {
         }
     }
 
-    /// Unsized decimal literal default: `BitVec(32, Signed)`.
+    /// Unsized decimal literal default: `BitVec(32, Signed, 2-state)`.
     pub fn int_literal() -> ExprType {
         ExprType::BitVec(BitVecType {
             width: BitWidth::Known(32),
             signed: Signedness::Signed,
+            four_state: false,
         })
     }
 
-    /// Sized bit-vector.
+    /// Sized bit-vector (2-state by default).
     pub fn bits(width: u32, signed: Signedness) -> ExprType {
         ExprType::BitVec(BitVecType {
             width: BitWidth::Known(width),
             signed,
+            four_state: false,
         })
     }
 
@@ -223,25 +246,25 @@ pub trait InferCtx {
     fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef>;
 }
 
-/// Infer the self-determined type of an expression node.
+/// Infer the type of an expression node, optionally in a context.
 ///
-/// `expected` is `None` for M4 (self-determined only).
-/// M5 will pass `Some(target_type)` for context-determined sizing.
+/// When `expected` is `None`, returns the self-determined type.
+/// When `expected` is `Some(ctx)`, propagates context sizing per LRM 11.6.
 pub fn infer_expr_type(
     expr: &SyntaxNode,
     ctx: &dyn InferCtx,
-    _expected: Option<&ExprType>,
+    expected: Option<&IntegralCtx>,
 ) -> ExprType {
     match expr.kind() {
         SyntaxKind::NameRef | SyntaxKind::QualifiedName => ctx.type_of_name(expr),
-        SyntaxKind::Literal => infer_literal(expr),
+        SyntaxKind::Literal => infer_literal(expr, expected),
         SyntaxKind::Expression | SyntaxKind::ParenExpr => match expr.first_child() {
-            Some(child) => infer_expr_type(&child, ctx, None),
+            Some(child) => infer_expr_type(&child, ctx, expected),
             None => ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind),
         },
-        SyntaxKind::PrefixExpr => infer_prefix(expr, ctx),
-        SyntaxKind::BinExpr => infer_binary(expr, ctx),
-        SyntaxKind::CondExpr => infer_cond(expr, ctx),
+        SyntaxKind::PrefixExpr => infer_prefix(expr, ctx, expected),
+        SyntaxKind::BinExpr => infer_binary(expr, ctx, expected),
+        SyntaxKind::CondExpr => infer_cond(expr, ctx, expected),
         SyntaxKind::ConcatExpr => infer_concat(expr, ctx),
         SyntaxKind::ReplicExpr => infer_replic(expr, ctx),
         SyntaxKind::IndexExpr => infer_index(expr, ctx),
@@ -252,7 +275,7 @@ pub fn infer_expr_type(
     }
 }
 
-fn infer_literal(node: &SyntaxNode) -> ExprType {
+fn infer_literal(node: &SyntaxNode, expected: Option<&IntegralCtx>) -> ExprType {
     let lit_kind = node
         .children_with_tokens()
         .filter_map(|el| el.into_token())
@@ -273,10 +296,23 @@ fn infer_literal(node: &SyntaxNode) -> ExprType {
         Some(SyntaxKind::TimeLiteral) => ExprType::NonBit(Ty::Real(RealKw::Time)),
         Some(SyntaxKind::RealLiteral) => ExprType::NonBit(Ty::Real(RealKw::Real)),
         Some(SyntaxKind::StringLiteral) => ExprType::NonBit(Ty::String),
-        Some(SyntaxKind::UnbasedUnsizedLiteral) => ExprType::BitVec(BitVecType {
-            width: BitWidth::ContextDetermined(1),
-            signed: Signedness::Unsigned,
-        }),
+        Some(SyntaxKind::UnbasedUnsizedLiteral) => {
+            let has_xz = node
+                .children_with_tokens()
+                .filter_map(|el| el.into_token())
+                .find(|t| t.kind() == SyntaxKind::UnbasedUnsizedLiteral)
+                .is_some_and(|t| t.text().chars().any(|c| matches!(c, 'x' | 'X' | 'z' | 'Z')));
+            let self_ty = BitVecType {
+                width: BitWidth::ContextDependent,
+                signed: Signedness::Unsigned,
+                four_state: has_xz,
+            };
+            if let Some(ectx) = expected {
+                ExprType::BitVec(coerce_integral(&self_ty, ectx))
+            } else {
+                ExprType::BitVec(self_ty)
+            }
+        }
         _ => match parse_literal_shape(node) {
             Some(shape) => {
                 let signed = if shape.signed {
@@ -284,14 +320,18 @@ fn infer_literal(node: &SyntaxNode) -> ExprType {
                 } else {
                     Signedness::Unsigned
                 };
-                ExprType::bits(shape.width, signed)
+                ExprType::BitVec(BitVecType {
+                    width: BitWidth::Known(shape.width),
+                    signed,
+                    four_state: shape.has_xz,
+                })
             }
             None => ExprType::Error(ExprTypeErrorKind::UnsupportedLiteralKind),
         },
     }
 }
 
-fn infer_prefix(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+fn infer_prefix(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralCtx>) -> ExprType {
     let Some(op) = find_operator_token(node) else {
         return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -300,30 +340,33 @@ fn infer_prefix(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    let operand = infer_expr_type(&operand_node, ctx, None);
-
     match op {
-        // Logical negation: always 1-bit unsigned
+        // Logical negation: always 1-bit unsigned, operand self-determined
         SyntaxKind::Bang
-        // Reduction operators: always 1-bit unsigned
+        // Reduction operators: always 1-bit unsigned, operand self-determined
         | SyntaxKind::Amp
         | SyntaxKind::Pipe
         | SyntaxKind::Caret
-        // Compound reduction operators: ~& ~| ~^ ^~ (lexed as single tokens)
         | SyntaxKind::TildeAmp
         | SyntaxKind::TildePipe
         | SyntaxKind::TildeCaret
-        | SyntaxKind::CaretTilde => ExprType::one_bit(),
-        // Bitwise NOT or unary +/-: same width and sign as operand
-        SyntaxKind::Tilde | SyntaxKind::Plus | SyntaxKind::Minus => match &operand {
-            ExprType::BitVec(_) | ExprType::Error(_) => operand,
-            ExprType::NonBit(_) => ExprType::Error(ExprTypeErrorKind::NonBitOperand),
-        },
+        | SyntaxKind::CaretTilde => {
+            let _operand = infer_expr_type(&operand_node, ctx, None);
+            ExprType::one_bit()
+        }
+        // Bitwise NOT or unary +/-: pass context to operand
+        SyntaxKind::Tilde | SyntaxKind::Plus | SyntaxKind::Minus => {
+            let operand = infer_expr_type(&operand_node, ctx, expected);
+            match &operand {
+                ExprType::BitVec(_) | ExprType::Error(_) => operand,
+                ExprType::NonBit(_) => ExprType::Error(ExprTypeErrorKind::NonBitOperand),
+            }
+        }
         _ => ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind),
     }
 }
 
-fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralCtx>) -> ExprType {
     let children: Vec<SyntaxNode> = node
         .children()
         .filter(|c| is_expression_kind(c.kind()))
@@ -332,57 +375,55 @@ fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
     }
 
-    let lhs = infer_expr_type(&children[0], ctx, None);
-    let rhs = infer_expr_type(&children[1], ctx, None);
-
     let Some(op) = find_binary_op(node) else {
         return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    match op {
-        // Arithmetic and bitwise: merge_bitvec
-        BinaryOp::Add
-        | BinaryOp::Sub
-        | BinaryOp::Mul
-        | BinaryOp::Div
-        | BinaryOp::Mod
-        | BinaryOp::BitAnd
-        | BinaryOp::BitOr
-        | BinaryOp::BitXor
-        | BinaryOp::BitXnor => match (&lhs, &rhs) {
-            (ExprType::BitVec(a), ExprType::BitVec(b)) => ExprType::BitVec(merge_bitvec(a, b)),
-            (ExprType::Error(_), _) => lhs,
-            (_, ExprType::Error(_)) => rhs,
-            _ => ExprType::Error(ExprTypeErrorKind::NonBitOperand),
-        },
-        // Shift: width=lhs, sign=lhs
-        BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Ashl | BinaryOp::Ashr => match &lhs {
-            ExprType::BitVec(_) => match &rhs {
-                ExprType::BitVec(_) | ExprType::Error(_) => lhs,
-                ExprType::NonBit(_) => ExprType::Error(ExprTypeErrorKind::NonBitOperand),
-            },
-            ExprType::Error(_) => lhs,
-            ExprType::NonBit(_) => ExprType::Error(ExprTypeErrorKind::NonBitOperand),
-        },
-        // Relational, equality, logical -- all produce 1-bit unsigned
-        BinaryOp::Lt
-        | BinaryOp::LtEq
-        | BinaryOp::Gt
-        | BinaryOp::GtEq
-        | BinaryOp::Eq
-        | BinaryOp::Neq
-        | BinaryOp::CaseEq
-        | BinaryOp::CaseNeq
-        | BinaryOp::WildEq
-        | BinaryOp::WildNeq
-        | BinaryOp::LogAnd
-        | BinaryOp::LogOr => ExprType::one_bit(),
-        // Power: unsupported for M4
-        BinaryOp::Power => ExprType::Error(ExprTypeErrorKind::UnsupportedBinaryOp),
+    // Step 1-2: self-determined types of both operands
+    let lhs_self = infer_expr_type(&children[0], ctx, None);
+    let rhs_self = infer_expr_type(&children[1], ctx, None);
+
+    let spec = op_spec(op);
+
+    // Check for non-bit operands
+    let (lhs_bv, rhs_bv) = match (&lhs_self, &rhs_self) {
+        (ExprType::BitVec(a), ExprType::BitVec(b)) => (a, b),
+        (ExprType::Error(_), _) => return lhs_self,
+        (_, ExprType::Error(_)) => return rhs_self,
+        _ => return ExprType::Error(ExprTypeErrorKind::NonBitOperand),
+    };
+
+    // Step 3: operator result (self-determined)
+    let result_self = operator_result_self(spec.category, spec.result_state, lhs_bv, rhs_bv);
+
+    // Step 4: combine with outer context
+    let result_ctx = apply_outer_context(spec.category, &result_self, expected);
+
+    // Step 5: re-infer operands with context (branched by category)
+    match spec.category {
+        OpCategory::ContextBoth => {
+            infer_expr_type(&children[0], ctx, Some(&result_ctx));
+            infer_expr_type(&children[1], ctx, Some(&result_ctx));
+        }
+        OpCategory::ShiftLike => {
+            infer_expr_type(&children[0], ctx, Some(&result_ctx));
+            // RHS is self-determined
+        }
+        OpCategory::Comparison => {
+            let cmp_ctx = comparison_context(lhs_bv, rhs_bv);
+            infer_expr_type(&children[0], ctx, Some(&cmp_ctx));
+            infer_expr_type(&children[1], ctx, Some(&cmp_ctx));
+        }
+        OpCategory::Logical => {
+            // Both operands are self-determined
+        }
     }
+
+    // Step 6: return the coerced result
+    ExprType::BitVec(coerce_integral(&result_self, &result_ctx))
 }
 
-fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralCtx>) -> ExprType {
     let children: Vec<SyntaxNode> = node
         .children()
         .filter(|c| is_expression_kind(c.kind()))
@@ -391,13 +432,48 @@ fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
     }
 
-    // condition is self-determined independently (not used for result type)
+    // Condition is always self-determined
     let _cond = infer_expr_type(&children[0], ctx, None);
+
+    // Self-determined types of both arms
     let then_ty = infer_expr_type(&children[1], ctx, None);
     let else_ty = infer_expr_type(&children[2], ctx, None);
 
     match (&then_ty, &else_ty) {
-        (ExprType::BitVec(a), ExprType::BitVec(b)) => ExprType::BitVec(merge_bitvec(a, b)),
+        (ExprType::BitVec(a), ExprType::BitVec(b)) => {
+            // Compute common type from arms, then merge with outer context
+            let merged = merge_bitvec(a, b);
+            let arm_ctx = if let Some(outer) = expected {
+                let width = match (merged.width.self_determined(), outer.width) {
+                    (Some(mw), Some(ow)) => Some(mw.max(ow)),
+                    (Some(mw), None) => Some(mw),
+                    (None, w) => w,
+                };
+                IntegralCtx {
+                    width,
+                    signed: if merged.signed == Signedness::Signed
+                        && outer.signed == Signedness::Signed
+                    {
+                        Signedness::Signed
+                    } else {
+                        Signedness::Unsigned
+                    },
+                    four_state: merged.four_state || outer.four_state,
+                }
+            } else {
+                IntegralCtx {
+                    width: merged.width.self_determined(),
+                    signed: merged.signed,
+                    four_state: merged.four_state,
+                }
+            };
+
+            // Re-infer arms with context
+            infer_expr_type(&children[1], ctx, Some(&arm_ctx));
+            infer_expr_type(&children[2], ctx, Some(&arm_ctx));
+
+            ExprType::BitVec(coerce_integral(&merged, &arm_ctx))
+        }
         (ExprType::NonBit(a), ExprType::NonBit(b)) if a == b => then_ty,
         (ExprType::Error(_), _) => then_ty,
         (_, ExprType::Error(_)) => else_ty,
@@ -408,6 +484,7 @@ fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     let mut total_width: Option<u32> = Some(0);
     let mut all_known = true;
+    let mut any_four_state = false;
 
     for child in node.children() {
         if !is_expression_kind(child.kind()) {
@@ -415,16 +492,19 @@ fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         }
         let child_ty = infer_expr_type(&child, ctx, None);
         match &child_ty {
-            ExprType::BitVec(bv) => match bv.width.self_determined() {
-                Some(w) => {
-                    if let Some(ref mut tw) = total_width {
-                        *tw = tw.saturating_add(w);
+            ExprType::BitVec(bv) => {
+                any_four_state = any_four_state || bv.four_state;
+                match bv.width.self_determined() {
+                    Some(w) => {
+                        if let Some(ref mut tw) = total_width {
+                            *tw = tw.saturating_add(w);
+                        }
+                    }
+                    None => {
+                        all_known = false;
                     }
                 }
-                None => {
-                    all_known = false;
-                }
-            },
+            }
             ExprType::NonBit(_) => {
                 return ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand);
             }
@@ -441,6 +521,7 @@ fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     ExprType::BitVec(BitVecType {
         width,
         signed: Signedness::Unsigned,
+        four_state: any_four_state,
     })
 }
 
@@ -480,10 +561,10 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     // Check for ConcatExpr child
     let concat_child = children.iter().find(|c| c.kind() == SyntaxKind::ConcatExpr);
 
-    let inner_width = if let Some(concat) = concat_child {
+    let (inner_width, inner_four_state) = if let Some(concat) = concat_child {
         let inner = infer_concat(concat, ctx);
         match &inner {
-            ExprType::BitVec(bv) => bv.width,
+            ExprType::BitVec(bv) => (bv.width, bv.four_state),
             ExprType::Error(_) => return inner,
             ExprType::NonBit(_) => {
                 return ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand);
@@ -495,28 +576,33 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         // Sum widths of inner items
         let mut total: Option<u32> = Some(0);
         let mut all_known = true;
+        let mut any_four_state = false;
         for item in inner_items {
             let item_ty = infer_expr_type(item, ctx, None);
             match &item_ty {
-                ExprType::BitVec(bv) => match bv.width.self_determined() {
-                    Some(w) => {
-                        if let Some(ref mut t) = total {
-                            *t = t.saturating_add(w);
+                ExprType::BitVec(bv) => {
+                    any_four_state = any_four_state || bv.four_state;
+                    match bv.width.self_determined() {
+                        Some(w) => {
+                            if let Some(ref mut t) = total {
+                                *t = t.saturating_add(w);
+                            }
                         }
+                        None => all_known = false,
                     }
-                    None => all_known = false,
-                },
+                }
                 ExprType::NonBit(_) => {
                     return ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand);
                 }
                 ExprType::Error(_) => return item_ty,
             }
         }
-        if all_known {
+        let width = if all_known {
             BitWidth::Known(total.unwrap_or(0))
         } else {
             BitWidth::Unknown
-        }
+        };
+        (width, any_four_state)
     };
 
     let result_width = match (replic_count, inner_width.self_determined()) {
@@ -527,6 +613,7 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     ExprType::BitVec(BitVecType {
         width: result_width,
         signed: Signedness::Unsigned,
+        four_state: inner_four_state,
     })
 }
 
@@ -579,6 +666,7 @@ fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
             "$clog2" => ExprType::BitVec(BitVecType {
                 width: BitWidth::Known(32),
                 signed: Signedness::Signed,
+                four_state: false,
             }),
             _ => ExprType::Error(ExprTypeErrorKind::UnsupportedSystemCall),
         };
@@ -651,96 +739,19 @@ fn check_call_args(call_node: &SyntaxNode, sig: &CallableSigRef, ctx: &dyn Infer
 
     // Infer each argument with expected type from the port signature
     for (i, arg) in args.iter().enumerate() {
-        let expected = sig.ports.get(i).map(|p| ExprType::from_ty(&p.ty));
-        infer_expr_type(arg, ctx, expected.as_ref());
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    BitAnd,
-    BitOr,
-    BitXor,
-    BitXnor,
-    Shl,
-    Shr,
-    Ashl,
-    Ashr,
-    Lt,
-    LtEq,
-    Gt,
-    GtEq,
-    Eq,
-    Neq,
-    CaseEq,
-    CaseNeq,
-    WildEq,
-    WildNeq,
-    LogAnd,
-    LogOr,
-    Power,
-}
-
-fn find_binary_op(node: &SyntaxNode) -> Option<BinaryOp> {
-    let mut ops: Vec<SyntaxKind> = Vec::new();
-    let mut seen_first_expr = false;
-    for el in node.children_with_tokens() {
-        if el.as_node().is_some_and(|n| is_expression_kind(n.kind())) {
-            if seen_first_expr {
-                break;
+        let expected_ctx = sig.ports.get(i).and_then(|p| {
+            let ety = ExprType::from_ty(&p.ty);
+            match ety {
+                ExprType::BitVec(bv) => Some(IntegralCtx {
+                    width: bv.width.self_determined(),
+                    signed: bv.signed,
+                    four_state: bv.four_state,
+                }),
+                _ => None,
             }
-            seen_first_expr = true;
-            continue;
-        }
-        if let Some(tok) = el.as_token()
-            && tok.kind() != SyntaxKind::Whitespace
-            && seen_first_expr
-        {
-            ops.push(tok.kind());
-        }
+        });
+        infer_expr_type(arg, ctx, expected_ctx.as_ref());
     }
-
-    match ops.as_slice() {
-        [SyntaxKind::Plus] => Some(BinaryOp::Add),
-        [SyntaxKind::Minus] => Some(BinaryOp::Sub),
-        [SyntaxKind::Star] => Some(BinaryOp::Mul),
-        [SyntaxKind::Slash] => Some(BinaryOp::Div),
-        [SyntaxKind::Percent] => Some(BinaryOp::Mod),
-        [SyntaxKind::Amp] => Some(BinaryOp::BitAnd),
-        [SyntaxKind::Pipe] => Some(BinaryOp::BitOr),
-        [SyntaxKind::Caret] => Some(BinaryOp::BitXor),
-        [SyntaxKind::TildeCaret | SyntaxKind::CaretTilde] => Some(BinaryOp::BitXnor),
-        [SyntaxKind::LtLt] => Some(BinaryOp::Shl),
-        [SyntaxKind::GtGt] => Some(BinaryOp::Shr),
-        [SyntaxKind::LtLtLt] => Some(BinaryOp::Ashl),
-        [SyntaxKind::GtGtGt] => Some(BinaryOp::Ashr),
-        [SyntaxKind::Lt] => Some(BinaryOp::Lt),
-        [SyntaxKind::LtEq] => Some(BinaryOp::LtEq),
-        [SyntaxKind::Gt] => Some(BinaryOp::Gt),
-        [SyntaxKind::GtEq] => Some(BinaryOp::GtEq),
-        [SyntaxKind::EqEq] => Some(BinaryOp::Eq),
-        [SyntaxKind::BangEq] => Some(BinaryOp::Neq),
-        [SyntaxKind::EqEqEq] => Some(BinaryOp::CaseEq),
-        [SyntaxKind::BangEqEq] => Some(BinaryOp::CaseNeq),
-        [SyntaxKind::EqEqQuestion] => Some(BinaryOp::WildEq),
-        [SyntaxKind::BangEqQuestion] => Some(BinaryOp::WildNeq),
-        [SyntaxKind::AmpAmp] => Some(BinaryOp::LogAnd),
-        [SyntaxKind::PipePipe] => Some(BinaryOp::LogOr),
-        [SyntaxKind::StarStar] => Some(BinaryOp::Power),
-        _ => None,
-    }
-}
-
-fn find_operator_token(node: &SyntaxNode) -> Option<SyntaxKind> {
-    node.children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .find(|tok| tok.kind() != SyntaxKind::Whitespace)
-        .map(|tok| tok.kind())
 }
 
 fn merge_bitvec(a: &BitVecType, b: &BitVecType) -> BitVecType {
@@ -754,26 +765,6 @@ fn merge_bitvec(a: &BitVecType, b: &BitVecType) -> BitVecType {
         } else {
             Signedness::Unsigned
         },
+        four_state: a.four_state || b.four_state,
     }
-}
-
-fn is_expression_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Expression
-            | SyntaxKind::BinExpr
-            | SyntaxKind::PrefixExpr
-            | SyntaxKind::ParenExpr
-            | SyntaxKind::CondExpr
-            | SyntaxKind::ConcatExpr
-            | SyntaxKind::ReplicExpr
-            | SyntaxKind::IndexExpr
-            | SyntaxKind::RangeExpr
-            | SyntaxKind::FieldExpr
-            | SyntaxKind::CallExpr
-            | SyntaxKind::SystemTfCall
-            | SyntaxKind::NameRef
-            | SyntaxKind::Literal
-            | SyntaxKind::QualifiedName
-    )
 }

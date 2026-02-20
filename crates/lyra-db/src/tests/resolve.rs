@@ -477,7 +477,7 @@ fn import_member_not_found() {
     assert!(
         diags.iter().any(|d| {
             let msg = d.render_message();
-            msg.contains("z") && msg.contains("not found")
+            msg.contains('z') && msg.contains("not found")
         }),
         "should have member not found diagnostic: {diags:?}"
     );
@@ -498,7 +498,7 @@ fn wildcard_ambiguity() {
     assert!(
         diags.iter().any(|d| {
             let msg = d.render_message();
-            msg.contains("ambiguous") || msg.contains("x")
+            msg.contains("ambiguous") || msg.contains('x')
         }),
         "should have ambiguous import diagnostic: {diags:?}"
     );

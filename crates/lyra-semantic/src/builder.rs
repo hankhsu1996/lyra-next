@@ -962,27 +962,7 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
     }
 }
 
-pub(crate) fn is_expression_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Expression
-            | SyntaxKind::BinExpr
-            | SyntaxKind::PrefixExpr
-            | SyntaxKind::ParenExpr
-            | SyntaxKind::CondExpr
-            | SyntaxKind::ConcatExpr
-            | SyntaxKind::ReplicExpr
-            | SyntaxKind::IndexExpr
-            | SyntaxKind::RangeExpr
-            | SyntaxKind::FieldExpr
-            | SyntaxKind::CallExpr
-            | SyntaxKind::SystemTfCall
-            | SyntaxKind::ArgList
-            | SyntaxKind::NameRef
-            | SyntaxKind::Literal
-            | SyntaxKind::QualifiedName
-    )
-}
+pub(crate) use crate::expr_helpers::is_expression_kind;
 
 fn first_ident_token(node: &SyntaxNode) -> Option<lyra_parser::SyntaxToken> {
     node.children_with_tokens()

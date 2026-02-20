@@ -171,8 +171,8 @@ struct EventDb {
 impl EventDb {
     fn new() -> Self {
         Self {
-            storage: Default::default(),
-            log: Default::default(),
+            storage: salsa::Storage::default(),
+            log: std::sync::Arc::default(),
         }
     }
 

@@ -2,6 +2,7 @@ use lyra_ast::AstIdMap;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
 
+use crate::expr_helpers::is_expression_kind;
 use crate::types::{
     ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType, PackedDim, RealKw,
     SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
@@ -447,27 +448,6 @@ fn find_child(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
     node.children().find(|c| c.kind() == kind)
 }
 
-fn is_expression_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Expression
-            | SyntaxKind::BinExpr
-            | SyntaxKind::PrefixExpr
-            | SyntaxKind::ParenExpr
-            | SyntaxKind::CondExpr
-            | SyntaxKind::ConcatExpr
-            | SyntaxKind::ReplicExpr
-            | SyntaxKind::IndexExpr
-            | SyntaxKind::RangeExpr
-            | SyntaxKind::FieldExpr
-            | SyntaxKind::CallExpr
-            | SyntaxKind::SystemTfCall
-            | SyntaxKind::NameRef
-            | SyntaxKind::Literal
-            | SyntaxKind::QualifiedName
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use lyra_source::FileId;
@@ -650,7 +630,7 @@ mod tests {
         let call_count = std::sync::atomic::AtomicU32::new(0);
         let eval = |_id: lyra_ast::ErasedAstId| -> ConstInt {
             let n = call_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if n % 2 == 0 {
+            if n.is_multiple_of(2) {
                 ConstInt::Known(7)
             } else {
                 ConstInt::Known(0)
