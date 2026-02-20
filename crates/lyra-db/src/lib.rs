@@ -11,6 +11,7 @@ mod module_sig;
 pub mod pipeline;
 mod resolve_at;
 pub mod semantic;
+mod struct_queries;
 pub mod type_queries;
 
 // Re-export pipeline queries
@@ -39,6 +40,9 @@ pub use expr_queries::{ExprRef, type_of_expr};
 
 // Re-export resolve-at helpers
 pub use resolve_at::{TypeAtResult, resolve_at, symbol_global, type_at};
+
+// Re-export struct queries
+pub use struct_queries::{StructRef, struct_sem};
 
 // Re-export diagnostics
 pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};

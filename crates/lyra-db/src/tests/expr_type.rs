@@ -1,4 +1,6 @@
-use lyra_semantic::type_infer::{BitVecType, BitWidth, ExprType, ExprTypeErrorKind, Signedness};
+use lyra_semantic::type_infer::{
+    BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView, Signedness,
+};
 use lyra_semantic::types::{ConstEvalError, RealKw, Ty};
 
 use super::*;
@@ -51,7 +53,7 @@ fn expr_type_of_named_param(
 }
 
 fn bv(width: u32, signed: Signedness, four_state: bool) -> ExprType {
-    ExprType::BitVec(BitVecType {
+    ExprType::bitvec(BitVecType {
         width: BitWidth::Known(width),
         signed,
         four_state,
@@ -67,7 +69,7 @@ fn bv_u4(width: u32) -> ExprType {
 }
 
 fn bv_context() -> ExprType {
-    ExprType::BitVec(BitVecType {
+    ExprType::bitvec(BitVecType {
         width: BitWidth::ContextDependent,
         signed: Signedness::Unsigned,
         four_state: false,
@@ -144,7 +146,7 @@ fn expr_type_string_literal() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::NonBit(Ty::String)
+        ExprType::from_ty(&Ty::String)
     );
 }
 
@@ -155,7 +157,7 @@ fn expr_type_real_literal() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::NonBit(Ty::Real(RealKw::Real))
+        ExprType::from_ty(&Ty::Real(RealKw::Real))
     );
 }
 
@@ -195,7 +197,7 @@ fn expr_type_unbased_unsized_xz_is_four_state() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::BitVec(BitVecType {
+        ExprType::bitvec(BitVecType {
             width: BitWidth::ContextDependent,
             signed: Signedness::Unsigned,
             four_state: true,
@@ -409,7 +411,7 @@ fn expr_type_cond_mismatch() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::CondBranchTypeMismatch)
+        ExprType::error(ExprTypeErrorKind::CondBranchTypeMismatch)
     );
 }
 
@@ -434,7 +436,7 @@ fn expr_type_concat_non_bit() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand)
+        ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand)
     );
 }
 
@@ -463,7 +465,7 @@ fn expr_type_replic_error_kind() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::ReplicationConstEvalFailed(
+        ExprType::error(ExprTypeErrorKind::ReplicationConstEvalFailed(
             ConstEvalError::NonConstant
         ))
     );
@@ -509,20 +511,20 @@ fn expr_type_range_unsupported() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::RangeUnsupported)
+        ExprType::error(ExprTypeErrorKind::RangeUnsupported)
     );
 }
 
-// Field expression (unsupported for M4)
+// Field expression: member access on non-composite type
 
 #[test]
-fn expr_type_field_error() {
+fn expr_type_field_error_non_composite() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "module m; logic x; parameter P = x.y; endmodule");
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::FieldAccessUnsupported)
+        ExprType::error(ExprTypeErrorKind::MemberAccessOnNonComposite)
     );
 }
 
@@ -547,7 +549,7 @@ fn expr_type_system_call_unsupported() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::UnsupportedSystemCall)
+        ExprType::error(ExprTypeErrorKind::UnsupportedSystemCall)
     );
 }
 
@@ -570,8 +572,8 @@ fn expr_type_typedef_name_in_expr() {
     let result = expr_type_of_first_param(&db, file, unit);
     assert!(
         matches!(
-            result,
-            ExprType::Error(
+            result.view,
+            ExprView::Error(
                 ExprTypeErrorKind::Unresolved | ExprTypeErrorKind::NameRefIsTypeNotValue
             )
         ),
@@ -641,7 +643,10 @@ fn expr_type_function_call_int_return() {
          endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_s(32));
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
 }
 
 #[test]
@@ -659,7 +664,7 @@ fn expr_type_function_call_void_return() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::NonBit(Ty::Void)
+        ExprType::from_ty(&Ty::Void)
     );
 }
 
@@ -678,7 +683,7 @@ fn expr_type_task_in_expr_context() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::TaskInExprContext)
+        ExprType::error(ExprTypeErrorKind::TaskInExprContext)
     );
 }
 
@@ -695,7 +700,7 @@ fn expr_type_function_call_unresolved() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::UnresolvedCall)
+        ExprType::error(ExprTypeErrorKind::UnresolvedCall)
     );
 }
 
@@ -713,7 +718,7 @@ fn expr_type_not_a_callable() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::NotACallable(
+        ExprType::error(ExprTypeErrorKind::NotACallable(
             lyra_semantic::symbols::SymbolKind::Variable
         ))
     );
@@ -733,7 +738,7 @@ fn expr_type_method_call_unsupported() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::Error(ExprTypeErrorKind::UnsupportedCalleeForm(
+        ExprType::error(ExprTypeErrorKind::UnsupportedCalleeForm(
             lyra_semantic::type_infer::CalleeFormKind::MethodCall
         ))
     );
@@ -760,7 +765,10 @@ fn expr_type_package_function_call() {
          endmodule",
     );
     let unit = new_compilation_unit(&db, vec![file_pkg, file_mod]);
-    assert_eq!(expr_type_of_named_param(&db, file_mod, unit, "P"), bv_s(32));
+    assert_eq!(
+        expr_type_of_named_param(&db, file_mod, unit, "P"),
+        ExprType::from_ty(&Ty::int()),
+    );
 }
 
 #[test]
@@ -886,4 +894,107 @@ fn expr_type_function_implicit_port_type() {
     let unit = single_file_unit(&db, file);
     // Return type is explicit logic [7:0]
     assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
+}
+
+// Struct member access
+
+#[test]
+fn expr_type_struct_field_access_int() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef struct { int a; logic [7:0] b; } foo_t;\n\
+         foo_t x;\n\
+         parameter P = x.a;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_struct_field_access_logic() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef struct { int a; logic [7:0] b; } foo_t;\n\
+         foo_t x;\n\
+         parameter P = x.b;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
+}
+
+#[test]
+fn expr_type_struct_unknown_field() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef struct { int a; } foo_t;\n\
+         foo_t x;\n\
+         parameter P = x.nonexistent;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::UnknownMember),
+    );
+}
+
+#[test]
+fn expr_type_struct_nested_access() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef struct { int x; } inner_t;\n\
+         typedef struct { inner_t sub; } outer_t;\n\
+         outer_t s;\n\
+         parameter P = s.sub.x;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_struct_field_from_package() {
+    let db = LyraDatabase::default();
+    let file_pkg = new_file(
+        &db,
+        0,
+        "package P;\n\
+         typedef int T;\n\
+         endpackage",
+    );
+    let file_mod = new_file(
+        &db,
+        1,
+        "module m;\n\
+         import P::*;\n\
+         typedef struct { T val; } wrap_t;\n\
+         wrap_t w;\n\
+         parameter P1 = w.val;\n\
+         endmodule",
+    );
+    let unit = new_compilation_unit(&db, vec![file_pkg, file_mod]);
+    assert_eq!(
+        expr_type_of_named_param(&db, file_mod, unit, "P1"),
+        ExprType::from_ty(&Ty::int()),
+    );
 }
