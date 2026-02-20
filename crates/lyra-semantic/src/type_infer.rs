@@ -914,16 +914,9 @@ fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 }
 
 fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    // System task/function calls: $clog2, etc.
-    if let Some(tok) = system_tf_name(node) {
-        return match tok.text() {
-            "$clog2" => ExprType::bitvec(BitVecType {
-                width: BitWidth::Known(32),
-                signed: Signedness::Signed,
-                four_state: false,
-            }),
-            _ => ExprType::error(ExprTypeErrorKind::UnsupportedSystemCall),
-        };
+    // System task/function calls: $clog2, $signed, $bits, etc.
+    if system_tf_name(node).is_some() {
+        return crate::system_functions::infer_system_call(node, ctx);
     }
 
     // User-defined call: classify callee form

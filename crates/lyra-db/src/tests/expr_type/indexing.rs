@@ -212,21 +212,9 @@ fn expr_type_field_error_non_composite() {
 }
 
 #[test]
-fn expr_type_system_call_clog2() {
-    let db = LyraDatabase::default();
-    let file = new_file(&db, 0, "module m; parameter P = $clog2(8); endmodule");
-    let unit = single_file_unit(&db, file);
-    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_s(32));
-}
-
-#[test]
 fn expr_type_system_call_unsupported() {
     let db = LyraDatabase::default();
-    let file = new_file(
-        &db,
-        0,
-        "module m; logic [7:0] x; parameter P = $bits(x); endmodule",
-    );
+    let file = new_file(&db, 0, "module m; parameter P = $random(0); endmodule");
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),

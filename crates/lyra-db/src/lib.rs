@@ -32,7 +32,7 @@ pub use semantic::{
 pub use const_eval::{ConstExprRef, eval_const_int};
 
 // Re-export type queries
-pub use type_queries::{SymbolRef, type_of_symbol, type_of_symbol_raw};
+pub use type_queries::{SymbolRef, TyRef, bit_width_total, type_of_symbol, type_of_symbol_raw};
 
 // Re-export callable queries
 pub use callable_queries::{CallableRef, callable_signature};
@@ -141,6 +141,11 @@ pub fn source_file_by_id(
         .ok()?;
     Some(files[idx])
 }
+
+/// Project-level database trait. New tracked queries use `&dyn Db`.
+/// Existing queries remain on `&dyn salsa::Database` until migrated.
+pub trait Db: salsa::Database {}
+impl<T: salsa::Database + ?Sized> Db for T {}
 
 /// The central Salsa database for Lyra.
 #[salsa::db]
