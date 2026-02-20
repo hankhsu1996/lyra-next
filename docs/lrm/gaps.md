@@ -60,6 +60,24 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 Bit-select and part-select currently return unsigned (engine policy). LRM signedness rules for these in different contexts need verification. Blocked by: signedness rule audit. Test: `lrm/ch11/select_signedness`.
 
+## Chapter 20 -- System Functions
+
+### 20.6.2: $bits constant evaluation
+
+`$bits` returns `int` for typing but the actual value is not computed at const-eval time. `bit_width_total` query exists (v1: Integral and Real only). Extending it to walk Record fields, Enum base types, and Array dimensions requires recursing via `record_sem` and enum queries. Blocked by: const_eval extension for compound types. Test: `lrm/ch20/bits_consteval`.
+
+### 20.7: Array query functions
+
+`$size`, `$left`, `$right`, `$low`, `$high`, `$increment`, `$dimensions`, `$unpacked_dimensions` not implemented. Need dimension navigation on `Ty` and optional second argument. Test: `lrm/ch20/array_query`.
+
+### 20.8.2: Real math functions
+
+`$ln`, `$sqrt`, `$exp`, etc. (~20 functions) all take `real` and return `real`. Test: `lrm/ch20/real_math`.
+
+### 20.5: Real conversion functions
+
+`$itor`, `$rtoi`, `$realtobits`, `$bitstoreal`, `$shortrealtobits`, `$bitstoshortreal` not implemented. Test: `lrm/ch20/real_conversion`.
+
 ## Chapter 25 -- Interfaces
 
 ### 25.3: Interface instance names unresolved in port connections
