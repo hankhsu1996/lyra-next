@@ -1,11 +1,11 @@
 use lyra_lexer::SyntaxKind;
-use lyra_semantic::record::SymbolOrigin;
+use lyra_semantic::record::{InterfaceDefId, SymbolOrigin};
 use lyra_semantic::symbols::GlobalSymbolId;
-use lyra_semantic::types::{ConstEvalError, ConstInt, Ty, UnpackedDim};
+use lyra_semantic::types::{ConstEvalError, ConstInt, InterfaceType, Ty, UnpackedDim};
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::semantic::{def_index_file, resolve_index_file};
+use crate::semantic::{def_index_file, global_def_index, resolve_index_file};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
 /// Identifies a symbol for type extraction.
@@ -171,39 +171,63 @@ fn expand_typedef(
     let target_def = def_index_file(db, target_file);
     let target_info = target_def.symbols.get(target_id.local);
 
-    if target_info.kind != lyra_semantic::symbols::SymbolKind::Typedef {
-        return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
-    }
-
-    // Recursively get the typedef's type (Salsa cycle detection)
-    let typedef_ref = SymbolRef::new(db, unit, target_id);
-    let typedef_type = type_of_symbol_raw(db, typedef_ref);
-
-    // Extract the underlying Ty from the typedef result
-    let underlying_ty = match &typedef_type {
-        SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => ty.clone(),
-        SymbolType::Error(e) => return SymbolType::Error(*e),
-        SymbolType::Net(_) => {
-            return SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported);
+    let ty = match target_info.kind {
+        lyra_semantic::symbols::SymbolKind::Interface => {
+            let Some(def_id) = target_def.symbol_global_def(target_id.local) else {
+                return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
+            };
+            let global = global_def_index(db, unit);
+            let actual_kind = global.def_kind(def_id);
+            let Some(iface_def) = actual_kind.and_then(|k| InterfaceDefId::from_pair(def_id, k))
+            else {
+                return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
+            };
+            Ty::Interface(InterfaceType {
+                iface: iface_def,
+                modport: None,
+            })
         }
+        lyra_semantic::symbols::SymbolKind::Typedef => {
+            // Recursively get the typedef's type (Salsa cycle detection)
+            let typedef_ref = SymbolRef::new(db, unit, target_id);
+            let typedef_type = type_of_symbol_raw(db, typedef_ref);
+
+            let underlying_ty = match &typedef_type {
+                SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => ty.clone(),
+                SymbolType::Error(e) => return SymbolType::Error(*e),
+                SymbolType::Net(_) => {
+                    return SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported);
+                }
+            };
+
+            // Collect use-site unpacked dims from dim source node
+            let use_site_unpacked: Vec<UnpackedDim> = dim_source
+                .map(|d| extract_unpacked_dims_raw(d, id_map))
+                .unwrap_or_default();
+
+            let wrap = if caller_kind == lyra_semantic::symbols::SymbolKind::Typedef {
+                SymbolType::TypeAlias
+            } else {
+                SymbolType::Value
+            };
+            return wrap(lyra_semantic::wrap_unpacked(
+                underlying_ty,
+                &use_site_unpacked,
+            ));
+        }
+        _ => return SymbolType::Error(SymbolTypeError::UserTypeUnresolved),
     };
 
-    // Collect use-site unpacked dims from dim source node
+    // Common wrapping + classification for non-typedef type targets
     let use_site_unpacked: Vec<UnpackedDim> = dim_source
         .map(|d| extract_unpacked_dims_raw(d, id_map))
         .unwrap_or_default();
-
-    // Wrap the result in the correct classification
     let wrap = if caller_kind == lyra_semantic::symbols::SymbolKind::Typedef {
         SymbolType::TypeAlias
     } else {
         SymbolType::Value
     };
-
-    wrap(lyra_semantic::wrap_unpacked(
-        underlying_ty,
-        &use_site_unpacked,
-    ))
+    wrap(lyra_semantic::wrap_unpacked(ty, &use_site_unpacked))
 }
 
 /// Extract unpacked dims from a node (used during typedef expansion in db crate).

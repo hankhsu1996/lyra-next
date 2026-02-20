@@ -49,7 +49,7 @@ pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};
 
 // Re-export elaboration queries
 pub use elab_lower::elab_diagnostics;
-pub use elab_queries::{TopModule, elaborate_top, module_signature};
+pub use elab_queries::{TopModule, design_unit_signature, elaborate_top};
 
 /// Sorted include-path lookup for deterministic O(log n) resolution.
 ///

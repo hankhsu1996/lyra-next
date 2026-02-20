@@ -314,7 +314,7 @@ pub(crate) enum ElabDiag {
         name: SmolStr,
         span: Span,
     },
-    NotAModule {
+    NotInstantiable {
         name: SmolStr,
         span: Span,
     },
@@ -374,7 +374,7 @@ impl ElabDiag {
     pub(crate) fn span(&self) -> &Span {
         match self {
             Self::UnresolvedModuleInst { span, .. }
-            | Self::NotAModule { span, .. }
+            | Self::NotInstantiable { span, .. }
             | Self::UnknownPort { span, .. }
             | Self::DuplicatePortConn { span, .. }
             | Self::TooManyPositionalPorts { span, .. }

@@ -45,7 +45,7 @@ pub(crate) struct ParamSig {
 ///
 /// Built from the module header AST. Independent of who instantiates the module.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ModuleSig {
+pub(crate) struct DesignUnitSig {
     pub(crate) name: SmolStr,
     pub(crate) ports: Box<[PortSig]>,
     pub(crate) params: Box<[ParamSig]>,
@@ -53,7 +53,7 @@ pub(crate) struct ModuleSig {
     param_index: HashMap<SmolStr, u32>,
 }
 
-impl ModuleSig {
+impl DesignUnitSig {
     pub(crate) fn new(name: SmolStr, ports: Vec<PortSig>, params: Vec<ParamSig>) -> Self {
         let port_index = ports
             .iter()

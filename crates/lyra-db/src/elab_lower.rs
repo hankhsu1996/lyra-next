@@ -8,13 +8,13 @@ use smol_str::SmolStr;
 
 use crate::elab_queries::{TopModule, elaborate_top};
 use crate::elaboration::ElabDiag;
-use crate::module_sig::ModuleSig;
+use crate::module_sig::DesignUnitSig;
 use crate::pipeline::preprocess_file;
 use crate::{CompilationUnit, source_file_by_id};
 
 pub(crate) fn resolve_port_connections(
     port_list: &lyra_ast::InstancePortList,
-    sig: &ModuleSig,
+    sig: &DesignUnitSig,
     module_name: &SmolStr,
     file_id: FileId,
     inst_range: TextRange,
@@ -50,7 +50,7 @@ pub(crate) fn resolve_port_connections(
 
 fn resolve_named_ports(
     ports: &[lyra_ast::InstancePort],
-    sig: &ModuleSig,
+    sig: &DesignUnitSig,
     module_name: &SmolStr,
     file_id: FileId,
     inst_span: Span,
@@ -103,7 +103,7 @@ fn resolve_named_ports(
 
 fn resolve_positional_ports(
     ports: &[lyra_ast::InstancePort],
-    sig: &ModuleSig,
+    sig: &DesignUnitSig,
     module_name: &SmolStr,
     inst_span: Span,
     diags: &mut Vec<ElabDiag>,
@@ -175,7 +175,7 @@ fn elab_diag_code_msg(
     let e = Severity::Error;
     let n = |d: &ElabDiag| match d {
         ElabDiag::UnresolvedModuleInst { name, .. }
-        | ElabDiag::NotAModule { name, .. }
+        | ElabDiag::NotInstantiable { name, .. }
         | ElabDiag::UnknownParam { name, .. }
         | ElabDiag::ParamNotConst { name, .. }
         | ElabDiag::DuplicateParamOverride { name, .. } => name.clone(),
@@ -188,10 +188,10 @@ fn elab_diag_code_msg(
             C::UNRESOLVED_MODULE_INST,
             Message::new(M::UnresolvedModuleInst, vec![Arg::Name(n(diag))]),
         ),
-        ElabDiag::NotAModule { .. } => (
+        ElabDiag::NotInstantiable { .. } => (
             e,
-            C::NOT_A_MODULE,
-            Message::new(M::NotAModule, vec![Arg::Name(n(diag))]),
+            C::NOT_INSTANTIABLE,
+            Message::new(M::NotInstantiable, vec![Arg::Name(n(diag))]),
         ),
         ElabDiag::UnknownPort { port, module, .. } => (
             e,
