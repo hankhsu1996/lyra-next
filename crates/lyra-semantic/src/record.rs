@@ -4,7 +4,9 @@ use lyra_parser::SyntaxNode;
 use lyra_source::{FileId, Span};
 use smol_str::SmolStr;
 
+use crate::global_index::DefinitionKind;
 use crate::scopes::ScopeId;
+use crate::symbols::GlobalDefId;
 use crate::type_extract::extract_base_ty_from_typespec;
 use crate::types::Ty;
 
@@ -168,6 +170,29 @@ pub enum PortDirection {
     Output,
     Inout,
     Ref,
+}
+
+/// Typed identity for an interface definition.
+///
+/// Field is private. Construction requires proving the `GlobalDefId`
+/// refers to an interface (via `DefinitionKind` check).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct InterfaceDefId(GlobalDefId);
+
+impl InterfaceDefId {
+    /// Construct from a `(GlobalDefId, DefinitionKind)` pair.
+    /// Returns `None` if the kind is not `Interface`.
+    pub fn from_pair(def: GlobalDefId, kind: DefinitionKind) -> Option<Self> {
+        match kind {
+            DefinitionKind::Interface => Some(Self(def)),
+            _ => None,
+        }
+    }
+
+    /// Unwrap to the underlying `GlobalDefId`.
+    pub fn global_def(self) -> GlobalDefId {
+        self.0
+    }
 }
 
 // SymbolOrigin: binding from symbol to its type source

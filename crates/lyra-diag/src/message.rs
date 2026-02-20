@@ -26,7 +26,7 @@ pub enum MessageId {
     UnsupportedTaggedUnion,
     // Elaboration messages
     UnresolvedModuleInst,
-    NotAModule,
+    NotInstantiable,
     UnknownPort,
     DuplicatePortConn,
     TooManyPositionalPorts,
@@ -176,7 +176,9 @@ fn render_elab_message(msg: &Message) -> String {
     let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
     match msg.id {
         MessageId::UnresolvedModuleInst => format!("module `{}` not found", name()),
-        MessageId::NotAModule => format!("`{}` is not a module", name()),
+        MessageId::NotInstantiable => {
+            format!("`{}` is not an instantiable design unit", name())
+        }
         MessageId::UnknownPort => {
             let port = name();
             let module = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");

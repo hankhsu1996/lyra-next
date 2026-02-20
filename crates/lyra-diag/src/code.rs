@@ -67,7 +67,7 @@ impl DiagnosticCode {
         namespace: "lyra.elab",
         number: 1,
     };
-    pub const NOT_A_MODULE: Self = Self {
+    pub const NOT_INSTANTIABLE: Self = Self {
         namespace: "lyra.elab",
         number: 2,
     };

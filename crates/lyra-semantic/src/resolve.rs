@@ -492,6 +492,19 @@ fn resolve_simple(
             WildcardResult::NotFound => {}
         }
     }
+
+    // For type-position lookups, fall back to the definition namespace.
+    // Interface names used as types (e.g. `my_bus b;`) live in the
+    // definition namespace per IEEE 1800 section 3.13(a).
+    if matches!(expected, ExpectedNs::TypeThenValue)
+        && let Some((def_id, _)) = ctx.global.resolve_definition(name)
+    {
+        return CoreResolveResult::Resolved(CoreResolution::Global {
+            decl: def_id,
+            namespace: Namespace::Definition,
+        });
+    }
+
     CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
 }
 
