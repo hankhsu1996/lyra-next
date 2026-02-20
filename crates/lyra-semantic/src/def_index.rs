@@ -48,6 +48,7 @@ pub struct DefIndex {
     pub decl_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
     pub enum_defs: Box<[EnumDef]>,
     pub struct_defs: Box<[StructDef]>,
+    pub export_decls: Box<[ExportEntry]>,
     pub diagnostics: Box<[SemanticDiag]>,
 }
 
@@ -140,6 +141,30 @@ pub struct Import {
 pub enum ImportName {
     Explicit(SmolStr),
     Wildcard,
+}
+
+/// A package export declaration entry (LRM 26.6).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ExportEntry {
+    /// `export Pkg::name;`
+    Explicit { package: SmolStr, name: SmolStr },
+    /// `export Pkg::*;`
+    PackageWildcard { package: SmolStr },
+    /// `export *::*;`
+    AllWildcard,
+}
+
+/// Compilation-unit-level environment: implicit imports visible in all files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompilationUnitEnv {
+    pub implicit_imports: Box<[ImplicitImport]>,
+}
+
+/// An implicit import added at the compilation-unit level.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplicitImport {
+    pub package: SmolStr,
+    pub name: ImportName,
 }
 
 /// Definition-namespace and package names exported to compilation-unit namespace.

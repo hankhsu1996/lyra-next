@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lyra_source::TextRange;
 use smol_str::SmolStr;
 
-use crate::def_index::{DefIndex, ExpectedNs, ImportName, NamePath};
+use crate::def_index::{CompilationUnitEnv, DefIndex, ExpectedNs, ImportName, NamePath};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
 use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
 use crate::name_graph::NameGraph;
@@ -29,6 +29,7 @@ pub fn build_resolve_core(
     graph: &NameGraph,
     global: &GlobalDefIndex,
     pkg_scope: &PackageScopeIndex,
+    cu_env: &CompilationUnitEnv,
 ) -> CoreResolveOutput {
     // Validate imports first
     let mut import_errors = Vec::new();
@@ -63,6 +64,7 @@ pub fn build_resolve_core(
                 graph,
                 global,
                 pkg_scope,
+                cu_env,
                 entry.scope,
                 name,
                 entry.expected_ns,
@@ -90,6 +92,7 @@ fn resolve_simple(
     graph: &NameGraph,
     global: &GlobalDefIndex,
     pkg_scope: &PackageScopeIndex,
+    cu_env: &CompilationUnitEnv,
     scope: ScopeId,
     name: &str,
     expected: ExpectedNs,
@@ -120,6 +123,18 @@ fn resolve_simple(
         }
         // 3. Wildcard imports in scope chain
         match resolve_via_wildcard_import(graph, pkg_scope, scope, name, ns) {
+            WildcardResult::Found(resolution) => {
+                return CoreResolveResult::Resolved(resolution);
+            }
+            WildcardResult::Ambiguous(candidates) => {
+                return CoreResolveResult::Unresolved(UnresolvedReason::AmbiguousWildcardImport {
+                    candidates,
+                });
+            }
+            WildcardResult::NotFound => {}
+        }
+        // 4. CU-level implicit imports (e.g., std)
+        match resolve_via_implicit_import(pkg_scope, cu_env, name, ns) {
             WildcardResult::Found(resolution) => {
                 return CoreResolveResult::Resolved(resolution);
             }
@@ -246,6 +261,53 @@ fn resolve_via_wildcard_import(
             });
         }
         current = graph.scopes.get(sid).parent;
+    }
+    WildcardResult::NotFound
+}
+
+fn resolve_via_implicit_import(
+    pkg_scope: &PackageScopeIndex,
+    cu_env: &CompilationUnitEnv,
+    name: &str,
+    ns: Namespace,
+) -> WildcardResult {
+    let mut found: Option<(GlobalDefId, SmolStr)> = None;
+    let mut ambiguous_pkgs: Vec<SmolStr> = Vec::new();
+
+    for imp in &*cu_env.implicit_imports {
+        if imp.name == ImportName::Wildcard {
+            if let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns) {
+                if let Some((existing_id, _)) = &found {
+                    if *existing_id != def_id {
+                        if ambiguous_pkgs.is_empty() {
+                            ambiguous_pkgs
+                                .push(found.as_ref().map(|(_, p)| p.clone()).unwrap_or_default());
+                        }
+                        ambiguous_pkgs.push(imp.package.clone());
+                    }
+                } else {
+                    found = Some((def_id, imp.package.clone()));
+                }
+            }
+        } else if let ImportName::Explicit(ref member) = imp.name
+            && member.as_str() == name
+            && let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns)
+        {
+            return WildcardResult::Found(CoreResolution::Global {
+                decl: def_id,
+                namespace: ns,
+            });
+        }
+    }
+
+    if !ambiguous_pkgs.is_empty() {
+        return WildcardResult::Ambiguous(ambiguous_pkgs.into_boxed_slice());
+    }
+    if let Some((def_id, _)) = found {
+        return WildcardResult::Found(CoreResolution::Global {
+            decl: def_id,
+            namespace: ns,
+        });
     }
     WildcardResult::NotFound
 }

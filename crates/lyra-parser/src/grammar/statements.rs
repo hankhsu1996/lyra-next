@@ -31,7 +31,7 @@ pub(crate) fn stmt(p: &mut Parser) {
         SyntaxKind::RepeatKw => repeat_stmt(p),
         SyntaxKind::ForeverKw => forever_stmt(p),
         // Local declaration in procedural context
-        k if declarations::is_data_type_keyword(k) => declarations::var_decl(p),
+        _ if declarations::at_unambiguous_data_decl_start(p) => declarations::var_decl(p),
         SyntaxKind::Semicolon => {
             // Null statement
             p.bump();

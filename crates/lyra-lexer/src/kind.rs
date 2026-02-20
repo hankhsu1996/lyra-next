@@ -446,6 +446,8 @@ pub enum SyntaxKind {
     TfPortDecl,
     AssignmentPatternItem,
     NewExpr,
+    ExportDecl,
+    ExportItem,
 
     #[doc(hidden)]
     __Last,

@@ -1,7 +1,7 @@
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
-use crate::def_index::{DefIndex, ExpectedNs, ImportName, NamePath};
+use crate::def_index::{DefIndex, ExpectedNs, ExportEntry, ImportName, NamePath};
 use crate::scopes::{ScopeId, ScopeTree, SymbolNameLookup};
 use crate::symbols::{SymbolId, SymbolKind};
 
@@ -20,6 +20,7 @@ pub struct NameGraph {
     pub(crate) scopes: ScopeTree,
     pub(crate) use_entries: Box<[UseEntry]>,
     pub(crate) imports: Box<[ImportEntry]>,
+    pub(crate) export_decls: Box<[ExportEntry]>,
 }
 
 /// Offset-independent use-site key.
@@ -32,10 +33,10 @@ pub(crate) struct UseEntry {
 
 /// Offset-independent import entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ImportEntry {
-    pub(crate) package: SmolStr,
-    pub(crate) name: ImportName,
-    pub(crate) scope: ScopeId,
+pub struct ImportEntry {
+    pub package: SmolStr,
+    pub name: ImportName,
+    pub scope: ScopeId,
 }
 
 impl SymbolNameLookup for NameGraph {
@@ -45,6 +46,16 @@ impl SymbolNameLookup for NameGraph {
 }
 
 impl NameGraph {
+    /// Access the import entries.
+    pub fn imports(&self) -> &[ImportEntry] {
+        &self.imports
+    }
+
+    /// Access the export declarations.
+    pub fn export_decls(&self) -> &[ExportEntry] {
+        &self.export_decls
+    }
+
     /// Project offset-independent facts from a `DefIndex`.
     pub fn from_def_index(def: &DefIndex) -> Self {
         let symbol_names: Box<[SmolStr]> = def
@@ -82,6 +93,7 @@ impl NameGraph {
             scopes: def.scopes.clone(),
             use_entries,
             imports,
+            export_decls: def.export_decls.clone(),
         }
     }
 }

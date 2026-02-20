@@ -1,6 +1,6 @@
-use lyra_semantic::def_index::DefIndex;
+use lyra_semantic::def_index::{CompilationUnitEnv, DefIndex, ImplicitImport, ImportName};
 use lyra_semantic::global_index::{
-    DefinitionKind, GlobalDefIndex, PackageScope, PackageScopeIndex,
+    DefinitionKind, GlobalDefIndex, PackageLocalFacts, PackageScope, PackageScopeIndex,
 };
 use lyra_semantic::name_graph::NameGraph;
 use lyra_semantic::resolve_index::{CoreResolveOutput, ResolveIndex};
@@ -69,12 +69,14 @@ pub fn global_def_index(db: &dyn salsa::Database, unit: CompilationUnit) -> Glob
 /// Build the package scope index for a compilation unit (Salsa-cached).
 ///
 /// Extracts symbols from package scopes in all files, split by namespace.
+/// Resolves export declarations to include re-exported symbols.
 #[salsa::tracked(return_ref)]
 pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> PackageScopeIndex {
-    let mut packages = Vec::new();
+    // Phase 1: Collect local facts for each package
+    let mut all_facts: Vec<PackageLocalFacts> = Vec::new();
     for file in unit.files(db) {
         let def = def_index_file(db, *file);
-        // Find package symbols and their scopes
+        let graph = name_graph_file(db, *file);
         for &sym_id in &*def.exports.packages {
             let pkg_sym = def.symbols.get(sym_id);
             let pkg_scope = pkg_sym.scope;
@@ -86,7 +88,6 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
             let mut value_ns: Vec<(SmolStr, GlobalDefId)> = Vec::new();
             let mut type_ns: Vec<(SmolStr, GlobalDefId)> = Vec::new();
 
-            // Collect Value-namespace symbols from this package scope
             for &child_sym_id in &*scope_data.value_ns {
                 let child_sym = def.symbols.get(child_sym_id);
                 if let Some(&Some(ast_id)) = def.symbol_to_decl.get(child_sym_id.index()) {
@@ -94,7 +95,6 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
                 }
             }
 
-            // Collect Type-namespace symbols
             for &child_sym_id in &*scope_data.type_ns {
                 let child_sym = def.symbols.get(child_sym_id);
                 if let Some(&Some(ast_id)) = def.symbol_to_decl.get(child_sym_id.index()) {
@@ -105,14 +105,98 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
             value_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
             type_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-            packages.push(PackageScope {
+            // Collect import package names for *::* export resolution
+            let import_packages: Vec<SmolStr> = graph
+                .imports()
+                .iter()
+                .filter(|imp| imp.scope == pkg_scope)
+                .map(|imp| imp.package.clone())
+                .collect();
+            let import_names = graph
+                .imports()
+                .iter()
+                .filter(|imp| imp.scope == pkg_scope)
+                .map(|imp| imp.name.clone())
+                .collect();
+
+            all_facts.push(PackageLocalFacts {
                 name: pkg_sym.name.clone(),
-                value_ns: value_ns.into_boxed_slice(),
-                type_ns: type_ns.into_boxed_slice(),
+                value_ns,
+                type_ns,
+                imports: import_names,
+                import_packages,
+                export_decls: graph.export_decls().to_vec(),
             });
         }
     }
+
+    // Phase 2: Build initial package scopes (local defs only, no export resolution)
+    let mut base_scopes: Vec<PackageScope> = all_facts
+        .iter()
+        .map(|f| PackageScope {
+            name: f.name.clone(),
+            value_ns: f.value_ns.clone().into_boxed_slice(),
+            type_ns: f.type_ns.clone().into_boxed_slice(),
+        })
+        .collect();
+    base_scopes.sort_by(|a, b| a.name.cmp(&b.name));
+
+    // Phase 3: Resolve exports for packages that have export declarations
+    let has_exports = all_facts.iter().any(|f| !f.export_decls.is_empty());
+    let mut packages = if has_exports {
+        all_facts
+            .iter()
+            .map(|facts| {
+                if facts.export_decls.is_empty() {
+                    PackageScope {
+                        name: facts.name.clone(),
+                        value_ns: facts.value_ns.clone().into_boxed_slice(),
+                        type_ns: facts.type_ns.clone().into_boxed_slice(),
+                    }
+                } else {
+                    lyra_semantic::global_index::compute_public_surface(facts, &|dep_name| {
+                        base_scopes
+                            .binary_search_by(|p| p.name.as_str().cmp(dep_name))
+                            .ok()
+                            .map(|idx| base_scopes[idx].clone())
+                    })
+                }
+            })
+            .collect()
+    } else {
+        base_scopes
+    };
+
+    // Phase 4: Add builtin std package if no user-defined std exists
+    let has_std = packages.iter().any(|p| p.name == "std");
+    if !has_std {
+        packages.push(PackageScope {
+            name: SmolStr::new_static("std"),
+            value_ns: Box::new([]),
+            type_ns: Box::new([]),
+        });
+    }
+
     lyra_semantic::global_index::build_package_scope_index(packages)
+}
+
+/// Build the compilation-unit environment (Salsa-cached).
+///
+/// Contains implicit imports (e.g., `import std::*`) that are visible
+/// in all files within the compilation unit. User-defined `package std`
+/// takes precedence over the builtin empty surface.
+#[salsa::tracked(return_ref)]
+pub fn compilation_unit_env(
+    _db: &dyn salsa::Database,
+    _unit: CompilationUnit,
+) -> CompilationUnitEnv {
+    CompilationUnitEnv {
+        implicit_imports: vec![ImplicitImport {
+            package: SmolStr::new_static("std"),
+            name: ImportName::Wildcard,
+        }]
+        .into(),
+    }
 }
 
 /// Resolve all use-sites using only offset-independent data (Salsa-cached).
@@ -129,7 +213,8 @@ pub fn resolve_core_file(
     let graph = name_graph_file(db, file);
     let global = global_def_index(db, unit);
     let pkg_scope = package_scope_index(db, unit);
-    lyra_semantic::build_resolve_core(graph, global, pkg_scope)
+    let cu_env = compilation_unit_env(db, unit);
+    lyra_semantic::build_resolve_core(graph, global, pkg_scope, cu_env)
 }
 
 /// Build per-file resolution index (Salsa-cached).
