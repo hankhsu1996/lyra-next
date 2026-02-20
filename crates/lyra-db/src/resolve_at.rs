@@ -158,7 +158,7 @@ impl TypeAtResult {
 /// Lossless type formatter with DB-powered name enrichment.
 ///
 /// `Ty::pretty()` is always lossless but cannot resolve aggregate names
-/// (enum/struct) because `lyra-semantic` has no DB access. `TyFmt` adds
+/// (enum/record) because `lyra-semantic` has no DB access. `TyFmt` adds
 /// name lookup by querying def indexes through Salsa, producing output
 /// like `enum color_t` or `struct packed pixel_t` instead of bare keywords.
 pub(crate) struct TyFmt<'db> {
@@ -188,7 +188,7 @@ impl<'db> TyFmt<'db> {
         let (base, dims) = collect_array_dims(ty);
         let base_str = match base {
             Ty::Enum(id) => self.enum_name(id),
-            Ty::Struct(id) => self.struct_name(id),
+            Ty::Record(id) => self.record_name(id),
             other => other.pretty().to_string(),
         };
 
@@ -203,7 +203,7 @@ impl<'db> TyFmt<'db> {
         SmolStr::new(s)
     }
 
-    fn enum_name(&self, id: &lyra_semantic::aggregate::EnumId) -> String {
+    fn enum_name(&self, id: &lyra_semantic::record::EnumId) -> String {
         let Some(src) = source_file_by_id(self.db, self.unit, id.file) else {
             return "enum".to_string();
         };
@@ -221,24 +221,25 @@ impl<'db> TyFmt<'db> {
         }
     }
 
-    fn struct_name(&self, id: &lyra_semantic::aggregate::StructId) -> String {
+    fn record_name(&self, id: &lyra_semantic::record::RecordId) -> String {
+        use lyra_semantic::record::{Packing, RecordKind};
+
         let Some(src) = source_file_by_id(self.db, self.unit, id.file) else {
             return "struct".to_string();
         };
         let def = def_index_file(self.db, src);
         let info = def
-            .struct_defs
+            .record_defs
             .iter()
             .find(|d| d.owner == id.owner && d.ordinal == id.ordinal);
         match info {
             Some(d) => {
                 let mut s = String::new();
-                if d.is_union {
-                    s.push_str("union");
-                } else {
-                    s.push_str("struct");
+                match d.kind {
+                    RecordKind::Union | RecordKind::TaggedUnion => s.push_str("union"),
+                    RecordKind::Struct => s.push_str("struct"),
                 }
-                if d.packed {
+                if d.packing == Packing::Packed {
                     s.push_str(" packed");
                 }
                 if let Some(ref n) = d.name {

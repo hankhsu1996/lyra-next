@@ -4,10 +4,10 @@ use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
-use crate::aggregate::{
-    EnumDef, EnumDefIdx, EnumId, ModportDef, ModportDefId, StructDef, StructDefIdx, StructId,
-};
 use crate::diagnostic::SemanticDiag;
+use crate::record::{
+    EnumDef, EnumDefIdx, EnumId, ModportDef, ModportDefId, RecordDef, RecordDefIdx, RecordId,
+};
 use crate::scopes::{ScopeId, ScopeTree};
 use crate::symbols::{Namespace, SymbolId, SymbolTable};
 
@@ -49,7 +49,7 @@ pub struct DefIndex {
     /// Key absent = not a parameter declarator (not tracked).
     pub decl_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
     pub enum_defs: Box<[EnumDef]>,
-    pub struct_defs: Box<[StructDef]>,
+    pub record_defs: Box<[RecordDef]>,
     pub modport_defs: Box<[ModportDef]>,
     pub modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportEntry]>,
@@ -61,8 +61,8 @@ impl DefIndex {
         &self.enum_defs[idx.0 as usize]
     }
 
-    pub fn struct_def(&self, idx: StructDefIdx) -> &StructDef {
-        &self.struct_defs[idx.0 as usize]
+    pub fn record_def(&self, idx: RecordDefIdx) -> &RecordDef {
+        &self.record_defs[idx.0 as usize]
     }
 
     pub fn enum_id(&self, idx: EnumDefIdx) -> EnumId {
@@ -83,9 +83,9 @@ impl DefIndex {
         self.modport_defs.iter().find(|d| d.id == *id)
     }
 
-    pub fn struct_id(&self, idx: StructDefIdx) -> StructId {
-        let def = self.struct_def(idx);
-        StructId {
+    pub fn record_id(&self, idx: RecordDefIdx) -> RecordId {
+        let def = self.record_def(idx);
+        RecordId {
             file: self.file,
             owner: def.owner.clone(),
             ordinal: def.ordinal,

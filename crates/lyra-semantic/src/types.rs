@@ -2,7 +2,7 @@ use lyra_ast::ErasedAstId;
 use smallvec::SmallVec;
 use smol_str::SmolStr;
 
-use crate::aggregate::{EnumId, StructId};
+use crate::record::{EnumId, RecordId};
 
 /// A constant integer value, used for dimension bounds and widths.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -171,7 +171,7 @@ pub enum Ty {
     Integral(Integral),
     Real(RealKw),
     Enum(EnumId),
-    Struct(StructId),
+    Record(RecordId),
     Array { elem: Box<Ty>, dim: UnpackedDim },
     String,
     Chandle,
@@ -268,8 +268,10 @@ impl Ty {
     /// Human-readable type representation (pure, no DB access).
     ///
     /// Always lossless: includes all packed dims, unpacked dims, and
-    /// signedness overrides. Enum/struct variants print as bare keywords
-    /// without names; use `TyFmt` in `lyra-db` for name-enriched output.
+    /// signedness overrides. Enum/record variants print as SV keywords
+    /// without names (`Record` falls back to `"struct"`); use `TyFmt`
+    /// in `lyra-db` for name-enriched output that distinguishes
+    /// struct vs union.
     pub fn pretty(&self) -> SmolStr {
         match self {
             Self::Array { .. } => {
@@ -284,7 +286,7 @@ impl Ty {
             Self::Integral(i) => i.pretty(),
             Self::Real(r) => SmolStr::new_static(r.keyword_str()),
             Self::Enum(_) => SmolStr::new_static("enum"),
-            Self::Struct(_) => SmolStr::new_static("struct"),
+            Self::Record(_) => SmolStr::new_static("struct"),
             Self::String => SmolStr::new_static("string"),
             Self::Chandle => SmolStr::new_static("chandle"),
             Self::Event => SmolStr::new_static("event"),

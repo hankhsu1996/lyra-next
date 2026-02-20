@@ -12,8 +12,8 @@ use crate::callable_queries::{CallableRef, callable_signature};
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::module_sig::CallableKind as DbCallableKind;
 use crate::pipeline::{ast_id_map, parse_file};
+use crate::record_queries::{RecordRef, record_sem};
 use crate::semantic::{def_index_file, resolve_index_file};
-use crate::struct_queries::{StructRef, struct_sem};
 use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, source_file_by_id};
 
@@ -208,13 +208,13 @@ impl InferCtx for DbInferCtx<'_> {
 
     fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError> {
         match ty {
-            Ty::Struct(id) => {
-                let sref = StructRef::new(self.db, self.unit, id.clone());
-                let sem = struct_sem(self.db, sref);
+            Ty::Record(id) => {
+                let rref = RecordRef::new(self.db, self.unit, id.clone());
+                let sem = record_sem(self.db, rref);
                 match sem.field_by_name(member_name) {
                     Some((idx, field)) => Ok(MemberInfo {
                         ty: field.ty.clone(),
-                        kind: MemberKind::StructField { index: idx },
+                        kind: MemberKind::Field { index: idx },
                     }),
                     None => Err(MemberLookupError::UnknownMember),
                 }

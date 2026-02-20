@@ -10,14 +10,15 @@ use lyra_parser::{Parse, SyntaxNode};
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
-use crate::aggregate::{
-    EnumDef, EnumDefIdx, EnumVariant, ModportDef, ModportDefId, ModportEntry, PortDirection,
-    StructDef, StructDefIdx, StructField, TypeOrigin, TypeRef, extract_typeref_from_typespec,
-};
 use crate::def_index::{
     DefIndex, ExpectedNs, ExportEntry, Exports, Import, ImportName, NamePath, UseSite,
 };
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::record::{
+    EnumDef, EnumDefIdx, EnumVariant, ModportDef, ModportDefId, ModportEntry, Packing,
+    PortDirection, RecordDef, RecordDefIdx, RecordField, RecordKind, TypeOrigin, TypeRef,
+    extract_typeref_from_typespec,
+};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
 use crate::types::Ty;
@@ -62,7 +63,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         symbol_to_decl: ctx.symbol_to_decl.into_boxed_slice(),
         decl_to_init_expr: ctx.decl_to_init_expr,
         enum_defs: ctx.enum_defs.into_boxed_slice(),
-        struct_defs: ctx.struct_defs.into_boxed_slice(),
+        record_defs: ctx.record_defs.into_boxed_slice(),
         modport_defs: ctx.modport_defs.into_boxed_slice(),
         modport_name_map: ctx.modport_name_map,
         export_decls: ctx.export_decls.into_boxed_slice(),
@@ -108,7 +109,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) use_sites: Vec<UseSite>,
     pub(crate) imports: Vec<Import>,
     pub(crate) enum_defs: Vec<EnumDef>,
-    pub(crate) struct_defs: Vec<StructDef>,
+    pub(crate) record_defs: Vec<RecordDef>,
     pub(crate) modport_defs: Vec<ModportDef>,
     pub(crate) modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
     pub(crate) export_decls: Vec<ExportEntry>,
@@ -116,7 +117,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) current_iface_def_id: Option<crate::symbols::GlobalDefId>,
     pub(crate) modport_ordinal: u32,
     pub(crate) enum_ordinals: HashMap<Option<SmolStr>, u32>,
-    pub(crate) struct_ordinals: HashMap<Option<SmolStr>, u32>,
+    pub(crate) record_ordinals: HashMap<Option<SmolStr>, u32>,
 }
 
 impl<'a> DefContext<'a> {
@@ -134,7 +135,7 @@ impl<'a> DefContext<'a> {
             use_sites: Vec::new(),
             imports: Vec::new(),
             enum_defs: Vec::new(),
-            struct_defs: Vec::new(),
+            record_defs: Vec::new(),
             modport_defs: Vec::new(),
             modport_name_map: HashMap::new(),
             export_decls: Vec::new(),
@@ -142,7 +143,7 @@ impl<'a> DefContext<'a> {
             current_iface_def_id: None,
             modport_ordinal: 0,
             enum_ordinals: HashMap::new(),
-            struct_ordinals: HashMap::new(),
+            record_ordinals: HashMap::new(),
         }
     }
 
@@ -915,8 +916,8 @@ fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) 
             TypeOrigin::Enum(idx) => {
                 ctx.enum_defs[idx.0 as usize].name = Some(typedef_name.clone());
             }
-            TypeOrigin::Struct(idx) => {
-                ctx.struct_defs[idx.0 as usize].name = Some(typedef_name.clone());
+            TypeOrigin::Record(idx) => {
+                ctx.record_defs[idx.0 as usize].name = Some(typedef_name.clone());
             }
             TypeOrigin::TypeSpec => {}
         }
@@ -952,7 +953,7 @@ fn detect_aggregate_type(
                 } else if ts_child.kind() == SyntaxKind::StructType
                     && let Some(st) = StructType::cast(ts_child)
                 {
-                    return TypeOrigin::Struct(collect_struct_def(ctx, &st, scope));
+                    return TypeOrigin::Record(collect_record_def(ctx, &st, scope));
                 }
             }
         }
@@ -1001,19 +1002,27 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, _scope: Scop
     idx
 }
 
-fn collect_struct_def(
+fn collect_record_def(
     ctx: &mut DefContext<'_>,
     struct_type: &StructType,
     scope: ScopeId,
-) -> StructDefIdx {
+) -> RecordDefIdx {
     let owner = ctx.current_owner.clone();
-    let ordinal = ctx.struct_ordinals.entry(owner.clone()).or_insert(0);
+    let ordinal = ctx.record_ordinals.entry(owner.clone()).or_insert(0);
     let ord = *ordinal;
     *ordinal += 1;
-    let idx = StructDefIdx(ctx.struct_defs.len() as u32);
+    let idx = RecordDefIdx(ctx.record_defs.len() as u32);
 
-    let packed = struct_type.is_packed();
-    let is_union = struct_type.is_union();
+    let kind = if struct_type.is_union() {
+        RecordKind::Union
+    } else {
+        RecordKind::Struct
+    };
+    let packing = if struct_type.is_packed() {
+        Packing::Packed
+    } else {
+        Packing::Unpacked
+    };
 
     // Extract fields from StructMember children
     let mut fields = Vec::new();
@@ -1028,7 +1037,7 @@ fn collect_struct_def(
         };
         for decl in member.declarators() {
             if let Some(name_tok) = decl.name() {
-                fields.push(StructField {
+                fields.push(RecordField {
                     name: SmolStr::new(name_tok.text()),
                     ty: ty.clone(),
                 });
@@ -1036,12 +1045,12 @@ fn collect_struct_def(
         }
     }
 
-    ctx.struct_defs.push(StructDef {
+    ctx.record_defs.push(RecordDef {
         name: None,
         owner,
         ordinal: ord,
-        packed,
-        is_union,
+        kind,
+        packing,
         scope,
         fields: fields.into_boxed_slice(),
     });

@@ -1,5 +1,5 @@
 use lyra_lexer::SyntaxKind;
-use lyra_semantic::aggregate::TypeOrigin;
+use lyra_semantic::record::TypeOrigin;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{ConstEvalError, ConstInt, Ty, UnpackedDim};
 
@@ -67,9 +67,9 @@ pub fn type_of_symbol_raw<'db>(
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
-        TypeOrigin::Struct(idx) => {
-            let id = def.struct_id(idx);
-            let ty = Ty::Struct(id);
+        TypeOrigin::Record(idx) => {
+            let id = def.record_id(idx);
+            let ty = Ty::Record(id);
             let parse = parse_file(db, source_file);
             let map = ast_id_map(db, source_file);
             let decl_ast_id = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o);

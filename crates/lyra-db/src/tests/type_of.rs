@@ -622,13 +622,13 @@ fn type_of_typedef_struct_packed() {
     let unit = single_file_unit(&db, file);
     let td = get_type(&db, file, unit, "pkt_t");
     assert!(
-        matches!(td, SymbolType::TypeAlias(Ty::Struct(_))),
-        "typedef struct should be TypeAlias(Struct), got {td:?}"
+        matches!(td, SymbolType::TypeAlias(Ty::Record(_))),
+        "typedef struct should be TypeAlias(Record), got {td:?}"
     );
     let var = get_type(&db, file, unit, "y");
     assert!(
-        matches!(var, SymbolType::Value(Ty::Struct(_))),
-        "variable of typedef struct should be Value(Struct), got {var:?}"
+        matches!(var, SymbolType::Value(Ty::Record(_))),
+        "variable of typedef struct should be Value(Record), got {var:?}"
     );
 }
 
@@ -655,8 +655,8 @@ fn type_of_inline_struct() {
     let unit = single_file_unit(&db, file);
     let var = get_type(&db, file, unit, "point");
     assert!(
-        matches!(var, SymbolType::Value(Ty::Struct(_))),
-        "inline struct variable should be Value(Struct), got {var:?}"
+        matches!(var, SymbolType::Value(Ty::Record(_))),
+        "inline struct variable should be Value(Record), got {var:?}"
     );
 }
 
@@ -731,15 +731,21 @@ fn struct_def_fields_stable() {
         "module m; typedef struct packed { logic [7:0] data; logic valid; } pkt_t; endmodule",
     );
     let def = def_index_file(&db, file);
-    assert_eq!(def.struct_defs.len(), 1);
-    let names: Vec<&str> = def.struct_defs[0]
+    assert_eq!(def.record_defs.len(), 1);
+    let names: Vec<&str> = def.record_defs[0]
         .fields
         .iter()
         .map(|f| f.name.as_str())
         .collect();
     assert_eq!(names, vec!["data", "valid"]);
-    assert!(def.struct_defs[0].packed);
-    assert!(!def.struct_defs[0].is_union);
+    assert_eq!(
+        def.record_defs[0].packing,
+        lyra_semantic::record::Packing::Packed
+    );
+    assert_eq!(
+        def.record_defs[0].kind,
+        lyra_semantic::record::RecordKind::Struct
+    );
 }
 
 #[test]
