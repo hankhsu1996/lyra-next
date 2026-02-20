@@ -316,6 +316,10 @@ impl StructType {
     pub fn is_union(&self) -> bool {
         support::token(&self.syntax, SyntaxKind::UnionKw).is_some()
     }
+
+    pub fn is_tagged(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::TaggedKw).is_some()
+    }
 }
 
 impl TypeSpec {

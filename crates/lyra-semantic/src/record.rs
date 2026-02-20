@@ -171,6 +171,7 @@ pub enum TypeOrigin {
     TypeSpec,
     Enum(EnumDefIdx),
     Record(RecordDefIdx),
+    Error,
 }
 
 // Extract a TypeRef from a TypeSpec syntax node.

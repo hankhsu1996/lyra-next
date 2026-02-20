@@ -41,8 +41,8 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
     ctx.export_packages
         .sort_by(|a, b| symbols.get(*a).name.cmp(&symbols.get(*b).name));
 
-    // Detect duplicate definitions within each scope, per namespace
-    let mut diagnostics = Vec::new();
+    // Collect diagnostics from builder + detect duplicates
+    let mut diagnostics = ctx.diagnostics;
     for scope_idx in 0..scopes.len() {
         let s = scopes.get(ScopeId(scope_idx as u32));
         detect_duplicates(&symbols, &s.value_ns, &mut diagnostics);
@@ -118,6 +118,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) modport_ordinal: u32,
     pub(crate) enum_ordinals: HashMap<Option<SmolStr>, u32>,
     pub(crate) record_ordinals: HashMap<Option<SmolStr>, u32>,
+    pub(crate) diagnostics: Vec<SemanticDiag>,
 }
 
 impl<'a> DefContext<'a> {
@@ -144,6 +145,7 @@ impl<'a> DefContext<'a> {
             modport_ordinal: 0,
             enum_ordinals: HashMap::new(),
             record_ordinals: HashMap::new(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -922,7 +924,7 @@ fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) 
             TypeOrigin::Record(idx) => {
                 ctx.record_defs[idx.0 as usize].name = Some(typedef_name.clone());
             }
-            TypeOrigin::TypeSpec => {}
+            TypeOrigin::TypeSpec | TypeOrigin::Error => {}
         }
         let sym_id = ctx.add_symbol_with_origin(
             typedef_name,
@@ -956,7 +958,10 @@ fn detect_aggregate_type(
                 } else if ts_child.kind() == SyntaxKind::StructType
                     && let Some(st) = StructType::cast(ts_child)
                 {
-                    return TypeOrigin::Record(collect_record_def(ctx, &st, scope));
+                    return match collect_record_def(ctx, &st, scope) {
+                        Some(idx) => TypeOrigin::Record(idx),
+                        None => TypeOrigin::Error,
+                    };
                 }
             }
         }
@@ -1009,7 +1014,21 @@ fn collect_record_def(
     ctx: &mut DefContext<'_>,
     struct_type: &StructType,
     scope: ScopeId,
-) -> RecordDefIdx {
+) -> Option<RecordDefIdx> {
+    if struct_type.is_union() && struct_type.is_tagged() {
+        let range = struct_type
+            .syntax()
+            .children_with_tokens()
+            .filter_map(lyra_parser::SyntaxElement::into_token)
+            .find(|tok| tok.kind() == SyntaxKind::TaggedKw)
+            .map_or_else(|| struct_type.text_range(), |tok| tok.text_range());
+        ctx.diagnostics.push(SemanticDiag {
+            kind: SemanticDiagKind::UnsupportedTaggedUnion,
+            range,
+        });
+        return None;
+    }
+
     let owner = ctx.current_owner.clone();
     let ordinal = ctx.record_ordinals.entry(owner.clone()).or_insert(0);
     let ord = *ordinal;
@@ -1057,7 +1076,7 @@ fn collect_record_def(
         scope,
         fields: fields.into_boxed_slice(),
     });
-    idx
+    Some(idx)
 }
 
 pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {

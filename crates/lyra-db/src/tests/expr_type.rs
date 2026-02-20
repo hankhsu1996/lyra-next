@@ -998,3 +998,79 @@ fn expr_type_struct_field_from_package() {
         ExprType::from_ty(&Ty::int()),
     );
 }
+
+// Union member access
+
+#[test]
+fn expr_type_union_member_access() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef union { int i; logic [7:0] b; } num_t;\n\
+         num_t u;\n\
+         parameter P = u.i;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_packed_union_member_access() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef union packed { logic [7:0] a; logic [7:0] b; } u_t;\n\
+         u_t u;\n\
+         parameter P = u.a;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
+}
+
+#[test]
+fn expr_type_union_nested_struct_member() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef struct { int x; } inner_t;\n\
+         typedef union { inner_t s; int i; } outer_t;\n\
+         outer_t u;\n\
+         parameter P = u.s.x;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_union_unknown_member() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef union { int i; } u_t;\n\
+         u_t u;\n\
+         parameter P = u.nonexistent;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::UnknownMember),
+    );
+}

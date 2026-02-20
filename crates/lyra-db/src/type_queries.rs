@@ -77,6 +77,9 @@ pub fn type_of_symbol_raw<'db>(
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
+        TypeOrigin::Error => {
+            return classify(Ty::Error, sym.kind);
+        }
         TypeOrigin::TypeSpec => {}
     }
 

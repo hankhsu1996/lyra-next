@@ -40,6 +40,7 @@ pub enum SemanticDiagKind {
     NotAType {
         name: SmolStr,
     },
+    UnsupportedTaggedUnion,
 }
 
 impl SemanticDiag {
@@ -70,6 +71,9 @@ impl SemanticDiag {
             }
             SemanticDiagKind::NotAType { name } => {
                 format!("`{name}` is not a type")
+            }
+            SemanticDiagKind::UnsupportedTaggedUnion => {
+                "tagged unions are not yet supported".to_string()
             }
         }
     }

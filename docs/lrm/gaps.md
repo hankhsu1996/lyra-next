@@ -4,6 +4,20 @@ Known gaps between LRM requirements and current engine capabilities. This is the
 
 When you discover a gap during `/lrm-add`, add an entry here. When you fix the gap and add the passing test, remove the entry. Both changes land in the same PR.
 
+## Chapter 7 -- Structures and Unions
+
+### 7.3.1: Soft packed unions
+
+The `soft` qualifier is not recognized by the parser. `SoftKw` is lexed but not handled in `struct_type()`. Blocked by: parser extension. Test: `lrm/ch07/soft_packed_union`.
+
+### 7.3.1: Packed union width/shape constraints
+
+Packed union members must satisfy LRM compatibility rules for packed widths. No width validation is performed. Blocked by: width computation on record types. Test: `lrm/ch07/packed_union_width`.
+
+### 7.3.2: Tagged unions
+
+The `tagged` qualifier is parsed and diagnosed as unsupported; the type resolves to error. Full support requires tagged expressions (11.9), pattern matching (12.6), tag tracking, and void members. `RecordKind::TaggedUnion` exists but is never constructed. Test: `lrm/ch07/tagged_union`.
+
 ## Chapter 26 -- Packages
 
 ### 26.3: Enum literal import semantics
