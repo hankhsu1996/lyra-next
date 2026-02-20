@@ -50,7 +50,8 @@ pub fn type_of_symbol_raw<'db>(
         | SymbolKind::Primitive
         | SymbolKind::Config
         | SymbolKind::Function
-        | SymbolKind::Task => return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
+        | SymbolKind::Task
+        | SymbolKind::Modport => return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
         _ => {}
     }
 

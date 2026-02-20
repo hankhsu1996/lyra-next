@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use lyra_ast::{
     AstIdMap, AstNode, ConfigDecl, EnumType, ExportDecl, ExportItem, FunctionDecl, InterfaceDecl,
-    ModuleInstantiation, NameRef, Port, PrimitiveDecl, ProgramDecl, QualifiedName, StructType,
-    TaskDecl, TfPortDecl, TypedefDecl,
+    ModportDecl, ModuleInstantiation, NameRef, Port, PrimitiveDecl, ProgramDecl, QualifiedName,
+    StructType, TaskDecl, TfPortDecl, TypedefDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
@@ -11,8 +11,8 @@ use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
 use crate::aggregate::{
-    EnumDef, EnumDefIdx, EnumVariant, StructDef, StructDefIdx, StructField, TypeOrigin, TypeRef,
-    extract_typeref_from_typespec,
+    EnumDef, EnumDefIdx, EnumVariant, ModportDef, ModportDefId, ModportEntry, PortDirection,
+    StructDef, StructDefIdx, StructField, TypeOrigin, TypeRef, extract_typeref_from_typespec,
 };
 use crate::def_index::{
     DefIndex, ExpectedNs, ExportEntry, Exports, Import, ImportName, NamePath, UseSite,
@@ -63,6 +63,8 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         decl_to_init_expr: ctx.decl_to_init_expr,
         enum_defs: ctx.enum_defs.into_boxed_slice(),
         struct_defs: ctx.struct_defs.into_boxed_slice(),
+        modport_defs: ctx.modport_defs.into_boxed_slice(),
+        modport_name_map: ctx.modport_name_map,
         export_decls: ctx.export_decls.into_boxed_slice(),
         diagnostics: diagnostics.into_boxed_slice(),
     }
@@ -107,8 +109,12 @@ pub(crate) struct DefContext<'a> {
     pub(crate) imports: Vec<Import>,
     pub(crate) enum_defs: Vec<EnumDef>,
     pub(crate) struct_defs: Vec<StructDef>,
+    pub(crate) modport_defs: Vec<ModportDef>,
+    pub(crate) modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
     pub(crate) export_decls: Vec<ExportEntry>,
     pub(crate) current_owner: Option<SmolStr>,
+    pub(crate) current_iface_def_id: Option<crate::symbols::GlobalDefId>,
+    pub(crate) modport_ordinal: u32,
     pub(crate) enum_ordinals: HashMap<Option<SmolStr>, u32>,
     pub(crate) struct_ordinals: HashMap<Option<SmolStr>, u32>,
 }
@@ -129,8 +135,12 @@ impl<'a> DefContext<'a> {
             imports: Vec::new(),
             enum_defs: Vec::new(),
             struct_defs: Vec::new(),
+            modport_defs: Vec::new(),
+            modport_name_map: HashMap::new(),
             export_decls: Vec::new(),
             current_owner: None,
+            current_iface_def_id: None,
+            modport_ordinal: 0,
             enum_ordinals: HashMap::new(),
             struct_ordinals: HashMap::new(),
         }
@@ -293,15 +303,20 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         ctx.symbol_to_decl.push(None);
         ctx.export_definitions.push(sym_id);
 
+        let mut iface_def_id = None;
         if let Some(iface_decl) = InterfaceDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&iface_decl)
         {
             let erased = ast_id.erase();
             ctx.decl_to_symbol.insert(erased, sym_id);
             ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            iface_def_id = Some(crate::symbols::GlobalDefId::new(erased));
         }
 
         let prev_owner = ctx.current_owner.replace(name);
+        let prev_iface = ctx.current_iface_def_id.take();
+        ctx.current_iface_def_id = iface_def_id;
+        ctx.modport_ordinal = 0;
         // Pass 1: header imports
         for child in node.children() {
             if child.kind() == SyntaxKind::ImportDecl {
@@ -324,6 +339,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             }
         }
         ctx.current_owner = prev_owner;
+        ctx.current_iface_def_id = prev_iface;
     }
 }
 
@@ -528,6 +544,9 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         SyntaxKind::FunctionDecl | SyntaxKind::TaskDecl => {
             collect_callable_decl(ctx, node, scope);
         }
+        SyntaxKind::ModportDecl => {
+            collect_modport_decl(ctx, node, scope);
+        }
         _ => {}
     }
 }
@@ -624,6 +643,76 @@ fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sco
     // Until then, expressions inside callable bodies are invisible to the
     // semantic model. This is acceptable because call *sites* (outside the
     // body) are the primary target of this change.
+}
+
+fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    let Some(decl) = ModportDecl::cast(node.clone()) else {
+        return;
+    };
+    let Some(owner) = ctx.current_iface_def_id else {
+        return;
+    };
+
+    for item in decl.items() {
+        // Assign ordinal for every ModportItem node, even malformed ones
+        // missing a name, so that later valid items get stable ordinals
+        // regardless of whether earlier items have syntax errors.
+        let ordinal = ctx.modport_ordinal;
+        ctx.modport_ordinal += 1;
+
+        let Some(name_tok) = item.name() else {
+            continue;
+        };
+        let name = SmolStr::new(name_tok.text());
+
+        let modport_id = ModportDefId { owner, ordinal };
+
+        // Collect port entries with sticky direction
+        let mut entries = Vec::new();
+        let mut current_dir: Option<PortDirection> = None;
+        for port in item.ports() {
+            if let Some(dir_tok) = port.direction() {
+                current_dir = match dir_tok.kind() {
+                    SyntaxKind::InputKw => Some(PortDirection::Input),
+                    SyntaxKind::OutputKw => Some(PortDirection::Output),
+                    SyntaxKind::InoutKw => Some(PortDirection::Inout),
+                    SyntaxKind::RefKw => Some(PortDirection::Ref),
+                    _ => current_dir,
+                };
+            }
+            if let Some(dir) = current_dir
+                && let Some(port_name_tok) = port.name()
+            {
+                entries.push(ModportEntry {
+                    member_name: SmolStr::new(port_name_tok.text()),
+                    direction: dir,
+                    span: lyra_source::Span {
+                        file: ctx.file,
+                        range: port_name_tok.text_range(),
+                    },
+                });
+            }
+        }
+
+        // Register symbol for navigation/diagnostics (skipped by add_binding)
+        ctx.add_symbol(
+            name.clone(),
+            SymbolKind::Modport,
+            name_tok.text_range(),
+            scope,
+        );
+
+        // First-wins: later duplicates still get a def entry but won't
+        // be reachable via name lookup.
+        let map_key = (owner, name.clone());
+        ctx.modport_name_map.entry(map_key).or_insert(modport_id);
+
+        ctx.modport_defs.push(ModportDef {
+            id: modport_id,
+            name,
+            entries: entries.into_boxed_slice(),
+        });
+    }
 }
 
 fn collect_import_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {

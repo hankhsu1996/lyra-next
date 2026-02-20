@@ -448,6 +448,9 @@ pub enum SyntaxKind {
     NewExpr,
     ExportDecl,
     ExportItem,
+    ModportDecl,
+    ModportItem,
+    ModportPort,
 
     #[doc(hidden)]
     __Last,

@@ -83,6 +83,11 @@ impl ScopeTreeBuilder {
     }
 
     pub(crate) fn add_binding(&mut self, scope: ScopeId, sym: SymbolId, kind: SymbolKind) {
+        // Modport symbols are resolved via DefIndex.modport_name_map, not
+        // lexical scope bindings.
+        if kind == SymbolKind::Modport {
+            return;
+        }
         let entry = &mut self.scopes[scope.0 as usize];
         match kind.namespace() {
             Namespace::Value => entry.value_bindings.push(sym),

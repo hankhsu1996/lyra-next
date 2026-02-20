@@ -282,6 +282,10 @@ pub(super) fn module_item(p: &mut Parser) -> bool {
             task_decl(p);
             true
         }
+        SyntaxKind::ModportKw => {
+            modport_decl(p);
+            true
+        }
         _ if declarations::at_unambiguous_data_decl_start(p) => {
             if is_net_type(p.current()) {
                 declarations::net_decl(p);
@@ -774,6 +778,67 @@ fn at_func_task_end(p: &Parser) -> bool {
         || p.at(SyntaxKind::EndinterfaceKw)
         || p.at(SyntaxKind::EndprogramKw)
         || p.at(SyntaxKind::EndgenerateKw)
+}
+
+// `modport` modport_item { `,` modport_item } `;`
+fn modport_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // modport
+
+    modport_item(p);
+    while p.eat(SyntaxKind::Comma) {
+        modport_item(p);
+    }
+
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::ModportDecl);
+}
+
+// IDENT `(` modport_port { `,` modport_port } `)`
+fn modport_item(p: &mut Parser) {
+    let m = p.start();
+    p.expect(SyntaxKind::Ident);
+    p.expect(SyntaxKind::LParen);
+
+    if !p.at(SyntaxKind::RParen) {
+        modport_ports(p);
+    }
+
+    p.expect(SyntaxKind::RParen);
+    m.complete(p, SyntaxKind::ModportItem);
+}
+
+// Parse modport port entries. Each direction keyword applies to subsequent
+// names until the next direction keyword.
+// Example: `input a, b, output c` -> 3 ModportPort nodes
+fn modport_ports(p: &mut Parser) {
+    // Current sticky direction
+    let mut has_dir = false;
+
+    loop {
+        // Accept a new direction keyword (updates the sticky direction)
+        if ports::is_direction(p.current()) {
+            has_dir = true;
+        } else if !has_dir {
+            p.error("expected direction keyword");
+            break;
+        }
+
+        // Parse one port: direction name
+        let port = p.start();
+        if ports::is_direction(p.current()) {
+            p.bump(); // direction
+        }
+        p.expect(SyntaxKind::Ident);
+        port.complete(p, SyntaxKind::ModportPort);
+
+        if !p.eat(SyntaxKind::Comma) {
+            break;
+        }
+        if p.at(SyntaxKind::RParen) {
+            break;
+        }
+    }
 }
 
 fn is_net_type(kind: SyntaxKind) -> bool {

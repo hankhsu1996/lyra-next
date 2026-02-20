@@ -118,6 +118,10 @@ pub enum SymbolKind {
     Config,
     Function,
     Task,
+    /// Navigation/diagnostics only. Not added to scope bindings; resolved
+    /// exclusively via `DefIndex.modport_name_map` when the LHS is an
+    /// interface type.
+    Modport,
 }
 
 impl SymbolKind {
@@ -139,7 +143,8 @@ impl SymbolKind {
             | Self::Variable
             | Self::Parameter
             | Self::Function
-            | Self::Task => Namespace::Value,
+            | Self::Task
+            | Self::Modport => Namespace::Value,
             Self::Typedef => Namespace::Type,
         }
     }

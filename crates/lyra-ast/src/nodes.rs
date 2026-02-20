@@ -188,6 +188,20 @@ ast_nodes! {
 
     InterfaceBody(SyntaxKind::InterfaceBody) {}
 
+    ModportDecl(SyntaxKind::ModportDecl) {
+        items: [ModportItem],
+    }
+
+    ModportItem(SyntaxKind::ModportItem) {
+        name: token([Ident, EscapedIdent]),
+        ports: [ModportPort],
+    }
+
+    ModportPort(SyntaxKind::ModportPort) {
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        name: token([Ident, EscapedIdent]),
+    }
+
     ProgramDecl(SyntaxKind::ProgramDecl) {
         name: token([Ident, EscapedIdent]),
         param_port_list: ParamPortList,
