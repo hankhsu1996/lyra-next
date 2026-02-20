@@ -4,6 +4,28 @@ Known gaps between LRM requirements and current engine capabilities. This is the
 
 When you discover a gap during `/lrm-add`, add an entry here. When you fix the gap and add the passing test, remove the entry. Both changes land in the same PR.
 
+## Chapter 6 -- Data Types
+
+### 6.19: Enum base type resolution
+
+Named base types (`enum logic [2:0] { ... }`, `enum my_base_t { ... }`) are stored as `TypeRef` but not resolved to a semantic type. The base type affects variant width and signedness. Blocked by: enum semantic query. Test: `lrm/ch06/enum_named_base`.
+
+### 6.19.3: Enum ranges
+
+`name[N]` and `name[N:M]` range syntax for auto-generating variant names is not supported by the parser. Test: `lrm/ch06/enum_ranges`.
+
+### 6.19.4: Enum methods
+
+`.first()`, `.last()`, `.next()`, `.prev()`, `.num()`, `.name()` are not implemented. Blocked by: method resolution infrastructure. Test: `lrm/ch06/enum_methods`.
+
+### 6.19.5: Enum type compatibility
+
+Assignment between different enum types, enum-to-integral casting rules are not checked. Test: `lrm/ch06/enum_type_compat`.
+
+### 6.19: Enum member visibility vs local declaration ordering
+
+Enum member names are injected into the enclosing scope unconditionally. The LRM's ordering/visibility rules for when a name becomes visible vs later local declarations are not modeled. Collisions between enum members and other declarations are diagnosed as duplicates under the current model. This is the same class of problem as Ch26 wildcard import ordering. Test: `lrm/ch06/enum_member_ordering`.
+
 ## Chapter 7 -- Structures and Unions
 
 ### 7.3.1: Soft packed unions

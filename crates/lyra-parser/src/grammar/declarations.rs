@@ -207,7 +207,11 @@ fn enum_member(p: &mut Parser) {
     let m = p.start();
     p.expect(SyntaxKind::Ident);
     if p.eat(SyntaxKind::Assign) {
+        // Expression wrapper: canonical single-child wrapper for embedded
+        // expressions. More sites (Declarator init, dimensions) will migrate later.
+        let w = p.start();
         expressions::expr(p);
+        w.complete(p, SyntaxKind::Expression);
     }
     m.complete(p, SyntaxKind::EnumMember);
 }

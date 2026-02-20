@@ -302,6 +302,12 @@ impl FieldExpr {
     }
 }
 
+impl EnumMember {
+    pub fn init_expr(&self) -> Option<Expression> {
+        support::child(&self.syntax)
+    }
+}
+
 impl EnumType {
     pub fn base_type_spec(&self) -> Option<TypeSpec> {
         support::child(&self.syntax)

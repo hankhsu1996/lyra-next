@@ -1,5 +1,5 @@
 use lyra_lexer::SyntaxKind;
-use lyra_semantic::record::TypeOrigin;
+use lyra_semantic::record::SymbolOrigin;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{ConstEvalError, ConstInt, Ty, UnpackedDim};
 
@@ -55,9 +55,9 @@ pub fn type_of_symbol_raw<'db>(
         _ => {}
     }
 
-    // Check TypeOrigin for enum/struct types
-    match sym.type_origin {
-        TypeOrigin::Enum(idx) => {
+    // Check SymbolOrigin for enum/struct types
+    match sym.origin {
+        SymbolOrigin::Enum(idx) => {
             let id = def.enum_id(idx);
             let ty = Ty::Enum(id);
             let parse = parse_file(db, source_file);
@@ -67,7 +67,7 @@ pub fn type_of_symbol_raw<'db>(
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
-        TypeOrigin::Record(idx) => {
+        SymbolOrigin::Record(idx) => {
             let id = def.record_id(idx);
             let ty = Ty::Record(id);
             let parse = parse_file(db, source_file);
@@ -77,10 +77,14 @@ pub fn type_of_symbol_raw<'db>(
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
-        TypeOrigin::Error => {
+        SymbolOrigin::EnumVariant { enum_idx, .. } => {
+            let id = def.enum_id(enum_idx);
+            return classify(Ty::Enum(id), sym.kind);
+        }
+        SymbolOrigin::Error => {
             return classify(Ty::Error, sym.kind);
         }
-        TypeOrigin::TypeSpec => {}
+        SymbolOrigin::TypeSpec => {}
     }
 
     let Some(decl_ast_id) = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o) else {

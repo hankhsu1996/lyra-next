@@ -6,7 +6,8 @@ use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
 use crate::record::{
-    EnumDef, EnumDefIdx, EnumId, ModportDef, ModportDefId, RecordDef, RecordDefIdx, RecordId,
+    EnumDef, EnumDefIdx, EnumId, EnumVariantId, ModportDef, ModportDefId, RecordDef, RecordDefIdx,
+    RecordId,
 };
 use crate::scopes::{ScopeId, ScopeTree};
 use crate::symbols::{Namespace, SymbolId, SymbolTable};
@@ -71,6 +72,13 @@ impl DefIndex {
             file: self.file,
             owner: def.owner.clone(),
             ordinal: def.ordinal,
+        }
+    }
+
+    pub fn enum_variant_id(&self, enum_idx: EnumDefIdx, variant_ordinal: u32) -> EnumVariantId {
+        EnumVariantId {
+            enum_id: self.enum_id(enum_idx),
+            variant_ordinal,
         }
     }
 
