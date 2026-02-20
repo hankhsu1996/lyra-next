@@ -56,7 +56,7 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 
 ## M6: Elaboration Completeness -- in progress
 
-- [ ] Context-determined typing (LRM 11.6)
+- [x] Context-determined typing (LRM 11.6)
 - [x] Callable typing (function/task calls)
 - [ ] Struct/union/enum semantics
 - [ ] Full array semantics
