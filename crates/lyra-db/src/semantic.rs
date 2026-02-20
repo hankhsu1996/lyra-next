@@ -5,7 +5,7 @@ use lyra_semantic::global_index::{
 use lyra_semantic::name_graph::NameGraph;
 use lyra_semantic::resolve_index::{CoreResolveOutput, ImportConflict, ResolveIndex};
 use lyra_semantic::scopes::ScopeKind;
-use lyra_semantic::symbols::GlobalDefId;
+use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId};
 use smol_str::SmolStr;
 
 use crate::pipeline::{ast_id_map, parse_file};
@@ -252,4 +252,24 @@ pub fn resolve_index_file(
         target_def.decl_to_symbol.get(&def_id.ast_id()).copied()
     };
     lyra_semantic::build_resolve_index(def, core, &lookup_decl)
+}
+
+/// Canonical `GlobalDefId` -> `GlobalSymbolId` resolution (Salsa-tracked).
+///
+/// Single path from a cross-file definition identity to the symbol that
+/// declares it. Both `modport_sem` and `member_lookup` use this.
+#[salsa::tracked]
+pub fn def_symbol(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    def_id: GlobalDefId,
+) -> Option<GlobalSymbolId> {
+    let file_id = def_id.file();
+    let source_file = source_file_by_id(db, unit, file_id)?;
+    let def = def_index_file(db, source_file);
+    let local = def.decl_to_symbol.get(&def_id.ast_id()).copied()?;
+    Some(GlobalSymbolId {
+        file: file_id,
+        local,
+    })
 }

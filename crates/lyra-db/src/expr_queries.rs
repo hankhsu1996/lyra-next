@@ -12,8 +12,8 @@ use crate::callable_queries::{CallableRef, callable_signature};
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::module_sig::CallableKind as DbCallableKind;
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::record_queries::{RecordRef, record_sem};
-use crate::semantic::{def_index_file, resolve_index_file};
+use crate::record_queries::{ModportRef, RecordRef, modport_sem, record_sem};
+use crate::semantic::{def_index_file, def_symbol, resolve_index_file};
 use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, source_file_by_id};
 
@@ -218,6 +218,44 @@ impl InferCtx for DbInferCtx<'_> {
                     }),
                     None => Err(MemberLookupError::UnknownMember),
                 }
+            }
+            Ty::Interface(iface_ty) => {
+                let gsym = def_symbol(self.db, self.unit, iface_ty.iface)
+                    .ok_or(MemberLookupError::NotComposite)?;
+                let src = source_file_by_id(self.db, self.unit, gsym.file)
+                    .ok_or(MemberLookupError::NotComposite)?;
+                let def = def_index_file(self.db, src);
+                let iface_scope = def.symbols.get(gsym.local).scope;
+                let member_sym = def
+                    .scopes
+                    .resolve(
+                        &def.symbols,
+                        iface_scope,
+                        lyra_semantic::symbols::Namespace::Value,
+                        member_name,
+                    )
+                    .ok_or(MemberLookupError::UnknownMember)?;
+                let global_member = lyra_semantic::symbols::GlobalSymbolId {
+                    file: gsym.file,
+                    local: member_sym,
+                };
+                let sym_ref = SymbolRef::new(self.db, self.unit, global_member);
+                let ty = match type_of_symbol(self.db, sym_ref) {
+                    lyra_semantic::types::SymbolType::Value(ty) => ty,
+                    lyra_semantic::types::SymbolType::Net(net) => net.data.clone(),
+                    _ => return Err(MemberLookupError::UnknownMember),
+                };
+                if let Some(mp_id) = iface_ty.modport {
+                    let mref = ModportRef::new(self.db, self.unit, mp_id);
+                    let sem = modport_sem(self.db, mref);
+                    if sem.view.direction_of(member_sym).is_none() {
+                        return Err(MemberLookupError::NotInModport);
+                    }
+                }
+                Ok(MemberInfo {
+                    ty,
+                    kind: MemberKind::InterfaceMember { member: member_sym },
+                })
             }
             _ => Err(MemberLookupError::NotComposite),
         }

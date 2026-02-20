@@ -2,7 +2,8 @@ use lyra_ast::ErasedAstId;
 use smallvec::SmallVec;
 use smol_str::SmolStr;
 
-use crate::record::{EnumId, RecordId};
+use crate::record::{EnumId, ModportDefId, PortDirection, RecordId};
+use crate::symbols::{GlobalDefId, SymbolId};
 
 /// A constant integer value, used for dimension bounds and widths.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -165,6 +166,42 @@ impl RealKw {
     }
 }
 
+/// Semantic identity for an interface-typed value.
+///
+/// `InterfaceDef`: module-like design unit (scope owner, instantiable)
+/// `InterfaceValue`: struct-like typed object (member access via `.`)
+/// Modport: view/capability set over `InterfaceValue` members
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceType {
+    pub iface: GlobalDefId,
+    pub modport: Option<ModportDefId>,
+}
+
+/// Derived fact: which members a modport exposes and their directions.
+///
+/// Entries are sorted by `SymbolId` for deterministic binary search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModportView {
+    dir_by_member: Box<[(SymbolId, PortDirection)]>,
+}
+
+impl ModportView {
+    pub fn new(mut entries: Vec<(SymbolId, PortDirection)>) -> Self {
+        entries.sort_by_key(|(s, _)| *s);
+        Self {
+            dir_by_member: entries.into_boxed_slice(),
+        }
+    }
+
+    pub fn direction_of(&self, sym: SymbolId) -> Option<PortDirection> {
+        let idx = self
+            .dir_by_member
+            .binary_search_by_key(&sym, |(s, _)| *s)
+            .ok()?;
+        Some(self.dir_by_member[idx].1)
+    }
+}
+
 /// The semantic type representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ty {
@@ -172,6 +209,7 @@ pub enum Ty {
     Real(RealKw),
     Enum(EnumId),
     Record(RecordId),
+    Interface(InterfaceType),
     Array { elem: Box<Ty>, dim: UnpackedDim },
     String,
     Chandle,
@@ -287,6 +325,7 @@ impl Ty {
             Self::Real(r) => SmolStr::new_static(r.keyword_str()),
             Self::Enum(_) => SmolStr::new_static("enum"),
             Self::Record(_) => SmolStr::new_static("struct"),
+            Self::Interface(_) => SmolStr::new_static("interface"),
             Self::String => SmolStr::new_static("string"),
             Self::Chandle => SmolStr::new_static("chandle"),
             Self::Event => SmolStr::new_static("event"),

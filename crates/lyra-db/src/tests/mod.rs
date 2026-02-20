@@ -2,6 +2,7 @@ mod const_eval;
 mod elab;
 mod exports;
 mod expr_type;
+mod modport;
 mod resolve;
 mod type_at;
 mod type_diag;

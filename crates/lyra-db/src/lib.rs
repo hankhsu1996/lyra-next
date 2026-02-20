@@ -22,8 +22,8 @@ pub use pipeline::{
 
 // Re-export semantic queries
 pub use semantic::{
-    def_index_file, global_def_index, name_graph_file, package_scope_index, resolve_core_file,
-    resolve_index_file,
+    def_index_file, def_symbol, global_def_index, name_graph_file, package_scope_index,
+    resolve_core_file, resolve_index_file,
 };
 
 // Re-export const-eval
@@ -42,7 +42,7 @@ pub use expr_queries::{ExprRef, type_of_expr};
 pub use resolve_at::{TypeAtResult, resolve_at, symbol_global, type_at};
 
 // Re-export record queries
-pub use record_queries::{RecordRef, record_sem};
+pub use record_queries::{ModportRef, ModportSem, RecordRef, modport_sem, record_sem};
 
 // Re-export diagnostics
 pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};

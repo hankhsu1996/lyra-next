@@ -8,7 +8,7 @@ use crate::coerce::{
 };
 use crate::expr_helpers::{find_binary_op, find_operator_token, is_expression_kind};
 use crate::literal::parse_literal_shape;
-use crate::symbols::{GlobalSymbolId, SymbolKind};
+use crate::symbols::{GlobalSymbolId, SymbolId, SymbolKind};
 use crate::syntax_helpers::system_tf_name;
 use crate::types::{ConstEvalError, ConstInt, RealKw, SymbolType, Ty};
 
@@ -97,6 +97,7 @@ pub enum ExprTypeErrorKind {
     IndexNonIndexable,
     MemberAccessOnNonComposite,
     UnknownMember,
+    MemberNotInModport,
     UserCallUnsupported,
     RangeUnsupported,
     UnsupportedCalleeForm(CalleeFormKind),
@@ -158,6 +159,7 @@ impl ExprType {
             | Ty::Void
             | Ty::Enum(_)
             | Ty::Record(_)
+            | Ty::Interface(_)
             | Ty::Array { .. } => ExprType {
                 ty: ty.clone(),
                 view: ExprView::Plain,
@@ -289,12 +291,14 @@ pub struct MemberInfo {
 /// What kind of member was accessed.
 pub enum MemberKind {
     Field { index: u32 },
+    InterfaceMember { member: SymbolId },
 }
 
 /// Reasons a member lookup can fail.
 pub enum MemberLookupError {
     NotComposite,
     UnknownMember,
+    NotInModport,
 }
 
 /// Callbacks for the inference engine. No DB access -- pure.
@@ -756,6 +760,9 @@ fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
             ExprType::error(ExprTypeErrorKind::MemberAccessOnNonComposite)
         }
         Err(MemberLookupError::UnknownMember) => ExprType::error(ExprTypeErrorKind::UnknownMember),
+        Err(MemberLookupError::NotInModport) => {
+            ExprType::error(ExprTypeErrorKind::MemberNotInModport)
+        }
     }
 }
 

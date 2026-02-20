@@ -64,7 +64,7 @@ pub enum Namespace {
 }
 
 /// Per-file symbol index.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SymbolId(pub(crate) u32);
 
 impl SymbolId {

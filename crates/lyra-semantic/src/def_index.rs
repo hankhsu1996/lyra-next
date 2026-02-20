@@ -50,7 +50,7 @@ pub struct DefIndex {
     pub decl_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
     pub enum_defs: Box<[EnumDef]>,
     pub record_defs: Box<[RecordDef]>,
-    pub modport_defs: Box<[ModportDef]>,
+    pub modport_defs: HashMap<ModportDefId, ModportDef>,
     pub modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportEntry]>,
     pub diagnostics: Box<[SemanticDiag]>,
@@ -80,7 +80,7 @@ impl DefIndex {
         name: &str,
     ) -> Option<&ModportDef> {
         let id = self.modport_name_map.get(&(iface, SmolStr::new(name)))?;
-        self.modport_defs.iter().find(|d| d.id == *id)
+        self.modport_defs.get(id)
     }
 
     pub fn record_id(&self, idx: RecordDefIdx) -> RecordId {

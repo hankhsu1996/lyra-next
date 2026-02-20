@@ -64,7 +64,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         decl_to_init_expr: ctx.decl_to_init_expr,
         enum_defs: ctx.enum_defs.into_boxed_slice(),
         record_defs: ctx.record_defs.into_boxed_slice(),
-        modport_defs: ctx.modport_defs.into_boxed_slice(),
+        modport_defs: ctx.modport_defs,
         modport_name_map: ctx.modport_name_map,
         export_decls: ctx.export_decls.into_boxed_slice(),
         diagnostics: diagnostics.into_boxed_slice(),
@@ -110,7 +110,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) imports: Vec<Import>,
     pub(crate) enum_defs: Vec<EnumDef>,
     pub(crate) record_defs: Vec<RecordDef>,
-    pub(crate) modport_defs: Vec<ModportDef>,
+    pub(crate) modport_defs: HashMap<ModportDefId, ModportDef>,
     pub(crate) modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
     pub(crate) export_decls: Vec<ExportEntry>,
     pub(crate) current_owner: Option<SmolStr>,
@@ -136,7 +136,7 @@ impl<'a> DefContext<'a> {
             imports: Vec::new(),
             enum_defs: Vec::new(),
             record_defs: Vec::new(),
-            modport_defs: Vec::new(),
+            modport_defs: HashMap::new(),
             modport_name_map: HashMap::new(),
             export_decls: Vec::new(),
             current_owner: None,
@@ -708,11 +708,14 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
         let map_key = (owner, name.clone());
         ctx.modport_name_map.entry(map_key).or_insert(modport_id);
 
-        ctx.modport_defs.push(ModportDef {
-            id: modport_id,
-            name,
-            entries: entries.into_boxed_slice(),
-        });
+        ctx.modport_defs.insert(
+            modport_id,
+            ModportDef {
+                id: modport_id,
+                name,
+                entries: entries.into_boxed_slice(),
+            },
+        );
     }
 }
 
