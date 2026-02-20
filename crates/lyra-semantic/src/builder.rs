@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use lyra_ast::{
     AstIdMap, AstNode, ConfigDecl, EnumType, ExportDecl, ExportItem, FunctionDecl, InterfaceDecl,
-    ModportDecl, ModuleInstantiation, NameRef, Port, PrimitiveDecl, ProgramDecl,
-    QualifiedName, StructType, TaskDecl, TfPortDecl, TypedefDecl,
+    ModportDecl, ModuleInstantiation, NameRef, Port, PrimitiveDecl, ProgramDecl, QualifiedName,
+    StructType, TaskDecl, TfPortDecl, TypedefDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
