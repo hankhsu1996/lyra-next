@@ -52,7 +52,7 @@ pub struct DefIndex {
     pub enum_defs: Box<[EnumDef]>,
     pub record_defs: Box<[RecordDef]>,
     pub modport_defs: HashMap<ModportDefId, ModportDef>,
-    pub modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
+    pub modport_name_map: HashMap<(crate::record::InterfaceDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportDecl]>,
     pub diagnostics: Box<[SemanticDiag]>,
 }
@@ -84,7 +84,7 @@ impl DefIndex {
 
     pub fn modport_by_name(
         &self,
-        iface: crate::symbols::GlobalDefId,
+        iface: crate::record::InterfaceDefId,
         name: &str,
     ) -> Option<&ModportDef> {
         let id = self.modport_name_map.get(&(iface, SmolStr::new(name)))?;

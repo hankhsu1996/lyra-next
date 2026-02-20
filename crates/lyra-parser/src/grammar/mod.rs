@@ -4,6 +4,7 @@ mod generate;
 mod items;
 mod ports;
 mod statements;
+mod subprograms;
 
 use lyra_lexer::SyntaxKind;
 

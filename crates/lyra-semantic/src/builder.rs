@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use lyra_ast::{
-    AstIdMap, AstNode, ConfigDecl, EnumType, ExportDecl, ExportItem, FunctionDecl, InterfaceDecl,
-    ModportDecl, ModuleInstantiation, NameRef, Port, PrimitiveDecl, ProgramDecl, QualifiedName,
-    StructType, TaskDecl, TfPortDecl, TypedefDecl,
+    AstIdMap, AstNode, ConfigDecl, ExportDecl, ExportItem, FunctionDecl, InterfaceDecl,
+    ModportDecl, ModuleInstantiation, Port, PrimitiveDecl, ProgramDecl, TaskDecl, TfPortDecl,
+    TypeSpec,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
@@ -11,19 +11,19 @@ use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
 use crate::builder_order::{assign_order_keys, detect_duplicates};
+use crate::builder_types::{
+    collect_name_refs, collect_type_spec_refs, collect_typedef, detect_aggregate_type,
+};
 
 use crate::def_index::{
     DefIndex, ExpectedNs, ExportDeclId, ExportKey, Exports, Import, ImportName, NamePath, UseSite,
 };
-use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::diagnostic::SemanticDiag;
 use crate::record::{
-    EnumDef, EnumDefIdx, EnumVariant, ModportDef, ModportDefId, ModportEntry, Packing,
-    PortDirection, RecordDef, RecordDefIdx, RecordField, RecordKind, SymbolOrigin, TypeRef,
-    extract_typeref_from_typespec,
+    EnumDef, ModportDef, ModportDefId, ModportEntry, PortDirection, RecordDef, SymbolOrigin,
 };
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
-use crate::types::Ty;
 
 pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> DefIndex {
     let mut ctx = DefContext::new(file, ast_id_map);
@@ -64,7 +64,10 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
             .all(|w| (w[0].id.scope, w[0].id.ordinal) < (w[1].id.scope, w[1].id.ordinal))
     );
 
-    DefIndex {
+    // Finalize modport defs: convert raw GlobalDefId owners to InterfaceDefId
+    let mut modport_defs = HashMap::new();
+    let mut modport_name_map = HashMap::new();
+    let def_index_partial = DefIndex {
         file,
         symbols,
         scopes,
@@ -79,10 +82,31 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         decl_to_init_expr: ctx.decl_to_init_expr,
         enum_defs: ctx.enum_defs.into_boxed_slice(),
         record_defs: ctx.record_defs.into_boxed_slice(),
-        modport_defs: ctx.modport_defs,
-        modport_name_map: ctx.modport_name_map,
+        modport_defs: HashMap::new(),
+        modport_name_map: HashMap::new(),
         export_decls: ctx.export_decls.into_boxed_slice(),
         diagnostics: diagnostics.into_boxed_slice(),
+    };
+    for raw in ctx.raw_modport_defs {
+        if let Some(iface_id) =
+            crate::record::InterfaceDefId::try_from_def_index(&def_index_partial, raw.owner)
+        {
+            let typed_id = ModportDefId {
+                owner: iface_id,
+                ordinal: raw.ordinal,
+            };
+            let mut def = raw.def;
+            def.id = typed_id;
+            modport_name_map
+                .entry((iface_id, raw.name))
+                .or_insert(typed_id);
+            modport_defs.insert(typed_id, def);
+        }
+    }
+    DefIndex {
+        modport_defs,
+        modport_name_map,
+        ..def_index_partial
     }
 }
 
@@ -91,6 +115,15 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
 /// Fields are `pub(crate)` because `builder_stmt` needs direct access for
 /// statement/expression collection. Both modules are internal to
 /// `lyra-semantic` and maintain builder invariants together.
+/// Intermediate modport data collected during building, before symbol table freeze.
+/// Uses raw `GlobalDefId` for the owner; converted to `InterfaceDefId` during finalization.
+pub(crate) struct RawModportEntry {
+    pub(crate) owner: crate::symbols::GlobalDefId,
+    pub(crate) ordinal: u32,
+    pub(crate) name: SmolStr,
+    pub(crate) def: ModportDef,
+}
+
 pub(crate) struct DefContext<'a> {
     pub(crate) file: FileId,
     pub(crate) ast_id_map: &'a AstIdMap,
@@ -105,8 +138,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) imports: Vec<Import>,
     pub(crate) enum_defs: Vec<EnumDef>,
     pub(crate) record_defs: Vec<RecordDef>,
-    pub(crate) modport_defs: HashMap<ModportDefId, ModportDef>,
-    pub(crate) modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
+    pub(crate) raw_modport_defs: Vec<RawModportEntry>,
     pub(crate) export_decls: Vec<crate::def_index::ExportDecl>,
     pub(crate) export_ordinals: HashMap<ScopeId, u32>,
     pub(crate) current_owner: Option<SmolStr>,
@@ -133,8 +165,7 @@ impl<'a> DefContext<'a> {
             imports: Vec::new(),
             enum_defs: Vec::new(),
             record_defs: Vec::new(),
-            modport_defs: HashMap::new(),
-            modport_name_map: HashMap::new(),
+            raw_modport_defs: Vec::new(),
             export_decls: Vec::new(),
             export_ordinals: HashMap::new(),
             current_owner: None,
@@ -487,8 +518,8 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
             }
             // Collect type-spec name refs for port typedef resolution
             for port_child in child.children() {
-                if port_child.kind() == SyntaxKind::TypeSpec {
-                    collect_type_spec_refs(ctx, &port_child, scope);
+                if let Some(ts) = TypeSpec::cast(port_child) {
+                    collect_type_spec_refs(ctx, &ts, scope);
                 }
             }
         }
@@ -612,7 +643,7 @@ fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sco
         && let Some(func) = FunctionDecl::cast(node.clone())
         && let Some(ts) = func.type_spec()
     {
-        collect_type_spec_refs(ctx, ts.syntax(), scope);
+        collect_type_spec_refs(ctx, &ts, scope);
     }
 
     // Collect TF port declarations
@@ -629,7 +660,7 @@ fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sco
     for port_decl in &tf_port_decls {
         // Collect type spec refs for resolution
         if let Some(ts) = port_decl.type_spec() {
-            collect_type_spec_refs(ctx, ts.syntax(), callable_scope);
+            collect_type_spec_refs(ctx, &ts, callable_scope);
         }
         // Collect each declarator as a port symbol
         for decl in port_decl.declarators() {
@@ -679,7 +710,11 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
         };
         let name = SmolStr::new(name_tok.text());
 
-        let modport_id = ModportDefId { owner, ordinal };
+        // Placeholder ModportDefId with a dummy owner; finalization replaces it.
+        let placeholder_id = ModportDefId {
+            owner: crate::record::InterfaceDefId::placeholder(),
+            ordinal,
+        };
 
         // Collect port entries with sticky direction
         let mut entries = Vec::new();
@@ -708,7 +743,7 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
             }
         }
 
-        // Register symbol for navigation/diagnostics (skipped by add_binding)
+        // Register symbol for navigation/diagnostics
         ctx.add_symbol(
             name.clone(),
             SymbolKind::Modport,
@@ -716,19 +751,16 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
             scope,
         );
 
-        // First-wins: later duplicates still get a def entry but won't
-        // be reachable via name lookup.
-        let map_key = (owner, name.clone());
-        ctx.modport_name_map.entry(map_key).or_insert(modport_id);
-
-        ctx.modport_defs.insert(
-            modport_id,
-            ModportDef {
-                id: modport_id,
-                name,
+        ctx.raw_modport_defs.push(RawModportEntry {
+            owner,
+            ordinal,
+            name,
+            def: ModportDef {
+                id: placeholder_id,
+                name: SmolStr::new(name_tok.text()),
                 entries: entries.into_boxed_slice(),
             },
-        );
+        });
     }
 }
 
@@ -828,8 +860,8 @@ fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem, scope: Scope
 
 fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
-        if child.kind() == SyntaxKind::TypeSpec {
-            collect_type_spec_refs(ctx, &child, scope);
+        if let Some(ts) = TypeSpec::cast(child.clone()) {
+            collect_type_spec_refs(ctx, &ts, scope);
         } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = first_ident_token(&child) {
                 let sym_id = ctx.add_symbol(
@@ -869,8 +901,8 @@ pub(crate) fn collect_declarators(
     // Detect inline enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
     for child in node.children() {
-        if child.kind() == SyntaxKind::TypeSpec {
-            collect_type_spec_refs(ctx, &child, scope);
+        if let Some(ts) = TypeSpec::cast(child.clone()) {
+            collect_type_spec_refs(ctx, &ts, scope);
         } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = first_ident_token(&child) {
                 let sym_id = ctx.add_symbol_with_origin(
@@ -888,304 +920,6 @@ pub(crate) fn collect_declarators(
                     ctx.symbol_to_decl[sym_id.index()] = Some(erased);
                 }
             }
-            collect_name_refs(ctx, &child, scope);
-        }
-    }
-}
-
-fn collect_type_spec_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    for child in node.children() {
-        match child.kind() {
-            SyntaxKind::NameRef => {
-                if let Some(name_ref) = NameRef::cast(child.clone())
-                    && let Some(ident) = name_ref.ident()
-                    && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
-                {
-                    ctx.use_sites.push(UseSite {
-                        path: NamePath::Simple(SmolStr::new(ident.text())),
-                        expected_ns: ExpectedNs::TypeThenValue,
-                        range: name_ref.text_range(),
-                        scope,
-                        ast_id: ast_id.erase(),
-                        order_key: 0,
-                    });
-                }
-            }
-            SyntaxKind::QualifiedName => {
-                if let Some(qn) = QualifiedName::cast(child.clone())
-                    && let Some(ast_id) = ctx.ast_id_map.ast_id(&qn)
-                {
-                    let segments: Box<[SmolStr]> = qn
-                        .segments()
-                        .map(|ident| SmolStr::new(ident.text()))
-                        .collect();
-                    if !segments.is_empty() {
-                        ctx.use_sites.push(UseSite {
-                            path: NamePath::Qualified { segments },
-                            expected_ns: ExpectedNs::TypeThenValue,
-                            range: qn.text_range(),
-                            scope,
-                            ast_id: ast_id.erase(),
-                            order_key: 0,
-                        });
-                    }
-                }
-            }
-            SyntaxKind::PackedDimension | SyntaxKind::UnpackedDimension => {
-                collect_name_refs(ctx, &child, scope);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    // Detect enum/struct in the TypeSpec child
-    let origin = detect_aggregate_type(ctx, node, scope);
-    for child in node.children() {
-        if child.kind() == SyntaxKind::TypeSpec {
-            collect_type_spec_refs(ctx, &child, scope);
-        }
-    }
-    if let Some(td) = TypedefDecl::cast(node.clone())
-        && let Some(name_tok) = td.name()
-    {
-        let typedef_name = SmolStr::new(name_tok.text());
-        // Update the def name if we collected an aggregate
-        match origin {
-            SymbolOrigin::Enum(idx) => {
-                ctx.enum_defs[idx.0 as usize].name = Some(typedef_name.clone());
-            }
-            SymbolOrigin::Record(idx) => {
-                ctx.record_defs[idx.0 as usize].name = Some(typedef_name.clone());
-            }
-            SymbolOrigin::TypeSpec | SymbolOrigin::Error | SymbolOrigin::EnumVariant { .. } => {}
-        }
-        let sym_id = ctx.add_symbol_with_origin(
-            typedef_name,
-            SymbolKind::Typedef,
-            name_tok.text_range(),
-            scope,
-            origin,
-        );
-        if let Some(ast_id) = ctx.ast_id_map.ast_id(&td) {
-            let erased = ast_id.erase();
-            ctx.decl_to_symbol.insert(erased, sym_id);
-            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
-        }
-    }
-}
-
-// Detect enum/struct type in a declaration's TypeSpec child.
-// If found, build the def table entry and return the appropriate SymbolOrigin.
-fn detect_aggregate_type(
-    ctx: &mut DefContext<'_>,
-    decl_node: &SyntaxNode,
-    scope: ScopeId,
-) -> SymbolOrigin {
-    for child in decl_node.children() {
-        if child.kind() == SyntaxKind::TypeSpec {
-            for ts_child in child.children() {
-                if ts_child.kind() == SyntaxKind::EnumType
-                    && let Some(et) = EnumType::cast(ts_child.clone())
-                {
-                    return SymbolOrigin::Enum(collect_enum_def(ctx, &et, scope));
-                } else if ts_child.kind() == SyntaxKind::StructType
-                    && let Some(st) = StructType::cast(ts_child)
-                {
-                    return match collect_record_def(ctx, &st, scope) {
-                        Some(idx) => SymbolOrigin::Record(idx),
-                        None => SymbolOrigin::Error,
-                    };
-                }
-            }
-        }
-    }
-    SymbolOrigin::TypeSpec
-}
-
-fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: ScopeId) -> EnumDefIdx {
-    let owner = ctx.current_owner.clone();
-    let ordinal = ctx.enum_ordinals.entry(owner.clone()).or_insert(0);
-    let ord = *ordinal;
-    *ordinal += 1;
-    let idx = EnumDefIdx(ctx.enum_defs.len() as u32);
-
-    // Extract base type
-    let base = if let Some(base_ts) = enum_type.base_type_spec() {
-        extract_typeref_from_typespec(base_ts.syntax(), ctx.file, ctx.ast_id_map)
-    } else {
-        TypeRef::Resolved(Ty::int())
-    };
-
-    // Extract variants and inject each as a value-namespace symbol
-    let mut variants = Vec::new();
-    let mut variant_ordinal: u32 = 0;
-    for member in enum_type.members() {
-        let Some(name_tok) = member.name() else {
-            continue;
-        };
-        let name = SmolStr::new(name_tok.text());
-        let init = member
-            .init_expr()
-            .and_then(|expr| ctx.ast_id_map.erased_ast_id(expr.syntax()));
-        variants.push(EnumVariant {
-            name: name.clone(),
-            init,
-        });
-
-        ctx.add_symbol_with_origin(
-            name,
-            SymbolKind::EnumMember,
-            name_tok.text_range(),
-            scope,
-            SymbolOrigin::EnumVariant {
-                enum_idx: idx,
-                variant_ordinal,
-            },
-        );
-        variant_ordinal += 1;
-    }
-
-    ctx.enum_defs.push(EnumDef {
-        name: None,
-        owner,
-        ordinal: ord,
-        base,
-        variants: variants.into_boxed_slice(),
-    });
-    idx
-}
-
-fn collect_record_def(
-    ctx: &mut DefContext<'_>,
-    struct_type: &StructType,
-    scope: ScopeId,
-) -> Option<RecordDefIdx> {
-    if struct_type.is_union() && struct_type.is_tagged() {
-        let range = struct_type
-            .syntax()
-            .children_with_tokens()
-            .filter_map(lyra_parser::SyntaxElement::into_token)
-            .find(|tok| tok.kind() == SyntaxKind::TaggedKw)
-            .map_or_else(|| struct_type.text_range(), |tok| tok.text_range());
-        ctx.diagnostics.push(SemanticDiag {
-            kind: SemanticDiagKind::UnsupportedTaggedUnion,
-            range,
-        });
-        return None;
-    }
-
-    let owner = ctx.current_owner.clone();
-    let ordinal = ctx.record_ordinals.entry(owner.clone()).or_insert(0);
-    let ord = *ordinal;
-    *ordinal += 1;
-    let idx = RecordDefIdx(ctx.record_defs.len() as u32);
-
-    let kind = if struct_type.is_union() {
-        RecordKind::Union
-    } else {
-        RecordKind::Struct
-    };
-    let packing = if struct_type.is_packed() {
-        Packing::Packed
-    } else {
-        Packing::Unpacked
-    };
-
-    // Extract fields from StructMember children
-    let mut fields = Vec::new();
-    for member in struct_type.members() {
-        let member_ts = member.type_spec();
-        let ty = match member_ts {
-            Some(ref ts) => {
-                collect_type_spec_refs(ctx, ts.syntax(), scope);
-                extract_typeref_from_typespec(ts.syntax(), ctx.file, ctx.ast_id_map)
-            }
-            None => TypeRef::Resolved(Ty::Error),
-        };
-        for decl in member.declarators() {
-            if let Some(name_tok) = decl.name() {
-                fields.push(RecordField {
-                    name: SmolStr::new(name_tok.text()),
-                    ty: ty.clone(),
-                });
-            }
-        }
-    }
-
-    ctx.record_defs.push(RecordDef {
-        name: None,
-        owner,
-        ordinal: ord,
-        kind,
-        packing,
-        scope,
-        fields: fields.into_boxed_slice(),
-    });
-    Some(idx)
-}
-
-pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    for child in node.children() {
-        if child.kind() == SyntaxKind::NameRef {
-            if let Some(name_ref) = NameRef::cast(child.clone())
-                && let Some(ident) = name_ref.ident()
-                && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
-            {
-                ctx.use_sites.push(UseSite {
-                    path: NamePath::Simple(SmolStr::new(ident.text())),
-                    expected_ns: ExpectedNs::Exact(Namespace::Value),
-                    range: name_ref.text_range(),
-                    scope,
-                    ast_id: ast_id.erase(),
-                    order_key: 0,
-                });
-            }
-        } else if child.kind() == SyntaxKind::QualifiedName {
-            if let Some(qn) = QualifiedName::cast(child.clone())
-                && let Some(ast_id) = ctx.ast_id_map.ast_id(&qn)
-            {
-                let segments: Box<[SmolStr]> = qn
-                    .segments()
-                    .map(|ident| SmolStr::new(ident.text()))
-                    .collect();
-                if !segments.is_empty() {
-                    ctx.use_sites.push(UseSite {
-                        path: NamePath::Qualified { segments },
-                        expected_ns: ExpectedNs::Exact(Namespace::Value),
-                        range: qn.text_range(),
-                        scope,
-                        ast_id: ast_id.erase(),
-                        order_key: 0,
-                    });
-                }
-            }
-        } else if child.kind() == SyntaxKind::TypeSpec {
-            // Handled by collect_type_spec_refs with TypeThenValue.
-        } else if child.kind() == SyntaxKind::Declarator {
-            // Skip declarator names but collect refs in their initializers
-            // (already handled by collect_declarators)
-        } else if child.kind() == SyntaxKind::AssignmentPatternItem {
-            let is_keyed = child
-                .children_with_tokens()
-                .any(|ct| ct.kind() == SyntaxKind::Colon);
-            if is_keyed {
-                let mut first = true;
-                for item_child in child.children() {
-                    if first {
-                        first = false;
-                        // Bare NameRef key is a struct field name, not a variable
-                        if item_child.kind() == SyntaxKind::NameRef {
-                            continue;
-                        }
-                    }
-                    collect_name_refs(ctx, &item_child, scope);
-                }
-            } else {
-                collect_name_refs(ctx, &child, scope);
-            }
-        } else {
             collect_name_refs(ctx, &child, scope);
         }
     }

@@ -74,6 +74,7 @@ fn port_decl(p: &mut Parser) {
         if p.current() != SyntaxKind::Ident
             || p.nth(1) == SyntaxKind::Ident
             || p.nth(1) == SyntaxKind::LBracket
+            || p.nth(1) == SyntaxKind::Dot
         {
             type_spec(p);
         }

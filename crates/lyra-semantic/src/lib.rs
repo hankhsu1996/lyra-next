@@ -1,6 +1,7 @@
 pub(crate) mod builder;
 mod builder_order;
 mod builder_stmt;
+mod builder_types;
 pub mod coerce;
 pub mod const_eval;
 pub mod def_index;
@@ -26,7 +27,7 @@ pub use resolve::{
     resolve_qualified_name,
 };
 pub use type_extract::{
-    extract_base_ty_from_typespec, extract_type_from_container, normalize_symbol_type,
-    normalize_ty, typespec_name_ref,
+    UserTypeRef, extract_base_ty_from_typespec, extract_type_from_container, normalize_symbol_type,
+    normalize_ty, user_type_ref,
 };
 pub use types::wrap_unpacked;

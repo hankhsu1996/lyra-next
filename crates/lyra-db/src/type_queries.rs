@@ -1,4 +1,5 @@
 use lyra_lexer::SyntaxKind;
+use lyra_semantic::UserTypeRef;
 use lyra_semantic::record::{InterfaceDefId, SymbolOrigin};
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{ConstEvalError, ConstInt, InterfaceType, Ty, UnpackedDim};
@@ -29,7 +30,7 @@ pub fn type_of_symbol_raw<'db>(
 ) -> lyra_semantic::types::SymbolType {
     use lyra_semantic::symbols::SymbolKind;
     use lyra_semantic::types::{SymbolType, SymbolTypeError};
-    use lyra_semantic::{extract_type_from_container, typespec_name_ref};
+    use lyra_semantic::{extract_type_from_container, user_type_ref};
 
     let unit = sym_ref.unit(db);
     let gsym = sym_ref.symbol(db);
@@ -117,14 +118,14 @@ pub fn type_of_symbol_raw<'db>(
         .find(|c| c.kind() == SyntaxKind::TypeSpec);
 
     if let Some(ref ts) = typespec
-        && typespec_name_ref(ts).is_some()
+        && let Some(utr) = user_type_ref(ts)
     {
         let dim_source = if decl_node.kind() == SyntaxKind::Port {
             Some(&decl_node)
         } else {
             declarator.as_ref()
         };
-        return expand_typedef(db, unit, source_file, ts, dim_source, map, sym.kind);
+        return expand_typedef(db, unit, source_file, &utr, dim_source, map, sym.kind);
     }
 
     // No user-defined type -- pure extraction
@@ -141,21 +142,18 @@ fn expand_typedef(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     source_file: SourceFile,
-    typespec: &lyra_parser::SyntaxNode,
+    user_type: &UserTypeRef,
     dim_source: Option<&lyra_parser::SyntaxNode>,
     id_map: &lyra_ast::AstIdMap,
     caller_kind: lyra_semantic::symbols::SymbolKind,
 ) -> lyra_semantic::types::SymbolType {
     use lyra_semantic::types::{SymbolType, SymbolTypeError, UnpackedDim};
-    use lyra_semantic::typespec_name_ref;
 
-    let Some(name_node) = typespec_name_ref(typespec) else {
-        return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
-    };
+    let resolve_node = user_type.resolve_node();
 
     // Look up the name in the resolve index
     let resolve = resolve_index_file(db, source_file, unit);
-    let Some(name_ast_id) = id_map.erased_ast_id(&name_node) else {
+    let Some(name_ast_id) = id_map.erased_ast_id(resolve_node) else {
         return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
     };
     let Some(resolution) = resolve.resolutions.get(&name_ast_id) else {
@@ -177,17 +175,27 @@ fn expand_typedef(
                 return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
             };
             let global = global_def_index(db, unit);
-            let actual_kind = global.def_kind(def_id);
-            let Some(iface_def) = actual_kind.and_then(|k| InterfaceDefId::from_pair(def_id, k))
-            else {
+            let Some(iface_def) = InterfaceDefId::try_from_global_index(global, def_id) else {
                 return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
+            };
+            let modport = match &user_type {
+                UserTypeRef::InterfaceModport { modport_name, .. } => {
+                    match target_def.modport_by_name(iface_def, modport_name.as_str()) {
+                        Some(mp_def) => Some(mp_def.id),
+                        None => return SymbolType::Error(SymbolTypeError::UnknownModport),
+                    }
+                }
+                _ => None,
             };
             Ty::Interface(InterfaceType {
                 iface: iface_def,
-                modport: None,
+                modport,
             })
         }
         lyra_semantic::symbols::SymbolKind::Typedef => {
+            if matches!(user_type, UserTypeRef::InterfaceModport { .. }) {
+                return SymbolType::Error(SymbolTypeError::ModportOnNonInterface);
+            }
             // Recursively get the typedef's type (Salsa cycle detection)
             let typedef_ref = SymbolRef::new(db, unit, target_id);
             let typedef_type = type_of_symbol_raw(db, typedef_ref);
@@ -214,6 +222,9 @@ fn expand_typedef(
                 underlying_ty,
                 &use_site_unpacked,
             ));
+        }
+        _ if matches!(user_type, UserTypeRef::InterfaceModport { .. }) => {
+            return SymbolType::Error(SymbolTypeError::ModportOnNonInterface);
         }
         _ => return SymbolType::Error(SymbolTypeError::UserTypeUnresolved),
     };

@@ -273,3 +273,41 @@ fn expr_type_function_implicit_port_type() {
     let unit = single_file_unit(&db, file);
     assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
 }
+
+#[test]
+fn callable_sig_modport_qualified_port() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "interface my_bus; logic data; modport master(input data); endinterface\n\
+         module m;\n\
+         function void setup(my_bus.master b);\n\
+         endfunction\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+
+    let def = def_index_file(&db, file);
+    let (sym_id, _) = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Function)
+        .expect("should have a function symbol");
+    let global_id = lyra_semantic::symbols::GlobalSymbolId {
+        file: file.file_id(&db),
+        local: sym_id,
+    };
+    let callable_ref = crate::callable_queries::CallableRef::new(&db, unit, global_id);
+    let sig = crate::callable_queries::callable_signature(&db, callable_ref);
+    assert_eq!(sig.ports.len(), 1, "should have 1 port");
+    match &sig.ports[0].ty {
+        lyra_semantic::types::Ty::Interface(it) => {
+            assert!(
+                it.modport.is_some(),
+                "port type should have modport: {it:?}"
+            );
+        }
+        other => panic!("expected Interface type, got {other:?}"),
+    }
+}
