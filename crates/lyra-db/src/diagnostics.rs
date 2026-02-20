@@ -5,7 +5,9 @@ use lyra_semantic::types::SymbolType;
 
 use crate::expr_queries::{ExprRef, IntegralCtxKey};
 use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
-use crate::semantic::{def_index_file, global_def_index, resolve_index_file};
+use crate::semantic::{
+    def_index_file, global_def_index, import_conflicts_file, resolve_index_file,
+};
 use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
@@ -20,8 +22,15 @@ pub fn file_diagnostics(
     let parse = parse_file(db, file);
     let def = def_index_file(db, file);
     let resolve = resolve_index_file(db, file, unit);
+    let conflicts = import_conflicts_file(db, file, unit);
     let mut diags =
         crate::lower_diag::lower_file_diagnostics(file.file_id(db), pp, parse, def, resolve);
+    diags.extend(crate::lower_diag::lower_import_conflicts(
+        file.file_id(db),
+        pp,
+        def,
+        conflicts,
+    ));
     diags.extend(type_diagnostics(db, file, unit).iter().cloned());
     diags
 }

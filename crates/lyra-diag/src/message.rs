@@ -16,6 +16,8 @@ pub enum MessageId {
     MemberNotFound,
     AmbiguousWildcardImport,
     UnsupportedQualifiedPath,
+    ExplicitImportConflictsWithLocal,
+    ExplicitConflictsWithWildcard,
     // Type check messages
     WidthMismatch,
     BitsWide,
@@ -129,6 +131,19 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::UnsupportedQualifiedPath => {
             format!("qualified path `{}` is not supported", name())
         }
+        MessageId::ExplicitImportConflictsWithLocal => {
+            let sym_name = name();
+            let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("import of `{sym_name}` from package `{pkg}` conflicts with local declaration")
+        }
+        MessageId::ExplicitConflictsWithWildcard => {
+            let sym_name = name();
+            let explicit_pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            let wildcard_pkg = msg.args.get(2).and_then(Arg::as_name).unwrap_or("?");
+            format!(
+                "import of `{sym_name}` from package `{explicit_pkg}` conflicts with wildcard import from package `{wildcard_pkg}`"
+            )
+        }
         MessageId::WidthMismatch => {
             let lhs_w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
             let rhs_w = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
@@ -140,6 +155,24 @@ pub fn render_message(msg: &Message) -> String {
         }
         MessageId::UndeclaredType => format!("undeclared type `{}`", name()),
         MessageId::NotAType => format!("`{}` is not a type", name()),
+        MessageId::NotFoundInScope => "not found in this scope".into(),
+        MessageId::NotFoundAsType => "not found as a type in this scope".into(),
+        MessageId::ValueNotType => "this is a value, not a type".into(),
+        MessageId::RedefinedHere => "redefined here".into(),
+        MessageId::FirstDefinedHere => "first defined here".into(),
+        MessageId::ParseError | MessageId::PreprocessError => msg
+            .args
+            .first()
+            .and_then(Arg::as_name)
+            .map(String::from)
+            .unwrap_or_default(),
+        _ => render_elab_message(msg),
+    }
+}
+
+fn render_elab_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
         MessageId::UnresolvedModuleInst => format!("module `{}` not found", name()),
         MessageId::NotAModule => format!("`{}` is not a module", name()),
         MessageId::UnknownPort => {
@@ -193,16 +226,6 @@ pub fn render_message(msg: &Message) -> String {
             let limit = msg.args.first().and_then(Arg::as_count).unwrap_or(0);
             format!("generate-for iteration limit ({limit}) reached")
         }
-        MessageId::NotFoundInScope => "not found in this scope".into(),
-        MessageId::NotFoundAsType => "not found as a type in this scope".into(),
-        MessageId::ValueNotType => "this is a value, not a type".into(),
-        MessageId::RedefinedHere => "redefined here".into(),
-        MessageId::FirstDefinedHere => "first defined here".into(),
-        MessageId::ParseError | MessageId::PreprocessError => msg
-            .args
-            .first()
-            .and_then(Arg::as_name)
-            .map(String::from)
-            .unwrap_or_default(),
+        _ => String::new(),
     }
 }

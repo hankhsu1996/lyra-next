@@ -4,7 +4,8 @@ use lyra_source::FileId;
 use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
-use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, SymbolId};
+use crate::scopes::ScopeId;
+use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
 
 /// Offset-independent resolution result from `build_resolve_core`.
 ///
@@ -84,4 +85,29 @@ pub struct ResolveIndex {
     pub file: FileId,
     pub resolutions: HashMap<lyra_ast::ErasedAstId, Resolution>,
     pub diagnostics: Box<[SemanticDiag]>,
+}
+
+/// An import conflict detected by LRM 26.5 rules.
+///
+/// Keyed by (name, scope, packages) -- no positional indices.
+/// Stable across import reordering for Salsa backdating.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportConflict {
+    pub scope: ScopeId,
+    pub name: SmolStr,
+    pub kind: ImportConflictKind,
+}
+
+/// The kind of import conflict (LRM 26.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportConflictKind {
+    /// Explicit import of a name already locally declared (LRM 26.5a).
+    ExplicitVsLocal { package: SmolStr, ns: NsMask },
+    /// Explicit import conflicts with a wildcard-provided name from
+    /// a different package (different `GlobalDefId`) (LRM 26.5b).
+    ExplicitVsWildcard {
+        explicit_package: SmolStr,
+        wildcard_package: SmolStr,
+        ns: NsMask,
+    },
 }

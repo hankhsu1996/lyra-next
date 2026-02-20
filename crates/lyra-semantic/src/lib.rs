@@ -20,7 +20,7 @@ pub mod type_infer;
 pub mod types;
 
 pub use builder::build_def_index;
-pub use resolve::{build_resolve_core, build_resolve_index};
+pub use resolve::{build_resolve_core, build_resolve_index, detect_import_conflicts};
 pub use type_extract::{
     extract_base_ty_from_typespec, extract_type_from_container, normalize_symbol_type,
     normalize_ty, typespec_name_ref,

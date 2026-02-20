@@ -3,7 +3,7 @@ use lyra_semantic::global_index::{
     DefinitionKind, GlobalDefIndex, PackageLocalFacts, PackageScope, PackageScopeIndex,
 };
 use lyra_semantic::name_graph::NameGraph;
-use lyra_semantic::resolve_index::{CoreResolveOutput, ResolveIndex};
+use lyra_semantic::resolve_index::{CoreResolveOutput, ImportConflict, ResolveIndex};
 use lyra_semantic::scopes::ScopeKind;
 use lyra_semantic::symbols::GlobalDefId;
 use smol_str::SmolStr;
@@ -215,6 +215,21 @@ pub fn resolve_core_file(
     let pkg_scope = package_scope_index(db, unit);
     let cu_env = compilation_unit_env(db, unit);
     lyra_semantic::build_resolve_core(graph, global, pkg_scope, cu_env)
+}
+
+/// Detect import conflicts per LRM 26.5 (Salsa-cached).
+///
+/// Depends on `name_graph_file` (per-file, backdates on whitespace edits)
+/// and `package_scope_index` (per-unit).
+#[salsa::tracked(return_ref)]
+pub fn import_conflicts_file(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+) -> Box<[ImportConflict]> {
+    let graph = name_graph_file(db, file);
+    let pkg_scope = package_scope_index(db, unit);
+    lyra_semantic::detect_import_conflicts(graph, pkg_scope)
 }
 
 /// Build per-file resolution index (Salsa-cached).
