@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
+use smallvec::SmallVec;
+
+use crate::def_index::ExportDeclId;
 use crate::diagnostic::SemanticDiag;
 use crate::scopes::ScopeId;
 use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
@@ -96,6 +99,8 @@ pub struct ImportConflict {
     pub scope: ScopeId,
     pub name: SmolStr,
     pub kind: ImportConflictKind,
+    /// Export declarations that triggered this conflict (empty for pure explicit imports).
+    pub export_sources: SmallVec<[ExportDeclId; 1]>,
 }
 
 /// The kind of import conflict (LRM 26.5).

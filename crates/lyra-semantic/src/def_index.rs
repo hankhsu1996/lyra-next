@@ -52,7 +52,7 @@ pub struct DefIndex {
     pub record_defs: Box<[RecordDef]>,
     pub modport_defs: HashMap<ModportDefId, ModportDef>,
     pub modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
-    pub export_decls: Box<[ExportEntry]>,
+    pub export_decls: Box<[ExportDecl]>,
     pub diagnostics: Box<[SemanticDiag]>,
 }
 
@@ -156,15 +156,31 @@ pub enum ImportName {
     Wildcard,
 }
 
-/// A package export declaration entry (LRM 26.6).
+/// File-local identity for an export declaration.
+/// Scoped to a single `DefIndex`/`NameGraph` (same as `ScopeId`, `SymbolId`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ExportDeclId {
+    pub scope: ScopeId,
+    pub ordinal: u32,
+}
+
+/// What an export declaration names (LRM 26.6).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ExportEntry {
+pub enum ExportKey {
     /// `export Pkg::name;`
     Explicit { package: SmolStr, name: SmolStr },
     /// `export Pkg::*;`
     PackageWildcard { package: SmolStr },
     /// `export *::*;`
     AllWildcard,
+}
+
+/// A single export declaration with identity and source range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportDecl {
+    pub id: ExportDeclId,
+    pub key: ExportKey,
+    pub range: TextRange,
 }
 
 /// Compilation-unit-level environment: implicit imports visible in all files.

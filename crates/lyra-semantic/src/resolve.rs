@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 
 use lyra_source::TextRange;
+use smallvec::{SmallVec, smallvec};
 use smol_str::SmolStr;
 
-use crate::def_index::{CompilationUnitEnv, DefIndex, ExpectedNs, ImportName, NamePath};
+use crate::def_index::{
+    CompilationUnitEnv, DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, NamePath,
+};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
 use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
 use crate::name_graph::NameGraph;
@@ -81,9 +84,153 @@ pub fn build_resolve_core(
     }
 }
 
+/// A name imported into a scope -- by explicit import or export-triggered
+/// wildcard promotion.
+pub(crate) struct RealizedBinding {
+    pub name: SmolStr,
+    pub target: GlobalDefId,
+    pub ns: Namespace,
+    pub origins: SmallVec<[ImportOrigin; 1]>,
+}
+
+pub(crate) enum ImportOrigin {
+    /// Direct `import P::N` statement.
+    Explicit { package: SmolStr },
+    /// `export P::N` triggered promotion of a wildcard candidate.
+    ExportTriggered { id: ExportDeclId, package: SmolStr },
+}
+
+impl ImportOrigin {
+    pub fn package(&self) -> &SmolStr {
+        match self {
+            Self::Explicit { package } | Self::ExportTriggered { package, .. } => package,
+        }
+    }
+}
+
+/// Canonical sort key for deterministic origin ordering:
+/// `Explicit` (0) before `ExportTriggered` (1), then package name, then ordinal.
+fn origin_sort_key(o: &ImportOrigin) -> (u8, &str, u32) {
+    match o {
+        ImportOrigin::Explicit { package } => (0, package.as_str(), 0),
+        ImportOrigin::ExportTriggered { id, package } => (1, package.as_str(), id.ordinal),
+    }
+}
+
+/// Build the effective imported bindings for a single scope.
+///
+/// Single source of truth for a scope's realized imports:
+/// 1. Explicit imports
+/// 2. Wildcard candidate map
+/// 3. Export-triggered promotion
+/// 4. Dedup by (name, ns, target)
+pub(crate) fn build_effective_imports(
+    graph: &NameGraph,
+    pkg_scope: &PackageScopeIndex,
+    scope_id: ScopeId,
+) -> Vec<RealizedBinding> {
+    let mut realized = Vec::new();
+
+    // Step 1: explicit imports -> realized
+    for imp in graph.imports_for_scope(scope_id) {
+        if let ImportName::Explicit(ref member) = imp.name {
+            for &ns in &[Namespace::Value, Namespace::Type] {
+                if let Some(target) = pkg_scope.resolve(&imp.package, member, ns) {
+                    realized.push(RealizedBinding {
+                        name: member.clone(),
+                        target,
+                        ns,
+                        origins: smallvec![ImportOrigin::Explicit {
+                            package: imp.package.clone(),
+                        }],
+                    });
+                }
+            }
+        }
+    }
+
+    // Step 2: build wildcard candidate maps (split by namespace)
+    let mut value_candidates: HashMap<SmolStr, Vec<GlobalDefId>> = HashMap::new();
+    let mut type_candidates: HashMap<SmolStr, Vec<GlobalDefId>> = HashMap::new();
+    for imp in graph.imports_for_scope(scope_id) {
+        if imp.name == ImportName::Wildcard
+            && let Some(surface) = pkg_scope.public_surface(&imp.package)
+        {
+            for (name, id) in surface.value_iter() {
+                value_candidates.entry(name.clone()).or_default().push(*id);
+            }
+            for (name, id) in surface.type_iter() {
+                type_candidates.entry(name.clone()).or_default().push(*id);
+            }
+        }
+    }
+    // Canonicalize candidate sets for binary_search in Step 3
+    for ids in value_candidates.values_mut() {
+        ids.sort();
+        ids.dedup();
+    }
+    for ids in type_candidates.values_mut() {
+        ids.sort();
+        ids.dedup();
+    }
+
+    // Step 3: export-triggered promotion (explicit named exports only)
+    for export in graph.exports_for_scope(scope_id) {
+        if let ExportKey::Explicit {
+            ref package,
+            ref name,
+        } = export.key
+        {
+            let cands_by_ns = [
+                (Namespace::Value, &value_candidates),
+                (Namespace::Type, &type_candidates),
+            ];
+            for (ns, cands) in &cands_by_ns {
+                if let Some(target) = pkg_scope.resolve(package, name, *ns) {
+                    let in_candidates = cands
+                        .get(name)
+                        .is_some_and(|ids| ids.binary_search(&target).is_ok());
+                    if in_candidates {
+                        realized.push(RealizedBinding {
+                            name: name.clone(),
+                            target,
+                            ns: *ns,
+                            origins: smallvec![ImportOrigin::ExportTriggered {
+                                id: export.id,
+                                package: package.clone(),
+                            }],
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 4: dedup by (name, ns, target), merging origins on collision
+    realized.sort_by(|a, b| (&a.name, &a.ns, &a.target).cmp(&(&b.name, &b.ns, &b.target)));
+    realized.dedup_by(|b, a| {
+        a.name == b.name && a.ns == b.ns && a.target == b.target && {
+            a.origins.extend(b.origins.drain(..));
+            true
+        }
+    });
+    // Canonicalize origin order
+    for binding in &mut realized {
+        binding
+            .origins
+            .sort_by(|a, b| origin_sort_key(a).cmp(&origin_sort_key(b)));
+        binding
+            .origins
+            .dedup_by(|a, b| origin_sort_key(a) == origin_sort_key(b));
+    }
+
+    realized
+}
+
 /// Detect import conflicts per LRM 26.5.
 ///
-/// Check 1 (26.5a): explicit import of a name already locally declared.
+/// Check 1 (26.5a): realized binding vs local declaration
+/// (covers both explicit imports and export-triggered wildcard promotion).
 /// Check 2 (26.5b): explicit import conflicts with wildcard-provided name
 /// from a different package (different `GlobalDefId`).
 pub fn detect_import_conflicts(
@@ -96,66 +243,51 @@ pub fn detect_import_conflicts(
         let scope_id = ScopeId(scope_idx as u32);
         let scope = graph.scopes.get(scope_id);
 
-        for imp in &*graph.imports {
-            if imp.scope != scope_id {
-                continue;
+        // Shared binding table
+        let effective = build_effective_imports(graph, pkg_scope, scope_id);
+
+        // Check 1 (26.5a): realized binding vs local
+        for binding in &effective {
+            let has_local = match binding.ns {
+                Namespace::Value => scope
+                    .value_ns
+                    .binary_search_by(|id| graph.name(*id).cmp(binding.name.as_str()))
+                    .is_ok(),
+                Namespace::Type => scope
+                    .type_ns
+                    .binary_search_by(|id| graph.name(*id).cmp(binding.name.as_str()))
+                    .is_ok(),
+                Namespace::Definition => false,
+            };
+            if has_local {
+                let package = binding.origins[0].package().clone();
+                let export_sources: SmallVec<[ExportDeclId; 1]> = binding
+                    .origins
+                    .iter()
+                    .filter_map(|o| match o {
+                        ImportOrigin::ExportTriggered { id, .. } => Some(*id),
+                        ImportOrigin::Explicit { .. } => None,
+                    })
+                    .collect();
+                conflicts.push(ImportConflict {
+                    scope: scope_id,
+                    name: binding.name.clone(),
+                    kind: ImportConflictKind::ExplicitVsLocal {
+                        package,
+                        ns: NsMask::from_namespace(binding.ns),
+                    },
+                    export_sources,
+                });
             }
+        }
+
+        // Check 2 (26.5b): explicit vs wildcard
+        for imp in graph.imports_for_scope(scope_id) {
             let ImportName::Explicit(ref member) = imp.name else {
                 continue;
             };
-
-            let has_value = pkg_scope
-                .resolve(&imp.package, member, Namespace::Value)
-                .is_some();
-            let has_type = pkg_scope
-                .resolve(&imp.package, member, Namespace::Type)
-                .is_some();
-            let mut import_ns = NsMask::EMPTY;
-            if has_value {
-                import_ns = import_ns.union(NsMask::VALUE);
-            }
-            if has_type {
-                import_ns = import_ns.union(NsMask::TYPE);
-            }
-
-            if import_ns.is_empty() {
-                continue;
-            }
-
-            // Check 1 (26.5a): explicit vs local
-            let local_has_value = scope
-                .value_ns
-                .binary_search_by(|id| graph.name(*id).cmp(member.as_str()))
-                .is_ok();
-            let local_has_type = scope
-                .type_ns
-                .binary_search_by(|id| graph.name(*id).cmp(member.as_str()))
-                .is_ok();
-            let mut local_ns = NsMask::EMPTY;
-            if local_has_value {
-                local_ns = local_ns.union(NsMask::VALUE);
-            }
-            if local_has_type {
-                local_ns = local_ns.union(NsMask::TYPE);
-            }
-            let conflict_ns = import_ns.intersect(local_ns);
-            if !conflict_ns.is_empty() {
-                conflicts.push(ImportConflict {
-                    scope: scope_id,
-                    name: member.clone(),
-                    kind: ImportConflictKind::ExplicitVsLocal {
-                        package: imp.package.clone(),
-                        ns: conflict_ns,
-                    },
-                });
-            }
-
-            // Check 2 (26.5b): explicit vs wildcard
-            for wc in &*graph.imports {
-                if wc.scope != scope_id
-                    || wc.name != ImportName::Wildcard
-                    || wc.package == imp.package
-                {
+            for wc in graph.imports_for_scope(scope_id) {
+                if wc.name != ImportName::Wildcard || wc.package == imp.package {
                     continue;
                 }
                 let mut wc_conflict_ns = NsMask::EMPTY;
@@ -177,6 +309,7 @@ pub fn detect_import_conflicts(
                             wildcard_package: wc.package.clone(),
                             ns: wc_conflict_ns,
                         },
+                        export_sources: SmallVec::new(),
                     });
                 }
             }

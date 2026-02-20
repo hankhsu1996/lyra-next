@@ -105,9 +105,35 @@ pub struct PackageScopeIndex {
 /// Exported symbols from a single package, split by namespace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageScope {
-    pub name: SmolStr,
-    pub value_ns: Box<[(SmolStr, GlobalDefId)]>,
-    pub type_ns: Box<[(SmolStr, GlobalDefId)]>,
+    pub(crate) name: SmolStr,
+    pub(crate) value_ns: Box<[(SmolStr, GlobalDefId)]>,
+    pub(crate) type_ns: Box<[(SmolStr, GlobalDefId)]>,
+}
+
+impl PackageScope {
+    pub fn new(
+        name: SmolStr,
+        value_ns: Box<[(SmolStr, GlobalDefId)]>,
+        type_ns: Box<[(SmolStr, GlobalDefId)]>,
+    ) -> Self {
+        Self {
+            name,
+            value_ns,
+            type_ns,
+        }
+    }
+
+    pub fn pkg_name(&self) -> &SmolStr {
+        &self.name
+    }
+
+    pub fn value_iter(&self) -> &[(SmolStr, GlobalDefId)] {
+        &self.value_ns
+    }
+
+    pub fn type_iter(&self) -> &[(SmolStr, GlobalDefId)] {
+        &self.type_ns
+    }
 }
 
 impl PackageScopeIndex {
@@ -134,6 +160,15 @@ impl PackageScopeIndex {
         self.packages
             .binary_search_by(|p| p.name.as_str().cmp(pkg))
             .is_ok()
+    }
+
+    /// Full package surface for iterating all exported names.
+    pub fn public_surface(&self, pkg: &str) -> Option<&PackageScope> {
+        let idx = self
+            .packages
+            .binary_search_by(|p| p.name.as_str().cmp(pkg))
+            .ok()?;
+        Some(&self.packages[idx])
     }
 
     /// Resolve a symbol in a package across all namespaces.
@@ -175,7 +210,7 @@ pub struct PackageLocalFacts {
     pub type_ns: Vec<(SmolStr, GlobalDefId)>,
     pub imports: Vec<crate::def_index::ImportName>,
     pub import_packages: Vec<SmolStr>,
-    pub export_decls: Vec<crate::def_index::ExportEntry>,
+    pub export_decls: Vec<crate::def_index::ExportKey>,
 }
 
 /// Compute the public surface for a single package, resolving exports.
@@ -192,7 +227,7 @@ pub fn compute_public_surface(
     facts: &PackageLocalFacts,
     get_dep_surface: &dyn Fn(&str) -> Option<PackageScope>,
 ) -> PackageScope {
-    use crate::def_index::ExportEntry;
+    use crate::def_index::ExportKey;
 
     let mut value_ns: Vec<(SmolStr, GlobalDefId)> = facts.value_ns.clone();
     let mut type_ns: Vec<(SmolStr, GlobalDefId)> = facts.type_ns.clone();
@@ -210,13 +245,13 @@ pub fn compute_public_surface(
 
     for entry in &facts.export_decls {
         match entry {
-            ExportEntry::Explicit { package, name } => {
+            ExportKey::Explicit { package, name } => {
                 explicit_exports.push((package.clone(), name.clone()));
             }
-            ExportEntry::PackageWildcard { package } => {
+            ExportKey::PackageWildcard { package } => {
                 wildcard_exports.push(package.clone());
             }
-            ExportEntry::AllWildcard => {
+            ExportKey::AllWildcard => {
                 has_all_wildcard = true;
             }
         }
@@ -269,11 +304,11 @@ pub fn compute_public_surface(
     type_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
     type_ns.dedup_by(|(a, _), (b, _)| a == b);
 
-    PackageScope {
-        name: facts.name.clone(),
-        value_ns: value_ns.into_boxed_slice(),
-        type_ns: type_ns.into_boxed_slice(),
-    }
+    PackageScope::new(
+        facts.name.clone(),
+        value_ns.into_boxed_slice(),
+        type_ns.into_boxed_slice(),
+    )
 }
 
 fn merge_ns_entries(
