@@ -6,10 +6,6 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 26 -- Packages
 
-### 26.2: Package lifetime keyword
-
-Package declarations accept an optional lifetime keyword (`package automatic;`). Not tested, may not parse. Test: `lrm/ch26/package_lifetime`.
-
 ### 26.3: Enum literal import semantics
 
 Importing an enum type does not import its enumeration literals (LRM 26.3 teeth_t example). Importing `teeth_t` from package `q` does not make `FALSE` visible -- a bare reference to `FALSE` still resolves to `p::FALSE` via a wildcard import of `p`. Not tested. Blocked by: semantic (enum literal visibility tracking). Test: `lrm/ch26/enum_literal_import`.
@@ -22,14 +18,6 @@ LRM 26.3 Examples 1-4 define complex lexical scoping rules for wildcard imports:
 
 "If a wildcard imported symbol is made locally visible in a scope, any later locally visible declaration of the same name in that scope shall be illegal" (LRM 26.3 Example 1 line 5). Error case not tested. Blocked by: semantic (conflict detection between wildcard import and later local decl). Test: `lrm/ch26/wildcard_local_conflict`.
 
-### 26.4: Header import in interface and program declarations
-
-Header-level imports are only tested for modules. The LRM specifies the same syntax for interface and program headers. Not tested. Blocked by: possibly just missing tests (parser may already handle it). Tests: `lrm/ch26/header_import_interface`, `lrm/ch26/header_import_program`.
-
-### 26.4: Multi-import in single header
-
-LRM example shows comma-separated imports in a single header (`import A::instruction_t, B::*;`). Not tested. Test: `lrm/ch26/header_multi_import`.
-
 ### 26.5: Explicit import conflicts with local declaration
 
 "It is illegal to import an identifier defined in the importing scope" (Table 26-1). Error case not tested. Blocked by: semantic (conflict detection between explicit import and local decl). Test: `lrm/ch26/explicit_import_local_conflict`.
@@ -38,10 +26,6 @@ LRM example shows comma-separated imports in a single header (`import A::instruc
 
 `import q::*; wire a = c; import p::c;` -- the wildcard forces import of `q::c`, then explicit import of `p::c` creates a conflict (LRM 26.5 end example). Error case not tested. Blocked by: semantic (conflict detection between triggered wildcard and explicit import). Test: `lrm/ch26/wildcard_explicit_conflict`.
 
-### 26.6: Transitive export chain
-
-A re-exports from B, B re-exports from C. Consumer imports from A and sees C's symbols. Not tested. Blocked by: possibly just missing test (compute_public_surface should handle this). Test: `lrm/ch26/export_transitive`.
-
 ### 26.6: Same declaration through multiple export paths
 
 Importing the same original declaration through multiple export paths shall not be a conflict (LRM p5 example: `export p1::x; export p4::x;` where both refer to the same `p1::x`). Not tested. Blocked by: semantic (identity-based dedup in import resolution). Test: `lrm/ch26/export_multi_path`.
@@ -49,10 +33,6 @@ Importing the same original declaration through multiple export paths shall not 
 ### 26.6: Export makes import a reference (later local decl illegal)
 
 An export of an unreferenced candidate for import counts as a reference, importing the declaration. A subsequent local declaration of the same name is then illegal (LRM p6 example). Error case not tested. Blocked by: semantic (export-triggers-import semantics). Test: `lrm/ch26/export_triggers_import`.
-
-### 26.6: Export may precede corresponding import
-
-"A package export may precede a corresponding package import" (LRM 26.6). Not tested. Blocked by: possibly just missing test. Test: `lrm/ch26/export_before_import`.
 
 ### 26.7: std package contents (Annex G)
 
