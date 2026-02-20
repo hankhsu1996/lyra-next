@@ -55,6 +55,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 1,
     };
+    pub const BITS_NON_DATA_TYPE: Self = Self {
+        namespace: "lyra.type",
+        number: 6,
+    };
     pub const UNDECLARED_TYPE: Self = Self {
         namespace: "lyra.type",
         number: 2,

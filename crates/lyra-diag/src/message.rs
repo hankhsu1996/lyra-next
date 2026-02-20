@@ -21,6 +21,8 @@ pub enum MessageId {
     // Type check messages
     WidthMismatch,
     BitsWide,
+    BitsNonDataType,
+    NotADataType,
     UndeclaredType,
     NotAType,
     UnsupportedTaggedUnion,
@@ -161,6 +163,8 @@ pub fn render_message(msg: &Message) -> String {
         }
         MessageId::UndeclaredType => format!("undeclared type `{}`", name()),
         MessageId::NotAType => format!("`{}` is not a type", name()),
+        MessageId::BitsNonDataType => "$bits argument is not a data type".into(),
+        MessageId::NotADataType => "not a data type".into(),
         MessageId::UnsupportedTaggedUnion => "tagged unions are not yet supported".into(),
         MessageId::IllegalEnumBaseType => {
             format!("enum base type `{}` is not an integral type", name())

@@ -1,5 +1,5 @@
 use lyra_semantic::coerce::IntegralCtx;
-use lyra_semantic::type_check::{TypeCheckCtx, TypeCheckKind};
+use lyra_semantic::type_check::{TypeCheckCtx, TypeCheckItem};
 use lyra_semantic::type_infer::ExprType;
 use lyra_semantic::types::SymbolType;
 
@@ -88,28 +88,23 @@ pub fn type_diagnostics(
     let mut seen = std::collections::HashSet::new();
     let mut diags = Vec::new();
     for item in &items {
-        match &item.kind {
-            TypeCheckKind::Truncation {
+        match item {
+            TypeCheckItem::AssignTruncation {
+                assign_range,
+                lhs_range,
+                rhs_range,
                 lhs_width,
                 rhs_width,
             } => {
-                let Some(assign_span) = pp.source_map.map_span(item.assign_range) else {
+                let Some(assign_span) = pp.source_map.map_span(*assign_range) else {
                     continue;
                 };
-                // Dedup by (assign start, lhs range, rhs range, code) to prevent
-                // duplicate diagnostics if future walker paths overlap.
-                let key = (assign_span.range.start(), item.lhs_range, item.rhs_range);
+                let key = (assign_span.range.start(), *lhs_range, *rhs_range);
                 if !seen.insert(key) {
                     continue;
                 }
-                let lhs_span = pp
-                    .source_map
-                    .map_span(item.lhs_range)
-                    .unwrap_or(assign_span);
-                let rhs_span = pp
-                    .source_map
-                    .map_span(item.rhs_range)
-                    .unwrap_or(assign_span);
+                let lhs_span = pp.source_map.map_span(*lhs_range).unwrap_or(assign_span);
+                let rhs_span = pp.source_map.map_span(*rhs_range).unwrap_or(assign_span);
 
                 diags.push(
                     lyra_diag::Diagnostic::new(
@@ -149,6 +144,27 @@ pub fn type_diagnostics(
                             lyra_diag::MessageId::BitsWide,
                             vec![lyra_diag::Arg::Width(*rhs_width)],
                         ),
+                    }),
+                );
+            }
+            TypeCheckItem::BitsNonDataType {
+                call_range,
+                arg_range,
+            } => {
+                let Some(call_span) = pp.source_map.map_span(*call_range) else {
+                    continue;
+                };
+                let arg_span = pp.source_map.map_span(*arg_range).unwrap_or(call_span);
+                diags.push(
+                    lyra_diag::Diagnostic::new(
+                        lyra_diag::Severity::Error,
+                        lyra_diag::DiagnosticCode::BITS_NON_DATA_TYPE,
+                        lyra_diag::Message::simple(lyra_diag::MessageId::BitsNonDataType),
+                    )
+                    .with_label(lyra_diag::Label {
+                        kind: lyra_diag::LabelKind::Primary,
+                        span: arg_span,
+                        message: lyra_diag::Message::simple(lyra_diag::MessageId::NotADataType),
                     }),
                 );
             }
@@ -195,6 +211,19 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         };
         let sym_ref = SymbolRef::new(self.db, self.unit, gsym);
         Some(type_of_symbol(self.db, sym_ref))
+    }
+
+    fn resolve_type_arg(
+        &self,
+        name_node: &lyra_parser::SyntaxNode,
+    ) -> Option<lyra_semantic::types::Ty> {
+        crate::resolve_helpers::resolve_type_arg_impl(
+            self.db,
+            self.unit,
+            self.source_file,
+            self.ast_id_map,
+            name_node,
+        )
     }
 }
 

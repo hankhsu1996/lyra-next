@@ -9,6 +9,7 @@ enum SystemFnKind {
     Clog2,
     Signed,
     Unsigned,
+    Bits,
 }
 
 struct SystemFnEntry {
@@ -36,6 +37,12 @@ static BUILTINS: &[SystemFnEntry] = &[
         min_args: 1,
         max_args: Some(1),
         kind: SystemFnKind::Unsigned,
+    },
+    SystemFnEntry {
+        name: "$bits",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::Bits,
     },
 ];
 
@@ -92,6 +99,7 @@ pub(crate) fn infer_system_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprTy
         SystemFnKind::Clog2 => infer_clog2(&args, ctx),
         SystemFnKind::Signed => infer_signedness_cast(&args, ctx, true),
         SystemFnKind::Unsigned => infer_signedness_cast(&args, ctx, false),
+        SystemFnKind::Bits => infer_bits(),
     }
 }
 
@@ -105,6 +113,11 @@ fn infer_clog2(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         signed: Signedness::Signed,
         four_state: false,
     })
+}
+
+fn infer_bits() -> ExprType {
+    use crate::types::Ty;
+    ExprType::from_ty(&Ty::int())
 }
 
 fn infer_signedness_cast(args: &SyntaxNode, ctx: &dyn InferCtx, target_signed: bool) -> ExprType {
@@ -127,6 +140,38 @@ fn infer_signedness_cast(args: &SyntaxNode, ctx: &dyn InferCtx, target_signed: b
         other => other.clone(),
     };
     ExprType::from_ty(&new_ty)
+}
+
+/// Semantic classification of a `$bits` argument.
+pub(crate) enum BitsArgKind {
+    Type(crate::types::Ty),
+    Expr,
+}
+
+/// Classify a `$bits` argument as type-form or expr-form.
+///
+/// Takes a closure for type-namespace resolution so it works from both
+/// `InferCtx` (inference) and `TypeCheckCtx` (validation) callers.
+pub(crate) fn classify_bits_arg(
+    first: &SyntaxNode,
+    resolve_type: &dyn Fn(&SyntaxNode) -> Option<crate::types::Ty>,
+) -> BitsArgKind {
+    if first.kind() == SyntaxKind::TypeSpec {
+        if let Some(ty) = resolve_type(first) {
+            return BitsArgKind::Type(ty);
+        }
+        let map = lyra_ast::AstIdMap::from_root(lyra_source::FileId(0), first);
+        let ty = crate::extract_base_ty_from_typespec(first, &map);
+        return BitsArgKind::Type(ty);
+    }
+    if matches!(
+        first.kind(),
+        SyntaxKind::NameRef | SyntaxKind::QualifiedName
+    ) && let Some(ty) = resolve_type(first)
+    {
+        return BitsArgKind::Type(ty);
+    }
+    BitsArgKind::Expr
 }
 
 #[cfg(test)]

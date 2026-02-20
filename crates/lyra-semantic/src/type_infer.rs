@@ -323,6 +323,9 @@ pub trait InferCtx {
     fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError>;
     /// Get the integral view of an enum's base type.
     fn enum_integral_view(&self, id: &EnumId) -> Option<BitVecType>;
+    /// Resolve a `NameRef` node as a type (typedef/enum/struct name).
+    /// Used by system functions like `$bits` that accept type arguments.
+    fn resolve_type_arg(&self, name_node: &SyntaxNode) -> Option<Ty>;
 }
 
 /// Extract an integral view from an `ExprType`, auto-casting enums to

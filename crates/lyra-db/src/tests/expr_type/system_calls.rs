@@ -121,6 +121,62 @@ fn signed_non_integral_noop() {
 }
 
 #[test]
+fn bits_expr() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; parameter P = $bits(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int())
+    );
+}
+
+#[test]
+fn bits_type_int() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; parameter P = $bits(int); endmodule");
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int())
+    );
+}
+
+#[test]
+fn bits_type_logic_dim() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $bits(logic [15:0]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int())
+    );
+}
+
+#[test]
+fn bits_typedef() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef logic [7:0] byte_t; parameter P = $bits(byte_t); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int())
+    );
+}
+
+#[test]
 fn tyref_structural_interning() {
     let db = LyraDatabase::default();
     let ty1 = Ty::int();

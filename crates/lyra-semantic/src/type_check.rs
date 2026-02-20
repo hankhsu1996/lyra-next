@@ -4,23 +4,24 @@ use lyra_source::TextRange;
 
 use crate::coerce::IntegralCtx;
 use crate::expr_helpers::is_expression_kind;
+use crate::syntax_helpers::{system_tf_args, system_tf_name};
+use crate::system_functions::{BitsArgKind, classify_bits_arg, iter_args};
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
 use crate::types::SymbolType;
 
-/// A type-check finding for a single assignment.
-pub struct TypeCheckItem {
-    /// Range of the full assignment statement/item (for primary label).
-    pub assign_range: TextRange,
-    /// Range of the LHS expression (for secondary label).
-    pub lhs_range: TextRange,
-    /// Range of the RHS expression (for secondary label).
-    pub rhs_range: TextRange,
-    /// The check kind.
-    pub kind: TypeCheckKind,
-}
-
-pub enum TypeCheckKind {
-    Truncation { lhs_width: u32, rhs_width: u32 },
+/// A type-check finding.
+pub enum TypeCheckItem {
+    AssignTruncation {
+        assign_range: TextRange,
+        lhs_range: TextRange,
+        rhs_range: TextRange,
+        lhs_width: u32,
+        rhs_width: u32,
+    },
+    BitsNonDataType {
+        call_range: TextRange,
+        arg_range: TextRange,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -31,6 +32,8 @@ pub trait TypeCheckCtx {
     fn expr_type_in_ctx(&self, node: &SyntaxNode, ctx: &IntegralCtx) -> ExprType;
     /// Get the declared type of a symbol via its Declarator node.
     fn symbol_type_of_declarator(&self, declarator: &SyntaxNode) -> Option<SymbolType>;
+    /// Resolve a `NameRef` node as a type (typedef/enum/struct name).
+    fn resolve_type_arg(&self, name_node: &SyntaxNode) -> Option<crate::types::Ty>;
 }
 
 /// Walk a file's AST and produce type-check items.
@@ -45,6 +48,7 @@ fn walk_for_checks(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<Ty
         SyntaxKind::ContinuousAssign => check_continuous_assign(node, ctx, items),
         SyntaxKind::AssignStmt => check_assign_stmt(node, ctx, items),
         SyntaxKind::VarDecl => check_var_decl(node, ctx, items),
+        SyntaxKind::SystemTfCall => check_system_call(node, ctx, items),
         _ => {}
     }
     for child in node.children() {
@@ -108,14 +112,12 @@ fn check_var_decl(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<Typ
         };
 
         if rhs_w > lhs_w {
-            items.push(TypeCheckItem {
+            items.push(TypeCheckItem::AssignTruncation {
                 assign_range: node.text_range(),
                 lhs_range: child.text_range(),
                 rhs_range: init_expr.text_range(),
-                kind: TypeCheckKind::Truncation {
-                    lhs_width: lhs_w,
-                    rhs_width: rhs_w,
-                },
+                lhs_width: lhs_w,
+                rhs_width: rhs_w,
             });
         }
     }
@@ -159,14 +161,36 @@ fn check_assignment_pair(
         return;
     };
     if rhs_w > lhs_w {
-        items.push(TypeCheckItem {
+        items.push(TypeCheckItem::AssignTruncation {
             assign_range: stmt_node.text_range(),
             lhs_range: lhs.text_range(),
             rhs_range: rhs.text_range(),
-            kind: TypeCheckKind::Truncation {
-                lhs_width: lhs_w,
-                rhs_width: rhs_w,
-            },
+            lhs_width: lhs_w,
+            rhs_width: rhs_w,
+        });
+    }
+}
+
+fn check_system_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+    let Some(tok) = system_tf_name(node) else {
+        return;
+    };
+    if tok.text() != "$bits" {
+        return;
+    }
+    let Some(arg_list) = system_tf_args(node) else {
+        return;
+    };
+    let Some(first) = iter_args(&arg_list).next() else {
+        return;
+    };
+    let kind = classify_bits_arg(&first, &|n| ctx.resolve_type_arg(n));
+    if let BitsArgKind::Type(ty) = kind
+        && !ty.is_data_type()
+    {
+        items.push(TypeCheckItem::BitsNonDataType {
+            call_range: node.text_range(),
+            arg_range: first.text_range(),
         });
     }
 }

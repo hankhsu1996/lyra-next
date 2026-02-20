@@ -4,9 +4,7 @@ use lyra_semantic::type_infer::{
     CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx, MemberInfo,
     MemberKind, MemberLookupError, ResolveCallableError, Signedness,
 };
-use lyra_semantic::types::ConstInt;
-
-use lyra_semantic::types::Ty;
+use lyra_semantic::types::{ConstInt, Ty};
 
 use crate::callable_queries::{CallableRef, callable_signature};
 use crate::const_eval::{ConstExprRef, eval_const_int};
@@ -258,5 +256,15 @@ impl InferCtx for DbInferCtx<'_> {
             }
             _ => Err(MemberLookupError::NotComposite),
         }
+    }
+
+    fn resolve_type_arg(&self, name_node: &lyra_parser::SyntaxNode) -> Option<Ty> {
+        crate::resolve_helpers::resolve_type_arg_impl(
+            self.db,
+            self.unit,
+            self.source_file,
+            self.ast_id_map,
+            name_node,
+        )
     }
 }

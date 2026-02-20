@@ -12,6 +12,7 @@ mod module_sig;
 pub mod pipeline;
 mod record_queries;
 mod resolve_at;
+mod resolve_helpers;
 pub mod semantic;
 mod ty_resolve;
 pub mod type_queries;
