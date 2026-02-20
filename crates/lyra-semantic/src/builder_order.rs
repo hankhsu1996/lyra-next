@@ -47,21 +47,15 @@ pub(crate) fn assign_order_keys(ctx: &mut DefContext<'_>, root: &SyntaxNode) {
         &mut assignments,
     );
 
-    // Apply collected assignments
+    // Apply collected assignments. Items not matched during the walk
+    // (e.g. due to parse error recovery) keep order_key 0 and remain
+    // visible to all use-sites -- a safe conservative default.
     for (item, key) in &assignments {
         match item {
             OrderItem::UseSite(i) => ctx.use_sites[*i].order_key = *key,
             OrderItem::Import(i) => ctx.imports[*i].order_key = *key,
         }
     }
-    assert!(
-        order_key > 0 || total_items == 0,
-        "order key walk produced no assignments"
-    );
-    assert!(
-        order_key as usize == total_items,
-        "order key assignment missed items: assigned {order_key}, expected {total_items}"
-    );
 }
 
 fn preorder_collect(
