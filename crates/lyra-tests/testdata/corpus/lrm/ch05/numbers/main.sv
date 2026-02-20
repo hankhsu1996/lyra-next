@@ -42,6 +42,14 @@ module numbers_test;
   logic [15:0] uscore = 16'b0011_0101_0001_1111;
   int hex_uscore = 32'h12ab_f001;
 
+  // ? as z alternative (LRM 5.7.1)
+  logic [3:0] qbin = 4'b10?1;
+  logic [7:0] qhex = 8'h?F;
+
+  // Negative numbers (LRM 5.7.1 -- unary minus before sized literal)
+  int neg = -8'd6;
+  int neg2 = -4'sd1;
+
   // Spaced sized literals (LRM 5.7.1 -- trivia between size and base)
   logic [7:0]  spaced_hex = 8 'hFF;
   logic [3:0]  spaced_bin = 4 'b1010;
