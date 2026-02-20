@@ -1,5 +1,6 @@
 mod declarations;
 mod expressions;
+mod generate;
 mod items;
 mod ports;
 mod statements;

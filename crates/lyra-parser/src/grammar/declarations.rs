@@ -298,3 +298,37 @@ pub(crate) fn is_data_type_keyword(kind: SyntaxKind) -> bool {
             SyntaxKind::EnumKw | SyntaxKind::StructKw | SyntaxKind::UnionKw
         )
 }
+
+/// Tokens that unambiguously start a data declaration.
+/// Does NOT handle bare `Ident Ident` (ambiguous with module instantiation).
+pub(crate) fn at_unambiguous_data_decl_start(p: &Parser) -> bool {
+    let k = p.current();
+    if is_data_type_keyword(k) || is_net_type(k) {
+        return true;
+    }
+    matches!(
+        k,
+        SyntaxKind::SignedKw
+            | SyntaxKind::UnsignedKw
+            | SyntaxKind::VarKw
+            | SyntaxKind::InputKw
+            | SyntaxKind::OutputKw
+            | SyntaxKind::InoutKw
+    ) || (k == SyntaxKind::Ident && p.nth(1) == SyntaxKind::ColonColon)
+}
+
+fn is_net_type(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::WireKw
+            | SyntaxKind::TriKw
+            | SyntaxKind::WandKw
+            | SyntaxKind::WorKw
+            | SyntaxKind::Tri0Kw
+            | SyntaxKind::Tri1Kw
+            | SyntaxKind::TriregKw
+            | SyntaxKind::Supply0Kw
+            | SyntaxKind::Supply1Kw
+            | SyntaxKind::UwireKw
+    )
+}

@@ -168,6 +168,10 @@ ast_nodes! {
     PackageBody(SyntaxKind::PackageBody) { @custom }
     ImportDecl(SyntaxKind::ImportDecl) { @custom }
     ImportItem(SyntaxKind::ImportItem) { @custom }
+    ExportDecl(SyntaxKind::ExportDecl) {
+        items: [ExportItem],
+    }
+    ExportItem(SyntaxKind::ExportItem) { @custom }
     QualifiedName(SyntaxKind::QualifiedName) { @custom }
 
     TypedefDecl(SyntaxKind::TypedefDecl) {
@@ -366,6 +370,46 @@ impl ImportItem {
 
     pub fn is_wildcard(&self) -> bool {
         support::token(&self.syntax, SyntaxKind::Star).is_some()
+    }
+}
+
+impl ExportItem {
+    /// Returns the package name token (first Ident), or None for *::*
+    pub fn package_name(&self) -> Option<SyntaxToken> {
+        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
+    }
+
+    /// True if this item contains a wildcard (* after ::)
+    pub fn is_wildcard(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::Star).is_some()
+    }
+
+    /// True if this is *::* (re-export all)
+    pub fn is_all_wildcard(&self) -> bool {
+        let stars: Vec<_> = self
+            .syntax
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .filter(|tok| tok.kind() == SyntaxKind::Star)
+            .collect();
+        stars.len() >= 2
+    }
+
+    /// Returns the member name token (Ident after ::), or None for wildcards
+    pub fn member_name(&self) -> Option<SyntaxToken> {
+        let mut past_colon_colon = false;
+        for el in self.syntax.children_with_tokens() {
+            if let Some(tok) = el.into_token() {
+                if tok.kind() == SyntaxKind::ColonColon {
+                    past_colon_colon = true;
+                } else if past_colon_colon
+                    && matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
+                {
+                    return Some(tok);
+                }
+            }
+        }
+        None
     }
 }
 

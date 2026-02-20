@@ -1,17 +1,23 @@
 // LRM 26.4: Using packages in module headers
 //
-// Header-level import is not yet supported by the parser.
-// This test covers the workaround: importing inside the module body.
-// The actual header import syntax (module M import P::*; (...)) is
-// tracked in gaps.md.
+// Package import declarations may appear in the module header,
+// between the module name and the port list.
 
 package A;
   typedef logic [7:0] byte_t;
+  parameter int WIDTH = 8;
 endpackage
 
-// Body import as workaround for header import
-module M(input logic [7:0] data);
+// Header-level wildcard import (LRM 26.4)
+module M
+  import A::*;
+(input byte_t data);
+  logic [WIDTH-1:0] bus;
+endmodule
+
+// Header-level explicit import
+module N
   import A::byte_t;
+(input byte_t data);
   byte_t local_data;
-  assign local_data = data;
 endmodule

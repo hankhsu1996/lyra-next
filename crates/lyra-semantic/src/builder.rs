@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use lyra_ast::{
-    AstIdMap, AstNode, ConfigDecl, EnumType, FunctionDecl, InterfaceDecl, ModuleInstantiation,
-    NameRef, Port, PrimitiveDecl, ProgramDecl, QualifiedName, StructType, TaskDecl, TfPortDecl,
-    TypedefDecl,
+    AstIdMap, AstNode, ConfigDecl, EnumType, ExportDecl, ExportItem, FunctionDecl, InterfaceDecl,
+    ModuleInstantiation, NameRef, Port, PrimitiveDecl, ProgramDecl, QualifiedName, StructType,
+    TaskDecl, TfPortDecl, TypedefDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
@@ -14,7 +14,9 @@ use crate::aggregate::{
     EnumDef, EnumDefIdx, EnumVariant, StructDef, StructDefIdx, StructField, TypeOrigin, TypeRef,
     extract_typeref_from_typespec,
 };
-use crate::def_index::{DefIndex, ExpectedNs, Exports, Import, ImportName, NamePath, UseSite};
+use crate::def_index::{
+    DefIndex, ExpectedNs, ExportEntry, Exports, Import, ImportName, NamePath, UseSite,
+};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
@@ -61,6 +63,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         decl_to_init_expr: ctx.decl_to_init_expr,
         enum_defs: ctx.enum_defs.into_boxed_slice(),
         struct_defs: ctx.struct_defs.into_boxed_slice(),
+        export_decls: ctx.export_decls.into_boxed_slice(),
         diagnostics: diagnostics.into_boxed_slice(),
     }
 }
@@ -104,6 +107,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) imports: Vec<Import>,
     pub(crate) enum_defs: Vec<EnumDef>,
     pub(crate) struct_defs: Vec<StructDef>,
+    pub(crate) export_decls: Vec<ExportEntry>,
     pub(crate) current_owner: Option<SmolStr>,
     pub(crate) enum_ordinals: HashMap<Option<SmolStr>, u32>,
     pub(crate) struct_ordinals: HashMap<Option<SmolStr>, u32>,
@@ -125,6 +129,7 @@ impl<'a> DefContext<'a> {
             imports: Vec::new(),
             enum_defs: Vec::new(),
             struct_defs: Vec::new(),
+            export_decls: Vec::new(),
             current_owner: None,
             enum_ordinals: HashMap::new(),
             struct_ordinals: HashMap::new(),
@@ -213,6 +218,13 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
         }
 
         let prev_owner = ctx.current_owner.replace(name);
+        // Pass 1: header imports (scope facts collected first so ports see them)
+        for child in node.children() {
+            if child.kind() == SyntaxKind::ImportDecl {
+                collect_import_decl(ctx, &child, module_scope);
+            }
+        }
+        // Pass 2: ports and body
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::ParamPortList => {
@@ -290,6 +302,13 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         }
 
         let prev_owner = ctx.current_owner.replace(name);
+        // Pass 1: header imports
+        for child in node.children() {
+            if child.kind() == SyntaxKind::ImportDecl {
+                collect_import_decl(ctx, &child, iface_scope);
+            }
+        }
+        // Pass 2: ports and body
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::ParamPortList => {
@@ -333,6 +352,13 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         }
 
         let prev_owner = ctx.current_owner.replace(name);
+        // Pass 1: header imports
+        for child in node.children() {
+            if child.kind() == SyntaxKind::ImportDecl {
+                collect_import_decl(ctx, &child, prog_scope);
+            }
+        }
+        // Pass 2: ports and body
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::ParamPortList => {
@@ -405,7 +431,11 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
 
 fn collect_package_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
-        collect_module_item(ctx, &child, scope);
+        if ExportDecl::cast(child.clone()).is_some() {
+            collect_export_decl(ctx, &child);
+        } else {
+            collect_module_item(ctx, &child, scope);
+        }
     }
 }
 
@@ -637,6 +667,32 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                 name: ImportName::Explicit(SmolStr::new(idents[1].text())),
                 scope,
                 range: node.text_range(),
+            });
+        }
+    }
+}
+
+fn collect_export_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
+    let Some(decl) = ExportDecl::cast(node.clone()) else {
+        return;
+    };
+    for item in decl.items() {
+        collect_export_item(ctx, &item);
+    }
+}
+
+fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem) {
+    if item.is_all_wildcard() {
+        ctx.export_decls.push(ExportEntry::AllWildcard);
+    } else if let Some(pkg_tok) = item.package_name() {
+        let package = SmolStr::new(pkg_tok.text());
+        if item.is_wildcard() {
+            ctx.export_decls
+                .push(ExportEntry::PackageWildcard { package });
+        } else if let Some(member_tok) = item.member_name() {
+            ctx.export_decls.push(ExportEntry::Explicit {
+                package,
+                name: SmolStr::new(member_tok.text()),
             });
         }
     }
@@ -987,188 +1043,5 @@ fn port_name_ident(port_node: &SyntaxNode) -> Option<lyra_parser::SyntaxToken> {
 }
 
 #[cfg(test)]
-mod tests {
-    use lyra_source::FileId;
-
-    use super::*;
-    use crate::name_graph::NameGraph;
-
-    fn parse_source(src: &str) -> (lyra_parser::Parse, lyra_ast::AstIdMap) {
-        let tokens = lyra_lexer::lex(src);
-        let pp = lyra_preprocess::preprocess_identity(FileId(0), &tokens, src);
-        let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
-        let map = lyra_ast::AstIdMap::from_root(FileId(0), &parse.syntax());
-        (parse, map)
-    }
-
-    #[test]
-    fn use_site_ordering_stable_across_whitespace() {
-        let src_a = "module m; logic x; assign x = 0; endmodule";
-        let src_b = "module  m;  logic  x;  assign  x  =  0;  endmodule";
-
-        let (parse_a, map_a) = parse_source(src_a);
-        let def_a = build_def_index(FileId(0), &parse_a, &map_a);
-        let graph_a = NameGraph::from_def_index(&def_a);
-
-        let (parse_b, map_b) = parse_source(src_b);
-        let def_b = build_def_index(FileId(0), &parse_b, &map_b);
-        let graph_b = NameGraph::from_def_index(&def_b);
-
-        // NameGraph should be equal (offset-independent)
-        assert_eq!(
-            graph_a, graph_b,
-            "NameGraph should be equal across whitespace edits"
-        );
-
-        // Ranges and ast_ids differ, confirming DefIndex is NOT equal
-        assert_ne!(def_a, def_b, "DefIndex should differ (offsets changed)");
-    }
-
-    #[test]
-    fn package_symbols_collected() {
-        let src = "package pkg; logic x; parameter P = 1; endpackage";
-        let (parse, map) = parse_source(src);
-        let def = build_def_index(FileId(0), &parse, &map);
-
-        assert_eq!(def.exports.packages.len(), 1);
-        let pkg_sym = def.symbols.get(def.exports.packages[0]);
-        assert_eq!(pkg_sym.name.as_str(), "pkg");
-        assert_eq!(pkg_sym.kind, SymbolKind::Package);
-
-        // Check that internal symbols were collected
-        let has_x = def
-            .symbols
-            .iter()
-            .any(|(_, s)| s.name.as_str() == "x" && s.kind == SymbolKind::Variable);
-        assert!(has_x, "variable 'x' should be collected in package");
-    }
-
-    #[test]
-    fn import_recorded_in_def_index() {
-        let src = "module m; import pkg::x; import pkg2::*; endmodule";
-        let (parse, map) = parse_source(src);
-        let def = build_def_index(FileId(0), &parse, &map);
-
-        assert_eq!(def.imports.len(), 2);
-        assert_eq!(def.imports[0].package.as_str(), "pkg");
-        assert_eq!(def.imports[0].name, ImportName::Explicit(SmolStr::new("x")));
-        assert_eq!(def.imports[1].package.as_str(), "pkg2");
-        assert_eq!(def.imports[1].name, ImportName::Wildcard);
-
-        // Imports should NOT appear as use-sites
-        let import_use_sites: Vec<_> = def
-            .use_sites
-            .iter()
-            .filter(|u| {
-                u.path
-                    .as_simple()
-                    .is_some_and(|s| s == "pkg" || s == "pkg2")
-            })
-            .collect();
-        assert!(
-            import_use_sites.is_empty(),
-            "imports should not be recorded as use-sites"
-        );
-    }
-
-    #[test]
-    fn qualified_name_use_site() {
-        let src = "module m; assign y = pkg::x; endmodule";
-        let (parse, map) = parse_source(src);
-        let def = build_def_index(FileId(0), &parse, &map);
-
-        let qualified_sites: Vec<_> = def
-            .use_sites
-            .iter()
-            .filter(|u| u.path.as_qualified().is_some())
-            .collect();
-        assert_eq!(qualified_sites.len(), 1);
-        let segs = qualified_sites[0].path.as_qualified().unwrap();
-        assert_eq!(segs.len(), 2);
-        assert_eq!(segs[0].as_str(), "pkg");
-        assert_eq!(segs[1].as_str(), "x");
-    }
-
-    #[test]
-    fn name_graph_includes_imports() {
-        let src = "module m; import pkg::x; endmodule";
-        let (parse, map) = parse_source(src);
-        let def = build_def_index(FileId(0), &parse, &map);
-        let graph = NameGraph::from_def_index(&def);
-
-        assert_eq!(graph.imports.len(), 1);
-        assert_eq!(graph.imports[0].package.as_str(), "pkg");
-    }
-
-    #[test]
-    fn typedef_collected_as_type_ns() {
-        let src = "module m; typedef logic [7:0] byte_t; endmodule";
-        let (parse, map) = parse_source(src);
-        let def = build_def_index(FileId(0), &parse, &map);
-
-        let typedef_sym = def
-            .symbols
-            .iter()
-            .find(|(_, s)| s.name.as_str() == "byte_t")
-            .map(|(_, s)| s);
-        assert!(
-            typedef_sym.is_some(),
-            "typedef 'byte_t' should be collected"
-        );
-        assert_eq!(typedef_sym.expect("checked").kind, SymbolKind::Typedef);
-    }
-
-    #[test]
-    fn typedef_use_site_type_then_value() {
-        let src = "module m; typedef my_t other_t; endmodule";
-        let (parse, map) = parse_source(src);
-        let def = build_def_index(FileId(0), &parse, &map);
-
-        let my_t_use = def
-            .use_sites
-            .iter()
-            .find(|u| u.path.as_simple() == Some("my_t"));
-        assert!(my_t_use.is_some(), "'my_t' should be a use-site");
-        assert_eq!(
-            my_t_use.expect("checked").expected_ns,
-            ExpectedNs::TypeThenValue,
-            "type-position NameRef should have TypeThenValue"
-        );
-
-        let other_sym = def
-            .symbols
-            .iter()
-            .find(|(_, s)| s.name.as_str() == "other_t");
-        assert!(other_sym.is_some(), "'other_t' should be a typedef symbol");
-    }
-
-    #[test]
-    fn same_name_different_namespace_no_duplicate() {
-        let src = "module m; logic x; typedef int x; endmodule";
-        let (parse, map) = parse_source(src);
-        let def = build_def_index(FileId(0), &parse, &map);
-
-        assert!(
-            def.diagnostics.is_empty(),
-            "value 'x' and type 'x' should not conflict: {:?}",
-            def.diagnostics
-        );
-    }
-
-    #[test]
-    fn same_namespace_typedef_duplicate() {
-        let src = "module m; typedef int t; typedef logic t; endmodule";
-        let (parse, map) = parse_source(src);
-        let def = build_def_index(FileId(0), &parse, &map);
-
-        let dup_diags: Vec<_> = def
-            .diagnostics
-            .iter()
-            .filter(|d| matches!(d.kind, SemanticDiagKind::DuplicateDefinition { .. }))
-            .collect();
-        assert!(
-            !dup_diags.is_empty(),
-            "two typedefs with same name should produce duplicate diagnostic"
-        );
-    }
-}
+#[path = "builder_tests.rs"]
+mod tests;

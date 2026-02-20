@@ -4,6 +4,7 @@ use crate::parser::Parser;
 
 use super::declarations;
 use super::expressions;
+use super::generate;
 use super::ports;
 use super::statements;
 
@@ -50,16 +51,12 @@ fn package_item(p: &mut Parser) -> bool {
             declarations::param_decl(p);
             true
         }
-        k if is_net_type(k) => {
-            declarations::net_decl(p);
-            true
-        }
-        k if declarations::is_data_type_keyword(k) => {
-            declarations::var_decl(p);
-            true
-        }
         SyntaxKind::ImportKw => {
             import_decl(p);
+            true
+        }
+        SyntaxKind::ExportKw => {
+            export_decl(p);
             true
         }
         SyntaxKind::TypedefKw => {
@@ -72,6 +69,14 @@ fn package_item(p: &mut Parser) -> bool {
         }
         SyntaxKind::TaskKw => {
             task_decl(p);
+            true
+        }
+        _ if declarations::at_unambiguous_data_decl_start(p) => {
+            if is_net_type(p.current()) {
+                declarations::net_decl(p);
+            } else {
+                declarations::var_decl(p);
+            }
             true
         }
         _ => {
@@ -127,7 +132,43 @@ fn import_item(p: &mut Parser) {
     m.complete(p, SyntaxKind::ImportItem);
 }
 
-// Parse a module declaration: `module name [#(params)] [(ports)] ; { item } endmodule`
+// Parse an export declaration: `export pkg::sym, pkg::*, *::* ;`
+pub(crate) fn export_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // export
+    export_item(p);
+    while p.eat(SyntaxKind::Comma) {
+        export_item(p);
+    }
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::ExportDecl);
+}
+
+fn export_item(p: &mut Parser) {
+    let m = p.start();
+    if p.at(SyntaxKind::Star) && p.nth(1) == SyntaxKind::ColonColon && p.nth(2) == SyntaxKind::Star
+    {
+        // *::*
+        p.bump(); // *
+        p.bump(); // ::
+        p.bump(); // *
+    } else if p.at(SyntaxKind::Ident) && p.nth(1) == SyntaxKind::ColonColon {
+        p.bump(); // pkg
+        p.bump(); // ::
+        if p.at(SyntaxKind::Star) {
+            p.bump(); // *
+        } else if p.at(SyntaxKind::Ident) {
+            p.bump(); // name
+        } else {
+            p.error("expected identifier or `*` after `::`");
+        }
+    } else {
+        p.error_bump("expected export item");
+    }
+    m.complete(p, SyntaxKind::ExportItem);
+}
+
+// Parse a module declaration: `module name [import ...;]* [#(params)] [(ports)] ; { item } endmodule`
 pub(crate) fn module_decl(p: &mut Parser) {
     let m = p.start();
     p.bump(); // module
@@ -139,6 +180,11 @@ pub(crate) fn module_decl(p: &mut Parser) {
 
     // Module name
     p.expect(SyntaxKind::Ident);
+
+    // Header-level package imports (LRM 26.4)
+    while p.at(SyntaxKind::ImportKw) {
+        import_decl(p);
+    }
 
     // Optional parameter port list #(...)
     if p.at(SyntaxKind::Hash) && p.nth(1) == SyntaxKind::LParen {
@@ -174,7 +220,7 @@ pub(crate) fn module_decl(p: &mut Parser) {
 }
 
 // Parse one module item. Returns false if no progress was made.
-fn module_item(p: &mut Parser) -> bool {
+pub(super) fn module_item(p: &mut Parser) -> bool {
     super::eat_attr_instances(p);
     match p.current() {
         SyntaxKind::AssignKw => {
@@ -196,18 +242,6 @@ fn module_item(p: &mut Parser) -> bool {
             declarations::param_decl(p);
             true
         }
-        k if is_net_type(k) => {
-            declarations::net_decl(p);
-            true
-        }
-        k if declarations::is_data_type_keyword(k) => {
-            declarations::var_decl(p);
-            true
-        }
-        SyntaxKind::InputKw | SyntaxKind::OutputKw | SyntaxKind::InoutKw => {
-            declarations::var_decl(p);
-            true
-        }
         SyntaxKind::ImportKw => {
             import_decl(p);
             true
@@ -217,27 +251,27 @@ fn module_item(p: &mut Parser) -> bool {
             true
         }
         SyntaxKind::GenerateKw => {
-            generate_region(p);
+            generate::generate_region(p);
             true
         }
         SyntaxKind::IfKw => {
-            generate_if(p);
+            generate::generate_if(p);
             true
         }
         SyntaxKind::ForKw => {
-            generate_for(p);
+            generate::generate_for(p);
             true
         }
         SyntaxKind::CaseKw | SyntaxKind::CasexKw | SyntaxKind::CasezKw => {
-            generate_case(p);
+            generate::generate_case(p);
             true
         }
         SyntaxKind::BeginKw => {
-            generate_block(p);
+            generate::generate_block(p);
             true
         }
         SyntaxKind::GenvarKw => {
-            genvar_decl(p);
+            generate::genvar_decl(p);
             true
         }
         SyntaxKind::FunctionKw => {
@@ -248,32 +282,32 @@ fn module_item(p: &mut Parser) -> bool {
             task_decl(p);
             true
         }
+        _ if declarations::at_unambiguous_data_decl_start(p) => {
+            if is_net_type(p.current()) {
+                declarations::net_decl(p);
+            } else {
+                declarations::var_decl(p);
+            }
+            true
+        }
         SyntaxKind::Ident => {
-            // Could be module instantiation or declaration with user-defined type.
-            // Heuristic: Ident followed by Ident is module_inst or typedef-based decl.
-            // Ident followed by #( is module instantiation with parameters.
-            // Known limitation: this 3-token lookahead can misclassify edge cases
-            // as grammar coverage expands (interfaces, modports, class names).
-            // A semantic pass will be needed for fully accurate disambiguation.
+            // Ambiguous: bare Ident not caught by classifier (no ColonColon).
+            // Heuristic: Ident # -> instantiation, Ident Ident ( -> instantiation.
             if p.nth(1) == SyntaxKind::Hash {
                 module_instantiation(p);
             } else if p.nth(1) == SyntaxKind::Ident {
-                // Ident Ident: could be decl or instantiation.
-                // If third significant token is `(`, likely instantiation.
                 if p.nth(2) == SyntaxKind::LParen {
                     module_instantiation(p);
                 } else {
                     declarations::var_decl(p);
                 }
             } else {
-                // Bare identifier -- skip as error
                 p.error_bump("unexpected token in module body");
             }
             true
         }
         _ => {
             p.error_bump("unexpected token in module body");
-            // Return true because we consumed a token (error_bump does that).
             !p.at_end()
         }
     }
@@ -427,6 +461,11 @@ pub(crate) fn interface_decl(p: &mut Parser) {
     // Interface name
     p.expect(SyntaxKind::Ident);
 
+    // Header-level package imports (LRM 26.4)
+    while p.at(SyntaxKind::ImportKw) {
+        import_decl(p);
+    }
+
     // Optional parameter port list #(...)
     if p.at(SyntaxKind::Hash) && p.nth(1) == SyntaxKind::LParen {
         ports::param_port_list(p);
@@ -472,6 +511,11 @@ pub(crate) fn program_decl(p: &mut Parser) {
 
     // Program name
     p.expect(SyntaxKind::Ident);
+
+    // Header-level package imports (LRM 26.4)
+    while p.at(SyntaxKind::ImportKw) {
+        import_decl(p);
+    }
 
     // Optional parameter port list #(...)
     if p.at(SyntaxKind::Hash) && p.nth(1) == SyntaxKind::LParen {
@@ -562,157 +606,6 @@ pub(crate) fn config_decl(p: &mut Parser) {
     }
 
     m.complete(p, SyntaxKind::ConfigDecl);
-}
-
-// `generate { module_item* } endgenerate`
-fn generate_region(p: &mut Parser) {
-    let m = p.start();
-    p.bump(); // generate
-    while !p.at(SyntaxKind::EndgenerateKw) && !p.at_end() {
-        if !module_item(p) {
-            break;
-        }
-    }
-    if !p.eat(SyntaxKind::EndgenerateKw) {
-        p.error("expected `endgenerate`");
-    }
-    m.complete(p, SyntaxKind::GenerateRegion);
-}
-
-// `if (expr) generate_body [else generate_body]`
-fn generate_if(p: &mut Parser) {
-    let m = p.start();
-    p.bump(); // if
-    p.expect(SyntaxKind::LParen);
-    expressions::expr(p);
-    p.expect(SyntaxKind::RParen);
-    generate_body(p);
-    if p.eat(SyntaxKind::ElseKw) {
-        generate_body(p);
-    }
-    m.complete(p, SyntaxKind::IfStmt);
-}
-
-// `for (genvar i = 0; i < N; i = i + 1) generate_body`
-fn generate_for(p: &mut Parser) {
-    let m = p.start();
-    p.bump(); // for
-    p.expect(SyntaxKind::LParen);
-    // Init: `genvar i = expr` or `i = expr`
-    if !p.at(SyntaxKind::Semicolon) {
-        if p.at(SyntaxKind::GenvarKw) {
-            p.bump(); // genvar
-        }
-        expressions::expr_for_stmt(p);
-        if p.at(SyntaxKind::Assign) {
-            p.bump();
-            expressions::expr(p);
-        }
-    }
-    p.expect(SyntaxKind::Semicolon);
-    // Condition
-    if !p.at(SyntaxKind::Semicolon) {
-        expressions::expr(p);
-    }
-    p.expect(SyntaxKind::Semicolon);
-    // Step
-    if !p.at(SyntaxKind::RParen) {
-        expressions::expr_for_stmt(p);
-        if p.at(SyntaxKind::Assign) {
-            p.bump();
-            expressions::expr(p);
-        }
-    }
-    p.expect(SyntaxKind::RParen);
-    generate_body(p);
-    m.complete(p, SyntaxKind::ForStmt);
-}
-
-// `case (expr) { case_item } endcase`
-fn generate_case(p: &mut Parser) {
-    let m = p.start();
-    p.bump(); // case / casex / casez
-    p.expect(SyntaxKind::LParen);
-    expressions::expr(p);
-    p.expect(SyntaxKind::RParen);
-    while !p.at(SyntaxKind::EndcaseKw) && !p.at_end() && !at_gen_end(p) {
-        let cp = p.checkpoint();
-        generate_case_item(p);
-        if !p.has_progressed(cp) {
-            p.error_bump("expected case item");
-        }
-    }
-    if !p.eat(SyntaxKind::EndcaseKw) {
-        p.error("expected `endcase`");
-    }
-    m.complete(p, SyntaxKind::CaseStmt);
-}
-
-fn generate_case_item(p: &mut Parser) {
-    let m = p.start();
-    if p.eat(SyntaxKind::DefaultKw) {
-        p.eat(SyntaxKind::Colon);
-        generate_body(p);
-    } else {
-        expressions::expr(p);
-        while p.eat(SyntaxKind::Comma) {
-            expressions::expr(p);
-        }
-        p.expect(SyntaxKind::Colon);
-        generate_body(p);
-    }
-    m.complete(p, SyntaxKind::CaseItem);
-}
-
-// `begin [:label] { module_item* } end [:label]`
-fn generate_block(p: &mut Parser) {
-    let m = p.start();
-    p.bump(); // begin
-    if p.eat(SyntaxKind::Colon) && p.at(SyntaxKind::Ident) {
-        p.bump();
-    }
-    while !p.at(SyntaxKind::EndKw) && !p.at_end() && !at_gen_end(p) {
-        if !module_item(p) {
-            break;
-        }
-    }
-    if !p.eat(SyntaxKind::EndKw) {
-        p.error("expected `end`");
-    }
-    if p.eat(SyntaxKind::Colon) && p.at(SyntaxKind::Ident) {
-        p.bump();
-    }
-    m.complete(p, SyntaxKind::BlockStmt);
-}
-
-// Generate body: either a begin..end block or a single module_item
-fn generate_body(p: &mut Parser) {
-    if p.at(SyntaxKind::BeginKw) {
-        generate_block(p);
-    } else {
-        module_item(p);
-    }
-}
-
-// `genvar ident [, ident]* ;`
-fn genvar_decl(p: &mut Parser) {
-    let m = p.start();
-    p.bump(); // genvar
-    p.expect(SyntaxKind::Ident);
-    while p.eat(SyntaxKind::Comma) {
-        p.expect(SyntaxKind::Ident);
-    }
-    p.expect(SyntaxKind::Semicolon);
-    m.complete(p, SyntaxKind::GenvarDecl);
-}
-
-fn at_gen_end(p: &Parser) -> bool {
-    p.at(SyntaxKind::EndmoduleKw)
-        || p.at(SyntaxKind::EndgenerateKw)
-        || p.at(SyntaxKind::EndinterfaceKw)
-        || p.at(SyntaxKind::EndprogramKw)
-        || p.at(SyntaxKind::EndfunctionKw)
-        || p.at(SyntaxKind::EndtaskKw)
 }
 
 // `function [lifetime] return_type name ( tf_port_list ) ; { stmt/decl } endfunction [: name]`

@@ -167,3 +167,123 @@ pub fn build_package_scope_index(mut packages: Vec<PackageScope>) -> PackageScop
         packages: packages.into_boxed_slice(),
     }
 }
+
+/// Per-package collected facts for computing the public surface.
+pub struct PackageLocalFacts {
+    pub name: SmolStr,
+    pub value_ns: Vec<(SmolStr, GlobalDefId)>,
+    pub type_ns: Vec<(SmolStr, GlobalDefId)>,
+    pub imports: Vec<crate::def_index::ImportName>,
+    pub import_packages: Vec<SmolStr>,
+    pub export_decls: Vec<crate::def_index::ExportEntry>,
+}
+
+/// Compute the public surface for a single package, resolving exports.
+///
+/// Merge precedence:
+/// 1. Local defs always win
+/// 2. Explicit single-name exports (`export P::name`)
+/// 3. Package wildcard exports (`export P::*`)
+/// 4. All-wildcard exports (`export *::*`)
+///
+/// `get_dep_surface` fetches the public surface of a dependency package.
+/// It should return `None` for unknown packages or to break cycles.
+pub fn compute_public_surface(
+    facts: &PackageLocalFacts,
+    get_dep_surface: &dyn Fn(&str) -> Option<PackageScope>,
+) -> PackageScope {
+    use crate::def_index::ExportEntry;
+
+    let mut value_ns: Vec<(SmolStr, GlobalDefId)> = facts.value_ns.clone();
+    let mut type_ns: Vec<(SmolStr, GlobalDefId)> = facts.type_ns.clone();
+
+    // Track names already present from local defs (owned for borrow checker)
+    let local_value_names: std::collections::HashSet<SmolStr> =
+        value_ns.iter().map(|(n, _)| n.clone()).collect();
+    let local_type_names: std::collections::HashSet<SmolStr> =
+        type_ns.iter().map(|(n, _)| n.clone()).collect();
+
+    // Process exports in order: explicit first, then package wildcards, then all-wildcards
+    let mut explicit_exports = Vec::new();
+    let mut wildcard_exports = Vec::new();
+    let mut has_all_wildcard = false;
+
+    for entry in &facts.export_decls {
+        match entry {
+            ExportEntry::Explicit { package, name } => {
+                explicit_exports.push((package.clone(), name.clone()));
+            }
+            ExportEntry::PackageWildcard { package } => {
+                wildcard_exports.push(package.clone());
+            }
+            ExportEntry::AllWildcard => {
+                has_all_wildcard = true;
+            }
+        }
+    }
+
+    // Explicit exports: add specific names from specific packages
+    for (pkg_name, member_name) in &explicit_exports {
+        if let Some(dep) = get_dep_surface(pkg_name) {
+            if !local_value_names.contains(member_name)
+                && let Ok(idx) = dep
+                    .value_ns
+                    .binary_search_by(|(n, _)| n.as_str().cmp(member_name.as_str()))
+            {
+                value_ns.push(dep.value_ns[idx].clone());
+            }
+            if !local_type_names.contains(member_name)
+                && let Ok(idx) = dep
+                    .type_ns
+                    .binary_search_by(|(n, _)| n.as_str().cmp(member_name.as_str()))
+            {
+                type_ns.push(dep.type_ns[idx].clone());
+            }
+        }
+    }
+
+    // Package wildcard exports: add all symbols from specific packages
+    for pkg_name in &wildcard_exports {
+        if let Some(dep) = get_dep_surface(pkg_name) {
+            merge_ns_entries(&mut value_ns, &dep.value_ns, &local_value_names);
+            merge_ns_entries(&mut type_ns, &dep.type_ns, &local_type_names);
+        }
+    }
+
+    // All-wildcard exports: re-export all imported symbols
+    if has_all_wildcard {
+        // Re-export from all imported packages
+        let mut seen_pkgs: std::collections::HashSet<SmolStr> = std::collections::HashSet::new();
+        for pkg_name in &facts.import_packages {
+            if seen_pkgs.insert(pkg_name.clone())
+                && let Some(dep) = get_dep_surface(pkg_name)
+            {
+                merge_ns_entries(&mut value_ns, &dep.value_ns, &local_value_names);
+                merge_ns_entries(&mut type_ns, &dep.type_ns, &local_type_names);
+            }
+        }
+    }
+
+    value_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
+    value_ns.dedup_by(|(a, _), (b, _)| a == b);
+    type_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
+    type_ns.dedup_by(|(a, _), (b, _)| a == b);
+
+    PackageScope {
+        name: facts.name.clone(),
+        value_ns: value_ns.into_boxed_slice(),
+        type_ns: type_ns.into_boxed_slice(),
+    }
+}
+
+fn merge_ns_entries(
+    target: &mut Vec<(SmolStr, GlobalDefId)>,
+    source: &[(SmolStr, GlobalDefId)],
+    local_names: &std::collections::HashSet<SmolStr>,
+) {
+    for (name, id) in source {
+        if !local_names.contains(name) && !target.iter().any(|(n, _)| n == name) {
+            target.push((name.clone(), *id));
+        }
+    }
+}
