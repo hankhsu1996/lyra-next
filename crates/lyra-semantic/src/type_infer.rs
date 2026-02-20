@@ -95,7 +95,8 @@ pub enum ExprTypeErrorKind {
     InvalidReplicationCount,
     ReplicationConstEvalFailed(ConstEvalError),
     IndexNonIndexable,
-    FieldAccessUnsupported,
+    MemberAccessOnNonComposite,
+    UnknownMember,
     UserCallUnsupported,
     RangeUnsupported,
     UnsupportedCalleeForm(CalleeFormKind),
@@ -104,16 +105,26 @@ pub enum ExprTypeErrorKind {
     TaskInExprContext,
 }
 
-/// Result of typing an expression (self-determined).
+/// How an expression's type is viewed for operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExprType {
-    /// Integral bit-vector (logic/int/bit/etc). All expression operations
-    /// normalize the keyword to logic -- we don't track keyword in `BitVecType`.
+pub enum ExprView {
+    /// Integral bit-vector view (logic/int/bit/etc).
     BitVec(BitVecType),
-    /// Non-bit type. Wraps `Ty` directly (Real, String, Chandle, Event, Void)
-    /// to avoid duplicating the `Ty` variant set.
-    NonBit(Ty),
+    /// Non-bit-vector type (real, string, struct, etc.).
+    Plain,
+    /// Type could not be determined.
     Error(ExprTypeErrorKind),
+}
+
+/// Result of typing an expression (self-determined).
+///
+/// Every typed expression always carries a `Ty`. `view` provides the
+/// operational interpretation: bit-vector for integral types, plain for
+/// non-integral types, or error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExprType {
+    pub ty: Ty,
+    pub view: ExprView,
 }
 
 impl ExprType {
@@ -131,17 +142,27 @@ impl ExprType {
                     Signedness::Unsigned
                 };
                 let four_state = i.keyword.four_state();
-                ExprType::BitVec(BitVecType {
-                    width,
-                    signed,
-                    four_state,
-                })
+                ExprType {
+                    ty: ty.clone(),
+                    view: ExprView::BitVec(BitVecType {
+                        width,
+                        signed,
+                        four_state,
+                    }),
+                }
             }
-            Ty::Real(_) | Ty::String | Ty::Chandle | Ty::Event | Ty::Void => {
-                ExprType::NonBit(ty.clone())
-            }
-            Ty::Enum(_) | Ty::Struct(_) | Ty::Array { .. } => ExprType::NonBit(ty.clone()),
-            Ty::Error => ExprType::Error(ExprTypeErrorKind::Unresolved),
+            Ty::Real(_)
+            | Ty::String
+            | Ty::Chandle
+            | Ty::Event
+            | Ty::Void
+            | Ty::Enum(_)
+            | Ty::Struct(_)
+            | Ty::Array { .. } => ExprType {
+                ty: ty.clone(),
+                view: ExprView::Plain,
+            },
+            Ty::Error => ExprType::error(ExprTypeErrorKind::Unresolved),
         }
     }
 
@@ -150,14 +171,44 @@ impl ExprType {
         match st {
             SymbolType::Value(ty) => ExprType::from_ty(ty),
             SymbolType::Net(net) => ExprType::from_ty(&net.data),
-            SymbolType::TypeAlias(_) => ExprType::Error(ExprTypeErrorKind::NameRefIsTypeNotValue),
-            SymbolType::Error(_) => ExprType::Error(ExprTypeErrorKind::Unresolved),
+            SymbolType::TypeAlias(_) => ExprType::error(ExprTypeErrorKind::NameRefIsTypeNotValue),
+            SymbolType::Error(_) => ExprType::error(ExprTypeErrorKind::Unresolved),
+        }
+    }
+
+    /// Construct an error `ExprType`.
+    pub fn error(kind: ExprTypeErrorKind) -> ExprType {
+        ExprType {
+            ty: Ty::Error,
+            view: ExprView::Error(kind),
+        }
+    }
+
+    /// Construct a bit-vector `ExprType` from raw `BitVecType`.
+    pub fn bitvec(bv: BitVecType) -> ExprType {
+        ExprType {
+            ty: Ty::Integral(crate::types::Integral {
+                keyword: if bv.four_state {
+                    crate::types::IntegralKw::Logic
+                } else {
+                    crate::types::IntegralKw::Bit
+                },
+                signed: bv.signed == Signedness::Signed,
+                packed: match bv.width {
+                    BitWidth::Known(w) if w > 1 => Box::new([crate::types::PackedDim {
+                        msb: crate::types::ConstInt::Known(i64::from(w) - 1),
+                        lsb: crate::types::ConstInt::Known(0),
+                    }]),
+                    _ => Box::new([]),
+                },
+            }),
+            view: ExprView::BitVec(bv),
         }
     }
 
     /// Unsized decimal literal default: `BitVec(32, Signed, 2-state)`.
     pub fn int_literal() -> ExprType {
-        ExprType::BitVec(BitVecType {
+        ExprType::bitvec(BitVecType {
             width: BitWidth::Known(32),
             signed: Signedness::Signed,
             four_state: false,
@@ -166,7 +217,7 @@ impl ExprType {
 
     /// Sized bit-vector (2-state by default).
     pub fn bits(width: u32, signed: Signedness) -> ExprType {
-        ExprType::BitVec(BitVecType {
+        ExprType::bitvec(BitVecType {
             width: BitWidth::Known(width),
             signed,
             four_state: false,
@@ -180,10 +231,10 @@ impl ExprType {
 
     /// Human-readable type representation.
     pub fn pretty(&self) -> SmolStr {
-        match self {
-            ExprType::BitVec(bv) => bv.pretty(),
-            ExprType::NonBit(ty) => ty.pretty(),
-            ExprType::Error(_) => SmolStr::new_static("<error>"),
+        match &self.view {
+            ExprView::BitVec(bv) => bv.pretty(),
+            ExprView::Plain => self.ty.pretty(),
+            ExprView::Error(_) => SmolStr::new_static("<error>"),
         }
     }
 }
@@ -229,6 +280,23 @@ pub struct CallablePort {
     pub has_default: bool,
 }
 
+/// Information about a resolved member access.
+pub struct MemberInfo {
+    pub ty: Ty,
+    pub kind: MemberKind,
+}
+
+/// What kind of member was accessed.
+pub enum MemberKind {
+    StructField { index: u32 },
+}
+
+/// Reasons a member lookup can fail.
+pub enum MemberLookupError {
+    NotComposite,
+    UnknownMember,
+}
+
 /// Callbacks for the inference engine. No DB access -- pure.
 pub trait InferCtx {
     /// Resolve a `NameRef`/`QualifiedName` to its type.
@@ -244,6 +312,8 @@ pub trait InferCtx {
     ) -> Result<GlobalSymbolId, ResolveCallableError>;
     /// Get the signature of a callable symbol.
     fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef>;
+    /// Look up a member (field) on a type.
+    fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError>;
 }
 
 /// Infer the type of an expression node, optionally in a context.
@@ -260,7 +330,7 @@ pub fn infer_expr_type(
         SyntaxKind::Literal => infer_literal(expr, expected),
         SyntaxKind::Expression | SyntaxKind::ParenExpr => match expr.first_child() {
             Some(child) => infer_expr_type(&child, ctx, expected),
-            None => ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind),
+            None => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
         },
         SyntaxKind::PrefixExpr => infer_prefix(expr, ctx, expected),
         SyntaxKind::BinExpr => infer_binary(expr, ctx, expected),
@@ -268,10 +338,10 @@ pub fn infer_expr_type(
         SyntaxKind::ConcatExpr => infer_concat(expr, ctx),
         SyntaxKind::ReplicExpr => infer_replic(expr, ctx),
         SyntaxKind::IndexExpr => infer_index(expr, ctx),
-        SyntaxKind::RangeExpr => ExprType::Error(ExprTypeErrorKind::RangeUnsupported),
-        SyntaxKind::FieldExpr => ExprType::Error(ExprTypeErrorKind::FieldAccessUnsupported),
+        SyntaxKind::RangeExpr => ExprType::error(ExprTypeErrorKind::RangeUnsupported),
+        SyntaxKind::FieldExpr => infer_field_access(expr, ctx),
         SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => infer_call(expr, ctx),
-        _ => ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind),
+        _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
     }
 }
 
@@ -293,9 +363,9 @@ fn infer_literal(node: &SyntaxNode, expected: Option<&IntegralCtx>) -> ExprType 
         });
 
     match lit_kind {
-        Some(SyntaxKind::TimeLiteral) => ExprType::NonBit(Ty::Real(RealKw::Time)),
-        Some(SyntaxKind::RealLiteral) => ExprType::NonBit(Ty::Real(RealKw::Real)),
-        Some(SyntaxKind::StringLiteral) => ExprType::NonBit(Ty::String),
+        Some(SyntaxKind::TimeLiteral) => ExprType::from_ty(&Ty::Real(RealKw::Time)),
+        Some(SyntaxKind::RealLiteral) => ExprType::from_ty(&Ty::Real(RealKw::Real)),
+        Some(SyntaxKind::StringLiteral) => ExprType::from_ty(&Ty::String),
         Some(SyntaxKind::UnbasedUnsizedLiteral) => {
             let has_xz = node
                 .children_with_tokens()
@@ -308,9 +378,9 @@ fn infer_literal(node: &SyntaxNode, expected: Option<&IntegralCtx>) -> ExprType 
                 four_state: has_xz,
             };
             if let Some(ectx) = expected {
-                ExprType::BitVec(coerce_integral(&self_ty, ectx))
+                ExprType::bitvec(coerce_integral(&self_ty, ectx))
             } else {
-                ExprType::BitVec(self_ty)
+                ExprType::bitvec(self_ty)
             }
         }
         _ => match parse_literal_shape(node) {
@@ -320,24 +390,24 @@ fn infer_literal(node: &SyntaxNode, expected: Option<&IntegralCtx>) -> ExprType 
                 } else {
                     Signedness::Unsigned
                 };
-                ExprType::BitVec(BitVecType {
+                ExprType::bitvec(BitVecType {
                     width: BitWidth::Known(shape.width),
                     signed,
                     four_state: shape.has_xz,
                 })
             }
-            None => ExprType::Error(ExprTypeErrorKind::UnsupportedLiteralKind),
+            None => ExprType::error(ExprTypeErrorKind::UnsupportedLiteralKind),
         },
     }
 }
 
 fn infer_prefix(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralCtx>) -> ExprType {
     let Some(op) = find_operator_token(node) else {
-        return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
     let Some(operand_node) = node.children().find(|c| is_expression_kind(c.kind())) else {
-        return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
     match op {
@@ -357,12 +427,12 @@ fn infer_prefix(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
         // Bitwise NOT or unary +/-: pass context to operand
         SyntaxKind::Tilde | SyntaxKind::Plus | SyntaxKind::Minus => {
             let operand = infer_expr_type(&operand_node, ctx, expected);
-            match &operand {
-                ExprType::BitVec(_) | ExprType::Error(_) => operand,
-                ExprType::NonBit(_) => ExprType::Error(ExprTypeErrorKind::NonBitOperand),
+            match &operand.view {
+                ExprView::BitVec(_) | ExprView::Error(_) => operand,
+                ExprView::Plain => ExprType::error(ExprTypeErrorKind::NonBitOperand),
             }
         }
-        _ => ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind),
+        _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
     }
 }
 
@@ -372,11 +442,11 @@ fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
         .filter(|c| is_expression_kind(c.kind()))
         .collect();
     if children.len() < 2 {
-        return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     }
 
     let Some(op) = find_binary_op(node) else {
-        return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
     // Step 1-2: self-determined types of both operands
@@ -386,11 +456,11 @@ fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
     let spec = op_spec(op);
 
     // Check for non-bit operands
-    let (lhs_bv, rhs_bv) = match (&lhs_self, &rhs_self) {
-        (ExprType::BitVec(a), ExprType::BitVec(b)) => (a, b),
-        (ExprType::Error(_), _) => return lhs_self,
-        (_, ExprType::Error(_)) => return rhs_self,
-        _ => return ExprType::Error(ExprTypeErrorKind::NonBitOperand),
+    let (lhs_bv, rhs_bv) = match (&lhs_self.view, &rhs_self.view) {
+        (ExprView::BitVec(a), ExprView::BitVec(b)) => (a, b),
+        (ExprView::Error(_), _) => return lhs_self,
+        (_, ExprView::Error(_)) => return rhs_self,
+        _ => return ExprType::error(ExprTypeErrorKind::NonBitOperand),
     };
 
     // Step 3: operator result (self-determined)
@@ -420,7 +490,7 @@ fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
     }
 
     // Step 6: return the coerced result
-    ExprType::BitVec(coerce_integral(&result_self, &result_ctx))
+    ExprType::bitvec(coerce_integral(&result_self, &result_ctx))
 }
 
 fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralCtx>) -> ExprType {
@@ -429,7 +499,7 @@ fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralC
         .filter(|c| is_expression_kind(c.kind()))
         .collect();
     if children.len() < 3 {
-        return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     }
 
     // Condition is always self-determined
@@ -439,8 +509,8 @@ fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralC
     let then_ty = infer_expr_type(&children[1], ctx, None);
     let else_ty = infer_expr_type(&children[2], ctx, None);
 
-    match (&then_ty, &else_ty) {
-        (ExprType::BitVec(a), ExprType::BitVec(b)) => {
+    match (&then_ty.view, &else_ty.view) {
+        (ExprView::BitVec(a), ExprView::BitVec(b)) => {
             // Compute common type from arms, then merge with outer context
             let merged = merge_bitvec(a, b);
             let arm_ctx = if let Some(outer) = expected {
@@ -472,12 +542,12 @@ fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralC
             infer_expr_type(&children[1], ctx, Some(&arm_ctx));
             infer_expr_type(&children[2], ctx, Some(&arm_ctx));
 
-            ExprType::BitVec(coerce_integral(&merged, &arm_ctx))
+            ExprType::bitvec(coerce_integral(&merged, &arm_ctx))
         }
-        (ExprType::NonBit(a), ExprType::NonBit(b)) if a == b => then_ty,
-        (ExprType::Error(_), _) => then_ty,
-        (_, ExprType::Error(_)) => else_ty,
-        _ => ExprType::Error(ExprTypeErrorKind::CondBranchTypeMismatch),
+        (ExprView::Plain, ExprView::Plain) if then_ty.ty == else_ty.ty => then_ty,
+        (ExprView::Error(_), _) => then_ty,
+        (_, ExprView::Error(_)) => else_ty,
+        _ => ExprType::error(ExprTypeErrorKind::CondBranchTypeMismatch),
     }
 }
 
@@ -491,8 +561,8 @@ fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
             continue;
         }
         let child_ty = infer_expr_type(&child, ctx, None);
-        match &child_ty {
-            ExprType::BitVec(bv) => {
+        match &child_ty.view {
+            ExprView::BitVec(bv) => {
                 any_four_state = any_four_state || bv.four_state;
                 match bv.width.self_determined() {
                     Some(w) => {
@@ -505,10 +575,10 @@ fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
                     }
                 }
             }
-            ExprType::NonBit(_) => {
-                return ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand);
+            ExprView::Plain => {
+                return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
             }
-            ExprType::Error(_) => return child_ty,
+            ExprView::Error(_) => return child_ty,
         }
     }
 
@@ -518,7 +588,7 @@ fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         BitWidth::Unknown
     };
 
-    ExprType::BitVec(BitVecType {
+    ExprType::bitvec(BitVecType {
         width,
         signed: Signedness::Unsigned,
         four_state: any_four_state,
@@ -535,7 +605,7 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         .collect();
 
     if expr_children.is_empty() {
-        return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     }
 
     // First expression child is the replication count
@@ -545,12 +615,12 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     let replic_count = match count {
         ConstInt::Known(n) => {
             if n <= 0 {
-                return ExprType::Error(ExprTypeErrorKind::InvalidReplicationCount);
+                return ExprType::error(ExprTypeErrorKind::InvalidReplicationCount);
             }
             u32::try_from(n).ok()
         }
         ConstInt::Error(e) => {
-            return ExprType::Error(ExprTypeErrorKind::ReplicationConstEvalFailed(e));
+            return ExprType::error(ExprTypeErrorKind::ReplicationConstEvalFailed(e));
         }
         ConstInt::Unevaluated(_) => None,
     };
@@ -563,15 +633,15 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 
     let (inner_width, inner_four_state) = if let Some(concat) = concat_child {
         let inner = infer_concat(concat, ctx);
-        match &inner {
-            ExprType::BitVec(bv) => (bv.width, bv.four_state),
-            ExprType::Error(_) => return inner,
-            ExprType::NonBit(_) => {
-                return ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand);
+        match &inner.view {
+            ExprView::BitVec(bv) => (bv.width, bv.four_state),
+            ExprView::Error(_) => return inner,
+            ExprView::Plain => {
+                return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
             }
         }
     } else if inner_items.is_empty() {
-        return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     } else {
         // Sum widths of inner items
         let mut total: Option<u32> = Some(0);
@@ -579,8 +649,8 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         let mut any_four_state = false;
         for item in inner_items {
             let item_ty = infer_expr_type(item, ctx, None);
-            match &item_ty {
-                ExprType::BitVec(bv) => {
+            match &item_ty.view {
+                ExprView::BitVec(bv) => {
                     any_four_state = any_four_state || bv.four_state;
                     match bv.width.self_determined() {
                         Some(w) => {
@@ -591,10 +661,10 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
                         None => all_known = false,
                     }
                 }
-                ExprType::NonBit(_) => {
-                    return ExprType::Error(ExprTypeErrorKind::ConcatNonBitOperand);
+                ExprView::Plain => {
+                    return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
                 }
-                ExprType::Error(_) => return item_ty,
+                ExprView::Error(_) => return item_ty,
             }
         }
         let width = if all_known {
@@ -610,7 +680,7 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         _ => BitWidth::Unknown,
     };
 
-    ExprType::BitVec(BitVecType {
+    ExprType::bitvec(BitVecType {
         width: result_width,
         signed: Signedness::Unsigned,
         four_state: inner_four_state,
@@ -623,7 +693,7 @@ fn infer_index(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         .filter(|c| is_expression_kind(c.kind()))
         .collect();
     if children.is_empty() {
-        return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind);
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     }
 
     let base_node = &children[0];
@@ -652,10 +722,40 @@ fn infer_index(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 
     // No unpacked dims to peel -- check if base is bitvec for packed bit-select
     let base_ty = infer_expr_type(base_node, ctx, None);
-    match &base_ty {
-        ExprType::BitVec(_) => ExprType::one_bit(),
-        ExprType::Error(_) => base_ty,
-        ExprType::NonBit(_) => ExprType::Error(ExprTypeErrorKind::IndexNonIndexable),
+    match &base_ty.view {
+        ExprView::BitVec(_) => ExprType::one_bit(),
+        ExprView::Error(_) => base_ty,
+        ExprView::Plain => ExprType::error(ExprTypeErrorKind::IndexNonIndexable),
+    }
+}
+
+fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    use lyra_ast::{AstNode, FieldExpr};
+
+    let lhs = match node.first_child() {
+        Some(c) if is_expression_kind(c.kind()) => c,
+        _ => return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
+    };
+
+    let field_expr = FieldExpr::cast(node.clone());
+    let field_tok = field_expr.and_then(|f| f.field_name());
+    let Some(field_tok) = field_tok else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+
+    let lhs_type = infer_expr_type(&lhs, ctx, None);
+
+    // Propagate LHS errors rather than masking them
+    if let ExprView::Error(_) = &lhs_type.view {
+        return lhs_type;
+    }
+
+    match ctx.member_lookup(&lhs_type.ty, field_tok.text()) {
+        Ok(info) => ExprType::from_ty(&info.ty),
+        Err(MemberLookupError::NotComposite) => {
+            ExprType::error(ExprTypeErrorKind::MemberAccessOnNonComposite)
+        }
+        Err(MemberLookupError::UnknownMember) => ExprType::error(ExprTypeErrorKind::UnknownMember),
     }
 }
 
@@ -663,30 +763,30 @@ fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     // System task/function calls: $clog2, etc.
     if let Some(tok) = system_tf_name(node) {
         return match tok.text() {
-            "$clog2" => ExprType::BitVec(BitVecType {
+            "$clog2" => ExprType::bitvec(BitVecType {
                 width: BitWidth::Known(32),
                 signed: Signedness::Signed,
                 four_state: false,
             }),
-            _ => ExprType::Error(ExprTypeErrorKind::UnsupportedSystemCall),
+            _ => ExprType::error(ExprTypeErrorKind::UnsupportedSystemCall),
         };
     }
 
     // User-defined call: classify callee form
     let callee_node = match node.first_child() {
         Some(c) if is_expression_kind(c.kind()) => c,
-        _ => return ExprType::Error(ExprTypeErrorKind::UnsupportedExprKind),
+        _ => return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
     };
 
     match callee_node.kind() {
         SyntaxKind::NameRef | SyntaxKind::QualifiedName => {}
         SyntaxKind::FieldExpr => {
-            return ExprType::Error(ExprTypeErrorKind::UnsupportedCalleeForm(
+            return ExprType::error(ExprTypeErrorKind::UnsupportedCalleeForm(
                 CalleeFormKind::MethodCall,
             ));
         }
         _ => {
-            return ExprType::Error(ExprTypeErrorKind::UnsupportedCalleeForm(
+            return ExprType::error(ExprTypeErrorKind::UnsupportedCalleeForm(
                 CalleeFormKind::Other,
             ));
         }
@@ -696,21 +796,21 @@ fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     let sym_id = match ctx.resolve_callable(&callee_node) {
         Ok(id) => id,
         Err(ResolveCallableError::NotFound) => {
-            return ExprType::Error(ExprTypeErrorKind::UnresolvedCall);
+            return ExprType::error(ExprTypeErrorKind::UnresolvedCall);
         }
         Err(ResolveCallableError::NotACallable(kind)) => {
-            return ExprType::Error(ExprTypeErrorKind::NotACallable(kind));
+            return ExprType::error(ExprTypeErrorKind::NotACallable(kind));
         }
     };
 
     // Get callable signature
     let Some(sig) = ctx.callable_sig(sym_id) else {
-        return ExprType::Error(ExprTypeErrorKind::UnresolvedCall);
+        return ExprType::error(ExprTypeErrorKind::UnresolvedCall);
     };
 
     // Task used in expression context
     if sig.kind == CallableKind::Task {
-        return ExprType::Error(ExprTypeErrorKind::TaskInExprContext);
+        return ExprType::error(ExprTypeErrorKind::TaskInExprContext);
     }
 
     // Check arguments
@@ -741,8 +841,8 @@ fn check_call_args(call_node: &SyntaxNode, sig: &CallableSigRef, ctx: &dyn Infer
     for (i, arg) in args.iter().enumerate() {
         let expected_ctx = sig.ports.get(i).and_then(|p| {
             let ety = ExprType::from_ty(&p.ty);
-            match ety {
-                ExprType::BitVec(bv) => Some(IntegralCtx {
+            match ety.view {
+                ExprView::BitVec(bv) => Some(IntegralCtx {
                     width: bv.width.self_determined(),
                     signed: bv.signed,
                     four_state: bv.four_state,

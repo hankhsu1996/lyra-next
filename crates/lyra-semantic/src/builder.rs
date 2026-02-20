@@ -880,7 +880,7 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, _scope: Scop
 
     // Extract base type
     let base = if let Some(base_ts) = enum_type.base_type_spec() {
-        extract_typeref_from_typespec(base_ts.syntax(), ctx.file)
+        extract_typeref_from_typespec(base_ts.syntax(), ctx.file, ctx.ast_id_map)
     } else {
         TypeRef::Resolved(Ty::int())
     };
@@ -915,7 +915,7 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, _scope: Scop
 fn collect_struct_def(
     ctx: &mut DefContext<'_>,
     struct_type: &StructType,
-    _scope: ScopeId,
+    scope: ScopeId,
 ) -> StructDefIdx {
     let owner = ctx.current_owner.clone();
     let ordinal = ctx.struct_ordinals.entry(owner.clone()).or_insert(0);
@@ -931,7 +931,10 @@ fn collect_struct_def(
     for member in struct_type.members() {
         let member_ts = member.type_spec();
         let ty = match member_ts {
-            Some(ref ts) => extract_typeref_from_typespec(ts.syntax(), ctx.file),
+            Some(ref ts) => {
+                collect_type_spec_refs(ctx, ts.syntax(), scope);
+                extract_typeref_from_typespec(ts.syntax(), ctx.file, ctx.ast_id_map)
+            }
             None => TypeRef::Resolved(Ty::Error),
         };
         for decl in member.declarators() {
@@ -950,6 +953,7 @@ fn collect_struct_def(
         ordinal: ord,
         packed,
         is_union,
+        scope,
         fields: fields.into_boxed_slice(),
     });
     idx

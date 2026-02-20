@@ -1,10 +1,11 @@
-use lyra_ast::{AstNode, ErasedAstId, NameRef, QualifiedName};
+use lyra_ast::{AstIdMap, AstNode, ErasedAstId, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_source::{FileId, Span};
 use smol_str::SmolStr;
 
-use crate::type_extract::keyword_to_ty_pub;
+use crate::scopes::ScopeId;
+use crate::type_extract::extract_base_ty_from_typespec;
 use crate::types::Ty;
 
 // Index types for def tables (file-local dense indices)
@@ -70,6 +71,7 @@ pub struct StructDef {
     pub ordinal: u32,
     pub packed: bool,
     pub is_union: bool,
+    pub scope: ScopeId,
     pub fields: Box<[StructField]>,
 }
 
@@ -77,6 +79,39 @@ pub struct StructDef {
 pub struct StructField {
     pub name: SmolStr,
     pub ty: TypeRef,
+}
+
+// Resolved struct semantic information
+
+/// A resolved struct field with its semantic type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldSem {
+    pub name: SmolStr,
+    pub ty: Ty,
+    pub span: Span,
+}
+
+/// Resolved struct type information.
+///
+/// Contains resolved field types and a sorted lookup table for
+/// efficient field-by-name access. Deterministic and compact --
+/// suitable as a Salsa query return value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructSem {
+    pub fields: Box<[FieldSem]>,
+    pub field_lookup: Box<[(SmolStr, u32)]>,
+    pub diags: Box<[crate::diagnostic::SemanticDiag]>,
+}
+
+impl StructSem {
+    pub fn field_by_name(&self, name: &str) -> Option<(u32, &FieldSem)> {
+        let i = self
+            .field_lookup
+            .binary_search_by(|(n, _)| n.as_str().cmp(name))
+            .ok()?;
+        let idx = self.field_lookup[i].1;
+        Some((idx, &self.fields[idx as usize]))
+    }
 }
 
 // TypeOrigin: binding from symbol to its type source
@@ -89,9 +124,11 @@ pub enum TypeOrigin {
 }
 
 // Extract a TypeRef from a TypeSpec syntax node.
-pub(crate) fn extract_typeref_from_typespec(typespec: &SyntaxNode, file: FileId) -> TypeRef {
-    use lyra_parser::SyntaxElement;
-
+pub(crate) fn extract_typeref_from_typespec(
+    typespec: &SyntaxNode,
+    file: FileId,
+    ast_id_map: &AstIdMap,
+) -> TypeRef {
     // Check for NameRef or QualifiedName child (user-defined type)
     for child in typespec.children() {
         if child.kind() == SyntaxKind::NameRef
@@ -117,14 +154,7 @@ pub(crate) fn extract_typeref_from_typespec(typespec: &SyntaxNode, file: FileId)
         }
     }
 
-    // Try keyword base type
-    for el in typespec.children_with_tokens() {
-        if let SyntaxElement::Token(tok) = el
-            && let Some(ty) = keyword_to_ty_pub(tok.kind())
-        {
-            return TypeRef::Resolved(ty);
-        }
-    }
-
-    TypeRef::Resolved(Ty::Error)
+    // Keyword base type with packed dimensions
+    let ty = extract_base_ty_from_typespec(typespec, ast_id_map);
+    TypeRef::Resolved(ty)
 }

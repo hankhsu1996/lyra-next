@@ -137,7 +137,7 @@ struct DbTypeCheckCtx<'a> {
 impl TypeCheckCtx for DbTypeCheckCtx<'_> {
     fn expr_type(&self, node: &lyra_parser::SyntaxNode) -> ExprType {
         let Some(ast_id) = self.ast_id_map.erased_ast_id(node) else {
-            return ExprType::Error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
+            return ExprType::error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
         };
         let expr_ref = ExprRef::new(self.db, self.unit, ast_id);
         crate::expr_queries::type_of_expr(self.db, expr_ref)
@@ -145,7 +145,7 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
 
     fn expr_type_in_ctx(&self, node: &lyra_parser::SyntaxNode, ctx: &IntegralCtx) -> ExprType {
         let Some(ast_id) = self.ast_id_map.erased_ast_id(node) else {
-            return ExprType::Error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
+            return ExprType::error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
         };
         let expr_ref = ExprRef::new(self.db, self.unit, ast_id);
         let ctx_key = IntegralCtxKey::new(self.db, ctx.width, ctx.signed, ctx.four_state);

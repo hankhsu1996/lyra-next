@@ -380,10 +380,6 @@ fn build_base_ty(base: Option<Ty>, signed_override: Option<bool>, packed: Vec<Pa
     }
 }
 
-pub(crate) fn keyword_to_ty_pub(kind: SyntaxKind) -> Option<Ty> {
-    keyword_to_ty(kind)
-}
-
 fn keyword_to_ty(kind: SyntaxKind) -> Option<Ty> {
     let kw = keyword_to_integral_kw(kind);
     if let Some(kw) = kw {

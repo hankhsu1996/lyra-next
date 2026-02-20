@@ -193,6 +193,35 @@ fn ns_list(expected: ExpectedNs) -> ([Namespace; 2], usize) {
     }
 }
 
+/// Resolve a simple name in a given scope.
+///
+/// Public API for ad-hoc resolution (struct field type resolution, etc.)
+/// without going through the use-site / resolve-index pipeline.
+pub fn resolve_name_in_scope(
+    graph: &NameGraph,
+    global: &GlobalDefIndex,
+    pkg_scope: &PackageScopeIndex,
+    cu_env: &CompilationUnitEnv,
+    scope: ScopeId,
+    name: &str,
+    expected: ExpectedNs,
+) -> CoreResolveResult {
+    resolve_simple(graph, global, pkg_scope, cu_env, scope, name, expected)
+}
+
+/// Resolve a qualified name (e.g. `Pkg::member`).
+///
+/// Public API for ad-hoc resolution without going through the
+/// use-site / resolve-index pipeline.
+pub fn resolve_qualified_name(
+    segments: &[SmolStr],
+    global: &GlobalDefIndex,
+    pkg_scope: &PackageScopeIndex,
+    expected: ExpectedNs,
+) -> CoreResolveResult {
+    resolve_qualified(segments, global, pkg_scope, expected)
+}
+
 fn resolve_simple(
     graph: &NameGraph,
     global: &GlobalDefIndex,

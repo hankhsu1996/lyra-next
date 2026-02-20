@@ -4,7 +4,7 @@ use lyra_source::TextRange;
 
 use crate::coerce::IntegralCtx;
 use crate::expr_helpers::is_expression_kind;
-use crate::type_infer::{BitVecType, BitWidth, ExprType};
+use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
 use crate::types::SymbolType;
 
 /// A type-check finding for a single assignment.
@@ -186,8 +186,8 @@ fn simple_lvalue_width(lhs: &SyntaxNode, ctx: &dyn TypeCheckCtx) -> Option<u32> 
 
 fn is_context_dependent(ty: &ExprType) -> bool {
     matches!(
-        ty,
-        ExprType::BitVec(BitVecType {
+        ty.view,
+        ExprView::BitVec(BitVecType {
             width: BitWidth::ContextDependent,
             ..
         })
@@ -195,8 +195,8 @@ fn is_context_dependent(ty: &ExprType) -> bool {
 }
 
 fn bitvec_known_width(ty: &ExprType) -> Option<u32> {
-    match ty {
-        ExprType::BitVec(BitVecType {
+    match &ty.view {
+        ExprView::BitVec(BitVecType {
             width: BitWidth::Known(w),
             ..
         }) => Some(*w),
@@ -205,8 +205,9 @@ fn bitvec_known_width(ty: &ExprType) -> Option<u32> {
 }
 
 fn symbol_type_bitvec(st: &SymbolType) -> Option<BitVecType> {
-    match ExprType::from_symbol_type(st) {
-        ExprType::BitVec(bv) => Some(bv),
+    let et = ExprType::from_symbol_type(st);
+    match et.view {
+        ExprView::BitVec(bv) => Some(bv),
         _ => None,
     }
 }

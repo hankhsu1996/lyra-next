@@ -1,16 +1,19 @@
 use lyra_semantic::coerce::IntegralCtx;
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::type_infer::{
-    CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx,
-    ResolveCallableError, Signedness,
+    CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx, MemberInfo,
+    MemberKind, MemberLookupError, ResolveCallableError, Signedness,
 };
 use lyra_semantic::types::ConstInt;
+
+use lyra_semantic::types::Ty;
 
 use crate::callable_queries::{CallableRef, callable_signature};
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::module_sig::CallableKind as DbCallableKind;
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::semantic::{def_index_file, resolve_index_file};
+use crate::struct_queries::{StructRef, struct_sem};
 use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, source_file_by_id};
 
@@ -31,14 +34,14 @@ pub fn type_of_expr<'db>(db: &'db dyn salsa::Database, expr_ref: ExprRef<'db>) -
     let file_id = expr_ast_id.file();
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
-        return ExprType::Error(ExprTypeErrorKind::Unresolved);
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
     };
 
     let parse = parse_file(db, source_file);
     let map = ast_id_map(db, source_file);
 
     let Some(node) = map.get_node(&parse.syntax(), expr_ast_id) else {
-        return ExprType::Error(ExprTypeErrorKind::Unresolved);
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
     };
 
     let ctx = DbInferCtx {
@@ -81,14 +84,14 @@ pub fn type_of_expr_in_ctx<'db>(
     let file_id = expr_ast_id.file();
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
-        return ExprType::Error(ExprTypeErrorKind::Unresolved);
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
     };
 
     let parse = parse_file(db, source_file);
     let map = ast_id_map(db, source_file);
 
     let Some(node) = map.get_node(&parse.syntax(), expr_ast_id) else {
-        return ExprType::Error(ExprTypeErrorKind::Unresolved);
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
     };
 
     let ctx = DbInferCtx {
@@ -113,12 +116,12 @@ struct DbInferCtx<'a> {
 impl InferCtx for DbInferCtx<'_> {
     fn type_of_name(&self, name_node: &lyra_parser::SyntaxNode) -> ExprType {
         let Some(name_ast_id) = self.ast_id_map.erased_ast_id(name_node) else {
-            return ExprType::Error(ExprTypeErrorKind::Unresolved);
+            return ExprType::error(ExprTypeErrorKind::Unresolved);
         };
 
         let resolve = resolve_index_file(self.db, self.source_file, self.unit);
         let Some(resolution) = resolve.resolutions.get(&name_ast_id) else {
-            return ExprType::Error(ExprTypeErrorKind::Unresolved);
+            return ExprType::error(ExprTypeErrorKind::Unresolved);
         };
 
         let sym_ref = SymbolRef::new(self.db, self.unit, resolution.symbol);
@@ -201,5 +204,22 @@ impl InferCtx for DbInferCtx<'_> {
             return_ty: normalize(&sig.return_ty),
             ports: ports.into(),
         })
+    }
+
+    fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError> {
+        match ty {
+            Ty::Struct(id) => {
+                let sref = StructRef::new(self.db, self.unit, id.clone());
+                let sem = struct_sem(self.db, sref);
+                match sem.field_by_name(member_name) {
+                    Some((idx, field)) => Ok(MemberInfo {
+                        ty: field.ty.clone(),
+                        kind: MemberKind::StructField { index: idx },
+                    }),
+                    None => Err(MemberLookupError::UnknownMember),
+                }
+            }
+            _ => Err(MemberLookupError::NotComposite),
+        }
     }
 }
