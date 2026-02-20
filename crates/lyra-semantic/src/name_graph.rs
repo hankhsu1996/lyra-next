@@ -36,6 +36,7 @@ pub(crate) struct UseEntry {
     pub(crate) path: NamePath,
     pub(crate) expected_ns: ExpectedNs,
     pub(crate) scope: ScopeId,
+    pub(crate) order_key: u32,
 }
 
 /// Offset-independent import entry.
@@ -44,6 +45,7 @@ pub struct ImportEntry {
     pub package: SmolStr,
     pub name: ImportName,
     pub scope: ScopeId,
+    pub order_key: u32,
 }
 
 impl SymbolNameLookup for NameGraph {
@@ -94,6 +96,7 @@ impl NameGraph {
                 path: site.path.clone(),
                 expected_ns: site.expected_ns,
                 scope: site.scope,
+                order_key: site.order_key,
             })
             .collect();
 
@@ -104,6 +107,7 @@ impl NameGraph {
                 package: imp.package.clone(),
                 name: imp.name.clone(),
                 scope: imp.scope,
+                order_key: imp.order_key,
             })
             .collect();
         imports.sort_by_key(|i| i.scope);

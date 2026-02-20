@@ -17,6 +17,14 @@ use crate::resolve_index::{
 use crate::scopes::{ScopeId, SymbolNameLookup};
 use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
 
+/// Shared resolution context for `resolve_simple` and related functions.
+struct ResolveCtx<'a> {
+    graph: &'a NameGraph,
+    global: &'a GlobalDefIndex,
+    pkg_scope: &'a PackageScopeIndex,
+    cu_env: &'a CompilationUnitEnv,
+}
+
 /// Resolve all use-sites using only offset-independent data.
 ///
 /// Returns `CoreResolveOutput` with reason codes for unresolved names.
@@ -59,19 +67,22 @@ pub fn build_resolve_core(
         }
     }
 
+    let ctx = ResolveCtx {
+        graph,
+        global,
+        pkg_scope,
+        cu_env,
+    };
     let resolutions: Box<[CoreResolveResult]> = graph
         .use_entries
         .iter()
         .map(|entry| match &entry.path {
-            NamePath::Simple(name) => resolve_simple(
-                graph,
-                global,
-                pkg_scope,
-                cu_env,
-                entry.scope,
-                name,
-                entry.expected_ns,
-            ),
+            NamePath::Simple(name) => {
+                resolve_simple(&ctx, entry.scope, name, entry.expected_ns, entry.order_key)
+            }
+            // Qualified names (P::x) bypass positional import filtering
+            // because visibility is determined solely by the package
+            // qualification, not by import declaration position.
             NamePath::Qualified { segments } => {
                 resolve_qualified(segments, global, pkg_scope, entry.expected_ns)
             }
@@ -384,10 +395,13 @@ fn ns_list(expected: ExpectedNs) -> ([Namespace; 2], usize) {
     }
 }
 
-/// Resolve a simple name in a given scope.
+/// Non-positioned name resolution: all imports visible regardless of
+/// source position. Bypasses LRM 26.3 positional import filtering.
 ///
 /// Public API for ad-hoc resolution (struct field type resolution, etc.)
 /// without going through the use-site / resolve-index pipeline.
+/// Use-site resolution goes through `build_resolve_core` which supplies
+/// each use-site's actual `order_key`.
 pub fn resolve_name_in_scope(
     graph: &NameGraph,
     global: &GlobalDefIndex,
@@ -397,7 +411,13 @@ pub fn resolve_name_in_scope(
     name: &str,
     expected: ExpectedNs,
 ) -> CoreResolveResult {
-    resolve_simple(graph, global, pkg_scope, cu_env, scope, name, expected)
+    let ctx = ResolveCtx {
+        graph,
+        global,
+        pkg_scope,
+        cu_env,
+    };
+    resolve_simple(&ctx, scope, name, expected, u32::MAX)
 }
 
 /// Resolve a qualified name (e.g. `Pkg::member`).
@@ -414,16 +434,14 @@ pub fn resolve_qualified_name(
 }
 
 fn resolve_simple(
-    graph: &NameGraph,
-    global: &GlobalDefIndex,
-    pkg_scope: &PackageScopeIndex,
-    cu_env: &CompilationUnitEnv,
+    ctx: &ResolveCtx<'_>,
     scope: ScopeId,
     name: &str,
     expected: ExpectedNs,
+    use_order_key: u32,
 ) -> CoreResolveResult {
     if let ExpectedNs::Exact(Namespace::Definition) = expected {
-        return if let Some((def_id, _)) = global.resolve_definition(name) {
+        return if let Some((def_id, _)) = ctx.global.resolve_definition(name) {
             CoreResolveResult::Resolved(CoreResolution::Global {
                 decl: def_id,
                 namespace: Namespace::Definition,
@@ -436,18 +454,21 @@ fn resolve_simple(
     let (nss, len) = ns_list(expected);
     for &ns in &nss[..len] {
         // 1. Lexical scope
-        if let Some(sym_id) = graph.scopes.resolve(graph, scope, ns, name) {
+        if let Some(sym_id) = ctx.graph.scopes.resolve(ctx.graph, scope, ns, name) {
             return CoreResolveResult::Resolved(CoreResolution::Local {
                 symbol: sym_id,
-                namespace: graph.symbol_kinds[sym_id.0 as usize].namespace(),
+                namespace: ctx.graph.symbol_kinds[sym_id.0 as usize].namespace(),
             });
         }
-        // 2. Explicit imports in scope chain
-        if let Some(resolution) = resolve_via_explicit_import(graph, pkg_scope, scope, name, ns) {
+        // 2. Explicit imports in scope chain (positional filter)
+        if let Some(resolution) =
+            resolve_via_explicit_import(ctx.graph, ctx.pkg_scope, scope, name, ns, use_order_key)
+        {
             return CoreResolveResult::Resolved(resolution);
         }
-        // 3. Wildcard imports in scope chain
-        match resolve_via_wildcard_import(graph, pkg_scope, scope, name, ns) {
+        // 3. Wildcard imports in scope chain (positional filter)
+        match resolve_via_wildcard_import(ctx.graph, ctx.pkg_scope, scope, name, ns, use_order_key)
+        {
             WildcardResult::Found(resolution) => {
                 return CoreResolveResult::Resolved(resolution);
             }
@@ -459,7 +480,7 @@ fn resolve_simple(
             WildcardResult::NotFound => {}
         }
         // 4. CU-level implicit imports (e.g., std)
-        match resolve_via_implicit_import(pkg_scope, cu_env, name, ns) {
+        match resolve_via_implicit_import(ctx.pkg_scope, ctx.cu_env, name, ns) {
             WildcardResult::Found(resolution) => {
                 return CoreResolveResult::Resolved(resolution);
             }
@@ -474,6 +495,9 @@ fn resolve_simple(
     CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
 }
 
+/// Qualified names (`Pkg::member`) bypass positional import filtering
+/// because their visibility is determined solely by the package
+/// qualification, not by import declaration position.
 fn resolve_qualified(
     segments: &[SmolStr],
     global: &GlobalDefIndex,
@@ -518,14 +542,15 @@ fn resolve_via_explicit_import(
     scope: ScopeId,
     name: &str,
     ns: Namespace,
+    use_order_key: u32,
 ) -> Option<CoreResolution> {
     // Walk scope chain looking for explicit imports
     let mut current = Some(scope);
     while let Some(sid) = current {
-        for imp in &*graph.imports {
-            if imp.scope == sid
-                && let ImportName::Explicit(ref member) = imp.name
+        for imp in graph.imports_for_scope(sid) {
+            if let ImportName::Explicit(ref member) = imp.name
                 && member.as_str() == name
+                && imp.order_key < use_order_key
                 && let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns)
             {
                 return Some(CoreResolution::Global {
@@ -551,15 +576,16 @@ fn resolve_via_wildcard_import(
     scope: ScopeId,
     name: &str,
     ns: Namespace,
+    use_order_key: u32,
 ) -> WildcardResult {
     let mut current = Some(scope);
     while let Some(sid) = current {
         let mut found: Option<(GlobalDefId, SmolStr)> = None;
         let mut ambiguous_pkgs: Vec<SmolStr> = Vec::new();
 
-        for imp in &*graph.imports {
-            if imp.scope == sid
-                && imp.name == ImportName::Wildcard
+        for imp in graph.imports_for_scope(sid) {
+            if imp.name == ImportName::Wildcard
+                && imp.order_key < use_order_key
                 && let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns)
             {
                 if let Some((existing_id, _)) = &found {

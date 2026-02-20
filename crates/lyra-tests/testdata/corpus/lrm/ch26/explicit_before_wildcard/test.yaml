@@ -1,0 +1,5 @@
+kind: lrm
+lrm:
+  chapter: 26
+  section: "26.3"
+  title: "Explicit before wildcard"
