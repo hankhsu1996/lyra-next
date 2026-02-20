@@ -174,6 +174,10 @@ ast_nodes! {
     ExportItem(SyntaxKind::ExportItem) { @custom }
     QualifiedName(SyntaxKind::QualifiedName) { @custom }
 
+    DottedName(SyntaxKind::DottedName) {
+        interface_ref: NameRef,
+    }
+
     TypedefDecl(SyntaxKind::TypedefDecl) {
         name: token([Ident, EscapedIdent]),
         type_spec: TypeSpec,

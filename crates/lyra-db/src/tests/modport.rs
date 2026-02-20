@@ -30,7 +30,7 @@ fn setup_modport_test(
         .modport_name_map
         .values()
         .copied()
-        .find(|id| id.owner == iface_def_id)
+        .find(|id| id.owner.global_def() == iface_def_id)
         .expect("should have a modport");
 
     (file, unit, modport_id)
@@ -54,7 +54,7 @@ fn modport_sem_resolves_members() {
 
     // Resolve req and gnt in the interface scope to get their SymbolIds
     let def = def_index_file(&db, file);
-    let gsym = def_symbol(&db, unit, modport_id.owner).expect("interface symbol");
+    let gsym = def_symbol(&db, unit, modport_id.owner.global_def()).expect("interface symbol");
     let iface_scope = def.symbols.get(gsym.local).scope;
 
     let req_sym = def

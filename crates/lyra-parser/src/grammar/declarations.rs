@@ -120,6 +120,14 @@ pub(crate) fn type_spec(p: &mut Parser) {
                 p.bump(); // segment
             }
             qn.complete(p, SyntaxKind::QualifiedName);
+        } else if p.nth(1) == SyntaxKind::Dot && p.nth(2) == SyntaxKind::Ident {
+            let dn = p.start();
+            let nr = p.start();
+            p.expect(SyntaxKind::Ident); // interface name
+            nr.complete(p, SyntaxKind::NameRef);
+            p.expect(SyntaxKind::Dot);
+            p.expect(SyntaxKind::Ident); // modport name
+            dn.complete(p, SyntaxKind::DottedName);
         } else {
             let nr = p.start();
             p.bump();
@@ -319,6 +327,10 @@ pub(crate) fn at_unambiguous_data_decl_start(p: &Parser) -> bool {
             | SyntaxKind::OutputKw
             | SyntaxKind::InoutKw
     ) || (k == SyntaxKind::Ident && p.nth(1) == SyntaxKind::ColonColon)
+        || (k == SyntaxKind::Ident
+            && p.nth(1) == SyntaxKind::Dot
+            && p.nth(2) == SyntaxKind::Ident
+            && p.nth(3) == SyntaxKind::Ident)
 }
 
 fn is_net_type(kind: SyntaxKind) -> bool {

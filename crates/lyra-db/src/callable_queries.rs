@@ -86,9 +86,9 @@ impl SigCtx<'_> {
     /// Resolve a `TypeSpec` to a `Ty`. Handles both keyword types and user-defined
     /// types (typedefs, enums, structs) by going through the DB resolve path.
     fn resolve_typespec_ty(&self, ts: &lyra_parser::SyntaxNode) -> Ty {
-        // Check for user-defined type (NameRef/QualifiedName inside TypeSpec)
-        if let Some(name_node) = lyra_semantic::typespec_name_ref(ts) {
-            let Some(name_ast_id) = self.id_map.erased_ast_id(&name_node) else {
+        // Check for user-defined type (NameRef/QualifiedName/DottedName inside TypeSpec)
+        if let Some(utr) = lyra_semantic::user_type_ref(ts) {
+            let Some(name_ast_id) = self.id_map.erased_ast_id(utr.resolve_node()) else {
                 return Ty::Error;
             };
             let resolve = resolve_index_file(self.db, self.source_file, self.unit);

@@ -1,6 +1,8 @@
-use lyra_ast::AstIdMap;
+use lyra_ast::{AstIdMap, AstNode, DottedName, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
+use lyra_source::TextRange;
+use smol_str::SmolStr;
 
 use crate::expr_helpers::is_expression_kind;
 use crate::types::{
@@ -30,17 +32,64 @@ pub fn extract_type_from_container(
     }
 }
 
-/// Returns the `NameRef` or `QualifiedName` child of a `TypeSpec`, if present.
-///
-/// Used by the db query as the sole trigger for typedef expansion.
-pub fn typespec_name_ref(typespec: &SyntaxNode) -> Option<SyntaxNode> {
+/// Structured representation of a user-defined type reference inside a `TypeSpec`.
+#[derive(Debug, Clone)]
+pub enum UserTypeRef {
+    Simple(NameRef),
+    Qualified(QualifiedName),
+    InterfaceModport {
+        iface: NameRef,
+        modport_name: SmolStr,
+        modport_range: TextRange,
+    },
+}
+
+impl UserTypeRef {
+    /// The AST node whose `ErasedAstId` has a resolution in the resolve index.
+    pub fn resolve_node(&self) -> &SyntaxNode {
+        match self {
+            Self::Simple(nr) | Self::InterfaceModport { iface: nr, .. } => nr.syntax(),
+            Self::Qualified(qn) => qn.syntax(),
+        }
+    }
+}
+
+/// Extract the user-defined type reference from a `TypeSpec`, if any.
+pub fn user_type_ref(typespec: &SyntaxNode) -> Option<UserTypeRef> {
     for child in typespec.children() {
         match child.kind() {
-            SyntaxKind::NameRef | SyntaxKind::QualifiedName => return Some(child),
+            SyntaxKind::NameRef => {
+                return NameRef::cast(child).map(UserTypeRef::Simple);
+            }
+            SyntaxKind::QualifiedName => {
+                return QualifiedName::cast(child).map(UserTypeRef::Qualified);
+            }
+            SyntaxKind::DottedName => {
+                let dn = DottedName::cast(child)?;
+                let nr = dn.interface_ref()?;
+                // The modport ident is a direct Ident token child of DottedName.
+                // The interface ident is nested inside the NameRef child node,
+                // so only a direct token child can be the modport name.
+                let mp_token = dn
+                    .syntax()
+                    .children_with_tokens()
+                    .filter_map(|el| el.into_token())
+                    .find(|t| t.kind() == SyntaxKind::Ident)?;
+                return Some(UserTypeRef::InterfaceModport {
+                    iface: nr,
+                    modport_name: SmolStr::new(mp_token.text()),
+                    modport_range: mp_token.text_range(),
+                });
+            }
             _ => {}
         }
     }
     None
+}
+
+// TODO: delete -- callers should migrate to user_type_ref
+pub(crate) fn typespec_name_ref(typespec: &SyntaxNode) -> Option<SyntaxNode> {
+    user_type_ref(typespec).map(|r| r.resolve_node().clone())
 }
 
 /// Normalize all `ConstInt` values inside a `SymbolType`.
@@ -657,5 +706,67 @@ mod tests {
         let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
         let typespec = find_child(&var_decl, SyntaxKind::TypeSpec).expect("TypeSpec");
         assert!(typespec_name_ref(&typespec).is_none());
+    }
+
+    #[test]
+    fn user_type_ref_dotted_name_tree_shape() {
+        let (parse, _map) = parse_source("module m; my_bus.master v; endmodule");
+        let root = parse.syntax();
+        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
+        let typespec = find_child(&var_decl, SyntaxKind::TypeSpec).expect("TypeSpec");
+
+        // TypeSpec should contain a DottedName child
+        let dotted = typespec
+            .children()
+            .find(|c| c.kind() == SyntaxKind::DottedName)
+            .expect("DottedName child");
+
+        // DottedName should contain a NameRef child (interface name)
+        let name_ref = dotted
+            .children()
+            .find(|c| c.kind() == SyntaxKind::NameRef)
+            .expect("NameRef child");
+        let iface_ident = name_ref
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find(|t| t.kind() == SyntaxKind::Ident)
+            .expect("interface ident");
+        assert_eq!(iface_ident.text(), "my_bus");
+
+        // DottedName should have a direct Ident token child (modport name)
+        let mp_ident = dotted
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find(|t| t.kind() == SyntaxKind::Ident)
+            .expect("modport ident");
+        assert_eq!(mp_ident.text(), "master");
+
+        // user_type_ref should return InterfaceModport
+        let utr = user_type_ref(&typespec).expect("should extract UserTypeRef");
+        match utr {
+            UserTypeRef::InterfaceModport { modport_name, .. } => {
+                assert_eq!(modport_name.as_str(), "master");
+            }
+            other => panic!("expected InterfaceModport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_type_ref_simple_name() {
+        let (parse, _map) = parse_source("module m; byte_t x; endmodule");
+        let root = parse.syntax();
+        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
+        let typespec = find_child(&var_decl, SyntaxKind::TypeSpec).expect("TypeSpec");
+        let utr = user_type_ref(&typespec).expect("should extract UserTypeRef");
+        assert!(matches!(utr, UserTypeRef::Simple(_)));
+    }
+
+    #[test]
+    fn user_type_ref_none_for_keyword() {
+        let (parse, _map) = parse_source("module m; logic x; endmodule");
+        let root = parse.syntax();
+        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
+        let typespec = find_child(&var_decl, SyntaxKind::TypeSpec).expect("TypeSpec");
+        assert!(user_type_ref(&typespec).is_none());
     }
 }

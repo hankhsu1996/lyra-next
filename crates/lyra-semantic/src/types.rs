@@ -516,6 +516,10 @@ pub enum SymbolTypeError {
     TypedefUnderlyingUnsupported,
     /// Port AST node is structurally broken (cannot read type info at all).
     PortTypeMissing,
+    /// Modport name does not exist on the resolved interface.
+    UnknownModport,
+    /// Dotted name used on a non-interface type (e.g. `typedef int foo; foo.bar v;`).
+    ModportOnNonInterface,
 }
 
 /// IEEE 1800-2023 net type keywords (LRM 6.7).

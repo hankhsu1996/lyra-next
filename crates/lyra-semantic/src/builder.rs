@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lyra_ast::{
     AstIdMap, AstNode, ConfigDecl, EnumType, ExportDecl, ExportItem, FunctionDecl, InterfaceDecl,
     ModportDecl, ModuleInstantiation, NameRef, Port, PrimitiveDecl, ProgramDecl, QualifiedName,
-    StructType, TaskDecl, TfPortDecl, TypedefDecl,
+    StructType, TaskDecl, TfPortDecl, TypeSpec, TypedefDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
@@ -64,7 +64,10 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
             .all(|w| (w[0].id.scope, w[0].id.ordinal) < (w[1].id.scope, w[1].id.ordinal))
     );
 
-    DefIndex {
+    // Finalize modport defs: convert raw GlobalDefId owners to InterfaceDefId
+    let mut modport_defs = HashMap::new();
+    let mut modport_name_map = HashMap::new();
+    let def_index_partial = DefIndex {
         file,
         symbols,
         scopes,
@@ -79,10 +82,31 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         decl_to_init_expr: ctx.decl_to_init_expr,
         enum_defs: ctx.enum_defs.into_boxed_slice(),
         record_defs: ctx.record_defs.into_boxed_slice(),
-        modport_defs: ctx.modport_defs,
-        modport_name_map: ctx.modport_name_map,
+        modport_defs: HashMap::new(),
+        modport_name_map: HashMap::new(),
         export_decls: ctx.export_decls.into_boxed_slice(),
         diagnostics: diagnostics.into_boxed_slice(),
+    };
+    for raw in ctx.raw_modport_defs {
+        if let Some(iface_id) =
+            crate::record::InterfaceDefId::try_from_def_index(&def_index_partial, raw.owner)
+        {
+            let typed_id = ModportDefId {
+                owner: iface_id,
+                ordinal: raw.ordinal,
+            };
+            let mut def = raw.def;
+            def.id = typed_id;
+            modport_name_map
+                .entry((iface_id, raw.name))
+                .or_insert(typed_id);
+            modport_defs.insert(typed_id, def);
+        }
+    }
+    DefIndex {
+        modport_defs,
+        modport_name_map,
+        ..def_index_partial
     }
 }
 
@@ -91,6 +115,15 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
 /// Fields are `pub(crate)` because `builder_stmt` needs direct access for
 /// statement/expression collection. Both modules are internal to
 /// `lyra-semantic` and maintain builder invariants together.
+/// Intermediate modport data collected during building, before symbol table freeze.
+/// Uses raw `GlobalDefId` for the owner; converted to `InterfaceDefId` during finalization.
+pub(crate) struct RawModportEntry {
+    pub(crate) owner: crate::symbols::GlobalDefId,
+    pub(crate) ordinal: u32,
+    pub(crate) name: SmolStr,
+    pub(crate) def: ModportDef,
+}
+
 pub(crate) struct DefContext<'a> {
     pub(crate) file: FileId,
     pub(crate) ast_id_map: &'a AstIdMap,
@@ -105,8 +138,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) imports: Vec<Import>,
     pub(crate) enum_defs: Vec<EnumDef>,
     pub(crate) record_defs: Vec<RecordDef>,
-    pub(crate) modport_defs: HashMap<ModportDefId, ModportDef>,
-    pub(crate) modport_name_map: HashMap<(crate::symbols::GlobalDefId, SmolStr), ModportDefId>,
+    pub(crate) raw_modport_defs: Vec<RawModportEntry>,
     pub(crate) export_decls: Vec<crate::def_index::ExportDecl>,
     pub(crate) export_ordinals: HashMap<ScopeId, u32>,
     pub(crate) current_owner: Option<SmolStr>,
@@ -133,8 +165,7 @@ impl<'a> DefContext<'a> {
             imports: Vec::new(),
             enum_defs: Vec::new(),
             record_defs: Vec::new(),
-            modport_defs: HashMap::new(),
-            modport_name_map: HashMap::new(),
+            raw_modport_defs: Vec::new(),
             export_decls: Vec::new(),
             export_ordinals: HashMap::new(),
             current_owner: None,
@@ -487,8 +518,8 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
             }
             // Collect type-spec name refs for port typedef resolution
             for port_child in child.children() {
-                if port_child.kind() == SyntaxKind::TypeSpec {
-                    collect_type_spec_refs(ctx, &port_child, scope);
+                if let Some(ts) = TypeSpec::cast(port_child) {
+                    collect_type_spec_refs(ctx, &ts, scope);
                 }
             }
         }
@@ -612,7 +643,7 @@ fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sco
         && let Some(func) = FunctionDecl::cast(node.clone())
         && let Some(ts) = func.type_spec()
     {
-        collect_type_spec_refs(ctx, ts.syntax(), scope);
+        collect_type_spec_refs(ctx, &ts, scope);
     }
 
     // Collect TF port declarations
@@ -629,7 +660,7 @@ fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sco
     for port_decl in &tf_port_decls {
         // Collect type spec refs for resolution
         if let Some(ts) = port_decl.type_spec() {
-            collect_type_spec_refs(ctx, ts.syntax(), callable_scope);
+            collect_type_spec_refs(ctx, &ts, callable_scope);
         }
         // Collect each declarator as a port symbol
         for decl in port_decl.declarators() {
@@ -679,7 +710,11 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
         };
         let name = SmolStr::new(name_tok.text());
 
-        let modport_id = ModportDefId { owner, ordinal };
+        // Placeholder ModportDefId with a dummy owner; finalization replaces it.
+        let placeholder_id = ModportDefId {
+            owner: crate::record::InterfaceDefId::placeholder(),
+            ordinal,
+        };
 
         // Collect port entries with sticky direction
         let mut entries = Vec::new();
@@ -708,7 +743,7 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
             }
         }
 
-        // Register symbol for navigation/diagnostics (skipped by add_binding)
+        // Register symbol for navigation/diagnostics
         ctx.add_symbol(
             name.clone(),
             SymbolKind::Modport,
@@ -716,19 +751,16 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
             scope,
         );
 
-        // First-wins: later duplicates still get a def entry but won't
-        // be reachable via name lookup.
-        let map_key = (owner, name.clone());
-        ctx.modport_name_map.entry(map_key).or_insert(modport_id);
-
-        ctx.modport_defs.insert(
-            modport_id,
-            ModportDef {
-                id: modport_id,
-                name,
+        ctx.raw_modport_defs.push(RawModportEntry {
+            owner,
+            ordinal,
+            name,
+            def: ModportDef {
+                id: placeholder_id,
+                name: SmolStr::new(name_tok.text()),
                 entries: entries.into_boxed_slice(),
             },
-        );
+        });
     }
 }
 
@@ -828,8 +860,8 @@ fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem, scope: Scope
 
 fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
-        if child.kind() == SyntaxKind::TypeSpec {
-            collect_type_spec_refs(ctx, &child, scope);
+        if let Some(ts) = TypeSpec::cast(child.clone()) {
+            collect_type_spec_refs(ctx, &ts, scope);
         } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = first_ident_token(&child) {
                 let sym_id = ctx.add_symbol(
@@ -869,8 +901,8 @@ pub(crate) fn collect_declarators(
     // Detect inline enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
     for child in node.children() {
-        if child.kind() == SyntaxKind::TypeSpec {
-            collect_type_spec_refs(ctx, &child, scope);
+        if let Some(ts) = TypeSpec::cast(child.clone()) {
+            collect_type_spec_refs(ctx, &ts, scope);
         } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = first_ident_token(&child) {
                 let sym_id = ctx.add_symbol_with_origin(
@@ -893,44 +925,13 @@ pub(crate) fn collect_declarators(
     }
 }
 
-fn collect_type_spec_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+fn collect_type_spec_refs(ctx: &mut DefContext<'_>, ts: &TypeSpec, scope: ScopeId) {
+    let node = ts.syntax();
+    if let Some(utr) = crate::type_extract::user_type_ref(node) {
+        register_type_use_site(ctx, &utr, scope);
+    }
     for child in node.children() {
         match child.kind() {
-            SyntaxKind::NameRef => {
-                if let Some(name_ref) = NameRef::cast(child.clone())
-                    && let Some(ident) = name_ref.ident()
-                    && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
-                {
-                    ctx.use_sites.push(UseSite {
-                        path: NamePath::Simple(SmolStr::new(ident.text())),
-                        expected_ns: ExpectedNs::TypeThenValue,
-                        range: name_ref.text_range(),
-                        scope,
-                        ast_id: ast_id.erase(),
-                        order_key: 0,
-                    });
-                }
-            }
-            SyntaxKind::QualifiedName => {
-                if let Some(qn) = QualifiedName::cast(child.clone())
-                    && let Some(ast_id) = ctx.ast_id_map.ast_id(&qn)
-                {
-                    let segments: Box<[SmolStr]> = qn
-                        .segments()
-                        .map(|ident| SmolStr::new(ident.text()))
-                        .collect();
-                    if !segments.is_empty() {
-                        ctx.use_sites.push(UseSite {
-                            path: NamePath::Qualified { segments },
-                            expected_ns: ExpectedNs::TypeThenValue,
-                            range: qn.text_range(),
-                            scope,
-                            ast_id: ast_id.erase(),
-                            order_key: 0,
-                        });
-                    }
-                }
-            }
             SyntaxKind::PackedDimension | SyntaxKind::UnpackedDimension => {
                 collect_name_refs(ctx, &child, scope);
             }
@@ -939,12 +940,54 @@ fn collect_type_spec_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sc
     }
 }
 
+fn register_type_use_site(
+    ctx: &mut DefContext<'_>,
+    utr: &crate::type_extract::UserTypeRef,
+    scope: ScopeId,
+) {
+    match utr {
+        crate::type_extract::UserTypeRef::Simple(nr)
+        | crate::type_extract::UserTypeRef::InterfaceModport { iface: nr, .. } => {
+            if let Some(ident) = nr.ident()
+                && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
+            {
+                ctx.use_sites.push(UseSite {
+                    path: NamePath::Simple(SmolStr::new(ident.text())),
+                    expected_ns: ExpectedNs::TypeThenValue,
+                    range: nr.text_range(),
+                    scope,
+                    ast_id: ast_id.erase(),
+                    order_key: 0,
+                });
+            }
+        }
+        crate::type_extract::UserTypeRef::Qualified(qn) => {
+            if let Some(ast_id) = ctx.ast_id_map.ast_id(qn) {
+                let segments: Box<[SmolStr]> = qn
+                    .segments()
+                    .map(|ident| SmolStr::new(ident.text()))
+                    .collect();
+                if !segments.is_empty() {
+                    ctx.use_sites.push(UseSite {
+                        path: NamePath::Qualified { segments },
+                        expected_ns: ExpectedNs::TypeThenValue,
+                        range: qn.text_range(),
+                        scope,
+                        ast_id: ast_id.erase(),
+                        order_key: 0,
+                    });
+                }
+            }
+        }
+    }
+}
+
 fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     // Detect enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
     for child in node.children() {
-        if child.kind() == SyntaxKind::TypeSpec {
-            collect_type_spec_refs(ctx, &child, scope);
+        if let Some(ts) = TypeSpec::cast(child) {
+            collect_type_spec_refs(ctx, &ts, scope);
         }
     }
     if let Some(td) = TypedefDecl::cast(node.clone())
@@ -1099,7 +1142,7 @@ fn collect_record_def(
         let member_ts = member.type_spec();
         let ty = match member_ts {
             Some(ref ts) => {
-                collect_type_spec_refs(ctx, ts.syntax(), scope);
+                collect_type_spec_refs(ctx, ts, scope);
                 extract_typeref_from_typespec(ts.syntax(), ctx.file, ctx.ast_id_map)
             }
             None => TypeRef::Resolved(Ty::Error),

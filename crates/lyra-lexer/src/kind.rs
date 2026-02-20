@@ -451,6 +451,7 @@ pub enum SyntaxKind {
     ModportDecl,
     ModportItem,
     ModportPort,
+    DottedName,
 
     #[doc(hidden)]
     __Last,

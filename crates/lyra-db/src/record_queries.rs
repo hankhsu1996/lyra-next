@@ -214,7 +214,7 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
     let unit = mref.unit(db);
     let modport_id = mref.modport_id(db);
 
-    let Some(gsym) = def_symbol(db, unit, modport_id.owner) else {
+    let Some(gsym) = def_symbol(db, unit, modport_id.owner.global_def()) else {
         return empty_modport_sem();
     };
 
