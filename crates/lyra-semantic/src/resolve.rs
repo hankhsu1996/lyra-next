@@ -8,11 +8,11 @@ use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
 use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
 use crate::name_graph::NameGraph;
 use crate::resolve_index::{
-    CoreResolution, CoreResolveOutput, CoreResolveResult, ImportError, Resolution, ResolveIndex,
-    UnresolvedReason,
+    CoreResolution, CoreResolveOutput, CoreResolveResult, ImportConflict, ImportConflictKind,
+    ImportError, Resolution, ResolveIndex, UnresolvedReason,
 };
-use crate::scopes::ScopeId;
-use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, SymbolId};
+use crate::scopes::{ScopeId, SymbolNameLookup};
+use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
 
 /// Resolve all use-sites using only offset-independent data.
 ///
@@ -79,6 +79,111 @@ pub fn build_resolve_core(
         resolutions,
         import_errors: import_errors.into_boxed_slice(),
     }
+}
+
+/// Detect import conflicts per LRM 26.5.
+///
+/// Check 1 (26.5a): explicit import of a name already locally declared.
+/// Check 2 (26.5b): explicit import conflicts with wildcard-provided name
+/// from a different package (different `GlobalDefId`).
+pub fn detect_import_conflicts(
+    graph: &NameGraph,
+    pkg_scope: &PackageScopeIndex,
+) -> Box<[ImportConflict]> {
+    let mut conflicts = Vec::new();
+
+    for scope_idx in 0..graph.scopes.len() {
+        let scope_id = ScopeId(scope_idx as u32);
+        let scope = graph.scopes.get(scope_id);
+
+        for imp in &*graph.imports {
+            if imp.scope != scope_id {
+                continue;
+            }
+            let ImportName::Explicit(ref member) = imp.name else {
+                continue;
+            };
+
+            let has_value = pkg_scope
+                .resolve(&imp.package, member, Namespace::Value)
+                .is_some();
+            let has_type = pkg_scope
+                .resolve(&imp.package, member, Namespace::Type)
+                .is_some();
+            let mut import_ns = NsMask::EMPTY;
+            if has_value {
+                import_ns = import_ns.union(NsMask::VALUE);
+            }
+            if has_type {
+                import_ns = import_ns.union(NsMask::TYPE);
+            }
+
+            if import_ns.is_empty() {
+                continue;
+            }
+
+            // Check 1 (26.5a): explicit vs local
+            let local_has_value = scope
+                .value_ns
+                .binary_search_by(|id| graph.name(*id).cmp(member.as_str()))
+                .is_ok();
+            let local_has_type = scope
+                .type_ns
+                .binary_search_by(|id| graph.name(*id).cmp(member.as_str()))
+                .is_ok();
+            let mut local_ns = NsMask::EMPTY;
+            if local_has_value {
+                local_ns = local_ns.union(NsMask::VALUE);
+            }
+            if local_has_type {
+                local_ns = local_ns.union(NsMask::TYPE);
+            }
+            let conflict_ns = import_ns.intersect(local_ns);
+            if !conflict_ns.is_empty() {
+                conflicts.push(ImportConflict {
+                    scope: scope_id,
+                    name: member.clone(),
+                    kind: ImportConflictKind::ExplicitVsLocal {
+                        package: imp.package.clone(),
+                        ns: conflict_ns,
+                    },
+                });
+            }
+
+            // Check 2 (26.5b): explicit vs wildcard
+            for wc in &*graph.imports {
+                if wc.scope != scope_id
+                    || wc.name != ImportName::Wildcard
+                    || wc.package == imp.package
+                {
+                    continue;
+                }
+                let mut wc_conflict_ns = NsMask::EMPTY;
+                for &ns in &[Namespace::Value, Namespace::Type] {
+                    let explicit_id = pkg_scope.resolve(&imp.package, member, ns);
+                    let wildcard_id = pkg_scope.resolve(&wc.package, member, ns);
+                    if let (Some(eid), Some(wid)) = (explicit_id, wildcard_id)
+                        && eid != wid
+                    {
+                        wc_conflict_ns = wc_conflict_ns.union(NsMask::from_namespace(ns));
+                    }
+                }
+                if !wc_conflict_ns.is_empty() {
+                    conflicts.push(ImportConflict {
+                        scope: scope_id,
+                        name: member.clone(),
+                        kind: ImportConflictKind::ExplicitVsWildcard {
+                            explicit_package: imp.package.clone(),
+                            wildcard_package: wc.package.clone(),
+                            ns: wc_conflict_ns,
+                        },
+                    });
+                }
+            }
+        }
+    }
+
+    conflicts.into_boxed_slice()
 }
 
 fn ns_list(expected: ExpectedNs) -> ([Namespace; 2], usize) {

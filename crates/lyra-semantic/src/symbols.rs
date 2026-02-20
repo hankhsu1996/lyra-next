@@ -5,6 +5,46 @@ use smol_str::SmolStr;
 use crate::aggregate::TypeOrigin;
 use crate::scopes::ScopeId;
 
+/// Bitmask for namespace overlap checking.
+///
+/// Used by import conflict detection (LRM 26.5) to track which
+/// namespaces overlap between an import and a local declaration
+/// or another import.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NsMask(u8);
+
+impl NsMask {
+    pub const EMPTY: Self = Self(0);
+    pub const VALUE: Self = Self(1);
+    pub const TYPE: Self = Self(2);
+
+    #[must_use]
+    pub fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[must_use]
+    pub fn intersect(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
+    pub fn intersects(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn from_namespace(ns: Namespace) -> Self {
+        match ns {
+            Namespace::Value => Self::VALUE,
+            Namespace::Type => Self::TYPE,
+            Namespace::Definition => Self::EMPTY,
+        }
+    }
+}
+
 /// Which namespace a symbol or use site belongs to.
 ///
 /// SV has separate namespaces for values (nets, variables, ports,

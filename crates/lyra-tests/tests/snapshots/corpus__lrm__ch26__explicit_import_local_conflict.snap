@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.semantic[7]] 7:8..7:8: import of `C` from package `P` conflicts with local declaration
+---
+unit (0 diagnostics)

@@ -43,6 +43,10 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 6,
     };
+    pub const IMPORT_CONFLICT: Self = Self {
+        namespace: "lyra.semantic",
+        number: 7,
+    };
     pub const WIDTH_MISMATCH: Self = Self {
         namespace: "lyra.type",
         number: 1,

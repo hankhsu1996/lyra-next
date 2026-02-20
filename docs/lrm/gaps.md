@@ -18,14 +18,6 @@ LRM 26.3 Examples 1-4 define complex lexical scoping rules for wildcard imports:
 
 "If a wildcard imported symbol is made locally visible in a scope, any later locally visible declaration of the same name in that scope shall be illegal" (LRM 26.3 Example 1 line 5). Error case not tested. Blocked by: semantic (conflict detection between wildcard import and later local decl). Test: `lrm/ch26/wildcard_local_conflict`.
 
-### 26.5: Explicit import conflicts with local declaration
-
-"It is illegal to import an identifier defined in the importing scope" (Table 26-1). Error case not tested. Blocked by: semantic (conflict detection between explicit import and local decl). Test: `lrm/ch26/explicit_import_local_conflict`.
-
-### 26.5: Wildcard then explicit import conflict
-
-`import q::*; wire a = c; import p::c;` -- the wildcard forces import of `q::c`, then explicit import of `p::c` creates a conflict (LRM 26.5 end example). Error case not tested. Blocked by: semantic (conflict detection between triggered wildcard and explicit import). Test: `lrm/ch26/wildcard_explicit_conflict`.
-
 ### 26.6: Same declaration through multiple export paths
 
 Importing the same original declaration through multiple export paths shall not be a conflict (LRM p5 example: `export p1::x; export p4::x;` where both refer to the same `p1::x`). Not tested. Blocked by: semantic (identity-based dedup in import resolution). Test: `lrm/ch26/export_multi_path`.

@@ -2,7 +2,7 @@ use lyra_diag::{Arg, Diagnostic, DiagnosticCode, Label, LabelKind, Message, Mess
 use lyra_preprocess::PreprocOutput;
 use lyra_semantic::def_index::DefIndex;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
-use lyra_semantic::resolve_index::ResolveIndex;
+use lyra_semantic::resolve_index::{ImportConflict, ImportConflictKind, ResolveIndex};
 use lyra_source::{FileId, Span, TextRange, TextSize};
 use smol_str::SmolStr;
 
@@ -146,6 +146,77 @@ fn lower_semantic_diag(
             primary_span,
         ),
     }
+}
+
+/// Lower import conflicts (LRM 26.5) to structured diagnostics.
+pub(crate) fn lower_import_conflicts(
+    file_id: FileId,
+    pp: &PreprocOutput,
+    def: &DefIndex,
+    conflicts: &[ImportConflict],
+) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    for conflict in conflicts {
+        if let Some(d) = lower_single_import_conflict(file_id, pp, def, conflict) {
+            diags.push(d);
+        }
+    }
+    diags
+}
+
+fn lower_single_import_conflict(
+    file_id: FileId,
+    pp: &PreprocOutput,
+    def: &DefIndex,
+    conflict: &ImportConflict,
+) -> Option<Diagnostic> {
+    // Find the import range by scanning def.imports for a match on (package, name, scope)
+    let import_range = def.imports.iter().find_map(|imp| {
+        if imp.scope != conflict.scope {
+            return None;
+        }
+        let matches = match (&conflict.kind, &imp.name) {
+            (
+                ImportConflictKind::ExplicitVsLocal { package, .. },
+                lyra_semantic::def_index::ImportName::Explicit(member),
+            ) => member.as_str() == conflict.name.as_str() && imp.package == *package,
+            (
+                ImportConflictKind::ExplicitVsWildcard {
+                    explicit_package, ..
+                },
+                lyra_semantic::def_index::ImportName::Explicit(member),
+            ) => member.as_str() == conflict.name.as_str() && imp.package == *explicit_package,
+            _ => false,
+        };
+        if matches { Some(imp.range) } else { None }
+    });
+
+    let range = import_range?;
+    let (span, _) = map_span_or_fallback(file_id, &pp.source_map, range);
+
+    let d = match &conflict.kind {
+        ImportConflictKind::ExplicitVsLocal { package, .. } => lower_args_diag(
+            DiagnosticCode::IMPORT_CONFLICT,
+            MessageId::ExplicitImportConflictsWithLocal,
+            vec![Arg::Name(conflict.name.clone()), Arg::Name(package.clone())],
+            span,
+        ),
+        ImportConflictKind::ExplicitVsWildcard {
+            explicit_package,
+            wildcard_package,
+            ..
+        } => lower_args_diag(
+            DiagnosticCode::IMPORT_CONFLICT,
+            MessageId::ExplicitConflictsWithWildcard,
+            vec![
+                Arg::Name(conflict.name.clone()),
+                Arg::Name(explicit_package.clone()),
+                Arg::Name(wildcard_package.clone()),
+            ],
+            span,
+        ),
+    };
+    Some(d)
 }
 
 fn lower_name_diag(
