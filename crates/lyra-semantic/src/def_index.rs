@@ -10,7 +10,7 @@ use crate::record::{
     RecordId,
 };
 use crate::scopes::{ScopeId, ScopeTree};
-use crate::symbols::{Namespace, SymbolId, SymbolTable};
+use crate::symbols::{GlobalDefId, Namespace, SymbolId, SymbolTable};
 
 /// Lookup strategy for a use-site.
 ///
@@ -89,6 +89,13 @@ impl DefIndex {
     ) -> Option<&ModportDef> {
         let id = self.modport_name_map.get(&(iface, SmolStr::new(name)))?;
         self.modport_defs.get(id)
+    }
+
+    /// Map a local symbol to its cross-file definition identity.
+    pub fn symbol_global_def(&self, sym: SymbolId) -> Option<GlobalDefId> {
+        debug_assert!(sym.index() < self.symbol_to_decl.len());
+        let ast_id = self.symbol_to_decl.get(sym.index()).and_then(|o| *o)?;
+        Some(GlobalDefId::new(ast_id))
     }
 
     pub fn record_id(&self, idx: RecordDefIdx) -> RecordId {

@@ -14,6 +14,10 @@ pub enum DefinitionKind {
 }
 
 impl DefinitionKind {
+    pub fn is_instantiable(self) -> bool {
+        matches!(self, Self::Module | Self::Interface)
+    }
+
     /// Derive `DefinitionKind` from a `SymbolKind` for definition-namespace symbols.
     /// Returns `None` for symbol kinds that are not in the definition namespace.
     pub fn from_symbol_kind(kind: crate::symbols::SymbolKind) -> Option<Self> {
@@ -42,6 +46,8 @@ pub struct GlobalDefIndex {
     /// All definitions sorted by `(name, id)`. Modules and packages
     /// share the same namespace per IEEE 1800-2023 section 3.13(a).
     definitions: Box<[(SmolStr, GlobalDefId, DefinitionKind)]>,
+    /// Parallel table sorted by `GlobalDefId` for O(log n) kind lookup.
+    kinds_sorted: Box<[(GlobalDefId, DefinitionKind)]>,
 }
 
 impl GlobalDefIndex {
@@ -75,6 +81,15 @@ impl GlobalDefIndex {
         }
     }
 
+    /// O(log n) kind lookup by `GlobalDefId`.
+    pub fn def_kind(&self, def: GlobalDefId) -> Option<DefinitionKind> {
+        let idx = self
+            .kinds_sorted
+            .binary_search_by_key(&def, |(id, _)| *id)
+            .ok()?;
+        Some(self.kinds_sorted[idx].1)
+    }
+
     /// Iterate over all definitions. Used for duplicate detection.
     pub fn definitions(&self) -> &[(SmolStr, GlobalDefId, DefinitionKind)] {
         &self.definitions
@@ -89,8 +104,13 @@ pub fn build_global_def_index(
 ) -> GlobalDefIndex {
     let mut sorted: Vec<(SmolStr, GlobalDefId, DefinitionKind)> = entries.to_vec();
     sorted.sort_by(|(na, ida, _), (nb, idb, _)| na.cmp(nb).then_with(|| ida.cmp(idb)));
+    let mut kinds: Vec<(GlobalDefId, DefinitionKind)> =
+        sorted.iter().map(|(_, id, k)| (*id, *k)).collect();
+    kinds.sort_by_key(|(id, _)| *id);
+    kinds.dedup_by_key(|(id, _)| *id);
     GlobalDefIndex {
         definitions: sorted.into_boxed_slice(),
+        kinds_sorted: kinds.into_boxed_slice(),
     }
 }
 

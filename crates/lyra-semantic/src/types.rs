@@ -2,8 +2,8 @@ use lyra_ast::ErasedAstId;
 use smallvec::SmallVec;
 use smol_str::SmolStr;
 
-use crate::record::{EnumId, ModportDefId, PortDirection, RecordId};
-use crate::symbols::{GlobalDefId, SymbolId};
+use crate::record::{EnumId, InterfaceDefId, ModportDefId, PortDirection, RecordId};
+use crate::symbols::SymbolId;
 
 /// A constant integer value, used for dimension bounds and widths.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -166,14 +166,14 @@ impl RealKw {
     }
 }
 
-/// Semantic identity for an interface-typed value.
+/// Handle type for an interface instance value.
 ///
-/// `InterfaceDef`: module-like design unit (scope owner, instantiable)
-/// `InterfaceValue`: struct-like typed object (member access via `.`)
-/// Modport: view/capability set over `InterfaceValue` members
+/// Not a primitive datatype -- represents a reference to an interface
+/// instance. Compatibility is based on same `InterfaceDefId` (same
+/// interface definition) and compatible modport constraints.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceType {
-    pub iface: GlobalDefId,
+    pub iface: InterfaceDefId,
     pub modport: Option<ModportDefId>,
 }
 

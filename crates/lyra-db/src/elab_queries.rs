@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use lyra_ast::{AstNode, ErasedAstId};
 use lyra_lexer::SyntaxKind;
-use lyra_parser::{SyntaxElement, SyntaxNode};
+use lyra_parser::{SyntaxElement, SyntaxNode, SyntaxToken};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::ConstInt;
@@ -18,7 +18,7 @@ use crate::elaboration::{
     GenScopeOrigin, GenvarEnvId, GenvarEnvInterner, InstId, InstOrigin, InstanceNode, ParamEnvId,
     ParamEnvInterner,
 };
-use crate::module_sig::{ModuleSig, ParamKind, PortDirection, PortSig};
+use crate::module_sig::{DesignUnitSig, ParamKind, PortDirection, PortSig};
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::semantic::{def_index_file, global_def_index};
 use crate::type_queries::{SymbolRef, type_of_symbol};
@@ -33,53 +33,101 @@ pub struct TopModule<'db> {
 }
 
 #[salsa::interned]
-pub struct ModuleRef<'db> {
+pub struct DesignUnitRef<'db> {
     pub unit: CompilationUnit,
     pub def_id: GlobalDefId,
 }
 
+enum DesignUnitDeclNode {
+    Module(lyra_ast::ModuleDecl),
+    Interface(lyra_ast::InterfaceDecl),
+}
+
+impl DesignUnitDeclNode {
+    fn cast(node: &SyntaxNode) -> Option<Self> {
+        if let Some(m) = lyra_ast::ModuleDecl::cast(node.clone()) {
+            return Some(Self::Module(m));
+        }
+        if let Some(i) = lyra_ast::InterfaceDecl::cast(node.clone()) {
+            return Some(Self::Interface(i));
+        }
+        None
+    }
+
+    fn name(&self) -> Option<SyntaxToken> {
+        match self {
+            Self::Module(m) => m.name(),
+            Self::Interface(i) => i.name(),
+        }
+    }
+
+    fn port_list(&self) -> Option<lyra_ast::PortList> {
+        match self {
+            Self::Module(m) => m.port_list(),
+            Self::Interface(i) => i.port_list(),
+        }
+    }
+
+    fn param_port_list(&self) -> Option<lyra_ast::ParamPortList> {
+        match self {
+            Self::Module(m) => m.param_port_list(),
+            Self::Interface(i) => i.param_port_list(),
+        }
+    }
+
+    fn body_syntax(&self) -> Option<SyntaxNode> {
+        match self {
+            Self::Module(m) => m.body().map(|b| b.syntax().clone()),
+            Self::Interface(i) => i.body().map(|b| b.syntax().clone()),
+        }
+    }
+}
+
 #[salsa::tracked(return_ref)]
-pub fn module_signature<'db>(db: &'db dyn salsa::Database, module: ModuleRef<'db>) -> ModuleSig {
+pub fn design_unit_signature<'db>(
+    db: &'db dyn salsa::Database,
+    module: DesignUnitRef<'db>,
+) -> DesignUnitSig {
     let unit = module.unit(db);
     let def_id = module.def_id(db);
     let file_id = def_id.file();
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
-        return ModuleSig::new(SmolStr::default(), Vec::new(), Vec::new());
+        return DesignUnitSig::new(SmolStr::default(), Vec::new(), Vec::new());
     };
 
     let parse = parse_file(db, source_file);
     let id_map = ast_id_map(db, source_file);
     let def = def_index_file(db, source_file);
 
-    let Some(module_node) = id_map.get_node(&parse.syntax(), def_id.ast_id()) else {
-        return ModuleSig::new(SmolStr::default(), Vec::new(), Vec::new());
+    let Some(node) = id_map.get_node(&parse.syntax(), def_id.ast_id()) else {
+        return DesignUnitSig::new(SmolStr::default(), Vec::new(), Vec::new());
     };
 
-    let Some(module_decl) = lyra_ast::ModuleDecl::cast(module_node) else {
-        return ModuleSig::new(SmolStr::default(), Vec::new(), Vec::new());
+    let Some(decl) = DesignUnitDeclNode::cast(&node) else {
+        return DesignUnitSig::new(SmolStr::default(), Vec::new(), Vec::new());
     };
 
-    let name = module_decl
+    let name = decl
         .name()
         .map(|t| SmolStr::new(t.text()))
         .unwrap_or_default();
 
-    let ports = extract_port_sigs(db, unit, file_id, &module_decl, id_map, def);
-    let params = extract_param_sigs(&module_decl, id_map);
+    let ports = extract_port_sigs(db, unit, file_id, decl.port_list(), id_map, def);
+    let params = extract_param_sigs(decl.param_port_list(), id_map);
 
-    ModuleSig::new(name, ports, params)
+    DesignUnitSig::new(name, ports, params)
 }
 
 fn extract_port_sigs(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     file_id: FileId,
-    module_decl: &lyra_ast::ModuleDecl,
+    port_list: Option<lyra_ast::PortList>,
     id_map: &lyra_ast::AstIdMap,
     def: &lyra_semantic::def_index::DefIndex,
 ) -> Vec<PortSig> {
-    let Some(port_list) = module_decl.port_list() else {
+    let Some(port_list) = port_list else {
         return Vec::new();
     };
 
@@ -130,10 +178,10 @@ fn extract_port_sigs(
 }
 
 fn extract_param_sigs(
-    module_decl: &lyra_ast::ModuleDecl,
+    param_port_list: Option<lyra_ast::ParamPortList>,
     id_map: &lyra_ast::AstIdMap,
 ) -> Vec<crate::module_sig::ParamSig> {
-    let Some(param_port_list) = module_decl.param_port_list() else {
+    let Some(param_port_list) = param_port_list else {
         return Vec::new();
     };
 
@@ -216,7 +264,7 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
     };
 
     if top_kind != DefinitionKind::Module {
-        diags.push(ElabDiag::NotAModule {
+        diags.push(ElabDiag::NotInstantiable {
             name: name.clone(),
             span: Span {
                 file: FileId(0),
@@ -227,9 +275,9 @@ pub fn elaborate_top<'db>(db: &'db dyn salsa::Database, top: TopModule<'db>) -> 
     }
 
     let file_id = top_def_id.file();
-    let top_name_range = module_name_range(db, unit, top_def_id);
+    let top_name_range = unit_name_range(db, unit, top_def_id);
 
-    let sig = module_signature(db, ModuleRef::new(db, unit, top_def_id));
+    let sig = design_unit_signature(db, DesignUnitRef::new(db, unit, top_def_id));
     let param_env = build_param_env(
         db,
         unit,
@@ -315,7 +363,7 @@ struct ScopeEnv<'a> {
     file_id: FileId,
     parent_scope: ElabNodeId,
     enclosing_inst: InstId,
-    sig: &'a ModuleSig,
+    sig: &'a DesignUnitSig,
     param_env: ParamEnvId,
     genvar_env: GenvarEnvId,
     global: &'a lyra_semantic::global_index::GlobalDefIndex,
@@ -332,7 +380,7 @@ fn make_eval_env<'a>(ctx: &'a ElabCtx<'_>, env: &'a ScopeEnv<'a>) -> EvalEnv<'a>
     }
 }
 
-fn module_name_range(
+fn unit_name_range(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     def_id: GlobalDefId,
@@ -345,13 +393,10 @@ fn module_name_range(
     let Some(node) = id_map.get_node(&parse.syntax(), def_id.ast_id()) else {
         return TextRange::default();
     };
-    let Some(module_decl) = lyra_ast::ModuleDecl::cast(node) else {
+    let Some(decl) = DesignUnitDeclNode::cast(&node) else {
         return TextRange::default();
     };
-    module_decl
-        .name()
-        .map(|t| t.text_range())
-        .unwrap_or_default()
+    decl.name().map(|t| t.text_range()).unwrap_or_default()
 }
 
 fn elaborate_module(
@@ -373,11 +418,11 @@ fn elaborate_module(
     }
 
     ctx.active_stack.push(module_def);
-    elaborate_module_body(ctx, module_def, inst_id, parent_scope);
+    elaborate_unit_body(ctx, module_def, inst_id, parent_scope);
     ctx.active_stack.pop();
 }
 
-fn elaborate_module_body(
+fn elaborate_unit_body(
     ctx: &mut ElabCtx<'_>,
     module_def: GlobalDefId,
     inst_id: InstId,
@@ -391,17 +436,22 @@ fn elaborate_module_body(
     let id_map = ast_id_map(ctx.db, source_file);
     let global = global_def_index(ctx.db, ctx.unit);
 
-    let Some(module_node) = id_map.get_node(&parse.syntax(), module_def.ast_id()) else {
+    let Some(node) = id_map.get_node(&parse.syntax(), module_def.ast_id()) else {
         return;
     };
-    let Some(module_decl) = lyra_ast::ModuleDecl::cast(module_node) else {
+    let Some(decl) = DesignUnitDeclNode::cast(&node) else {
         return;
     };
-    let Some(body) = module_decl.body() else {
+    // Elaboration currently only builds the instance tree and evaluates
+    // generate constructs. Non-elaboration items (signal declarations,
+    // always blocks, modport declarations, etc.) are intentionally
+    // skipped -- they are handled by per-file semantic queries, not
+    // the elaboration pass.
+    let Some(body) = decl.body_syntax() else {
         return;
     };
 
-    let sig = module_signature(ctx.db, ModuleRef::new(ctx.db, ctx.unit, module_def));
+    let sig = design_unit_signature(ctx.db, DesignUnitRef::new(ctx.db, ctx.unit, module_def));
     let param_env = ctx.tree.inst(inst_id).param_env;
 
     let env = ScopeEnv {
@@ -413,7 +463,7 @@ fn elaborate_module_body(
         genvar_env: GenvarEnvId::EMPTY,
         global,
     };
-    expand_body_children(ctx, body.syntax(), &env);
+    expand_body_children(ctx, &body, &env);
 }
 
 fn expand_body_children(ctx: &mut ElabCtx<'_>, body_node: &SyntaxNode, env: &ScopeEnv<'_>) {
@@ -454,15 +504,16 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         return;
     };
 
-    if target_kind != DefinitionKind::Module {
-        ctx.diags.push(ElabDiag::NotAModule {
+    if !target_kind.is_instantiable() {
+        ctx.diags.push(ElabDiag::NotInstantiable {
             name: inst_module_name,
             span: name_span,
         });
         return;
     }
 
-    let target_sig = module_signature(ctx.db, ModuleRef::new(ctx.db, ctx.unit, target_def_id));
+    let target_sig =
+        design_unit_signature(ctx.db, DesignUnitRef::new(ctx.db, ctx.unit, target_def_id));
 
     let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
     let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));

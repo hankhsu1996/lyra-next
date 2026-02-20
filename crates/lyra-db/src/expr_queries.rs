@@ -220,7 +220,7 @@ impl InferCtx for DbInferCtx<'_> {
                 }
             }
             Ty::Interface(iface_ty) => {
-                let gsym = def_symbol(self.db, self.unit, iface_ty.iface)
+                let gsym = def_symbol(self.db, self.unit, iface_ty.iface.global_def())
                     .ok_or(MemberLookupError::NotComposite)?;
                 let src = source_file_by_id(self.db, self.unit, gsym.file)
                     .ok_or(MemberLookupError::NotComposite)?;

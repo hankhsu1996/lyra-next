@@ -9,12 +9,12 @@ use lyra_source::{FileId, Span, TextRange};
 use smol_str::SmolStr;
 
 use crate::elaboration::{ElabDiag, ParamEnvId, ParamEnvInterner};
-use crate::module_sig::{ModuleSig, ParamKind};
+use crate::module_sig::{DesignUnitSig, ParamKind};
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::{CompilationUnit, source_file_by_id};
 
 pub(crate) struct ParamLookup<'a> {
-    pub(crate) sig: &'a ModuleSig,
+    pub(crate) sig: &'a DesignUnitSig,
     pub(crate) values: &'a [ConstInt],
     pub(crate) prefix_len: usize,
 }
@@ -40,14 +40,14 @@ pub(crate) struct ParamOverride {
 /// Bundled context for expression evaluation in a scope.
 pub(crate) struct EvalEnv<'a> {
     pub(crate) file_id: FileId,
-    pub(crate) sig: &'a ModuleSig,
+    pub(crate) sig: &'a DesignUnitSig,
     pub(crate) param_env: ParamEnvId,
     pub(crate) genvar_values: &'a [(SmolStr, ConstInt)],
     pub(crate) interner: &'a ParamEnvInterner,
 }
 
 pub(crate) fn collect_overrides(
-    sig: &ModuleSig,
+    sig: &DesignUnitSig,
     overrides: &[ParamOverride],
     file_id: FileId,
     inst_range: TextRange,
@@ -141,7 +141,7 @@ pub(crate) fn collect_overrides(
 pub(crate) fn build_param_env(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
-    sig: &ModuleSig,
+    sig: &DesignUnitSig,
     overrides: &[ParamOverride],
     inst_span: Span,
     diags: &mut Vec<ElabDiag>,

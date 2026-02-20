@@ -37,8 +37,8 @@ fn sig_ports(src: &str, module_name: &str) -> Vec<String> {
     let def_id = global
         .resolve_module(module_name)
         .expect("module not found");
-    let mref = crate::elab_queries::ModuleRef::new(&db, unit, def_id);
-    let sig = module_signature(&db, mref);
+    let mref = crate::elab_queries::DesignUnitRef::new(&db, unit, def_id);
+    let sig = design_unit_signature(&db, mref);
     sig.ports
         .iter()
         .map(|p| format!("{}: {}", p.name, p.ty.pretty()))
@@ -153,8 +153,8 @@ fn sig_params() {
     let unit = single_file_unit(&db, file);
     let global = crate::semantic::global_def_index(&db, unit);
     let def_id = global.resolve_module("m").expect("module not found");
-    let mref = crate::elab_queries::ModuleRef::new(&db, unit, def_id);
-    let sig = module_signature(&db, mref);
+    let mref = crate::elab_queries::DesignUnitRef::new(&db, unit, def_id);
+    let sig = design_unit_signature(&db, mref);
     assert_eq!(sig.params.len(), 2);
     assert_eq!(sig.params[0].name, "W");
     assert_eq!(sig.params[1].name, "D");
@@ -306,7 +306,7 @@ fn not_a_module_instantiation() {
     );
     let not_mod: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::NOT_A_MODULE)
+        .filter(|d| d.code == DiagnosticCode::NOT_INSTANTIABLE)
         .collect();
     assert_eq!(not_mod.len(), 1);
 }
@@ -1140,4 +1140,80 @@ fn generate_for_exact_cap_no_false_positive() {
     let top_id = tree.top.expect("top should exist");
     let all = all_instance_names_under(&tree, top_id);
     assert_eq!(all.len(), 32, "all 32 iterations should be present");
+}
+
+// Interface instantiation tests
+
+#[test]
+fn interface_instantiation() {
+    let (_, tree) = elab_tree(
+        &[
+            "interface my_bus; logic data; endinterface",
+            "module top; my_bus u_bus(); endmodule",
+        ],
+        "top",
+    );
+    assert!(
+        tree.diagnostics.is_empty(),
+        "expected no diagnostics, got: {:?}",
+        tree.diagnostics
+    );
+    let top_id = tree.top.expect("top should exist");
+    let children = child_instance_names(&tree, top_id);
+    assert_eq!(children, vec!["u_bus"]);
+}
+
+#[test]
+fn interface_sig_with_ports() {
+    let diags = elab_diags(
+        &[
+            "interface my_bus(input logic clk, input logic rst); endinterface",
+            "module top; logic c, r; my_bus u(.clk(c), .rst(r)); endmodule",
+        ],
+        "top",
+    );
+    let elab_errs: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code.namespace == "lyra.elab" && d.severity == lyra_diag::Severity::Error)
+        .collect();
+    assert!(
+        elab_errs.is_empty(),
+        "expected no elab errors for interface with ports, got: {elab_errs:?}"
+    );
+}
+
+#[test]
+fn non_instantiable_rejected() {
+    let diags = elab_diags(
+        &["package pkg; endpackage", "module top; pkg p(); endmodule"],
+        "top",
+    );
+    let not_inst: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::NOT_INSTANTIABLE)
+        .collect();
+    assert_eq!(not_inst.len(), 1);
+}
+
+#[test]
+fn interface_instantiation_accepted() {
+    let (_, tree) = elab_tree(
+        &[
+            "interface my_bus; endinterface",
+            "module top; my_bus u(); endmodule",
+        ],
+        "top",
+    );
+    let top_id = tree.top.expect("top should exist");
+    let children = child_instance_names(&tree, top_id);
+    assert_eq!(children, vec!["u"]);
+    let not_inst: Vec<_> = tree
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(d, crate::elaboration::ElabDiag::NotInstantiable { .. }))
+        .collect();
+    assert!(
+        not_inst.is_empty(),
+        "interface should not trigger NotInstantiable: {not_inst:?}"
+    );
 }
