@@ -1,15 +1,16 @@
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
-use lyra_semantic::record::{FieldSem, RecordId, RecordSem, TypeRef};
+use lyra_semantic::record::{FieldSem, ModportDefId, RecordId, RecordSem, TypeRef};
 use lyra_semantic::resolve_index::{CoreResolution, CoreResolveResult};
-use lyra_semantic::symbols::GlobalSymbolId;
-use lyra_semantic::types::{ConstInt, Ty};
+use lyra_semantic::symbols::{GlobalSymbolId, Namespace};
+use lyra_semantic::types::{ConstInt, ModportView, Ty};
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::semantic::{
-    compilation_unit_env, def_index_file, global_def_index, name_graph_file, package_scope_index,
+    compilation_unit_env, def_index_file, def_symbol, global_def_index, name_graph_file,
+    package_scope_index,
 };
 use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, source_file_by_id};
@@ -189,6 +190,88 @@ fn empty_record_sem() -> RecordSem {
     RecordSem {
         fields: Box::new([]),
         field_lookup: Box::new([]),
+        diags: Box::new([]),
+    }
+}
+
+/// Resolved modport: the member view plus diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModportSem {
+    pub view: ModportView,
+    pub diags: Box<[SemanticDiag]>,
+}
+
+/// Identifies a modport for semantic resolution.
+#[salsa::interned]
+pub struct ModportRef<'db> {
+    pub unit: CompilationUnit,
+    pub modport_id: ModportDefId,
+}
+
+/// Resolve a modport's member entries against the interface scope (Salsa-tracked).
+#[salsa::tracked]
+pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> ModportSem {
+    let unit = mref.unit(db);
+    let modport_id = mref.modport_id(db);
+
+    let Some(gsym) = def_symbol(db, unit, modport_id.owner) else {
+        return empty_modport_sem();
+    };
+
+    let Some(src) = source_file_by_id(db, unit, gsym.file) else {
+        return empty_modport_sem();
+    };
+    let def = def_index_file(db, src);
+
+    let Some(modport_def) = def.modport_defs.get(&modport_id) else {
+        return empty_modport_sem();
+    };
+
+    let iface_scope = def.symbols.get(gsym.local).scope;
+
+    let mut entries = Vec::new();
+    let mut diags = Vec::new();
+    let mut seen = std::collections::HashMap::new();
+
+    for entry in &*modport_def.entries {
+        let resolved = def.scopes.resolve(
+            &def.symbols,
+            iface_scope,
+            Namespace::Value,
+            &entry.member_name,
+        );
+        let Some(member_sym) = resolved else {
+            diags.push(SemanticDiag {
+                kind: SemanticDiagKind::UnresolvedName {
+                    name: entry.member_name.clone(),
+                },
+                range: entry.span.range,
+            });
+            continue;
+        };
+        if let Some(&first_range) = seen.get(&member_sym) {
+            diags.push(SemanticDiag {
+                kind: SemanticDiagKind::DuplicateDefinition {
+                    name: entry.member_name.clone(),
+                    original: first_range,
+                },
+                range: entry.span.range,
+            });
+            continue;
+        }
+        seen.insert(member_sym, entry.span.range);
+        entries.push((member_sym, entry.direction));
+    }
+
+    ModportSem {
+        view: ModportView::new(entries),
+        diags: diags.into_boxed_slice(),
+    }
+}
+
+fn empty_modport_sem() -> ModportSem {
+    ModportSem {
+        view: ModportView::new(Vec::new()),
         diags: Box::new([]),
     }
 }

@@ -189,6 +189,7 @@ impl<'db> TyFmt<'db> {
         let base_str = match base {
             Ty::Enum(id) => self.enum_name(id),
             Ty::Record(id) => self.record_name(id),
+            Ty::Interface(iface_ty) => self.interface_name(iface_ty),
             other => other.pretty().to_string(),
         };
 
@@ -218,6 +219,29 @@ impl<'db> TyFmt<'db> {
         match name {
             Some(n) => format!("enum {n}"),
             None => "enum".to_string(),
+        }
+    }
+
+    fn interface_name(&self, iface_ty: &lyra_semantic::types::InterfaceType) -> String {
+        use crate::semantic::def_symbol;
+
+        let Some(gsym) = def_symbol(self.db, self.unit, iface_ty.iface) else {
+            return "interface".to_string();
+        };
+        let Some(src) = source_file_by_id(self.db, self.unit, gsym.file) else {
+            return "interface".to_string();
+        };
+        let def = def_index_file(self.db, src);
+        let iface_name = def.symbols.get(gsym.local).name.clone();
+        match iface_ty.modport {
+            Some(mp_id) => {
+                let mp_name = def.modport_defs.get(&mp_id).map(|d| d.name.as_str());
+                match mp_name {
+                    Some(n) => format!("{iface_name}.{n}"),
+                    None => iface_name.to_string(),
+                }
+            }
+            None => iface_name.to_string(),
         }
     }
 
