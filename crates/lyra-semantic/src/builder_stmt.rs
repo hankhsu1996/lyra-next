@@ -3,7 +3,8 @@ use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
 
-use crate::builder::{DefContext, collect_declarators, collect_name_refs, is_expression_kind};
+use crate::builder::{DefContext, collect_declarators, is_expression_kind};
+use crate::builder_types::collect_name_refs;
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::scopes::ScopeKind;
 use crate::symbols::{Namespace, SymbolKind};

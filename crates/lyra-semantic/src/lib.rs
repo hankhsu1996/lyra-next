@@ -1,6 +1,7 @@
 pub(crate) mod builder;
 mod builder_order;
 mod builder_stmt;
+mod builder_types;
 pub mod coerce;
 pub mod const_eval;
 pub mod def_index;
