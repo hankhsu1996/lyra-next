@@ -62,5 +62,5 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 - [x] Enum member name resolution (base type, methods, type compat deferred, see gaps)
 - [x] Indexing and part-select typing (dynamic/queue/assoc/streaming deferred, see gaps)
 - [x] Generate blocks and parameter elaboration
-- [ ] Interface/modport semantics
+- [x] Interface/modport semantics (LRM Ch25 signoff deferred, see gaps)
 - [ ] Performance baseline (10K lines under 1s)

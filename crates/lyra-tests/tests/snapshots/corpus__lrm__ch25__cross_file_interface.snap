@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: defs.sv (0 diagnostics)
+// file: main.sv (0 diagnostics)
+---
+unit (0 diagnostics)
