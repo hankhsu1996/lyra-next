@@ -60,12 +60,6 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 Bit-select and part-select currently return unsigned (engine policy). LRM signedness rules for these in different contexts need verification. Blocked by: signedness rule audit. Test: `lrm/ch11/select_signedness`.
 
-## Chapter 25 -- Interfaces
-
-### 25.5.4: Modport type extraction to dedicated module
-
-Modport types (`ModportDef`, `ModportDefIdx`, `ModportId`, etc.) are co-located with struct/union types in `record.rs`. For consistency with the `enum_def.rs` extraction, modport types should be moved to a dedicated `modport_def.rs` module. Blocked by: refactoring (no functional gap). Test: N/A (internal code organization).
-
 ## Chapter 26 -- Packages
 
 ### 26.3: Enum literal import semantics

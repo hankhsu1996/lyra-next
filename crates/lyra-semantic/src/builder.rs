@@ -21,9 +21,9 @@ use crate::def_index::{
 };
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::EnumDef;
-use crate::record::{
-    ModportDef, ModportDefId, ModportEntry, PortDirection, RecordDef, SymbolOrigin,
-};
+use crate::interface_id::InterfaceDefId;
+use crate::modport_def::{ModportDef, ModportDefId, ModportEntry, PortDirection};
+use crate::record::{RecordDef, SymbolOrigin};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
 
@@ -99,9 +99,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         diagnostics: diagnostics.into_boxed_slice(),
     };
     for raw in ctx.raw_modport_defs {
-        if let Some(iface_id) =
-            crate::record::InterfaceDefId::try_from_def_index(&def_index_partial, raw.owner)
-        {
+        if let Some(iface_id) = InterfaceDefId::try_from_def_index(&def_index_partial, raw.owner) {
             let typed_id = ModportDefId {
                 owner: iface_id,
                 ordinal: raw.ordinal,
@@ -749,7 +747,7 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
 
         // Placeholder ModportDefId with a dummy owner; finalization replaces it.
         let placeholder_id = ModportDefId {
-            owner: crate::record::InterfaceDefId::placeholder(),
+            owner: InterfaceDefId::placeholder(),
             ordinal,
         };
 

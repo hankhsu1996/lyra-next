@@ -1,6 +1,7 @@
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
-use lyra_semantic::record::{FieldSem, ModportDefId, RecordId, RecordSem, TypeRef};
+use lyra_semantic::modport_def::ModportDefId;
+use lyra_semantic::record::{FieldSem, RecordId, RecordSem, TypeRef};
 use lyra_semantic::symbols::Namespace;
 use lyra_semantic::types::{ConstInt, ModportView};
 use smol_str::SmolStr;
