@@ -6,6 +6,7 @@ use lyra_semantic::types::SymbolType;
 use crate::enum_queries::{EnumRef, enum_sem};
 use crate::expr_queries::{ExprRef, IntegralCtxKey};
 use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
+use crate::record_queries::{RecordRef, record_diagnostics};
 use crate::semantic::{
     def_index_file, global_def_index, import_conflicts_file, resolve_core_file, resolve_index_file,
 };
@@ -60,6 +61,17 @@ pub fn file_diagnostics(
                 &pp.source_map,
             ));
         }
+    }
+
+    // Record diagnostics (type resolution errors + packed union width)
+    for record_def in &*def.record_defs {
+        let record_id = lyra_semantic::record::RecordId {
+            file: file_id,
+            owner: record_def.owner.clone(),
+            ordinal: record_def.ordinal,
+        };
+        let rref = RecordRef::new(db, unit, record_id);
+        diags.extend(record_diagnostics(db, rref).iter().cloned());
     }
 
     diags

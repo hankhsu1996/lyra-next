@@ -71,6 +71,7 @@ pub struct RecordDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordField {
     pub name: SmolStr,
+    pub name_range: lyra_source::TextRange,
     pub ty: TypeRef,
 }
 

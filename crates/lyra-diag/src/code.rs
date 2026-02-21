@@ -83,6 +83,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 8,
     };
+    pub const PACKED_UNION_WIDTH: Self = Self {
+        namespace: "lyra.type",
+        number: 9,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,
