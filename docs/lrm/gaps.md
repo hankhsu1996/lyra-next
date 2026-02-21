@@ -60,6 +60,56 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 Bit-select and part-select currently return unsigned (engine policy). LRM signedness rules for these in different contexts need verification. Blocked by: signedness rule audit. Test: `lrm/ch11/select_signedness`.
 
+## Chapter 25 -- Interfaces
+
+### 25.3: Interface instance names unresolved in port connections
+
+Interface instances declared in a module (e.g., `my_bus sb();`) cannot be referenced in named port connections of submodule instantiations (e.g., `.bus(sb)` produces "unresolved name `sb`"). The instance is created but not registered as a resolvable name in the enclosing scope for expression contexts. Tests: `lrm/ch25/interface_port_connection`.
+
+### 25.3.3: Generic interface reference
+
+Module ports declared with bare `interface` keyword as type (generic interface). Parser and semantic layer do not recognize this syntax. Test: `lrm/ch25/generic_interface`.
+
+### 25.5: Modport direction enforcement
+
+Accessing modport members should enforce direction. Writing to an `input` modport member or reading an `output`-only member is not diagnosed. Test: `lrm/ch25/modport_direction_check`.
+
+### 25.5: Modport conflict detection
+
+When modport is specified at both instantiation and module header, they must be identical. Not checked. Test: `lrm/ch25/modport_conflict`.
+
+### 25.5.4: Modport expressions
+
+`.port_identifier(expression)` syntax in modport declarations. Parser does not handle this form. Test: `lrm/ch25/modport_expressions`.
+
+### 25.5.5: Clocking blocks in modports
+
+`modport_clocking_declaration` syntax. No clocking block support. Test: `lrm/ch25/modport_clocking`.
+
+### 25.6: Interfaces and specify blocks
+
+Specify block terminal rules for interface ports. No specify block support. Test: `lrm/ch25/specify_interface`.
+
+### 25.7: Tasks and functions in interfaces
+
+Import/export of subroutines through modports. Neither parsing nor semantic analysis handles `modport_tf_ports_declaration`. Test: `lrm/ch25/interface_methods`.
+
+### 25.7.4: Extern forkjoin tasks
+
+`extern forkjoin task` declaration in interfaces. Not supported. Test: `lrm/ch25/extern_forkjoin`.
+
+### 25.8: Parameterized interfaces
+
+Interface parameter override at instantiation site. Parser/elaboration may partially work but untested in LRM corpus. Test: `lrm/ch25/parameterized_interface`.
+
+### 25.9: Virtual interfaces
+
+`virtual interface` type declaration, assignment, and access. Not supported at any layer. Test: `lrm/ch25/virtual_interface`.
+
+### 25.10: Type and param access through modport
+
+Types and localparams not listed in modport should remain accessible through port reference. Not tested. Test: `lrm/ch25/modport_type_access`.
+
 ## Chapter 26 -- Packages
 
 ### 26.3: Enum literal import semantics
