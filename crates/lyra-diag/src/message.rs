@@ -31,6 +31,8 @@ pub enum MessageId {
     EnumAssignFromNonEnum,
     EnumAssignWrongEnum,
     EnumTypeHere,
+    ConversionArgCategory,
+    ConversionWidthMismatch,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -188,6 +190,9 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::EnumTypeHere => {
             format!("enum type `{}`", name())
         }
+        MessageId::ConversionArgCategory | MessageId::ConversionWidthMismatch => {
+            render_conversion_message(msg)
+        }
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -212,6 +217,25 @@ pub fn render_message(msg: &Message) -> String {
             .map(String::from)
             .unwrap_or_default(),
         _ => render_elab_message(msg),
+    }
+}
+
+fn render_conversion_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
+        MessageId::ConversionArgCategory => {
+            let expected = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("{} requires {expected} argument", name())
+        }
+        MessageId::ConversionWidthMismatch => {
+            let expected = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
+            let actual = msg.args.get(2).and_then(Arg::as_width).unwrap_or(0);
+            format!(
+                "{} requires {expected}-bit argument, got {actual}-bit",
+                name()
+            )
+        }
+        _ => String::new(),
     }
 }
 

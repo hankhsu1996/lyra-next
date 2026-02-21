@@ -407,6 +407,18 @@ impl Ty {
         })
     }
 
+    /// Construct `bit[width-1:0]` (unsigned, 2-state) with a single packed dim.
+    pub fn bit_n(width: u32) -> Self {
+        debug_assert!(width > 0, "bit_n(0) is nonsensical");
+        Self::bit(
+            PackedDims::from(vec![PackedDim {
+                msb: ConstInt::Known(i64::from(width) - 1),
+                lsb: ConstInt::Known(0),
+            }]),
+            false,
+        )
+    }
+
     /// Remove the outermost unpacked dimension and return the element type.
     pub fn peel_unpacked_dim(&self) -> Option<Ty> {
         match self {
@@ -450,6 +462,11 @@ impl Ty {
             }
             _ => None,
         }
+    }
+
+    /// Whether this is a real-valued type (real, shortreal, realtime).
+    pub fn is_real(&self) -> bool {
+        matches!(self, Ty::Real(_))
     }
 
     /// Whether this type is a data type (LRM 6.2.1).

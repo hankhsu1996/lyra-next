@@ -79,6 +79,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 5,
     };
+    pub const CONVERSION_ARG_TYPE: Self = Self {
+        namespace: "lyra.type",
+        number: 8,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,

@@ -5,20 +5,28 @@ use crate::expr_helpers::is_expression_kind;
 use crate::syntax_helpers::{system_tf_args, system_tf_name};
 use crate::type_infer::{ExprType, ExprTypeErrorKind, InferCtx, infer_expr_type};
 
-enum SystemFnKind {
+pub(crate) enum SystemFnKind {
     Clog2,
     Signed,
     Unsigned,
     Bits,
     ReturnsInt,
     ReturnsBit,
+    RealMath1,
+    RealMath2,
+    IntToReal,
+    RealToInt,
+    RealToBits,
+    ShortRealToBits,
+    BitsToReal,
+    BitsToShortReal,
 }
 
-struct SystemFnEntry {
-    name: &'static str,
-    min_args: u8,
-    max_args: Option<u8>,
-    kind: SystemFnKind,
+pub(crate) struct SystemFnEntry {
+    pub(crate) name: &'static str,
+    pub(crate) min_args: u8,
+    pub(crate) max_args: Option<u8>,
+    pub(crate) kind: SystemFnKind,
 }
 
 static BUILTINS: &[SystemFnEntry] = &[
@@ -76,6 +84,171 @@ static BUILTINS: &[SystemFnEntry] = &[
         max_args: Some(1),
         kind: SystemFnKind::ReturnsBit,
     },
+    // Real math functions (LRM 20.8.2) -- 1-arg
+    SystemFnEntry {
+        name: "$ln",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$log10",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$exp",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$sqrt",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$floor",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$ceil",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$sin",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$cos",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$tan",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$asin",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$acos",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$atan",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$sinh",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$cosh",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$tanh",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$asinh",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$acosh",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    SystemFnEntry {
+        name: "$atanh",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealMath1,
+    },
+    // Real math functions (LRM 20.8.2) -- 2-arg
+    SystemFnEntry {
+        name: "$pow",
+        min_args: 2,
+        max_args: Some(2),
+        kind: SystemFnKind::RealMath2,
+    },
+    SystemFnEntry {
+        name: "$atan2",
+        min_args: 2,
+        max_args: Some(2),
+        kind: SystemFnKind::RealMath2,
+    },
+    SystemFnEntry {
+        name: "$hypot",
+        min_args: 2,
+        max_args: Some(2),
+        kind: SystemFnKind::RealMath2,
+    },
+    // Real conversion functions (LRM 20.5)
+    SystemFnEntry {
+        name: "$itor",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::IntToReal,
+    },
+    SystemFnEntry {
+        name: "$rtoi",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealToInt,
+    },
+    SystemFnEntry {
+        name: "$realtobits",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::RealToBits,
+    },
+    SystemFnEntry {
+        name: "$bitstoreal",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::BitsToReal,
+    },
+    SystemFnEntry {
+        name: "$shortrealtobits",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::ShortRealToBits,
+    },
+    SystemFnEntry {
+        name: "$bitstoshortreal",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::BitsToShortReal,
+    },
 ];
 
 /// Iterate argument nodes in a system task/function argument list.
@@ -113,12 +286,17 @@ fn check_arity(arg_list: &SyntaxNode, entry: &SystemFnEntry) -> Option<ExprType>
     None
 }
 
+/// Look up a system function by name. Shared by inference and type-check.
+pub(crate) fn lookup_builtin(name: &str) -> Option<&'static SystemFnEntry> {
+    BUILTINS.iter().find(|e| e.name == name)
+}
+
 pub(crate) fn infer_system_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     let Some(tok) = system_tf_name(node) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
     let name = tok.text();
-    let Some(entry) = BUILTINS.iter().find(|e| e.name == name) else {
+    let Some(entry) = lookup_builtin(name) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedSystemCall);
     };
     let Some(args) = system_tf_args(node) else {
@@ -137,6 +315,14 @@ pub(crate) fn infer_system_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprTy
             crate::types::PackedDims::empty(),
             false,
         )),
+        SystemFnKind::RealMath1 | SystemFnKind::IntToReal | SystemFnKind::BitsToReal => {
+            infer_one_arg_returns_real(&args, ctx)
+        }
+        SystemFnKind::RealMath2 => infer_two_arg_returns_real(&args, ctx),
+        SystemFnKind::RealToInt => infer_one_arg_returns_int(&args, ctx),
+        SystemFnKind::RealToBits => infer_one_arg_returns_bits(&args, ctx, 64),
+        SystemFnKind::ShortRealToBits => infer_one_arg_returns_bits(&args, ctx, 32),
+        SystemFnKind::BitsToShortReal => infer_one_arg_returns_shortreal(&args, ctx),
     }
 }
 
@@ -177,6 +363,49 @@ fn infer_signedness_cast(args: &SyntaxNode, ctx: &dyn InferCtx, target_signed: b
         other => other.clone(),
     };
     ExprType::from_ty(&new_ty)
+}
+
+fn infer_one_arg_returns_real(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    use crate::types::{RealKw, Ty};
+    if let Some(arg) = nth_arg(args, 0) {
+        let _ = infer_expr_type(&arg, ctx, None);
+    }
+    ExprType::from_ty(&Ty::Real(RealKw::Real))
+}
+
+fn infer_two_arg_returns_real(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    use crate::types::{RealKw, Ty};
+    if let Some(arg) = nth_arg(args, 0) {
+        let _ = infer_expr_type(&arg, ctx, None);
+    }
+    if let Some(arg) = nth_arg(args, 1) {
+        let _ = infer_expr_type(&arg, ctx, None);
+    }
+    ExprType::from_ty(&Ty::Real(RealKw::Real))
+}
+
+fn infer_one_arg_returns_int(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    use crate::types::Ty;
+    if let Some(arg) = nth_arg(args, 0) {
+        let _ = infer_expr_type(&arg, ctx, None);
+    }
+    ExprType::from_ty(&Ty::int())
+}
+
+fn infer_one_arg_returns_bits(args: &SyntaxNode, ctx: &dyn InferCtx, width: u32) -> ExprType {
+    use crate::types::Ty;
+    if let Some(arg) = nth_arg(args, 0) {
+        let _ = infer_expr_type(&arg, ctx, None);
+    }
+    ExprType::from_ty(&Ty::bit_n(width))
+}
+
+fn infer_one_arg_returns_shortreal(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    use crate::types::{RealKw, Ty};
+    if let Some(arg) = nth_arg(args, 0) {
+        let _ = infer_expr_type(&arg, ctx, None);
+    }
+    ExprType::from_ty(&Ty::Real(RealKw::Short))
 }
 
 /// Semantic classification of a `$bits` argument.

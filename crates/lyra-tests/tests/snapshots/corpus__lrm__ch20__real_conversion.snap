@@ -1,0 +1,11 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (4 diagnostics)
+  error[lyra.type[8]] 22:25..22:25: $bitstoreal requires 64-bit argument, got 16-bit
+  error[lyra.type[8]] 26:31..26:31: $bitstoshortreal requires 32-bit argument, got 64-bit
+  error[lyra.type[8]] 30:25..30:25: $bitstoreal requires integral argument
+  error[lyra.type[8]] 34:30..34:30: $realtobits requires real argument
+---
+unit (0 diagnostics)
