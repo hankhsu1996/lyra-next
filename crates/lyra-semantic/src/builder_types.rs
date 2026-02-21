@@ -92,7 +92,10 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
             SymbolOrigin::Record(idx) => {
                 ctx.record_defs[idx.0 as usize].name = Some(typedef_name.clone());
             }
-            SymbolOrigin::TypeSpec | SymbolOrigin::Error | SymbolOrigin::EnumVariant { .. } => {}
+            SymbolOrigin::TypeSpec
+            | SymbolOrigin::Error
+            | SymbolOrigin::EnumVariant { .. }
+            | SymbolOrigin::Instance(_) => {}
         }
         let sym_id = ctx.add_symbol_with_origin(
             typedef_name,

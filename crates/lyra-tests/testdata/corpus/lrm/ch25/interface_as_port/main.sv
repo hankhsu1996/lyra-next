@@ -10,4 +10,5 @@ endmodule
 
 module top;
   my_bus bus_inst();
+  sink u1(.b(bus_inst));
 endmodule

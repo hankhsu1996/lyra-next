@@ -902,10 +902,16 @@ fn has_higher_precedence_binding(
 ///
 /// `lookup_decl` maps a `GlobalDefId` (from `CoreResolution::Global`)
 /// to a `SymbolId` in the target file.
+///
+/// `unresolved_value_fallback` is called for value-only simple-name
+/// use-sites that are unresolved after core resolution. If it returns
+/// a `GlobalSymbolId`, that resolution is used instead of emitting an
+/// unresolved diagnostic. Used for interface instance names.
 pub fn build_resolve_index(
     def: &DefIndex,
     core: &CoreResolveOutput,
     lookup_decl: &dyn Fn(GlobalDefId) -> Option<SymbolId>,
+    unresolved_value_fallback: &dyn Fn(&str, ScopeId) -> Option<GlobalSymbolId>,
 ) -> ResolveIndex {
     let mut resolutions = HashMap::new();
     let mut diagnostics = Vec::new();
@@ -955,6 +961,21 @@ pub fn build_resolve_index(
                 }
             }
             CoreResolveResult::Unresolved(reason) => {
+                // For value-only simple names, try the instance fallback
+                if matches!(reason, UnresolvedReason::NotFound)
+                    && matches!(use_site.expected_ns, ExpectedNs::Exact(Namespace::Value))
+                    && let Some(name) = use_site.path.as_simple()
+                    && let Some(gsym) = unresolved_value_fallback(name, use_site.scope)
+                {
+                    resolutions.insert(
+                        use_site.ast_id,
+                        Resolution {
+                            symbol: gsym,
+                            namespace: Namespace::Value,
+                        },
+                    );
+                    continue;
+                }
                 let diag = reason_to_diagnostic(
                     reason,
                     use_site.expected_ns,

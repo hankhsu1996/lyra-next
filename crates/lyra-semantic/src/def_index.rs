@@ -6,6 +6,7 @@ use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::{EnumDef, EnumDefIdx, EnumId, EnumVariantId};
+use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId};
 use crate::record::{RecordDef, RecordDefIdx, RecordId};
@@ -52,6 +53,7 @@ pub struct DefIndex {
     pub decl_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
     pub enum_defs: Box<[EnumDef]>,
     pub record_defs: Box<[RecordDef]>,
+    pub instance_decls: Box<[InstanceDecl]>,
     pub modport_defs: HashMap<ModportDefId, ModportDef>,
     pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportDecl]>,
@@ -81,6 +83,24 @@ impl DefIndex {
             enum_id: self.enum_id(enum_idx),
             variant_ordinal,
         }
+    }
+
+    pub fn instance_decl(&self, idx: InstanceDeclIdx) -> &InstanceDecl {
+        &self.instance_decls[idx.0 as usize]
+    }
+
+    /// Find an instance declaration by name within a scope (walking parents).
+    pub fn instance_by_name_in_scope(&self, name: &str, scope: ScopeId) -> Option<InstanceDeclIdx> {
+        let mut current = Some(scope);
+        while let Some(s) = current {
+            for (i, decl) in self.instance_decls.iter().enumerate() {
+                if decl.scope == s && decl.name == name {
+                    return Some(InstanceDeclIdx(i as u32));
+                }
+            }
+            current = self.scopes.get(s).parent;
+        }
+        None
     }
 
     pub fn modport_by_name(&self, iface: InterfaceDefId, name: &str) -> Option<&ModportDef> {

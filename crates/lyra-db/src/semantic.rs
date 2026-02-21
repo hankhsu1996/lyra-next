@@ -2,9 +2,12 @@ use lyra_semantic::def_index::{CompilationUnitEnv, DefIndex, ImplicitImport, Imp
 use lyra_semantic::global_index::{
     DefinitionKind, GlobalDefIndex, PackageLocalFacts, PackageScope, PackageScopeIndex,
 };
+use lyra_semantic::instance_decl::InstanceDeclIdx;
 use lyra_semantic::name_graph::NameGraph;
-use lyra_semantic::resolve_index::{CoreResolveOutput, ImportConflict, ResolveIndex};
-use lyra_semantic::scopes::ScopeKind;
+use lyra_semantic::resolve_index::{
+    CoreResolveOutput, CoreResolveResult, ImportConflict, ResolveIndex,
+};
+use lyra_semantic::scopes::{ScopeId, ScopeKind};
 use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId};
 use smol_str::SmolStr;
 
@@ -247,13 +250,52 @@ pub fn resolve_index_file(
 ) -> ResolveIndex {
     let def = def_index_file(db, file);
     let core = resolve_core_file(db, file, unit);
+    let global = global_def_index(db, unit);
     let lookup_decl = |def_id: GlobalDefId| -> Option<lyra_semantic::symbols::SymbolId> {
         let target_file_id = def_id.file();
         let target_file = source_file_by_id(db, unit, target_file_id)?;
         let target_def = def_index_file(db, target_file);
         target_def.decl_to_symbol.get(&def_id.ast_id()).copied()
     };
-    lyra_semantic::build_resolve_index(def, core, &lookup_decl)
+    let unresolved_value_fallback = |name: &str, scope: ScopeId| -> Option<GlobalSymbolId> {
+        let idx = def.instance_by_name_in_scope(name, scope)?;
+        if instance_decl_is_interface(core, def, global, idx) {
+            let decl = def.instance_decl(idx);
+            Some(GlobalSymbolId {
+                file: def.file,
+                local: decl.sym_id,
+            })
+        } else {
+            None
+        }
+    };
+    lyra_semantic::build_resolve_index(def, core, &lookup_decl, &unresolved_value_fallback)
+}
+
+/// Check whether an instance declaration refers to an interface type.
+///
+/// Uses the already-computed `resolve_core_file` result to look up the
+/// instance's type-name use-site resolution, then checks the global
+/// definition index for `DefinitionKind::Interface`.
+fn instance_decl_is_interface(
+    core: &CoreResolveOutput,
+    def: &DefIndex,
+    global: &GlobalDefIndex,
+    idx: InstanceDeclIdx,
+) -> bool {
+    let decl = def.instance_decl(idx);
+    let Some(result) = core.resolutions.get(decl.type_use_site_idx as usize) else {
+        return false;
+    };
+    if let CoreResolveResult::Resolved(lyra_semantic::resolve_index::CoreResolution::Global {
+        decl: def_id,
+        ..
+    }) = result
+    {
+        matches!(global.def_kind(*def_id), Some(DefinitionKind::Interface))
+    } else {
+        false
+    }
 }
 
 /// Canonical `GlobalDefId` -> `GlobalSymbolId` resolution (Salsa-tracked).

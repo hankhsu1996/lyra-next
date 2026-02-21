@@ -92,10 +92,6 @@ Bit-select and part-select currently return unsigned (engine policy). LRM signed
 
 ## Chapter 25 -- Interfaces
 
-### 25.3: Interface instance names unresolved in port connections
-
-Interface instances declared in a module (e.g., `my_bus sb();`) cannot be referenced in named port connections of submodule instantiations (e.g., `.bus(sb)` produces "unresolved name `sb`"). The instance is created but not registered as a resolvable name in the enclosing scope for expression contexts. Tests: `lrm/ch25/interface_port_connection`.
-
 ### 25.3.3: Generic interface reference
 
 Module ports declared with bare `interface` keyword as type (generic interface). Parser and semantic layer do not recognize this syntax. Test: `lrm/ch25/generic_interface`.

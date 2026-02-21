@@ -21,6 +21,7 @@ use crate::def_index::{
 };
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::EnumDef;
+use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId, ModportEntry, PortDirection};
 use crate::record::{RecordDef, SymbolOrigin};
@@ -93,6 +94,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         decl_to_init_expr: ctx.decl_to_init_expr,
         enum_defs: ctx.enum_defs.into_boxed_slice(),
         record_defs: ctx.record_defs.into_boxed_slice(),
+        instance_decls: ctx.instance_decls.into_boxed_slice(),
         modport_defs: HashMap::new(),
         modport_name_map: HashMap::new(),
         export_decls: ctx.export_decls.into_boxed_slice(),
@@ -147,6 +149,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) imports: Vec<Import>,
     pub(crate) enum_defs: Vec<EnumDef>,
     pub(crate) record_defs: Vec<RecordDef>,
+    pub(crate) instance_decls: Vec<InstanceDecl>,
     pub(crate) raw_modport_defs: Vec<RawModportEntry>,
     pub(crate) export_decls: Vec<crate::def_index::ExportDecl>,
     pub(crate) local_decls: Vec<LocalDecl>,
@@ -177,6 +180,7 @@ impl<'a> DefContext<'a> {
             imports: Vec::new(),
             enum_defs: Vec::new(),
             record_defs: Vec::new(),
+            instance_decls: Vec::new(),
             raw_modport_defs: Vec::new(),
             export_decls: Vec::new(),
             local_decls: Vec::new(),
@@ -591,14 +595,35 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                 && let Some(name_tok) = inst.module_name()
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(&inst)
             {
+                let type_use_site_idx = ctx.use_sites.len() as u32;
+                let type_name_range = name_tok.text_range();
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Simple(SmolStr::new(name_tok.text())),
                     expected_ns: ExpectedNs::Exact(Namespace::Definition),
-                    range: name_tok.text_range(),
+                    range: type_name_range,
                     scope,
                     ast_id: ast_id.erase(),
                     order_key: 0,
                 });
+                // Register each instance name as an Instance symbol
+                for (inst_name_tok, _port_list) in inst.instances() {
+                    let idx = InstanceDeclIdx(ctx.instance_decls.len() as u32);
+                    let sym_id = ctx.add_symbol_with_origin(
+                        SmolStr::new(inst_name_tok.text()),
+                        SymbolKind::Instance,
+                        inst_name_tok.text_range(),
+                        scope,
+                        SymbolOrigin::Instance(idx),
+                    );
+                    ctx.instance_decls.push(InstanceDecl {
+                        type_use_site_idx,
+                        sym_id,
+                        name: SmolStr::new(inst_name_tok.text()),
+                        name_range: inst_name_tok.text_range(),
+                        type_name_range,
+                        scope,
+                    });
+                }
             }
             // Still collect NameRefs in port connection expressions
             collect_name_refs(ctx, node, scope);

@@ -188,6 +188,38 @@ fn cross_file_modport_qualified() {
 }
 
 #[test]
+fn interface_instance_type() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "interface my_bus; endinterface module m; my_bus sb(); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "sb");
+    match ty {
+        SymbolType::Value(Ty::Interface(_)) => {}
+        other => panic!("expected Value(Interface), got {other:?}"),
+    }
+}
+
+#[test]
+fn module_instance_not_interface_type() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module child; endmodule module top; child u(); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "u");
+    match ty {
+        SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind) => {}
+        other => panic!("expected Error(UnsupportedSymbolKind), got {other:?}"),
+    }
+}
+
+#[test]
 fn port_with_keyword_type_still_works() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "module m(input logic a); endmodule");
