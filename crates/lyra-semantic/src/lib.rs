@@ -33,7 +33,7 @@ pub use resolve::{
     resolve_qualified_name,
 };
 pub use type_extract::{
-    UserTypeRef, extract_base_ty_from_typespec, extract_type_from_container, normalize_symbol_type,
-    normalize_ty, user_type_ref,
+    UserTypeRef, extract_base_ty_from_typespec, extract_type_from_container, extract_unpacked_dims,
+    normalize_symbol_type, normalize_ty, user_type_ref,
 };
 pub use types::wrap_unpacked;

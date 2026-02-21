@@ -1,4 +1,4 @@
-use lyra_ast::{AstIdMap, AstNode, DottedName, NameRef, QualifiedName};
+use lyra_ast::{AstIdMap, AstNode, DottedName, ErasedAstId, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
 use lyra_source::TextRange;
@@ -6,8 +6,8 @@ use smol_str::SmolStr;
 
 use crate::expr_helpers::is_expression_kind;
 use crate::types::{
-    ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType, PackedDim, PackedDims,
-    RealKw, SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
+    AssocIndex, AssocTypeRef, ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType,
+    PackedDim, PackedDims, RealKw, SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
 };
 
 /// Extract a `SymbolType` from a declaration container node.
@@ -153,6 +153,11 @@ fn normalize_unpacked_dim(
             lsb: normalize_const_int(lsb, eval),
         },
         UnpackedDim::Size(c) => UnpackedDim::Size(normalize_const_int(c, eval)),
+        UnpackedDim::Unsized => UnpackedDim::Unsized,
+        UnpackedDim::Queue { bound } => UnpackedDim::Queue {
+            bound: bound.as_ref().map(|c| normalize_const_int(c, eval)),
+        },
+        UnpackedDim::Assoc(idx) => UnpackedDim::Assoc(idx.clone()),
     }
 }
 
@@ -375,33 +380,119 @@ fn extract_single_packed_dim(node: &SyntaxNode, ast_id_map: &AstIdMap) -> Packed
     }
 }
 
-fn extract_unpacked_dims(node: &SyntaxNode, ast_id_map: &AstIdMap) -> Vec<UnpackedDim> {
+/// Extract unpacked dimensions from a parent node's `UnpackedDimension` children.
+///
+/// Handles all dimension forms: `[n]`, `[m:l]`, `[]`, `[$]`, `[$:n]`, `[*]`,
+/// and `[type]` (associative with scalar type keyword).
+pub fn extract_unpacked_dims(node: &SyntaxNode, ast_id_map: &AstIdMap) -> Vec<UnpackedDim> {
     let mut dims = Vec::new();
     for child in node.children() {
         if child.kind() == SyntaxKind::UnpackedDimension {
-            let exprs: Vec<_> = child
-                .children()
-                .filter(|c| is_expression_kind(c.kind()))
-                .collect();
-            match exprs.len() {
-                2 => {
-                    let msb = expr_to_const_int(&exprs[0], ast_id_map);
-                    let lsb = expr_to_const_int(&exprs[1], ast_id_map);
-                    dims.push(UnpackedDim::Range { msb, lsb });
-                }
-                1 => {
-                    let size = expr_to_const_int(&exprs[0], ast_id_map);
-                    dims.push(UnpackedDim::Size(size));
-                }
-                _ => {
-                    dims.push(UnpackedDim::Size(ConstInt::Error(
-                        ConstEvalError::Unsupported,
-                    )));
-                }
-            }
+            dims.push(extract_single_unpacked_dim(&child, ast_id_map));
         }
     }
     dims
+}
+
+fn has_token_child(node: &SyntaxNode, kind: SyntaxKind) -> bool {
+    node.children_with_tokens()
+        .any(|el| el.as_token().is_some_and(|t| t.kind() == kind))
+}
+
+fn extract_single_unpacked_dim(node: &SyntaxNode, ast_id_map: &AstIdMap) -> UnpackedDim {
+    // Star token -> Assoc(Wildcard)
+    if has_token_child(node, SyntaxKind::Star) {
+        return UnpackedDim::Assoc(AssocIndex::Wildcard);
+    }
+
+    // Dollar token -> Queue
+    if has_token_child(node, SyntaxKind::Dollar) {
+        let expr = node.children().find(|c| is_expression_kind(c.kind()));
+        let bound = expr.map(|e| expr_to_const_int(&e, ast_id_map));
+        return UnpackedDim::Queue { bound };
+    }
+
+    // TypeSpec child -> Assoc(Type) or Assoc(Unsupported)
+    if let Some(ts) = node.children().find(|c| c.kind() == SyntaxKind::TypeSpec) {
+        return extract_assoc_from_typespec(&ts, ast_id_map);
+    }
+
+    // Expression children -> Size, Range, or Unsized
+    let exprs: Vec<_> = node
+        .children()
+        .filter(|c| is_expression_kind(c.kind()))
+        .collect();
+    match exprs.len() {
+        0 => UnpackedDim::Unsized,
+        1 => UnpackedDim::Size(expr_to_const_int(&exprs[0], ast_id_map)),
+        2 => UnpackedDim::Range {
+            msb: expr_to_const_int(&exprs[0], ast_id_map),
+            lsb: expr_to_const_int(&exprs[1], ast_id_map),
+        },
+        _ => UnpackedDim::Size(ConstInt::Error(ConstEvalError::Unsupported)),
+    }
+}
+
+fn extract_assoc_from_typespec(ts: &SyntaxNode, ast_id_map: &AstIdMap) -> UnpackedDim {
+    // Find the first token in the TypeSpec (the keyword)
+    let first_token = ts
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| t.kind() != SyntaxKind::Whitespace);
+
+    let Some(token) = first_token else {
+        let ast_id = ast_id_map
+            .erased_ast_id(ts)
+            .unwrap_or_else(dummy_erased_ast_id);
+        return UnpackedDim::Assoc(AssocIndex::Unsupported(ast_id));
+    };
+
+    // Check that the TypeSpec is simple (just a scalar keyword, no dims/signing)
+    let has_extra_children = ts.children().any(|c| {
+        matches!(
+            c.kind(),
+            SyntaxKind::PackedDimension | SyntaxKind::NameRef | SyntaxKind::QualifiedName
+        )
+    });
+
+    if is_scalar_type_token(token.kind()) && !has_extra_children {
+        let keyword = SmolStr::new(token.text());
+        let ast_id = ast_id_map
+            .erased_ast_id(ts)
+            .unwrap_or_else(dummy_erased_ast_id);
+        UnpackedDim::Assoc(AssocIndex::Type(AssocTypeRef { keyword, ast_id }))
+    } else {
+        let ast_id = ast_id_map
+            .erased_ast_id(ts)
+            .unwrap_or_else(dummy_erased_ast_id);
+        UnpackedDim::Assoc(AssocIndex::Unsupported(ast_id))
+    }
+}
+
+fn is_scalar_type_token(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::LogicKw
+            | SyntaxKind::RegKw
+            | SyntaxKind::BitKw
+            | SyntaxKind::IntegerKw
+            | SyntaxKind::IntKw
+            | SyntaxKind::ShortintKw
+            | SyntaxKind::LongintKw
+            | SyntaxKind::ByteKw
+            | SyntaxKind::TimeKw
+            | SyntaxKind::RealtimeKw
+            | SyntaxKind::RealKw
+            | SyntaxKind::ShortRealKw
+            | SyntaxKind::StringKw
+            | SyntaxKind::ChandleKw
+            | SyntaxKind::EventKw
+            | SyntaxKind::VoidKw
+    )
+}
+
+fn dummy_erased_ast_id() -> ErasedAstId {
+    ErasedAstId::placeholder(lyra_source::FileId(u32::MAX))
 }
 
 fn expr_to_const_int(expr: &SyntaxNode, ast_id_map: &AstIdMap) -> ConstInt {

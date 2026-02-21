@@ -46,11 +46,29 @@ impl PackedDim {
     }
 }
 
-/// An unpacked dimension: either a range `[msb:lsb]` or a size `[n]`.
+/// A type reference in an associative array index, e.g. `[string]`, `[int]`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AssocTypeRef {
+    pub keyword: SmolStr,
+    pub ast_id: ErasedAstId,
+}
+
+/// The index type of an associative array dimension.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AssocIndex {
+    Wildcard,
+    Type(AssocTypeRef),
+    Unsupported(ErasedAstId),
+}
+
+/// An unpacked dimension on a variable declaration.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UnpackedDim {
     Range { msb: ConstInt, lsb: ConstInt },
     Size(ConstInt),
+    Unsized,
+    Queue { bound: Option<ConstInt> },
+    Assoc(AssocIndex),
 }
 
 impl UnpackedDim {
@@ -64,6 +82,7 @@ impl UnpackedDim {
                 ConstInt::Known(v) => u32::try_from(*v).ok(),
                 _ => None,
             },
+            UnpackedDim::Unsized | UnpackedDim::Queue { .. } | UnpackedDim::Assoc(_) => None,
         }
     }
 }
@@ -673,6 +692,20 @@ fn fmt_unpacked_dim(s: &mut String, dim: &UnpackedDim) {
             fmt_const_int(s, c);
             s.push(']');
         }
+        UnpackedDim::Unsized => s.push_str("[]"),
+        UnpackedDim::Queue { bound: None } => s.push_str("[$]"),
+        UnpackedDim::Queue { bound: Some(c) } => {
+            s.push_str("[$:");
+            fmt_const_int(s, c);
+            s.push(']');
+        }
+        UnpackedDim::Assoc(AssocIndex::Wildcard) => s.push_str("[*]"),
+        UnpackedDim::Assoc(AssocIndex::Type(r)) => {
+            s.push('[');
+            s.push_str(&r.keyword);
+            s.push(']');
+        }
+        UnpackedDim::Assoc(AssocIndex::Unsupported(_)) => s.push_str("[?]"),
     }
 }
 

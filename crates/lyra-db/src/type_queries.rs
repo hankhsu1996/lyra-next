@@ -5,7 +5,7 @@ use lyra_semantic::record::{Packing, RecordKind, SymbolOrigin};
 use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::BitWidth;
-use lyra_semantic::types::{ConstEvalError, ConstInt, InterfaceType, Ty, UnpackedDim};
+use lyra_semantic::types::{ConstInt, InterfaceType, Ty};
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::enum_queries::{EnumRef, enum_sem};
@@ -369,7 +369,7 @@ fn expand_typedef(
 
             // Collect use-site unpacked dims from dim source node
             let use_site_unpacked: Vec<UnpackedDim> = dim_source
-                .map(|d| extract_unpacked_dims_raw(d, id_map))
+                .map(|d| lyra_semantic::extract_unpacked_dims(d, id_map))
                 .unwrap_or_default();
 
             let wrap = if caller_kind == lyra_semantic::symbols::SymbolKind::Typedef {
@@ -390,7 +390,7 @@ fn expand_typedef(
 
     // Common wrapping + classification for non-typedef type targets
     let use_site_unpacked: Vec<UnpackedDim> = dim_source
-        .map(|d| extract_unpacked_dims_raw(d, id_map))
+        .map(|d| lyra_semantic::extract_unpacked_dims(d, id_map))
         .unwrap_or_default();
     let wrap = if caller_kind == lyra_semantic::symbols::SymbolKind::Typedef {
         SymbolType::TypeAlias
@@ -398,66 +398,6 @@ fn expand_typedef(
         SymbolType::Value
     };
     wrap(lyra_semantic::wrap_unpacked(ty, &use_site_unpacked))
-}
-
-/// Extract unpacked dims from a node (used during typedef expansion in db crate).
-fn extract_unpacked_dims_raw(
-    node: &lyra_parser::SyntaxNode,
-    ast_id_map: &lyra_ast::AstIdMap,
-) -> Vec<UnpackedDim> {
-    let mut dims = Vec::new();
-    for child in node.children() {
-        if child.kind() == SyntaxKind::UnpackedDimension {
-            let exprs: Vec<_> = child
-                .children()
-                .filter(|c| is_expression_kind(c.kind()))
-                .collect();
-            match exprs.len() {
-                2 => {
-                    let msb = expr_to_const_int(&exprs[0], ast_id_map);
-                    let lsb = expr_to_const_int(&exprs[1], ast_id_map);
-                    dims.push(UnpackedDim::Range { msb, lsb });
-                }
-                1 => {
-                    let size = expr_to_const_int(&exprs[0], ast_id_map);
-                    dims.push(UnpackedDim::Size(size));
-                }
-                _ => {
-                    dims.push(UnpackedDim::Size(ConstInt::Error(
-                        ConstEvalError::Unsupported,
-                    )));
-                }
-            }
-        }
-    }
-    dims
-}
-
-fn expr_to_const_int(expr: &lyra_parser::SyntaxNode, ast_id_map: &lyra_ast::AstIdMap) -> ConstInt {
-    match ast_id_map.erased_ast_id(expr) {
-        Some(id) => ConstInt::Unevaluated(id),
-        None => ConstInt::Error(ConstEvalError::Unsupported),
-    }
-}
-
-pub(crate) fn is_expression_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Expression
-            | SyntaxKind::BinExpr
-            | SyntaxKind::PrefixExpr
-            | SyntaxKind::ParenExpr
-            | SyntaxKind::CondExpr
-            | SyntaxKind::ConcatExpr
-            | SyntaxKind::ReplicExpr
-            | SyntaxKind::IndexExpr
-            | SyntaxKind::RangeExpr
-            | SyntaxKind::FieldExpr
-            | SyntaxKind::CallExpr
-            | SyntaxKind::NameRef
-            | SyntaxKind::Literal
-            | SyntaxKind::QualifiedName
-    )
 }
 
 fn classify(ty: Ty, kind: lyra_semantic::symbols::SymbolKind) -> lyra_semantic::types::SymbolType {
@@ -482,7 +422,7 @@ fn wrap_unpacked_dims_from_node(
     ) {
         return ty;
     }
-    let dims = extract_unpacked_dims_raw(node, ast_id_map);
+    let dims = lyra_semantic::extract_unpacked_dims(node, ast_id_map);
     if dims.is_empty() {
         return ty;
     }

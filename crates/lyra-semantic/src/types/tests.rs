@@ -388,3 +388,96 @@ fn dimension_nesting_and_print_order() {
     // Pretty output matches source order: "int [2] [3]"
     assert_eq!(with_2_3.pretty(), "int [2] [3]");
 }
+
+#[test]
+fn try_size_unsized_returns_none() {
+    assert_eq!(UnpackedDim::Unsized.try_size(), None);
+}
+
+#[test]
+fn try_size_queue_returns_none() {
+    assert_eq!(UnpackedDim::Queue { bound: None }.try_size(), None);
+    assert_eq!(
+        UnpackedDim::Queue {
+            bound: Some(ConstInt::Known(8))
+        }
+        .try_size(),
+        None
+    );
+}
+
+#[test]
+fn try_size_assoc_wildcard_returns_none() {
+    assert_eq!(UnpackedDim::Assoc(AssocIndex::Wildcard).try_size(), None);
+}
+
+#[test]
+fn try_size_assoc_type_returns_none() {
+    assert_eq!(
+        UnpackedDim::Assoc(AssocIndex::Type(AssocTypeRef {
+            keyword: SmolStr::new("string"),
+            ast_id: dummy_ast_id(),
+        }))
+        .try_size(),
+        None
+    );
+}
+
+#[test]
+fn pretty_unsized_dim() {
+    let ty = Ty::Array {
+        elem: Box::new(Ty::int()),
+        dim: UnpackedDim::Unsized,
+    };
+    assert_eq!(ty.pretty(), "int []");
+}
+
+#[test]
+fn pretty_queue_no_bound() {
+    let ty = Ty::Array {
+        elem: Box::new(Ty::int()),
+        dim: UnpackedDim::Queue { bound: None },
+    };
+    assert_eq!(ty.pretty(), "int [$]");
+}
+
+#[test]
+fn pretty_queue_with_bound() {
+    let ty = Ty::Array {
+        elem: Box::new(Ty::int()),
+        dim: UnpackedDim::Queue {
+            bound: Some(ConstInt::Known(8)),
+        },
+    };
+    assert_eq!(ty.pretty(), "int [$:8]");
+}
+
+#[test]
+fn pretty_assoc_wildcard() {
+    let ty = Ty::Array {
+        elem: Box::new(Ty::int()),
+        dim: UnpackedDim::Assoc(AssocIndex::Wildcard),
+    };
+    assert_eq!(ty.pretty(), "int [*]");
+}
+
+#[test]
+fn pretty_assoc_type() {
+    let ty = Ty::Array {
+        elem: Box::new(Ty::int()),
+        dim: UnpackedDim::Assoc(AssocIndex::Type(AssocTypeRef {
+            keyword: SmolStr::new("string"),
+            ast_id: dummy_ast_id(),
+        })),
+    };
+    assert_eq!(ty.pretty(), "int [string]");
+}
+
+#[test]
+fn pretty_assoc_unsupported() {
+    let ty = Ty::Array {
+        elem: Box::new(Ty::int()),
+        dim: UnpackedDim::Assoc(AssocIndex::Unsupported(dummy_ast_id())),
+    };
+    assert_eq!(ty.pretty(), "int [?]");
+}
