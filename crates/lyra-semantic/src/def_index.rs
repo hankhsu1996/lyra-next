@@ -38,6 +38,7 @@ pub struct DefIndex {
     pub exports: Exports,
     pub use_sites: Box<[UseSite]>,
     pub imports: Box<[Import]>,
+    pub local_decls: Box<[LocalDecl]>,
     /// Reverse map from exported declaration `ErasedAstId` to `SymbolId`.
     /// Used by cross-file resolution to convert `ErasedAstId` (from
     /// `GlobalDefIndex`) back to a `SymbolId` in this file.
@@ -153,6 +154,22 @@ pub struct UseSite {
     pub order_key: u32,
 }
 
+/// A local declaration that may conflict with wildcard imports (LRM 26.3).
+///
+/// Value- and type-namespace declarations only. Definition-namespace
+/// items (module, package, interface, etc.) are excluded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalDecl {
+    pub id: LocalDeclId,
+    pub symbol_id: SymbolId,
+    pub name: SmolStr,
+    pub namespace: Namespace,
+    pub ast_id: ErasedAstId,
+    /// File-local monotonic rank from preorder syntax traversal.
+    pub order_key: u32,
+    pub range: TextRange,
+}
+
 /// An import declaration record.
 ///
 /// Carries no namespace: the namespace is determined at the use-site
@@ -161,6 +178,7 @@ pub struct UseSite {
 /// namespace the use-site needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Import {
+    pub id: ImportDeclId,
     pub package: SmolStr,
     pub name: ImportName,
     pub scope: ScopeId,
@@ -176,6 +194,22 @@ pub struct Import {
 pub enum ImportName {
     Explicit(SmolStr),
     Wildcard,
+}
+
+/// File-local identity for a local declaration that may conflict with imports.
+/// Scoped to a single `DefIndex`/`NameGraph` (same as `ScopeId`, `SymbolId`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LocalDeclId {
+    pub scope: ScopeId,
+    pub ordinal: u32,
+}
+
+/// File-local identity for an import declaration.
+/// Scoped to a single `DefIndex`/`NameGraph` (same as `ScopeId`, `SymbolId`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ImportDeclId {
+    pub scope: ScopeId,
+    pub ordinal: u32,
 }
 
 /// File-local identity for an export declaration.

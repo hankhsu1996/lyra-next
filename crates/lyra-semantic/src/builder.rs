@@ -16,7 +16,8 @@ use crate::builder_types::{
 };
 
 use crate::def_index::{
-    DefIndex, ExpectedNs, ExportDeclId, ExportKey, Exports, Import, ImportName, NamePath, UseSite,
+    DefIndex, ExpectedNs, ExportDeclId, ExportKey, Exports, Import, ImportDeclId, ImportName,
+    LocalDecl, LocalDeclId, NamePath, UseSite,
 };
 use crate::diagnostic::SemanticDiag;
 use crate::record::{
@@ -64,6 +65,14 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
             .all(|w| (w[0].id.scope, w[0].id.ordinal) < (w[1].id.scope, w[1].id.ordinal))
     );
 
+    // Sort imports by (id.scope, id.ordinal) for binary-search lookup
+    ctx.imports
+        .sort_by(|a, b| (a.id.scope, a.id.ordinal).cmp(&(b.id.scope, b.id.ordinal)));
+
+    // Sort local_decls by (id.scope, id.ordinal) for binary-search lookup
+    ctx.local_decls
+        .sort_by(|a, b| (a.id.scope, a.id.ordinal).cmp(&(b.id.scope, b.id.ordinal)));
+
     // Finalize modport defs: convert raw GlobalDefId owners to InterfaceDefId
     let mut modport_defs = HashMap::new();
     let mut modport_name_map = HashMap::new();
@@ -77,6 +86,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         },
         use_sites: ctx.use_sites.into_boxed_slice(),
         imports: ctx.imports.into_boxed_slice(),
+        local_decls: ctx.local_decls.into_boxed_slice(),
         decl_to_symbol: ctx.decl_to_symbol,
         symbol_to_decl: ctx.symbol_to_decl.into_boxed_slice(),
         decl_to_init_expr: ctx.decl_to_init_expr,
@@ -140,6 +150,9 @@ pub(crate) struct DefContext<'a> {
     pub(crate) record_defs: Vec<RecordDef>,
     pub(crate) raw_modport_defs: Vec<RawModportEntry>,
     pub(crate) export_decls: Vec<crate::def_index::ExportDecl>,
+    pub(crate) local_decls: Vec<LocalDecl>,
+    pub(crate) local_decl_ordinals: HashMap<ScopeId, u32>,
+    pub(crate) import_ordinals: HashMap<ScopeId, u32>,
     pub(crate) export_ordinals: HashMap<ScopeId, u32>,
     pub(crate) current_owner: Option<SmolStr>,
     pub(crate) current_iface_def_id: Option<crate::symbols::GlobalDefId>,
@@ -167,6 +180,9 @@ impl<'a> DefContext<'a> {
             record_defs: Vec::new(),
             raw_modport_defs: Vec::new(),
             export_decls: Vec::new(),
+            local_decls: Vec::new(),
+            local_decl_ordinals: HashMap::new(),
+            import_ordinals: HashMap::new(),
             export_ordinals: HashMap::new(),
             current_owner: None,
             current_iface_def_id: None,
@@ -185,6 +201,40 @@ impl<'a> DefContext<'a> {
         scope: ScopeId,
     ) -> SymbolId {
         self.add_symbol_with_origin(name, kind, def_range, scope, SymbolOrigin::TypeSpec)
+    }
+
+    pub(crate) fn register_binding(
+        &mut self,
+        sym_id: SymbolId,
+        scope: ScopeId,
+        ast_id: lyra_ast::ErasedAstId,
+        range: TextRange,
+    ) {
+        self.decl_to_symbol.insert(ast_id, sym_id);
+        self.symbol_to_decl[sym_id.index()] = Some(ast_id);
+
+        let sym = self.symbols.get(sym_id);
+        debug_assert_eq!(sym.scope, scope);
+        let ns = sym.kind.namespace();
+        if ns == Namespace::Definition {
+            return;
+        }
+        let name = sym.name.clone();
+        let ordinal = self.local_decl_ordinals.entry(scope).or_insert(0);
+        let ord = *ordinal;
+        *ordinal += 1;
+        self.local_decls.push(LocalDecl {
+            id: LocalDeclId {
+                scope,
+                ordinal: ord,
+            },
+            symbol_id: sym_id,
+            name,
+            namespace: ns,
+            ast_id,
+            order_key: 0,
+            range,
+        });
     }
 
     pub(crate) fn add_symbol_with_origin(
@@ -253,9 +303,7 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
         if let Some(module_decl) = lyra_ast::ModuleDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&module_decl)
         {
-            let erased = ast_id.erase();
-            ctx.decl_to_symbol.insert(erased, sym_id);
-            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            ctx.register_binding(sym_id, module_scope, ast_id.erase(), range);
         }
 
         let prev_owner = ctx.current_owner.replace(name);
@@ -303,9 +351,7 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
         if let Some(pkg_decl) = lyra_ast::PackageDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&pkg_decl)
         {
-            let erased = ast_id.erase();
-            ctx.decl_to_symbol.insert(erased, sym_id);
-            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            ctx.register_binding(sym_id, package_scope, ast_id.erase(), range);
         }
 
         let prev_owner = ctx.current_owner.replace(name);
@@ -339,8 +385,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&iface_decl)
         {
             let erased = ast_id.erase();
-            ctx.decl_to_symbol.insert(erased, sym_id);
-            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            ctx.register_binding(sym_id, iface_scope, erased, range);
             iface_def_id = Some(crate::symbols::GlobalDefId::new(erased));
         }
 
@@ -393,9 +438,7 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         if let Some(prog_decl) = ProgramDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&prog_decl)
         {
-            let erased = ast_id.erase();
-            ctx.decl_to_symbol.insert(erased, sym_id);
-            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            ctx.register_binding(sym_id, prog_scope, ast_id.erase(), range);
         }
 
         let prev_owner = ctx.current_owner.replace(name);
@@ -443,9 +486,7 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         if let Some(prim_decl) = PrimitiveDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&prim_decl)
         {
-            let erased = ast_id.erase();
-            ctx.decl_to_symbol.insert(erased, sym_id);
-            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            ctx.register_binding(sym_id, prim_scope, ast_id.erase(), range);
         }
     }
 }
@@ -469,9 +510,7 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         if let Some(cfg_decl) = ConfigDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&cfg_decl)
         {
-            let erased = ast_id.erase();
-            ctx.decl_to_symbol.insert(erased, sym_id);
-            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            ctx.register_binding(sym_id, cfg_scope, ast_id.erase(), range);
         }
     }
 }
@@ -512,9 +551,7 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
             if let Some(port_node) = Port::cast(child.clone())
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(&port_node)
             {
-                let erased = ast_id.erase();
-                ctx.decl_to_symbol.insert(erased, sym_id);
-                ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+                ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
             }
             // Collect type-spec name refs for port typedef resolution
             for port_child in child.children() {
@@ -626,16 +663,12 @@ fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sco
         if let Some(func) = FunctionDecl::cast(node.clone())
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&func)
         {
-            let erased = ast_id.erase();
-            ctx.decl_to_symbol.insert(erased, sym_id);
-            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
         }
     } else if let Some(task) = TaskDecl::cast(node.clone())
         && let Some(ast_id) = ctx.ast_id_map.ast_id(&task)
     {
-        let erased = ast_id.erase();
-        ctx.decl_to_symbol.insert(erased, sym_id);
-        ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+        ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
     }
 
     // Collect return type spec refs (for typedef resolution in the enclosing scope)
@@ -672,9 +705,12 @@ fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sco
                     callable_scope,
                 );
                 if let Some(ast_id) = ctx.ast_id_map.ast_id(&decl) {
-                    let erased = ast_id.erase();
-                    ctx.decl_to_symbol.insert(erased, port_sym);
-                    ctx.symbol_to_decl[port_sym.index()] = Some(erased);
+                    ctx.register_binding(
+                        port_sym,
+                        callable_scope,
+                        ast_id.erase(),
+                        name_tok.text_range(),
+                    );
                 }
             }
         }
@@ -783,10 +819,19 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         .filter_map(lyra_parser::SyntaxElement::into_token)
         .any(|tok| tok.kind() == SyntaxKind::Star);
 
+    let ordinal = ctx.import_ordinals.entry(scope).or_insert(0);
+    let ord = *ordinal;
+    *ordinal += 1;
+    let id = ImportDeclId {
+        scope,
+        ordinal: ord,
+    };
+
     if has_star {
         // Wildcard: first Ident is the package name
         if let Some(pkg_tok) = first_ident_token(node) {
             ctx.imports.push(Import {
+                id,
                 package: SmolStr::new(pkg_tok.text()),
                 name: ImportName::Wildcard,
                 scope,
@@ -807,6 +852,7 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
             .collect();
         if idents.len() >= 2 {
             ctx.imports.push(Import {
+                id,
                 package: SmolStr::new(idents[0].text()),
                 name: ImportName::Explicit(SmolStr::new(idents[1].text())),
                 scope,
@@ -870,13 +916,11 @@ fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeI
                     name_tok.text_range(),
                     scope,
                 );
-                // Record decl_to_symbol and symbol_to_decl
                 if let Some(decl) = lyra_ast::Declarator::cast(child.clone())
                     && let Some(ast_id) = ctx.ast_id_map.ast_id(&decl)
                 {
                     let erased = ast_id.erase();
-                    ctx.decl_to_symbol.insert(erased, sym_id);
-                    ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+                    ctx.register_binding(sym_id, scope, erased, name_tok.text_range());
 
                     // Find init expression (first expression-like child node)
                     let init_id = child
@@ -915,9 +959,7 @@ pub(crate) fn collect_declarators(
                 if let Some(decl) = lyra_ast::Declarator::cast(child.clone())
                     && let Some(ast_id) = ctx.ast_id_map.ast_id(&decl)
                 {
-                    let erased = ast_id.erase();
-                    ctx.decl_to_symbol.insert(erased, sym_id);
-                    ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+                    ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
                 }
             }
             collect_name_refs(ctx, &child, scope);

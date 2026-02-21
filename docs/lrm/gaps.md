@@ -70,10 +70,6 @@ Bit-select and part-select currently return unsigned (engine policy). LRM signed
 
 Importing an enum type does not import its enumeration literals (LRM 26.3 teeth_t example). Importing `teeth_t` from package `q` does not make `FALSE` visible -- a bare reference to `FALSE` still resolves to `p::FALSE` via a wildcard import of `p`. Not tested. Blocked by: semantic (enum literal visibility tracking). Test: `lrm/ch26/enum_literal_import`.
 
-### 26.3: Later local declaration conflicts with wildcard-imported name
-
-"If a wildcard imported symbol is made locally visible in a scope, any later locally visible declaration of the same name in that scope shall be illegal" (LRM 26.3 Example 1 line 5). Error case not tested. OrderKey infrastructure is in place; remaining work is positional locals + realization conflict check. Blocked by: semantic (positional local declarations). Test: `lrm/ch26/wildcard_local_conflict`.
-
 ### 26.7: std package contents (Annex G)
 
 The std built-in package should contain process, mailbox, and semaphore classes per Annex G. Not tested. Blocked by: class support (Ch 8). Test: deferred until class support lands.

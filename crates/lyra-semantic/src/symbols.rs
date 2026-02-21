@@ -193,6 +193,10 @@ impl SymbolTableBuilder {
         id
     }
 
+    pub(crate) fn get(&self, id: SymbolId) -> &Symbol {
+        &self.symbols[id.0 as usize]
+    }
+
     pub(crate) fn freeze(self) -> SymbolTable {
         SymbolTable {
             symbols: self.symbols.into_boxed_slice(),

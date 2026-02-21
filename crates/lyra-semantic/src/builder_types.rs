@@ -101,9 +101,7 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
             origin,
         );
         if let Some(ast_id) = ctx.ast_id_map.ast_id(&td) {
-            let erased = ast_id.erase();
-            ctx.decl_to_symbol.insert(erased, sym_id);
-            ctx.symbol_to_decl[sym_id.index()] = Some(erased);
+            ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
         }
     }
 }

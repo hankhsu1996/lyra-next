@@ -5,7 +5,7 @@ use smol_str::SmolStr;
 
 use smallvec::SmallVec;
 
-use crate::def_index::ExportDeclId;
+use crate::def_index::{ExportDeclId, ImportDeclId, LocalDeclId};
 use crate::diagnostic::SemanticDiag;
 use crate::scopes::ScopeId;
 use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
@@ -69,6 +69,18 @@ pub struct CoreResolveOutput {
     pub resolutions: Box<[CoreResolveResult]>,
     /// Errors from validating imports (package not found, member not found).
     pub import_errors: Box<[ImportError]>,
+    /// LRM 26.3: local declarations that conflict with wildcard-realized names.
+    pub wildcard_local_conflicts: Box<[WildcardLocalConflict]>,
+}
+
+/// A local declaration that conflicts with a previously realized wildcard
+/// import in the same scope (LRM 26.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WildcardLocalConflict {
+    pub local_decl_id: LocalDeclId,
+    pub namespace: Namespace,
+    pub import_id: ImportDeclId,
+    pub use_site_idx: u32,
 }
 
 /// A resolved name: the target symbol and the namespace it was found in.

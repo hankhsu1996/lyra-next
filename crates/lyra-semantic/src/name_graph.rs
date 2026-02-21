@@ -1,9 +1,11 @@
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
-use crate::def_index::{DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, NamePath};
+use crate::def_index::{
+    DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportDeclId, ImportName, LocalDeclId, NamePath,
+};
 use crate::scopes::{ScopeId, ScopeTree, SymbolNameLookup};
-use crate::symbols::{SymbolId, SymbolKind};
+use crate::symbols::{Namespace, SymbolId, SymbolKind};
 
 /// Offset-independent projection of `DefIndex` for resolution.
 ///
@@ -20,6 +22,7 @@ pub struct NameGraph {
     pub(crate) scopes: ScopeTree,
     pub(crate) use_entries: Box<[UseEntry]>,
     pub(crate) imports: Box<[ImportEntry]>,
+    pub(crate) local_decls: Box<[LocalDeclEntry]>,
     pub(crate) export_decls: Box<[ExportEntry]>,
 }
 
@@ -42,10 +45,20 @@ pub(crate) struct UseEntry {
 /// Offset-independent import entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportEntry {
+    pub id: ImportDeclId,
     pub package: SmolStr,
     pub name: ImportName,
     pub scope: ScopeId,
     pub order_key: u32,
+}
+
+/// Offset-independent local declaration entry for wildcard conflict detection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LocalDeclEntry {
+    pub(crate) id: LocalDeclId,
+    pub(crate) name: SmolStr,
+    pub(crate) namespace: Namespace,
+    pub(crate) order_key: u32,
 }
 
 impl SymbolNameLookup for NameGraph {
@@ -79,6 +92,13 @@ impl NameGraph {
         &self.imports[start..end]
     }
 
+    /// Local declarations in `scope`, O(log n) via binary search into sorted slice.
+    pub(crate) fn local_decls_for_scope(&self, scope: ScopeId) -> &[LocalDeclEntry] {
+        let start = self.local_decls.partition_point(|d| d.id.scope < scope);
+        let end = self.local_decls[start..].partition_point(|d| d.id.scope == scope) + start;
+        &self.local_decls[start..end]
+    }
+
     /// Project offset-independent facts from a `DefIndex`.
     pub fn from_def_index(def: &DefIndex) -> Self {
         let symbol_names: Box<[SmolStr]> = def
@@ -104,13 +124,26 @@ impl NameGraph {
             .imports
             .iter()
             .map(|imp| ImportEntry {
+                id: imp.id,
                 package: imp.package.clone(),
                 name: imp.name.clone(),
                 scope: imp.scope,
                 order_key: imp.order_key,
             })
             .collect();
-        imports.sort_by_key(|i| i.scope);
+        imports.sort_by_key(|i| (i.id.scope, i.id.ordinal));
+
+        let mut local_decls: Vec<LocalDeclEntry> = def
+            .local_decls
+            .iter()
+            .map(|d| LocalDeclEntry {
+                id: d.id,
+                name: d.name.clone(),
+                namespace: d.namespace,
+                order_key: d.order_key,
+            })
+            .collect();
+        local_decls.sort_by_key(|d| (d.id.scope, d.id.ordinal));
 
         let mut export_decls: Vec<ExportEntry> = def
             .export_decls
@@ -129,6 +162,7 @@ impl NameGraph {
             scopes: def.scopes.clone(),
             use_entries,
             imports: imports.into_boxed_slice(),
+            local_decls: local_decls.into_boxed_slice(),
             export_decls: export_decls.into_boxed_slice(),
         }
     }
