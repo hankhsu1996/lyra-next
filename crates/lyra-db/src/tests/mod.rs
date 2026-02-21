@@ -1,5 +1,6 @@
 mod const_eval;
 mod elab;
+mod enum_base;
 mod exports;
 mod expr_type;
 mod modport;

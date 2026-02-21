@@ -6,9 +6,9 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 6 -- Data Types
 
-### 6.19: Enum base type resolution
+### 6.19: Enum named base type (parser limitation)
 
-Named base types (`enum logic [2:0] { ... }`, `enum my_base_t { ... }`) are stored as `TypeRef` but not resolved to a semantic type. The base type affects variant width and signedness. Blocked by: enum semantic query. Test: `lrm/ch06/enum_named_base`.
+Named base types (`enum my_base_t { ... }`) are not supported because the parser does not recognize user-defined types in enum base position. Keyword bases (`enum logic [7:0] { ... }`) and the default base (int) are fully resolved. Blocked by: parser extension for named enum bases. Test: deferred until parser support lands.
 
 ### 6.19.3: Enum ranges
 
@@ -63,6 +63,12 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 ### 11.5.1: Bit-select and part-select signedness
 
 Bit-select and part-select currently return unsigned (engine policy). LRM signedness rules for these in different contexts need verification. Blocked by: signedness rule audit. Test: `lrm/ch11/select_signedness`.
+
+## Chapter 25 -- Interfaces
+
+### 25.5.4: Modport type extraction to dedicated module
+
+Modport types (`ModportDef`, `ModportDefIdx`, `ModportId`, etc.) are co-located with struct/union types in `record.rs`. For consistency with the `enum_def.rs` extraction, modport types should be moved to a dedicated `modport_def.rs` module. Blocked by: refactoring (no functional gap). Test: N/A (internal code organization).
 
 ## Chapter 26 -- Packages
 

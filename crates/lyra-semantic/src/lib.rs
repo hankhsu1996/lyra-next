@@ -6,6 +6,7 @@ pub mod coerce;
 pub mod const_eval;
 pub mod def_index;
 pub mod diagnostic;
+pub mod enum_def;
 pub mod expr_helpers;
 pub mod global_index;
 pub(crate) mod literal;

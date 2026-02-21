@@ -41,6 +41,10 @@ pub enum SemanticDiagKind {
         name: SmolStr,
     },
     UnsupportedTaggedUnion,
+    IllegalEnumBaseType {
+        name: SmolStr,
+    },
+    EnumBaseDimsNotConstant,
 }
 
 impl SemanticDiag {
@@ -74,6 +78,12 @@ impl SemanticDiag {
             }
             SemanticDiagKind::UnsupportedTaggedUnion => {
                 "tagged unions are not yet supported".to_string()
+            }
+            SemanticDiagKind::IllegalEnumBaseType { name } => {
+                format!("enum base type `{name}` is not an integral type")
+            }
+            SemanticDiagKind::EnumBaseDimsNotConstant => {
+                "enum base type has non-constant packed dimensions".to_string()
             }
         }
     }

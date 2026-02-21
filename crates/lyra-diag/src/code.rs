@@ -63,6 +63,14 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 3,
     };
+    pub const ILLEGAL_ENUM_BASE: Self = Self {
+        namespace: "lyra.type",
+        number: 4,
+    };
+    pub const ENUM_BASE_DIMS_NOT_CONST: Self = Self {
+        namespace: "lyra.type",
+        number: 5,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,

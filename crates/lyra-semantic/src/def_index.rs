@@ -5,10 +5,8 @@ use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
-use crate::record::{
-    EnumDef, EnumDefIdx, EnumId, EnumVariantId, ModportDef, ModportDefId, RecordDef, RecordDefIdx,
-    RecordId,
-};
+use crate::enum_def::{EnumDef, EnumDefIdx, EnumId, EnumVariantId};
+use crate::record::{ModportDef, ModportDefId, RecordDef, RecordDefIdx, RecordId};
 use crate::scopes::{ScopeId, ScopeTree};
 use crate::symbols::{GlobalDefId, Namespace, SymbolId, SymbolTable};
 

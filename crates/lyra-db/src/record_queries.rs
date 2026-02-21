@@ -1,10 +1,8 @@
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
 use lyra_semantic::record::{FieldSem, ModportDefId, RecordId, RecordSem, TypeRef};
-use lyra_semantic::resolve_index::{CoreResolution, CoreResolveResult};
-use lyra_semantic::symbols::{GlobalSymbolId, Namespace};
-use lyra_semantic::types::{ConstInt, ModportView, Ty};
-use lyra_source::FileId;
+use lyra_semantic::symbols::Namespace;
+use lyra_semantic::types::{ConstInt, ModportView};
 use smol_str::SmolStr;
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
@@ -12,7 +10,7 @@ use crate::semantic::{
     compilation_unit_env, def_index_file, def_symbol, global_def_index, name_graph_file,
     package_scope_index,
 };
-use crate::type_queries::{SymbolRef, type_of_symbol};
+use crate::ty_resolve::resolve_result_to_ty;
 use crate::{CompilationUnit, source_file_by_id};
 
 /// Identifies a record (struct/union) for semantic resolution.
@@ -124,65 +122,6 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
         fields: fields.into_boxed_slice(),
         field_lookup: lookup.into_boxed_slice(),
         diags: diags.into_boxed_slice(),
-    }
-}
-
-fn resolve_result_to_ty(
-    db: &dyn salsa::Database,
-    unit: CompilationUnit,
-    defining_file: FileId,
-    result: &CoreResolveResult,
-    name: &str,
-    range: lyra_source::TextRange,
-    diags: &mut Vec<SemanticDiag>,
-) -> Ty {
-    match result {
-        CoreResolveResult::Resolved(resolution) => {
-            let gsym = match resolution {
-                CoreResolution::Local { symbol, .. } => GlobalSymbolId {
-                    file: defining_file,
-                    local: *symbol,
-                },
-                CoreResolution::Global { decl, .. } => {
-                    let target_file_id = decl.file();
-                    let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
-                        return Ty::Error;
-                    };
-                    let target_def = def_index_file(db, target_file);
-                    let Some(&sym_id) = target_def.decl_to_symbol.get(&decl.ast_id()) else {
-                        return Ty::Error;
-                    };
-                    GlobalSymbolId {
-                        file: target_file_id,
-                        local: sym_id,
-                    }
-                }
-            };
-            let sym_ref = SymbolRef::new(db, unit, gsym);
-            let sym_type = type_of_symbol(db, sym_ref);
-            match &sym_type {
-                lyra_semantic::types::SymbolType::TypeAlias(ty) => ty.clone(),
-                lyra_semantic::types::SymbolType::Value(_) => {
-                    diags.push(SemanticDiag {
-                        kind: SemanticDiagKind::NotAType {
-                            name: SmolStr::new(name),
-                        },
-                        range,
-                    });
-                    Ty::Error
-                }
-                _ => Ty::Error,
-            }
-        }
-        CoreResolveResult::Unresolved(_) => {
-            diags.push(SemanticDiag {
-                kind: SemanticDiagKind::UndeclaredType {
-                    name: SmolStr::new(name),
-                },
-                range,
-            });
-            Ty::Error
-        }
     }
 }
 

@@ -60,7 +60,7 @@ pub(crate) fn lower_file_diagnostics(
     diags
 }
 
-fn lower_semantic_diag(
+pub(crate) fn lower_semantic_diag(
     diag: &SemanticDiag,
     primary_span: Span,
     source_map: &lyra_preprocess::SourceMap,
@@ -74,27 +74,7 @@ fn lower_semantic_diag(
             primary_span,
         ),
         SemanticDiagKind::DuplicateDefinition { name, original } => {
-            let mut d = Diagnostic::new(
-                Severity::Error,
-                DiagnosticCode::DUPLICATE_DEFINITION,
-                Message::new(
-                    MessageId::DuplicateDefinition,
-                    vec![Arg::Name(name.clone())],
-                ),
-            )
-            .with_label(Label {
-                kind: LabelKind::Primary,
-                span: primary_span,
-                message: Message::simple(MessageId::RedefinedHere),
-            });
-            if let Some(orig_span) = source_map.map_span(*original) {
-                d = d.with_label(Label {
-                    kind: LabelKind::Secondary,
-                    span: orig_span,
-                    message: Message::simple(MessageId::FirstDefinedHere),
-                });
-            }
-            d
+            lower_duplicate_def(name, *original, primary_span, source_map)
         }
         SemanticDiagKind::PackageNotFound { package } => lower_args_diag(
             DiagnosticCode::PACKAGE_NOT_FOUND,
@@ -150,6 +130,19 @@ fn lower_semantic_diag(
         SemanticDiagKind::UnsupportedTaggedUnion => lower_args_diag(
             DiagnosticCode::UNSUPPORTED_TAGGED_UNION,
             MessageId::UnsupportedTaggedUnion,
+            vec![],
+            primary_span,
+        ),
+        SemanticDiagKind::IllegalEnumBaseType { name } => lower_name_diag(
+            DiagnosticCode::ILLEGAL_ENUM_BASE,
+            MessageId::IllegalEnumBaseType,
+            MessageId::IllegalEnumBaseType,
+            name,
+            primary_span,
+        ),
+        SemanticDiagKind::EnumBaseDimsNotConstant => lower_args_diag(
+            DiagnosticCode::ENUM_BASE_DIMS_NOT_CONST,
+            MessageId::EnumBaseDimsNotConstant,
             vec![],
             primary_span,
         ),
@@ -314,6 +307,35 @@ fn lower_single_import_conflict(
     Some(d)
 }
 
+fn lower_duplicate_def(
+    name: &SmolStr,
+    original: TextRange,
+    primary_span: Span,
+    source_map: &lyra_preprocess::SourceMap,
+) -> Diagnostic {
+    let mut d = Diagnostic::new(
+        Severity::Error,
+        DiagnosticCode::DUPLICATE_DEFINITION,
+        Message::new(
+            MessageId::DuplicateDefinition,
+            vec![Arg::Name(name.clone())],
+        ),
+    )
+    .with_label(Label {
+        kind: LabelKind::Primary,
+        span: primary_span,
+        message: Message::simple(MessageId::RedefinedHere),
+    });
+    if let Some(orig_span) = source_map.map_span(original) {
+        d = d.with_label(Label {
+            kind: LabelKind::Secondary,
+            span: orig_span,
+            message: Message::simple(MessageId::FirstDefinedHere),
+        });
+    }
+    d
+}
+
 fn lower_name_diag(
     code: DiagnosticCode,
     msg_id: MessageId,
@@ -349,7 +371,7 @@ fn lower_args_diag(
 /// Map an expanded-text range to a `Span` via the source map.
 /// Returns the mapped span and an optional annotation suffix for
 /// unmappable ranges.
-fn map_span_or_fallback(
+pub(crate) fn map_span_or_fallback(
     file_id: FileId,
     source_map: &lyra_preprocess::SourceMap,
     range: TextRange,

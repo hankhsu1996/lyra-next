@@ -182,3 +182,59 @@ fn expr_type_cond_mismatch() {
         ExprType::error(ExprTypeErrorKind::CondBranchTypeMismatch)
     );
 }
+
+// Enum integral auto-cast tests
+
+#[test]
+fn enum_arithmetic_auto_cast() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; enum logic [7:0] { A, B } x; parameter int P = x + 1; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let et = expr_type_of_first_param(&db, file, unit);
+    assert!(matches!(et.view, ExprView::BitVec(_)));
+}
+
+#[test]
+fn enum_default_base_arithmetic() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; enum { IDLE, RUN } s; parameter int P = s * 2; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let et = expr_type_of_first_param(&db, file, unit);
+    // Default enum base is int (32-bit signed 2-state)
+    assert_eq!(et, bv_s(32));
+}
+
+#[test]
+fn enum_relational_mixed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; enum logic [7:0] { A, B } x; logic [7:0] y; parameter bit P = (x < y); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let et = expr_type_of_first_param(&db, file, unit);
+    // Result is 1-bit 4-state because both sides are logic (4-state)
+    assert_eq!(et, one_bit_4());
+}
+
+#[test]
+fn enum_prefix_bitwise_not() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; enum logic [7:0] { A, B } x; parameter int P = ~x; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let et = expr_type_of_first_param(&db, file, unit);
+    assert!(matches!(et.view, ExprView::BitVec(_)));
+}
