@@ -84,9 +84,8 @@ impl ScopeTreeBuilder {
 
     pub(crate) fn add_binding(&mut self, scope: ScopeId, sym: SymbolId, kind: SymbolKind) {
         // Modport symbols are resolved via DefIndex.modport_name_map, not
-        // lexical scope bindings. Instance symbols are resolved via
-        // DefIndex.instance_decls fallback, not lexical scope bindings.
-        if matches!(kind, SymbolKind::Modport | SymbolKind::Instance) {
+        // lexical scope bindings.
+        if kind == SymbolKind::Modport {
             return;
         }
         let entry = &mut self.scopes[scope.0 as usize];

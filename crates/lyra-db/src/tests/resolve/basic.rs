@@ -183,3 +183,29 @@ fn module_instance_not_resolved_as_value() {
         "module instance 'u' should NOT resolve as a value: {diags:?}"
     );
 }
+
+#[test]
+fn interface_instance_shadows_import() {
+    let db = LyraDatabase::default();
+    let pkg = new_file(&db, 0, "package pkg; logic sb; endpackage");
+    let top = new_file(
+        &db,
+        1,
+        "interface my_bus; endinterface \
+         module sink(my_bus bus); endmodule \
+         module top; import pkg::*; my_bus sb(); sink u(.bus(sb)); endmodule",
+    );
+    let unit = new_compilation_unit(&db, vec![pkg, top]);
+    let diags = file_diagnostics(&db, top, unit);
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            let msg = d.render_message();
+            msg.contains("unresolved") && msg.contains("`sb`")
+        })
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "local interface instance 'sb' should shadow imported 'sb': {unresolved:?}"
+    );
+}

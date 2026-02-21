@@ -7,7 +7,7 @@ use lyra_semantic::name_graph::NameGraph;
 use lyra_semantic::resolve_index::{
     CoreResolveOutput, CoreResolveResult, ImportConflict, ResolveIndex,
 };
-use lyra_semantic::scopes::{ScopeId, ScopeKind};
+use lyra_semantic::scopes::ScopeKind;
 use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId};
 use smol_str::SmolStr;
 
@@ -257,19 +257,9 @@ pub fn resolve_index_file(
         let target_def = def_index_file(db, target_file);
         target_def.decl_to_symbol.get(&def_id.ast_id()).copied()
     };
-    let unresolved_value_fallback = |name: &str, scope: ScopeId| -> Option<GlobalSymbolId> {
-        let idx = def.instance_by_name_in_scope(name, scope)?;
-        if instance_decl_is_interface(core, def, global, idx) {
-            let decl = def.instance_decl(idx);
-            Some(GlobalSymbolId {
-                file: def.file,
-                local: decl.sym_id,
-            })
-        } else {
-            None
-        }
-    };
-    lyra_semantic::build_resolve_index(def, core, &lookup_decl, &unresolved_value_fallback)
+    let instance_filter =
+        |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
+    lyra_semantic::build_resolve_index(def, core, &lookup_decl, &instance_filter)
 }
 
 /// Check whether an instance declaration refers to an interface type.

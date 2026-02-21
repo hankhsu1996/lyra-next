@@ -89,20 +89,6 @@ impl DefIndex {
         &self.instance_decls[idx.0 as usize]
     }
 
-    /// Find an instance declaration by name within a scope (walking parents).
-    pub fn instance_by_name_in_scope(&self, name: &str, scope: ScopeId) -> Option<InstanceDeclIdx> {
-        let mut current = Some(scope);
-        while let Some(s) = current {
-            for (i, decl) in self.instance_decls.iter().enumerate() {
-                if decl.scope == s && decl.name == name {
-                    return Some(InstanceDeclIdx(i as u32));
-                }
-            }
-            current = self.scopes.get(s).parent;
-        }
-        None
-    }
-
     pub fn modport_by_name(&self, iface: InterfaceDefId, name: &str) -> Option<&ModportDef> {
         let id = self.modport_name_map.get(&(iface, SmolStr::new(name)))?;
         self.modport_defs.get(id)
