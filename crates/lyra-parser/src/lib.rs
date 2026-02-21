@@ -265,6 +265,70 @@ mod tests {
     }
 
     #[test]
+    fn stream_expr_no_slice_size() {
+        let (p, root) = parse_module("initial begin a = {>> {b, c}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let stream = find_node(&root, SyntaxKind::StreamExpr);
+        assert!(stream.is_some(), "should have StreamExpr node");
+        let stream = stream.unwrap();
+        // No StreamSliceSize
+        let ss = stream
+            .children()
+            .find(|c| c.kind() == SyntaxKind::StreamSliceSize);
+        assert!(ss.is_none(), "should have no StreamSliceSize");
+        // Has StreamOperands
+        let ops = stream
+            .children()
+            .find(|c| c.kind() == SyntaxKind::StreamOperands);
+        assert!(ops.is_some(), "should have StreamOperands");
+    }
+
+    #[test]
+    fn stream_expr_type_slice_size() {
+        let (p, root) = parse_module("initial begin a = {<< byte {b}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let stream = find_node(&root, SyntaxKind::StreamExpr);
+        assert!(stream.is_some(), "should have StreamExpr node");
+        let stream = stream.unwrap();
+        // Has StreamSliceSize containing TypeSpec
+        let ss = stream
+            .children()
+            .find(|c| c.kind() == SyntaxKind::StreamSliceSize);
+        assert!(ss.is_some(), "should have StreamSliceSize");
+        let ts = find_node(&ss.unwrap(), SyntaxKind::TypeSpec);
+        assert!(ts.is_some(), "StreamSliceSize should contain TypeSpec");
+    }
+
+    #[test]
+    fn stream_expr_numeric_slice_size() {
+        let (p, root) = parse_module("initial begin a = {<< 16 {b, c}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let stream = find_node(&root, SyntaxKind::StreamExpr);
+        assert!(stream.is_some(), "should have StreamExpr node");
+        let stream = stream.unwrap();
+        // Has StreamSliceSize containing Literal
+        let ss = stream
+            .children()
+            .find(|c| c.kind() == SyntaxKind::StreamSliceSize);
+        assert!(ss.is_some(), "should have StreamSliceSize");
+        let lit = find_node(&ss.unwrap(), SyntaxKind::Literal);
+        assert!(lit.is_some(), "StreamSliceSize should contain Literal");
+        // Has StreamOperands
+        let ops = stream
+            .children()
+            .find(|c| c.kind() == SyntaxKind::StreamOperands);
+        assert!(ops.is_some(), "should have StreamOperands");
+    }
+
+    #[test]
+    fn stream_expr_roundtrip() {
+        let src = "module m; initial begin a = {<< byte {b, c}}; end endmodule";
+        let tokens = lyra_lexer::lex(src);
+        let p = parse(&tokens, src);
+        assert_eq!(p.syntax().text().to_string(), src);
+    }
+
+    #[test]
     fn system_tf_call_with_type_arg() {
         let (p, root) = parse_module("parameter P = $bits(logic [7:0]);");
         assert!(p.errors.is_empty(), "errors: {:?}", p.errors);

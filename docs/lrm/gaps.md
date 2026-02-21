@@ -48,9 +48,21 @@ The `tagged` qualifier is parsed and diagnosed as unsupported; the type resolves
 
 ## Chapter 11 -- Operators and Expressions
 
-### 11.4.14: Streaming operators
+### 11.4.14: Streaming `with` array range
 
-`{>>{ }}` and `{<<{ }}` are not parsed or typed. Blocked by: parser and type inference extension. Test: `lrm/ch11/streaming_operators`.
+The `with [array_range_expression]` construct on stream expressions is not parsed. Blocked by: parser extension + dynamic array support (7.4). Test: `lrm/ch11/streaming_with`.
+
+### 11.4.14: Streaming assignment target (unpack)
+
+Streaming operators on the LHS of assignments (unpack semantics) are not handled. The parser accepts the syntax but semantic checking (width validation, dynamic resizing) is not implemented. Blocked by: assignment target analysis. Test: `lrm/ch11/streaming_unpack`.
+
+### 11.4.14.1: Non-integral operand bitstream conversion
+
+Streaming of arrays, structs, unions, and strings follows recursive bitstream conversion rules (LRM 11.4.14.1). Only integral operands are supported. Blocked by: bitstream type conversion. Test: `lrm/ch11/streaming_aggregate`.
+
+### 11.4.14: Streaming slice_size const validation
+
+Parser accepts any expression as `slice_size`. The LRM requires it to be a constant expression. Constantness is not enforced. Blocked by: general constant expression validation. Test: N/A (part of const-eval signoff).
 
 ### 11.5.1: Fixed part-select with non-constant bounds
 

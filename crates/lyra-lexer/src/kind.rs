@@ -452,6 +452,10 @@ pub enum SyntaxKind {
     ModportItem,
     ModportPort,
     DottedName,
+    // Streaming operators (LRM 11.4.14)
+    StreamExpr,
+    StreamSliceSize,
+    StreamOperands,
 
     #[doc(hidden)]
     __Last,

@@ -100,6 +100,9 @@ ast_nodes! {
     CondExpr(SyntaxKind::CondExpr) {}
     ConcatExpr(SyntaxKind::ConcatExpr) {}
     ReplicExpr(SyntaxKind::ReplicExpr) {}
+    StreamExpr(SyntaxKind::StreamExpr) {}
+    StreamSliceSize(SyntaxKind::StreamSliceSize) {}
+    StreamOperands(SyntaxKind::StreamOperands) {}
     IndexExpr(SyntaxKind::IndexExpr) {}
     RangeExpr(SyntaxKind::RangeExpr) {}
     FieldExpr(SyntaxKind::FieldExpr) { @custom }

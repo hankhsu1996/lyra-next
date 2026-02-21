@@ -369,6 +369,7 @@ pub fn infer_expr_type(
         SyntaxKind::RangeExpr => infer_range(expr, ctx),
         SyntaxKind::FieldExpr => infer_field_access(expr, ctx),
         SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => infer_call(expr, ctx),
+        SyntaxKind::StreamExpr => infer_stream(expr, ctx),
         _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
     }
 }
@@ -622,6 +623,49 @@ fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 
     let width = if all_known {
         BitWidth::Known(total_width.unwrap_or(0))
+    } else {
+        BitWidth::Unknown
+    };
+
+    ExprType::bitvec(BitVecType {
+        width,
+        signed: Signedness::Unsigned,
+        four_state: any_four_state,
+    })
+}
+
+fn infer_stream(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    let Some(operands) = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::StreamOperands)
+    else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+
+    let mut total_width: u32 = 0;
+    let mut all_known = true;
+    let mut any_four_state = false;
+
+    for child in operands.children() {
+        if !is_expression_kind(child.kind()) {
+            continue;
+        }
+        let child_ty = infer_expr_type(&child, ctx, None);
+        if let ExprView::Error(_) = &child_ty.view {
+            return child_ty;
+        }
+        let Some(bv) = try_integral_view(&child_ty, ctx) else {
+            return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
+        };
+        any_four_state = any_four_state || bv.four_state;
+        match bv.width.self_determined() {
+            Some(w) => total_width = total_width.saturating_add(w),
+            None => all_known = false,
+        }
+    }
+
+    let width = if all_known {
+        BitWidth::Known(total_width)
     } else {
         BitWidth::Unknown
     };

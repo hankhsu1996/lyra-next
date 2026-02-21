@@ -14,8 +14,8 @@ pub use nodes::{
     ModportItem, ModportPort, ModuleBody, ModuleDecl, ModuleInstantiation, NameRef, NetDecl,
     PackageBody, PackageDecl, PackedDimension, ParamDecl, ParamPortList, ParenExpr, Port, PortList,
     PrefixExpr, PrimitiveDecl, ProgramBody, ProgramDecl, QualifiedName, RangeExpr, RangeKind,
-    RepeatStmt, ReplicExpr, SourceFile, StructMember, StructType, SystemTfArgList, SystemTfCall,
-    TaskDecl, TfPortDecl, TimingControl, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl,
-    WhileStmt,
+    RepeatStmt, ReplicExpr, SourceFile, StreamExpr, StreamOperands, StreamSliceSize, StructMember,
+    StructType, SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl, TimingControl, TypeSpec,
+    TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
 };
 pub use support::AstChildren;

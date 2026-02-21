@@ -1,0 +1,5 @@
+kind: lrm
+lrm:
+  chapter: 11
+  section: "11.4.14"
+  title: "Streaming operators (pack/unpack)"
