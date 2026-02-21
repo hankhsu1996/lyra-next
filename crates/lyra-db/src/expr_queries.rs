@@ -10,6 +10,7 @@ use lyra_semantic::types::Ty;
 
 use crate::callable_queries::{CallableRef, callable_signature};
 use crate::const_eval::{ConstExprRef, eval_const_int};
+use crate::enum_queries::{EnumRef, enum_sem};
 use crate::module_sig::CallableKind as DbCallableKind;
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::record_queries::{ModportRef, RecordRef, modport_sem, record_sem};
@@ -193,6 +194,15 @@ impl InferCtx for DbInferCtx<'_> {
             return_ty: normalize(&sig.return_ty),
             ports: ports.into(),
         })
+    }
+
+    fn enum_integral_view(
+        &self,
+        id: &lyra_semantic::enum_def::EnumId,
+    ) -> Option<lyra_semantic::type_infer::BitVecType> {
+        let eref = EnumRef::new(self.db, self.unit, id.clone());
+        let sem = enum_sem(self.db, eref);
+        sem.base_int
     }
 
     fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError> {

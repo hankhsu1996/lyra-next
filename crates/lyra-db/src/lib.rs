@@ -5,6 +5,7 @@ mod elab_eval;
 mod elab_lower;
 mod elab_queries;
 mod elaboration;
+mod enum_queries;
 mod expr_queries;
 mod lower_diag;
 mod module_sig;
@@ -12,6 +13,7 @@ pub mod pipeline;
 mod record_queries;
 mod resolve_at;
 pub mod semantic;
+mod ty_resolve;
 pub mod type_queries;
 
 // Re-export pipeline queries
@@ -40,6 +42,9 @@ pub use expr_queries::{ExprRef, type_of_expr};
 
 // Re-export resolve-at helpers
 pub use resolve_at::{TypeAtResult, resolve_at, symbol_global, type_at};
+
+// Re-export enum queries
+pub use enum_queries::{EnumRef, enum_sem};
 
 // Re-export record queries
 pub use record_queries::{ModportRef, ModportSem, RecordRef, modport_sem, record_sem};

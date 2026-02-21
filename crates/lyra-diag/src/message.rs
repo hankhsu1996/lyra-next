@@ -24,6 +24,8 @@ pub enum MessageId {
     UndeclaredType,
     NotAType,
     UnsupportedTaggedUnion,
+    IllegalEnumBaseType,
+    EnumBaseDimsNotConstant,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -160,6 +162,12 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::UndeclaredType => format!("undeclared type `{}`", name()),
         MessageId::NotAType => format!("`{}` is not a type", name()),
         MessageId::UnsupportedTaggedUnion => "tagged unions are not yet supported".into(),
+        MessageId::IllegalEnumBaseType => {
+            format!("enum base type `{}` is not an integral type", name())
+        }
+        MessageId::EnumBaseDimsNotConstant => {
+            "enum base type has non-constant packed dimensions".into()
+        }
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");

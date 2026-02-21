@@ -20,8 +20,9 @@ use crate::def_index::{
     LocalDecl, LocalDeclId, NamePath, UseSite,
 };
 use crate::diagnostic::SemanticDiag;
+use crate::enum_def::EnumDef;
 use crate::record::{
-    EnumDef, ModportDef, ModportDefId, ModportEntry, PortDirection, RecordDef, SymbolOrigin,
+    ModportDef, ModportDefId, ModportEntry, PortDirection, RecordDef, SymbolOrigin,
 };
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};

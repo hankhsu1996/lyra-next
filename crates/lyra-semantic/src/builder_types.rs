@@ -6,9 +6,10 @@ use smol_str::SmolStr;
 use crate::builder::DefContext;
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::enum_def::{EnumBase, EnumDef, EnumDefIdx, EnumVariant};
 use crate::record::{
-    EnumDef, EnumDefIdx, EnumVariant, Packing, RecordDef, RecordDefIdx, RecordField, RecordKind,
-    SymbolOrigin, TypeRef, extract_typeref_from_typespec,
+    Packing, RecordDef, RecordDefIdx, RecordField, RecordKind, SymbolOrigin, TypeRef,
+    extract_typeref_from_typespec,
 };
 use crate::scopes::ScopeId;
 use crate::symbols::{Namespace, SymbolKind};
@@ -141,11 +142,23 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
     *ordinal += 1;
     let idx = EnumDefIdx(ctx.enum_defs.len() as u32);
 
-    // Extract base type
+    // Extract base type with its source range
     let base = if let Some(base_ts) = enum_type.base_type_spec() {
-        extract_typeref_from_typespec(base_ts.syntax(), ctx.file, ctx.ast_id_map)
+        let range = base_ts.text_range();
+        let tref = extract_typeref_from_typespec(base_ts.syntax(), ctx.file, ctx.ast_id_map);
+        EnumBase { tref, range }
     } else {
-        TypeRef::Resolved(Ty::int())
+        // Default base: use the `enum` keyword token's range as anchor
+        let range = enum_type
+            .syntax()
+            .children_with_tokens()
+            .filter_map(lyra_parser::SyntaxElement::into_token)
+            .find(|tok| tok.kind() == SyntaxKind::EnumKw)
+            .map_or_else(|| enum_type.text_range(), |tok| tok.text_range());
+        EnumBase {
+            tref: TypeRef::Resolved(Ty::int()),
+            range,
+        }
     };
 
     // Extract variants and inject each as a value-namespace symbol
@@ -181,6 +194,7 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
         name: None,
         owner,
         ordinal: ord,
+        scope,
         base,
         variants: variants.into_boxed_slice(),
     });

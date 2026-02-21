@@ -1,9 +1,10 @@
-use lyra_ast::{AstIdMap, AstNode, ErasedAstId, NameRef, QualifiedName};
+use lyra_ast::{AstIdMap, AstNode, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_source::{FileId, Span};
 use smol_str::SmolStr;
 
+use crate::enum_def::EnumDefIdx;
 use crate::global_index::DefinitionKind;
 use crate::scopes::ScopeId;
 use crate::symbols::GlobalDefId;
@@ -13,25 +14,9 @@ use crate::types::Ty;
 // Index types for def tables (file-local dense indices)
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EnumDefIdx(pub(crate) u32);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RecordDefIdx(pub(crate) u32);
 
 // Global IDs (offset-independent, scope-owner-local ordinal)
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumId {
-    pub file: FileId,
-    pub owner: Option<SmolStr>,
-    pub ordinal: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumVariantId {
-    pub enum_id: EnumId,
-    pub variant_ordinal: u32,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RecordId {
@@ -71,21 +56,6 @@ pub enum TypeRef {
 }
 
 // Def tables
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnumDef {
-    pub name: Option<SmolStr>,
-    pub owner: Option<SmolStr>,
-    pub ordinal: u32,
-    pub base: TypeRef,
-    pub variants: Box<[EnumVariant]>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnumVariant {
-    pub name: SmolStr,
-    pub init: Option<ErasedAstId>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordDef {

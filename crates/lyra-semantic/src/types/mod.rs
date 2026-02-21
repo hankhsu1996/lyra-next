@@ -4,7 +4,8 @@ use lyra_ast::ErasedAstId;
 use smallvec::SmallVec;
 use smol_str::SmolStr;
 
-use crate::record::{EnumId, InterfaceDefId, ModportDefId, PortDirection, RecordId};
+use crate::enum_def::EnumId;
+use crate::record::{InterfaceDefId, ModportDefId, PortDirection, RecordId};
 use crate::symbols::SymbolId;
 
 /// A constant integer value, used for dimension bounds and widths.

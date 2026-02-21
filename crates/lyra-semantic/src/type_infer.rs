@@ -6,6 +6,7 @@ use crate::coerce::{
     IntegralCtx, OpCategory, apply_outer_context, coerce_integral, comparison_context, op_spec,
     operator_result_self,
 };
+use crate::enum_def::EnumId;
 use crate::expr_helpers::{find_binary_op, find_operator_token, is_expression_kind};
 use crate::literal::parse_literal_shape;
 use crate::symbols::{GlobalSymbolId, SymbolId, SymbolKind};
@@ -320,6 +321,24 @@ pub trait InferCtx {
     fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef>;
     /// Look up a member (field) on a type.
     fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError>;
+    /// Get the integral view of an enum's base type.
+    fn enum_integral_view(&self, id: &EnumId) -> Option<BitVecType>;
+}
+
+/// Extract an integral view from an `ExprType`, auto-casting enums to
+/// their base integral type when needed for arithmetic/bitwise operations.
+fn try_integral_view(et: &ExprType, ctx: &dyn InferCtx) -> Option<BitVecType> {
+    match &et.view {
+        ExprView::BitVec(bv) => Some(*bv),
+        ExprView::Plain => {
+            if let Ty::Enum(id) = &et.ty {
+                ctx.enum_integral_view(id)
+            } else {
+                None
+            }
+        }
+        ExprView::Error(_) => None,
+    }
 }
 
 /// Infer the type of an expression node, optionally in a context.
@@ -435,7 +454,13 @@ fn infer_prefix(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
             let operand = infer_expr_type(&operand_node, ctx, expected);
             match &operand.view {
                 ExprView::BitVec(_) | ExprView::Error(_) => operand,
-                ExprView::Plain => ExprType::error(ExprTypeErrorKind::NonBitOperand),
+                ExprView::Plain => {
+                    if let Some(bv) = try_integral_view(&operand, ctx) {
+                        ExprType::bitvec(bv)
+                    } else {
+                        ExprType::error(ExprTypeErrorKind::NonBitOperand)
+                    }
+                }
             }
         }
         _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
@@ -461,16 +486,22 @@ fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
 
     let spec = op_spec(op);
 
-    // Check for non-bit operands
-    let (lhs_bv, rhs_bv) = match (&lhs_self.view, &rhs_self.view) {
-        (ExprView::BitVec(a), ExprView::BitVec(b)) => (a, b),
-        (ExprView::Error(_), _) => return lhs_self,
-        (_, ExprView::Error(_)) => return rhs_self,
-        _ => return ExprType::error(ExprTypeErrorKind::NonBitOperand),
+    // Check for non-bit operands (auto-cast enums to their base integral type)
+    if matches!(lhs_self.view, ExprView::Error(_)) {
+        return lhs_self;
+    }
+    if matches!(rhs_self.view, ExprView::Error(_)) {
+        return rhs_self;
+    }
+    let Some(lhs_bv) = try_integral_view(&lhs_self, ctx) else {
+        return ExprType::error(ExprTypeErrorKind::NonBitOperand);
+    };
+    let Some(rhs_bv) = try_integral_view(&rhs_self, ctx) else {
+        return ExprType::error(ExprTypeErrorKind::NonBitOperand);
     };
 
     // Step 3: operator result (self-determined)
-    let result_self = operator_result_self(spec.category, spec.result_state, lhs_bv, rhs_bv);
+    let result_self = operator_result_self(spec.category, spec.result_state, &lhs_bv, &rhs_bv);
 
     // Step 4: combine with outer context
     let result_ctx = apply_outer_context(spec.category, &result_self, expected);
@@ -486,7 +517,7 @@ fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
             // RHS is self-determined
         }
         OpCategory::Comparison => {
-            let cmp_ctx = comparison_context(lhs_bv, rhs_bv);
+            let cmp_ctx = comparison_context(&lhs_bv, &rhs_bv);
             infer_expr_type(&children[0], ctx, Some(&cmp_ctx));
             infer_expr_type(&children[1], ctx, Some(&cmp_ctx));
         }
@@ -567,24 +598,22 @@ fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
             continue;
         }
         let child_ty = infer_expr_type(&child, ctx, None);
-        match &child_ty.view {
-            ExprView::BitVec(bv) => {
-                any_four_state = any_four_state || bv.four_state;
-                match bv.width.self_determined() {
-                    Some(w) => {
-                        if let Some(ref mut tw) = total_width {
-                            *tw = tw.saturating_add(w);
-                        }
-                    }
-                    None => {
-                        all_known = false;
-                    }
+        if let ExprView::Error(_) = &child_ty.view {
+            return child_ty;
+        }
+        let Some(bv) = try_integral_view(&child_ty, ctx) else {
+            return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
+        };
+        any_four_state = any_four_state || bv.four_state;
+        match bv.width.self_determined() {
+            Some(w) => {
+                if let Some(ref mut tw) = total_width {
+                    *tw = tw.saturating_add(w);
                 }
             }
-            ExprView::Plain => {
-                return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
+            None => {
+                all_known = false;
             }
-            ExprView::Error(_) => return child_ty,
         }
     }
 
@@ -639,13 +668,13 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 
     let (inner_width, inner_four_state) = if let Some(concat) = concat_child {
         let inner = infer_concat(concat, ctx);
-        match &inner.view {
-            ExprView::BitVec(bv) => (bv.width, bv.four_state),
-            ExprView::Error(_) => return inner,
-            ExprView::Plain => {
-                return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
-            }
+        if let ExprView::Error(_) = &inner.view {
+            return inner;
         }
+        let Some(bv) = try_integral_view(&inner, ctx) else {
+            return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
+        };
+        (bv.width, bv.four_state)
     } else if inner_items.is_empty() {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     } else {
@@ -655,22 +684,20 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         let mut any_four_state = false;
         for item in inner_items {
             let item_ty = infer_expr_type(item, ctx, None);
-            match &item_ty.view {
-                ExprView::BitVec(bv) => {
-                    any_four_state = any_four_state || bv.four_state;
-                    match bv.width.self_determined() {
-                        Some(w) => {
-                            if let Some(ref mut t) = total {
-                                *t = t.saturating_add(w);
-                            }
-                        }
-                        None => all_known = false,
+            if let ExprView::Error(_) = &item_ty.view {
+                return item_ty;
+            }
+            let Some(bv) = try_integral_view(&item_ty, ctx) else {
+                return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
+            };
+            any_four_state = any_four_state || bv.four_state;
+            match bv.width.self_determined() {
+                Some(w) => {
+                    if let Some(ref mut t) = total {
+                        *t = t.saturating_add(w);
                     }
                 }
-                ExprView::Plain => {
-                    return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
-                }
-                ExprView::Error(_) => return item_ty,
+                None => all_known = false,
             }
         }
         let width = if all_known {

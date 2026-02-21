@@ -204,7 +204,7 @@ impl<'db> TyFmt<'db> {
         SmolStr::new(s)
     }
 
-    fn enum_name(&self, id: &lyra_semantic::record::EnumId) -> String {
+    fn enum_name(&self, id: &lyra_semantic::enum_def::EnumId) -> String {
         let Some(src) = source_file_by_id(self.db, self.unit, id.file) else {
             return "enum".to_string();
         };

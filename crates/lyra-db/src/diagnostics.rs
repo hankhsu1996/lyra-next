@@ -3,6 +3,7 @@ use lyra_semantic::type_check::{TypeCheckCtx, TypeCheckKind};
 use lyra_semantic::type_infer::ExprType;
 use lyra_semantic::types::SymbolType;
 
+use crate::enum_queries::{EnumRef, enum_sem};
 use crate::expr_queries::{ExprRef, IntegralCtxKey};
 use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
 use crate::semantic::{
@@ -39,6 +40,28 @@ pub fn file_diagnostics(
         core,
     ));
     diags.extend(type_diagnostics(db, file, unit).iter().cloned());
+
+    // Enum base type diagnostics
+    let file_id = file.file_id(db);
+    for enum_def in &*def.enum_defs {
+        let enum_id = lyra_semantic::enum_def::EnumId {
+            file: file_id,
+            owner: enum_def.owner.clone(),
+            ordinal: enum_def.ordinal,
+        };
+        let eref = EnumRef::new(db, unit, enum_id);
+        let sem = enum_sem(db, eref);
+        for diag in &*sem.diags {
+            let (primary_span, _) =
+                crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, diag.range);
+            diags.push(crate::lower_diag::lower_semantic_diag(
+                diag,
+                primary_span,
+                &pp.source_map,
+            ));
+        }
+    }
+
     diags
 }
 
