@@ -20,6 +20,34 @@ pub struct SymbolRef<'db> {
     pub symbol: GlobalSymbolId,
 }
 
+/// Salsa-interned type identity. Structural: same `Ty` content = same `TyRef`.
+///
+/// No `unit` in the key -- type identity is structural across compilation
+/// units. All IDs embedded in `Ty` variants (`EnumId`, `RecordId`,
+/// `InterfaceDefId`) are globally unique (contain `FileId`).
+#[salsa::interned]
+pub struct TyRef<'db> {
+    pub ty: lyra_semantic::types::Ty,
+}
+
+/// Total bit width of a type (Salsa-tracked).
+///
+/// V1: handles Integral and Real. Compound types (Record, Enum, Array)
+/// return None -- extending to walk fields is future work.
+#[salsa::tracked]
+pub fn bit_width_total<'db>(
+    db: &'db dyn salsa::Database,
+    _unit: CompilationUnit,
+    ty_ref: TyRef<'db>,
+) -> Option<u32> {
+    let ty = ty_ref.ty(db);
+    match &ty {
+        lyra_semantic::types::Ty::Integral(i) => i.try_packed_width(),
+        lyra_semantic::types::Ty::Real(rk) => Some(rk.bit_width()),
+        _ => None,
+    }
+}
+
 /// Extract a symbol's raw type from its declaration AST (Salsa-tracked with cycle recovery).
 ///
 /// Returns `SymbolType` with `Unevaluated` dims -- const-eval is NOT called.

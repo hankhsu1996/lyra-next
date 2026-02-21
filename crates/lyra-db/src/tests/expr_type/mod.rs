@@ -3,6 +3,7 @@ mod indexing;
 mod literals;
 mod members;
 mod operators;
+mod system_calls;
 
 use lyra_semantic::type_infer::{
     BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView, Signedness,

@@ -31,7 +31,7 @@ pub enum ConstEvalError {
 }
 
 /// A packed dimension with msb and lsb bounds, e.g. `[7:0]`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackedDim {
     pub msb: ConstInt,
     pub lsb: ConstInt,
@@ -47,7 +47,7 @@ impl PackedDim {
 }
 
 /// An unpacked dimension: either a range `[msb:lsb]` or a size `[n]`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UnpackedDim {
     Range { msb: ConstInt, lsb: ConstInt },
     Size(ConstInt),
@@ -71,9 +71,8 @@ impl UnpackedDim {
 /// Shared packed dimension list with O(1) peeling via start offset.
 ///
 /// Backed by `Arc<[PackedDim]>` so cloning and peeling are cheap.
-/// `PartialEq`/`Eq` compare the viewed slice (from `start`), which is O(n)
-/// for remaining dims (tiny in practice, typically 1-2). No `Hash` impl --
-/// if `Hash` is added later, it must hash the viewed slice to match `Eq`.
+/// `PartialEq`/`Eq`/`Hash` compare the viewed slice (from `start`),
+/// which is O(n) for remaining dims (tiny in practice, typically 1-2).
 #[derive(Debug, Clone)]
 pub struct PackedDims {
     dims: Arc<[PackedDim]>,
@@ -129,6 +128,12 @@ impl PartialEq for PackedDims {
 
 impl Eq for PackedDims {}
 
+impl std::hash::Hash for PackedDims {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state);
+    }
+}
+
 impl std::ops::Index<usize> for PackedDims {
     type Output = PackedDim;
     fn index(&self, idx: usize) -> &PackedDim {
@@ -164,7 +169,7 @@ impl FromIterator<PackedDim> for PackedDims {
 }
 
 /// The keyword that produced an integral type, preserving LRM identity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IntegralKw {
     Logic,
     Reg,
@@ -215,7 +220,7 @@ impl IntegralKw {
 }
 
 /// An integral type: keyword identity, signedness, and packed dimensions.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Integral {
     pub keyword: IntegralKw,
     pub signed: bool,
@@ -249,7 +254,7 @@ impl Integral {
 }
 
 /// A real (floating-point) type keyword.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RealKw {
     Real,
     Short,
@@ -257,6 +262,13 @@ pub enum RealKw {
 }
 
 impl RealKw {
+    pub fn bit_width(self) -> u32 {
+        match self {
+            Self::Short => 32,
+            Self::Real | Self::Time => 64,
+        }
+    }
+
     fn keyword_str(self) -> &'static str {
         match self {
             Self::Real => "real",
@@ -271,7 +283,7 @@ impl RealKw {
 /// Not a primitive datatype -- represents a reference to an interface
 /// instance. Compatibility is based on same `InterfaceDefId` (same
 /// interface definition) and compatible modport constraints.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InterfaceType {
     pub iface: InterfaceDefId,
     pub modport: Option<ModportDefId>,
@@ -303,7 +315,7 @@ impl ModportView {
 }
 
 /// The semantic type representation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ty {
     Integral(Integral),
     Real(RealKw),
@@ -438,6 +450,22 @@ impl Ty {
             }
             _ => None,
         }
+    }
+
+    /// Whether this type is a data type (LRM 6.2.1).
+    ///
+    /// Returns false for void, event, interface, and error types.
+    pub fn is_data_type(&self) -> bool {
+        matches!(
+            self,
+            Ty::Integral(_)
+                | Ty::Real(_)
+                | Ty::Enum(_)
+                | Ty::Record(_)
+                | Ty::Array { .. }
+                | Ty::String
+                | Ty::Chandle
+        )
     }
 
     /// Human-readable type representation (pure, no DB access).
