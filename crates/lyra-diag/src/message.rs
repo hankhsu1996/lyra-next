@@ -28,6 +28,9 @@ pub enum MessageId {
     UnsupportedTaggedUnion,
     IllegalEnumBaseType,
     EnumBaseDimsNotConstant,
+    EnumAssignFromNonEnum,
+    EnumAssignWrongEnum,
+    EnumTypeHere,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -171,6 +174,19 @@ pub fn render_message(msg: &Message) -> String {
         }
         MessageId::EnumBaseDimsNotConstant => {
             "enum base type has non-constant packed dimensions".into()
+        }
+        MessageId::EnumAssignFromNonEnum => {
+            let rhs_ty = name();
+            let lhs_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("cannot assign {rhs_ty} to enum `{lhs_name}` without an explicit cast")
+        }
+        MessageId::EnumAssignWrongEnum => {
+            let rhs_name = name();
+            let lhs_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("cannot assign enum `{rhs_name}` to enum `{lhs_name}` without an explicit cast")
+        }
+        MessageId::EnumTypeHere => {
+            format!("enum type `{}`", name())
         }
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
