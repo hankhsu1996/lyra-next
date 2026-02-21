@@ -125,6 +125,10 @@ pub enum SymbolKind {
     /// exclusively via `DefIndex.modport_name_map` when the LHS is an
     /// interface type.
     Modport,
+    /// Module or interface instance (e.g., `my_bus sb();`). Not added to
+    /// lexical scope bindings; resolved via `DefIndex.instance_decls`
+    /// fallback when the name is unresolved in value context.
+    Instance,
 }
 
 impl SymbolKind {
@@ -148,7 +152,8 @@ impl SymbolKind {
             | Self::Function
             | Self::Task
             | Self::EnumMember
-            | Self::Modport => Namespace::Value,
+            | Self::Modport
+            | Self::Instance => Namespace::Value,
             Self::Typedef => Namespace::Type,
         }
     }

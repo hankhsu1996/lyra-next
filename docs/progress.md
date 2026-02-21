@@ -58,10 +58,10 @@ Where we are against the roadmap. See `docs/roadmap.md` for milestone details.
 
 - [x] Context-determined typing (LRM 11.6)
 - [x] Callable typing (function/task calls)
-- [x] Plain struct/union member typing (tagged unions deferred, see gaps)
-- [x] Enum member name resolution (base type, methods, type compat deferred, see gaps)
-- [x] Indexing and part-select typing (dynamic/queue/assoc/streaming deferred, see gaps)
+- [ ] Struct/union semantics (basic member typing done; tagged unions, soft unions, packed union width validation missing)
+- [ ] Enum semantics (name resolution done; methods, type compat, ranges missing)
+- [ ] Array semantics (indexing and part-select done; dynamic, queue, assoc, slicing, streaming missing)
 - [x] Generate blocks and parameter elaboration
 - [x] System function typing ($signed, $unsigned, $bits, $clog2, bit-vector queries)
-- [x] Interface/modport semantics (LRM Ch25 signoff deferred, see gaps)
+- [ ] Interface/modport semantics (declaration, member access, and port connections done; direction enforcement, virtual interfaces missing)
 - [ ] Performance baseline (10K lines under 1s)

@@ -2,12 +2,13 @@ use lyra_lexer::SyntaxKind;
 use lyra_semantic::UserTypeRef;
 use lyra_semantic::interface_id::InterfaceDefId;
 use lyra_semantic::record::SymbolOrigin;
+use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{ConstEvalError, ConstInt, InterfaceType, Ty, UnpackedDim};
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::semantic::{def_index_file, global_def_index, resolve_index_file};
+use crate::semantic::{def_index_file, global_def_index, resolve_core_file, resolve_index_file};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
 /// Identifies a symbol for type extraction.
@@ -111,6 +112,9 @@ pub fn type_of_symbol_raw<'db>(
             let id = def.enum_id(enum_idx);
             return classify(Ty::Enum(id), sym.kind);
         }
+        SymbolOrigin::Instance(idx) => {
+            return type_of_instance(db, unit, source_file, idx, sym.kind);
+        }
         SymbolOrigin::Error => {
             return classify(Ty::Error, sym.kind);
         }
@@ -159,6 +163,52 @@ pub fn type_of_symbol_raw<'db>(
 
     // No user-defined type -- pure extraction
     extract_type_from_container(&container, declarator.as_ref(), map)
+}
+
+/// Resolve the type of a module/interface instance.
+///
+/// Looks up the instance's type-name use-site in `resolve_core_file`,
+/// checks if the target is an interface, and returns `Ty::Interface`.
+/// Module instances return `UnsupportedSymbolKind`.
+fn type_of_instance(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    idx: lyra_semantic::instance_decl::InstanceDeclIdx,
+    kind: lyra_semantic::symbols::SymbolKind,
+) -> lyra_semantic::types::SymbolType {
+    use lyra_semantic::global_index::DefinitionKind;
+    use lyra_semantic::resolve_index::CoreResolution;
+    use lyra_semantic::types::{SymbolType, SymbolTypeError};
+
+    let def = def_index_file(db, source_file);
+    let decl = def.instance_decl(idx);
+    let core = resolve_core_file(db, source_file, unit);
+
+    let Some(result) = core.resolutions.get(decl.type_use_site_idx as usize) else {
+        return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
+    };
+
+    let CoreResolveResult::Resolved(CoreResolution::Global { decl: def_id, .. }) = result else {
+        return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
+    };
+
+    let global = global_def_index(db, unit);
+    match global.def_kind(*def_id) {
+        Some(DefinitionKind::Interface) => {
+            let Some(iface_def) = InterfaceDefId::try_from_global_index(global, *def_id) else {
+                return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
+            };
+            classify(
+                Ty::Interface(InterfaceType {
+                    iface: iface_def,
+                    modport: None,
+                }),
+                kind,
+            )
+        }
+        _ => SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
+    }
 }
 
 /// Expand a user-defined type reference via single-step typedef resolution.

@@ -133,3 +133,79 @@ fn module_not_in_lexical_scope() {
         "module 'm' should be in exports"
     );
 }
+
+#[test]
+fn interface_instance_resolves_in_port_connection() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "interface my_bus; endinterface \
+         module sink(my_bus bus); endmodule \
+         module top; my_bus sb(); sink u(.bus(sb)); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            let msg = d.render_message();
+            msg.contains("unresolved") && msg.contains("`sb`")
+        })
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "interface instance 'sb' should resolve in port connection: {unresolved:?}"
+    );
+}
+
+#[test]
+fn module_instance_not_resolved_as_value() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module child; endmodule \
+         module sink(input logic x); endmodule \
+         module top; child u(); sink s(.x(u)); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            let msg = d.render_message();
+            msg.contains("unresolved") && msg.contains("`u`")
+        })
+        .collect();
+    assert!(
+        !unresolved.is_empty(),
+        "module instance 'u' should NOT resolve as a value: {diags:?}"
+    );
+}
+
+#[test]
+fn interface_instance_shadows_import() {
+    let db = LyraDatabase::default();
+    let pkg = new_file(&db, 0, "package pkg; logic sb; endpackage");
+    let top = new_file(
+        &db,
+        1,
+        "interface my_bus; endinterface \
+         module sink(my_bus bus); endmodule \
+         module top; import pkg::*; my_bus sb(); sink u(.bus(sb)); endmodule",
+    );
+    let unit = new_compilation_unit(&db, vec![pkg, top]);
+    let diags = file_diagnostics(&db, top, unit);
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            let msg = d.render_message();
+            msg.contains("unresolved") && msg.contains("`sb`")
+        })
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "local interface instance 'sb' should shadow imported 'sb': {unresolved:?}"
+    );
+}

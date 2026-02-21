@@ -5,6 +5,7 @@ use lyra_source::{FileId, Span};
 use smol_str::SmolStr;
 
 use crate::enum_def::EnumDefIdx;
+use crate::instance_decl::InstanceDeclIdx;
 use crate::scopes::ScopeId;
 use crate::type_extract::extract_base_ty_from_typespec;
 use crate::types::Ty;
@@ -119,6 +120,8 @@ pub enum SymbolOrigin {
         enum_idx: EnumDefIdx,
         variant_ordinal: u32,
     },
+    /// Symbol is a module/interface instance (e.g., `my_bus sb();`).
+    Instance(InstanceDeclIdx),
     /// Poisoned origin: type extraction failed or was suppressed.
     Error,
 }

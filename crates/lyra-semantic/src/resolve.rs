@@ -902,10 +902,17 @@ fn has_higher_precedence_binding(
 ///
 /// `lookup_decl` maps a `GlobalDefId` (from `CoreResolution::Global`)
 /// to a `SymbolId` in the target file.
+///
+/// `instance_filter` is called when core resolution resolves a use-site
+/// to an `Instance` symbol. Returns `true` if the instance should be
+/// kept as a valid resolution (e.g., interface instances). Returns
+/// `false` to reject the resolution and emit an unresolved diagnostic
+/// (e.g., module instances are not valid in value expressions).
 pub fn build_resolve_index(
     def: &DefIndex,
     core: &CoreResolveOutput,
     lookup_decl: &dyn Fn(GlobalDefId) -> Option<SymbolId>,
+    instance_filter: &dyn Fn(crate::instance_decl::InstanceDeclIdx) -> bool,
 ) -> ResolveIndex {
     let mut resolutions = HashMap::new();
     let mut diagnostics = Vec::new();
@@ -913,6 +920,20 @@ pub fn build_resolve_index(
     for (use_site, result) in def.use_sites.iter().zip(core.resolutions.iter()) {
         match result {
             CoreResolveResult::Resolved(CoreResolution::Local { symbol, namespace }) => {
+                // Filter instance symbols: only interface instances are
+                // valid in value expressions. Module instances are rejected.
+                if let crate::record::SymbolOrigin::Instance(idx) = def.symbols.get(*symbol).origin
+                    && !instance_filter(idx)
+                {
+                    let diag = reason_to_diagnostic(
+                        &UnresolvedReason::NotFound,
+                        use_site.expected_ns,
+                        &use_site.path,
+                        use_site.range,
+                    );
+                    diagnostics.push(diag);
+                    continue;
+                }
                 resolutions.insert(
                     use_site.ast_id,
                     Resolution {

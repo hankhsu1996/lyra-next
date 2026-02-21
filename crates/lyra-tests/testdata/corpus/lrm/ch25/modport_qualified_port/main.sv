@@ -10,4 +10,5 @@ endmodule
 
 module top;
   my_bus b();
+  producer p(.bus(b));
 endmodule

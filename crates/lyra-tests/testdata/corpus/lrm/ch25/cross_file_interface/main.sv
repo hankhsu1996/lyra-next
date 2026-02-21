@@ -8,4 +8,6 @@ endmodule
 
 module top;
   shared_bus sb();
+  source src(.bus(sb));
+  sink snk(.bus(sb));
 endmodule
