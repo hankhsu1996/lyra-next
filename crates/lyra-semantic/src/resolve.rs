@@ -736,7 +736,7 @@ fn detect_wildcard_local_conflicts(
                 // this name where order_key is between import and local_decl.
                 // The use-site can be in this scope or any descendant scope.
                 let realizing_use = find_realizing_use_site(
-                    graph,
+                    ctx,
                     use_entries,
                     scope_id,
                     &local.name,
@@ -776,7 +776,7 @@ fn detect_wildcard_local_conflicts(
 /// that references `name` with a compatible namespace and has an `order_key`
 /// between `after_key` (exclusive) and `before_key` (exclusive).
 fn find_realizing_use_site(
-    graph: &NameGraph,
+    ctx: &ResolveCtx<'_>,
     use_entries: &[crate::name_graph::UseEntry],
     scope: ScopeId,
     name: &str,
@@ -807,14 +807,21 @@ fn find_realizing_use_site(
             continue;
         }
         // Must be in scope or a descendant of scope
-        if !is_scope_or_descendant(graph, entry.scope, scope) {
+        if !is_scope_or_descendant(ctx.graph, entry.scope, scope) {
             continue;
         }
-        // Check that no local in the use-site's lexical chain (before reaching
-        // the wildcard scope) shadows the name. We only need to check scopes
-        // between entry.scope and scope (exclusive of scope itself, since
-        // local declarations in the wildcard's scope are scope-wide).
-        if has_shadowing_local_in_chain(graph, entry.scope, scope, name, ns) {
+        // Check that no local declaration or explicit import in the
+        // use-site's lexical chain (before reaching the wildcard scope)
+        // would take precedence over the wildcard import.
+        if has_higher_precedence_binding(
+            ctx.graph,
+            ctx.pkg_scope,
+            entry.scope,
+            scope,
+            name,
+            ns,
+            entry.order_key,
+        ) {
             continue;
         }
 
@@ -839,33 +846,51 @@ fn is_scope_or_descendant(graph: &NameGraph, child: ScopeId, ancestor: ScopeId) 
 }
 
 /// Check if any scope between `start` (inclusive) and `stop` (exclusive)
-/// in the parent chain has a local declaration with the given name and namespace.
-fn has_shadowing_local_in_chain(
+/// in the parent chain has a local declaration or an explicit import
+/// that would shadow the wildcard import for the given name.
+///
+/// An explicit import `import pkg::name;` in a descendant scope has
+/// higher precedence than a wildcard import in an ancestor scope
+/// (LRM 26.3 resolution order), so a use-site resolved via such an
+/// explicit import does not count as a wildcard realization.
+fn has_higher_precedence_binding(
     graph: &NameGraph,
+    pkg_scope: &PackageScopeIndex,
     start: ScopeId,
     stop: ScopeId,
     name: &str,
     ns: Namespace,
+    use_order_key: u32,
 ) -> bool {
     let mut current = Some(start);
     while let Some(s) = current {
         if s == stop {
             return false;
         }
-        // Check if this scope has a binding for the name in the right namespace
+        // Check local declarations (scope-wide visibility)
         let scope_data = graph.scopes.get(s);
         let bindings = match ns {
             Namespace::Value => &scope_data.value_ns,
             Namespace::Type => &scope_data.type_ns,
             Namespace::Definition => return false,
         };
-        let found = bindings
+        if bindings
             .binary_search_by(|id| graph.name(*id).cmp(name))
-            .is_ok();
-        if found {
+            .is_ok()
+        {
             return true;
         }
-        current = graph.scopes.get(s).parent;
+        // Check explicit imports (positional: must precede the use-site)
+        for imp in graph.imports_for_scope(s) {
+            if let ImportName::Explicit(ref member) = imp.name
+                && member.as_str() == name
+                && imp.order_key < use_order_key
+                && pkg_scope.resolve(&imp.package, name, ns).is_some()
+            {
+                return true;
+            }
+        }
+        current = scope_data.parent;
     }
     false
 }
