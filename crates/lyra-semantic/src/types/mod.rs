@@ -5,7 +5,9 @@ use smallvec::SmallVec;
 use smol_str::SmolStr;
 
 use crate::enum_def::EnumId;
-use crate::record::{InterfaceDefId, ModportDefId, PortDirection, RecordId};
+use crate::interface_id::InterfaceDefId;
+use crate::modport_def::{ModportDefId, PortDirection};
+use crate::record::RecordId;
 use crate::symbols::SymbolId;
 
 /// A constant integer value, used for dimension bounds and widths.

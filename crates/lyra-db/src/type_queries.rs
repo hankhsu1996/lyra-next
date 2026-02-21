@@ -1,6 +1,7 @@
 use lyra_lexer::SyntaxKind;
 use lyra_semantic::UserTypeRef;
-use lyra_semantic::record::{InterfaceDefId, SymbolOrigin};
+use lyra_semantic::interface_id::InterfaceDefId;
+use lyra_semantic::record::SymbolOrigin;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{ConstEvalError, ConstInt, InterfaceType, Ty, UnpackedDim};
 

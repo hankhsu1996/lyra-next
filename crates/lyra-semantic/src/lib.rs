@@ -9,7 +9,10 @@ pub mod diagnostic;
 pub mod enum_def;
 pub mod expr_helpers;
 pub mod global_index;
+pub mod interface_id;
+
 pub(crate) mod literal;
+pub mod modport_def;
 pub mod name_graph;
 pub mod record;
 mod resolve;

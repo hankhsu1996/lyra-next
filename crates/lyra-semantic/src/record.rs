@@ -5,9 +5,7 @@ use lyra_source::{FileId, Span};
 use smol_str::SmolStr;
 
 use crate::enum_def::EnumDefIdx;
-use crate::global_index::DefinitionKind;
 use crate::scopes::ScopeId;
-use crate::symbols::GlobalDefId;
 use crate::type_extract::extract_base_ty_from_typespec;
 use crate::types::Ty;
 
@@ -102,88 +100,6 @@ impl RecordSem {
             .ok()?;
         let idx = self.field_lookup[i].1;
         Some((idx, &self.fields[idx as usize]))
-    }
-}
-
-// Modport definitions
-
-/// Stable cross-file identity for a modport item.
-///
-/// Ordinal determinism: a single source-order pass over the interface body's
-/// children. Count every successfully-parsed `ModportItem` node. Error-recovered
-/// items that produced a `ModportItem` node still get an ordinal; items that
-/// failed to parse and produced only `Error` nodes do not. Ordinal resets to 0
-/// for each interface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ModportDefId {
-    pub owner: InterfaceDefId,
-    pub ordinal: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModportDef {
-    pub id: ModportDefId,
-    pub name: SmolStr,
-    pub entries: Box<[ModportEntry]>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModportEntry {
-    pub member_name: SmolStr,
-    pub direction: PortDirection,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PortDirection {
-    Input,
-    Output,
-    Inout,
-    Ref,
-}
-
-/// Typed identity for an interface definition.
-///
-/// Field is private. Construction requires proving the `GlobalDefId`
-/// refers to an interface (via `DefinitionKind` check).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct InterfaceDefId(GlobalDefId);
-
-impl InterfaceDefId {
-    /// Construct from a `DefIndex` (per-file, used after symbol table freeze).
-    pub fn try_from_def_index(
-        def_index: &crate::def_index::DefIndex,
-        def: GlobalDefId,
-    ) -> Option<Self> {
-        let sym_id = def_index.decl_to_symbol.get(&def.ast_id())?;
-        let kind = DefinitionKind::from_symbol_kind(def_index.symbols.get(*sym_id).kind)?;
-        match kind {
-            DefinitionKind::Interface => Some(Self(def)),
-            _ => None,
-        }
-    }
-
-    /// Construct from a `GlobalDefIndex` (cross-file, used by query layer).
-    pub fn try_from_global_index(
-        global: &crate::global_index::GlobalDefIndex,
-        def: GlobalDefId,
-    ) -> Option<Self> {
-        match global.def_kind(def) {
-            Some(DefinitionKind::Interface) => Some(Self(def)),
-            _ => None,
-        }
-    }
-
-    /// Unwrap to the underlying `GlobalDefId`.
-    pub fn global_def(self) -> GlobalDefId {
-        self.0
-    }
-
-    /// Builder-internal placeholder. Replaced during finalization.
-    pub(crate) fn placeholder() -> Self {
-        Self(GlobalDefId::new(lyra_ast::ErasedAstId::placeholder(
-            lyra_source::FileId(u32::MAX),
-        )))
     }
 }
 

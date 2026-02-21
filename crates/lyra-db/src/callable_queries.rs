@@ -3,7 +3,7 @@ use std::sync::Arc;
 use lyra_ast::{AstNode, FunctionDecl, TaskDecl};
 use lyra_lexer::SyntaxKind;
 use lyra_semantic::UserTypeRef;
-use lyra_semantic::record::InterfaceDefId;
+use lyra_semantic::interface_id::InterfaceDefId;
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::types::{InterfaceType, SymbolType, Ty};
 use smol_str::SmolStr;

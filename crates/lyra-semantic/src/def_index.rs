@@ -6,7 +6,9 @@ use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::{EnumDef, EnumDefIdx, EnumId, EnumVariantId};
-use crate::record::{ModportDef, ModportDefId, RecordDef, RecordDefIdx, RecordId};
+use crate::interface_id::InterfaceDefId;
+use crate::modport_def::{ModportDef, ModportDefId};
+use crate::record::{RecordDef, RecordDefIdx, RecordId};
 use crate::scopes::{ScopeId, ScopeTree};
 use crate::symbols::{GlobalDefId, Namespace, SymbolId, SymbolTable};
 
@@ -51,7 +53,7 @@ pub struct DefIndex {
     pub enum_defs: Box<[EnumDef]>,
     pub record_defs: Box<[RecordDef]>,
     pub modport_defs: HashMap<ModportDefId, ModportDef>,
-    pub modport_name_map: HashMap<(crate::record::InterfaceDefId, SmolStr), ModportDefId>,
+    pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportDecl]>,
     pub diagnostics: Box<[SemanticDiag]>,
 }
@@ -81,11 +83,7 @@ impl DefIndex {
         }
     }
 
-    pub fn modport_by_name(
-        &self,
-        iface: crate::record::InterfaceDefId,
-        name: &str,
-    ) -> Option<&ModportDef> {
+    pub fn modport_by_name(&self, iface: InterfaceDefId, name: &str) -> Option<&ModportDef> {
         let id = self.modport_name_map.get(&(iface, SmolStr::new(name)))?;
         self.modport_defs.get(id)
     }

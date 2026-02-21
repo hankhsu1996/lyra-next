@@ -1,4 +1,4 @@
-use lyra_semantic::record::PortDirection;
+use lyra_semantic::modport_def::PortDirection;
 use lyra_semantic::symbols::Namespace;
 
 use super::*;
@@ -9,7 +9,7 @@ fn setup_modport_test(
 ) -> (
     SourceFile,
     CompilationUnit,
-    lyra_semantic::record::ModportDefId,
+    lyra_semantic::modport_def::ModportDefId,
 ) {
     let file = new_file(db, 0, src);
     let unit = single_file_unit(db, file);
