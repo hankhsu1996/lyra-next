@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
@@ -11,7 +13,7 @@ use crate::types::Ty;
 // Index type for enum def table (file-local dense index)
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EnumDefIdx(pub(crate) u32);
+pub struct EnumDefIdx(pub u32);
 
 // Global IDs (offset-independent, scope-owner-local ordinal)
 
@@ -28,9 +30,24 @@ pub struct EnumVariantId {
     pub variant_ordinal: u32,
 }
 
+/// Range specification on an enum member: `[N]` (count) or `[N:M]` (from-to).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnumVariant {
+pub enum EnumMemberRangeKind {
+    Count(ErasedAstId),
+    FromTo(ErasedAstId, ErasedAstId),
+}
+
+/// A single enum member as declared in the source.
+///
+/// Plain members have `range: None`; range members (`name[N]`, `name[N:M]`)
+/// have `range: Some(...)`. The `enum_variants` query only expands range
+/// members; plain members are real symbols found via normal scope lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumMemberDef {
     pub name: SmolStr,
+    pub name_range: TextRange,
+    pub range: Option<EnumMemberRangeKind>,
+    pub range_text_range: Option<TextRange>,
     pub init: Option<ErasedAstId>,
 }
 
@@ -44,7 +61,7 @@ pub struct EnumBase {
     pub range: TextRange,
 }
 
-/// Per-file enum definition with optional name, owner scope, and variants.
+/// Per-file enum definition with optional name, owner scope, and members.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDef {
     pub name: Option<SmolStr>,
@@ -52,7 +69,7 @@ pub struct EnumDef {
     pub ordinal: u32,
     pub scope: ScopeId,
     pub base: EnumBase,
-    pub variants: Box<[EnumVariant]>,
+    pub members: Box<[EnumMemberDef]>,
 }
 
 /// Resolved enum type information.
@@ -66,3 +83,27 @@ pub struct EnumSem {
     pub base_int: Option<BitVecType>,
     pub diags: Box<[SemanticDiag]>,
 }
+
+/// A range-generated enum variant resolved via `EnumVariantIndex`.
+///
+/// Uses stable `EnumId` so consumers can derive `Ty::Enum(enum_id)` directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumVariantTarget {
+    pub enum_id: EnumId,
+    pub variant_ordinal: u32,
+    pub def_range: TextRange,
+}
+
+/// Per-file index of range-generated enum variant names, keyed by scope.
+///
+/// Plain enum members are NOT in this index -- they are resolved via
+/// normal scope lookup. Only range-expanded names appear here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumVariantIndex {
+    pub by_scope: HashMap<ScopeId, HashMap<SmolStr, EnumVariantTarget>>,
+    pub diagnostics: Box<[SemanticDiag]>,
+}
+
+/// Per-package enum variant index for wildcard imports.
+/// Keyed by package name, then by variant name.
+pub type PkgEnumVariantIndex = HashMap<SmolStr, HashMap<SmolStr, EnumVariantTarget>>;

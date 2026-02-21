@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use lyra_semantic::def_index::{CompilationUnitEnv, DefIndex, ImplicitImport, ImportName};
+use lyra_semantic::enum_def::PkgEnumVariantIndex;
 use lyra_semantic::global_index::{
     DefinitionKind, GlobalDefIndex, PackageLocalFacts, PackageScope, PackageScopeIndex,
 };
@@ -11,6 +14,7 @@ use lyra_semantic::scopes::ScopeKind;
 use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId};
 use smol_str::SmolStr;
 
+use crate::enum_queries::enum_variant_index;
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
@@ -206,9 +210,8 @@ pub fn compilation_unit_env(
 
 /// Resolve all use-sites using only offset-independent data (Salsa-cached).
 ///
-/// Depends on `name_graph_file`, `global_def_index`, and
-/// `package_scope_index`. When all are backdated (e.g. whitespace edit),
-/// this query is NOT re-executed.
+/// Base version: no enum variant data. Used by `base_resolve_index`
+/// (the const-eval path) to avoid cycles with `enum_variant_index`.
 #[salsa::tracked(return_ref)]
 pub fn resolve_core_file(
     db: &dyn salsa::Database,
@@ -219,7 +222,37 @@ pub fn resolve_core_file(
     let global = global_def_index(db, unit);
     let pkg_scope = package_scope_index(db, unit);
     let cu_env = compilation_unit_env(db, unit);
-    lyra_semantic::build_resolve_core(graph, global, pkg_scope, cu_env)
+    lyra_semantic::build_resolve_core(graph, global, pkg_scope, cu_env, None, None)
+}
+
+/// Enriched core resolution with enum variant data (Salsa-cached).
+///
+/// Includes range-generated enum variant names (LRM 6.19.3) from both
+/// local enums and wildcard-imported packages.
+#[salsa::tracked(return_ref)]
+fn enriched_resolve_core(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+) -> CoreResolveOutput {
+    let graph = name_graph_file(db, file);
+    let global = global_def_index(db, unit);
+    let pkg_scope = package_scope_index(db, unit);
+    let cu_env = compilation_unit_env(db, unit);
+    let local_ev = enum_variant_index(db, file, unit);
+    let pkg_ev = build_pkg_enum_variant_index(db, unit, graph, global);
+    lyra_semantic::build_resolve_core(
+        graph,
+        global,
+        pkg_scope,
+        cu_env,
+        Some(local_ev),
+        if pkg_ev.is_empty() {
+            None
+        } else {
+            Some(&pkg_ev)
+        },
+    )
 }
 
 /// Detect import conflicts per LRM 26.5 (Salsa-cached).
@@ -237,11 +270,33 @@ pub fn import_conflicts_file(
     lyra_semantic::detect_import_conflicts(graph, pkg_scope)
 }
 
+/// Base per-file resolution index without enum enrichment (Salsa-cached).
+///
+/// Only for `eval_const_int` to avoid cycles with `enum_variant_index`.
+#[salsa::tracked(return_ref)]
+pub fn base_resolve_index(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+) -> ResolveIndex {
+    let def = def_index_file(db, file);
+    let core = resolve_core_file(db, file, unit);
+    let global = global_def_index(db, unit);
+    let lookup_decl = |def_id: GlobalDefId| -> Option<lyra_semantic::symbols::SymbolId> {
+        let target_file_id = def_id.file();
+        let target_file = source_file_by_id(db, unit, target_file_id)?;
+        let target_def = def_index_file(db, target_file);
+        target_def.decl_to_symbol.get(&def_id.ast_id()).copied()
+    };
+    let instance_filter =
+        |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
+    lyra_semantic::build_resolve_index(def, core, &lookup_decl, &instance_filter)
+}
+
 /// Build per-file resolution index (Salsa-cached).
 ///
-/// Combines offset-independent resolve results from `resolve_core_file`
-/// with offset-dependent data from `def_index_file` (`ast_ids`, ranges)
-/// to produce the final `HashMap` and diagnostics. Trivially cheap.
+/// Enriched version with enum variant data. All consumers use this
+/// except `eval_const_int` which uses `base_resolve_index`.
 #[salsa::tracked(return_ref)]
 pub fn resolve_index_file(
     db: &dyn salsa::Database,
@@ -249,7 +304,7 @@ pub fn resolve_index_file(
     unit: CompilationUnit,
 ) -> ResolveIndex {
     let def = def_index_file(db, file);
-    let core = resolve_core_file(db, file, unit);
+    let core = enriched_resolve_core(db, file, unit);
     let global = global_def_index(db, unit);
     let lookup_decl = |def_id: GlobalDefId| -> Option<lyra_semantic::symbols::SymbolId> {
         let target_file_id = def_id.file();
@@ -306,4 +361,44 @@ pub fn def_symbol(
         file: file_id,
         local,
     })
+}
+
+/// Build per-package enum variant index for wildcard imports.
+///
+/// Iterates wildcard imports in the file's name graph, resolves each
+/// package, and extracts range-generated enum variant names from the
+/// package's scope in the target file's `enum_variant_index`.
+fn build_pkg_enum_variant_index(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    graph: &NameGraph,
+    global: &GlobalDefIndex,
+) -> PkgEnumVariantIndex {
+    let mut result: PkgEnumVariantIndex = HashMap::new();
+    let mut seen_packages: std::collections::HashSet<SmolStr> = std::collections::HashSet::new();
+
+    for imp in graph.imports() {
+        if imp.name != ImportName::Wildcard {
+            continue;
+        }
+        if !seen_packages.insert(imp.package.clone()) {
+            continue;
+        }
+        let Some(def_id) = global.resolve_package(&imp.package) else {
+            continue;
+        };
+        let pkg_file_id = def_id.file();
+        let Some(pkg_source_file) = source_file_by_id(db, unit, pkg_file_id) else {
+            continue;
+        };
+        let pkg_def = def_index_file(db, pkg_source_file);
+        let Some(pkg_scope_id) = pkg_def.package_scope(&imp.package) else {
+            continue;
+        };
+        let ev_idx = enum_variant_index(db, pkg_source_file, unit);
+        if let Some(scope_map) = ev_idx.by_scope.get(&pkg_scope_id) {
+            result.insert(imp.package.clone(), scope_map.clone());
+        }
+    }
+    result
 }

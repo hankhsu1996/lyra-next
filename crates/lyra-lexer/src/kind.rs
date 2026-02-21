@@ -460,6 +460,9 @@ pub enum SyntaxKind {
     // Standalone dollar (queue/assoc dim delimiter)
     Dollar,
 
+    // Enum member range (LRM 6.19.3)
+    EnumMemberRange,
+
     #[doc(hidden)]
     __Last,
 }

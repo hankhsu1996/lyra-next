@@ -319,7 +319,12 @@ fn expand_typedef(
         return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
     };
 
-    let target_id = resolution.symbol;
+    let target_id = match &resolution.target {
+        lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+        lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
+            return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
+        }
+    };
 
     // Look up target symbol kind
     let Some(target_file) = source_file_by_id(db, unit, target_id.file) else {

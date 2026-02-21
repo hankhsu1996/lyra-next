@@ -1,3 +1,4 @@
+use lyra_semantic::resolve_index::ResolvedTarget;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::ExprType;
 use lyra_semantic::types::{SymbolType, Ty};
@@ -30,7 +31,7 @@ pub fn resolve_at(
         && let Some(ast_id) = ast_map.ast_id(&name_ref)
         && let Some(resolution) = resolve.resolutions.get(&ast_id.erase())
     {
-        return Some(resolution.symbol);
+        return resolution_to_symbol(&resolution.target);
     }
 
     // Try qualified name (pkg::sym)
@@ -43,7 +44,7 @@ pub fn resolve_at(
         && let Some(ast_id) = ast_map.ast_id(&inst)
         && let Some(resolution) = resolve.resolutions.get(&ast_id.erase())
     {
-        return Some(resolution.symbol);
+        return resolution_to_symbol(&resolution.target);
     }
 
     None
@@ -113,7 +114,14 @@ fn find_qualified_name_at(
         let resolve = resolve_index_file(db, file, unit);
         let ast_id = ast_map.ast_id(&qn)?;
         let resolution = resolve.resolutions.get(&ast_id.erase())?;
-        Some(resolution.symbol)
+        resolution_to_symbol(&resolution.target)
+    }
+}
+
+fn resolution_to_symbol(target: &ResolvedTarget) -> Option<GlobalSymbolId> {
+    match target {
+        ResolvedTarget::Symbol(sym) => Some(*sym),
+        ResolvedTarget::EnumVariant(_) => None,
     }
 }
 

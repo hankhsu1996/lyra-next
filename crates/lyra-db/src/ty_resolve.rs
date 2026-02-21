@@ -49,6 +49,9 @@ fn classify_resolve_result(
                         local: sym_id,
                     }
                 }
+                CoreResolution::EnumVariant(target) => {
+                    return TypeResolveOutcome::Ok(Ty::Enum(target.enum_id.clone()));
+                }
             };
             let sym_ref = SymbolRef::new(db, unit, gsym);
             let sym_type = type_of_symbol(db, sym_ref);

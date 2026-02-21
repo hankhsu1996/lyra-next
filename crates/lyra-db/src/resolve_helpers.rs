@@ -17,7 +17,13 @@ pub(crate) fn resolve_type_arg_impl(
     let ast_id = ast_id_map.erased_ast_id(name_node)?;
     let resolve = resolve_index_file(db, source_file, unit);
     let resolution = resolve.resolutions.get(&ast_id)?;
-    let sym_ref = SymbolRef::new(db, unit, resolution.symbol);
+    let sym_id = match &resolution.target {
+        lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+        lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
+            return Some(Ty::Enum(target.enum_id.clone()));
+        }
+    };
+    let sym_ref = SymbolRef::new(db, unit, sym_id);
     let sym_type = type_of_symbol(db, sym_ref);
     match &sym_type {
         SymbolType::TypeAlias(ty) => Some(ty.clone()),

@@ -7,6 +7,7 @@ use smallvec::SmallVec;
 
 use crate::def_index::{ExportDeclId, ImportDeclId, LocalDeclId};
 use crate::diagnostic::SemanticDiag;
+use crate::enum_def::EnumVariantTarget;
 use crate::scopes::ScopeId;
 use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
 
@@ -15,7 +16,7 @@ use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
 /// Local resolutions carry a `SymbolId` (per-file); global resolutions
 /// carry a `GlobalDefId` (cross-file, topology-stable). The mapping
 /// to `GlobalSymbolId` happens in `build_resolve_index`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoreResolution {
     /// Resolved within the same file's lexical scopes.
     Local {
@@ -27,6 +28,8 @@ pub enum CoreResolution {
         decl: GlobalDefId,
         namespace: Namespace,
     },
+    /// Resolved as a range-generated enum variant name.
+    EnumVariant(EnumVariantTarget),
 }
 
 /// Result of resolving a single use-site.
@@ -83,10 +86,17 @@ pub struct WildcardLocalConflict {
     pub use_site_idx: u32,
 }
 
-/// A resolved name: the target symbol and the namespace it was found in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// The resolved target of a name: either a declared symbol or a range-generated enum variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedTarget {
+    Symbol(GlobalSymbolId),
+    EnumVariant(EnumVariantTarget),
+}
+
+/// A resolved name: the target and the namespace it was found in.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolution {
-    pub symbol: GlobalSymbolId,
+    pub target: ResolvedTarget,
     pub namespace: Namespace,
 }
 

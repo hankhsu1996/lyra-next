@@ -235,6 +235,24 @@ fn enum_type(p: &mut Parser) {
 fn enum_member(p: &mut Parser) {
     let m = p.start();
     p.expect(SyntaxKind::Ident);
+    if p.at(SyntaxKind::LBracket) {
+        let r = p.start();
+        p.bump(); // [
+        if p.at(SyntaxKind::RBracket) {
+            p.error("expected expression in enum member range");
+        } else {
+            let w = p.start();
+            expressions::expr(p);
+            w.complete(p, SyntaxKind::Expression);
+            if p.eat(SyntaxKind::Colon) {
+                let w2 = p.start();
+                expressions::expr(p);
+                w2.complete(p, SyntaxKind::Expression);
+            }
+        }
+        p.expect(SyntaxKind::RBracket);
+        r.complete(p, SyntaxKind::EnumMemberRange);
+    }
     if p.eat(SyntaxKind::Assign) {
         // Expression wrapper: canonical single-child wrapper for embedded
         // expressions. More sites (Declarator init, dimensions) will migrate later.

@@ -28,6 +28,9 @@ pub enum MessageId {
     UnsupportedTaggedUnion,
     IllegalEnumBaseType,
     EnumBaseDimsNotConstant,
+    EnumRangeBoundNotEvaluable,
+    EnumRangeCountNegative,
+    EnumRangeTooLarge,
     EnumAssignFromNonEnum,
     EnumAssignWrongEnum,
     EnumTypeHere,
@@ -168,6 +171,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::UnsupportedTaggedUnion
         | MessageId::IllegalEnumBaseType
         | MessageId::EnumBaseDimsNotConstant
+        | MessageId::EnumRangeBoundNotEvaluable
+        | MessageId::EnumRangeCountNegative
+        | MessageId::EnumRangeTooLarge
         | MessageId::EnumAssignFromNonEnum
         | MessageId::EnumAssignWrongEnum
         | MessageId::EnumTypeHere
@@ -224,6 +230,17 @@ fn render_type_message(msg: &Message) -> String {
         }
         MessageId::EnumBaseDimsNotConstant => {
             "enum base type has non-constant packed dimensions".into()
+        }
+        MessageId::EnumRangeBoundNotEvaluable => {
+            "enum member range bound is not a constant expression".into()
+        }
+        MessageId::EnumRangeCountNegative => {
+            let count = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            format!("enum member range count is negative ({count})")
+        }
+        MessageId::EnumRangeTooLarge => {
+            let count = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            format!("enum member range count is too large ({count})")
         }
         MessageId::EnumAssignFromNonEnum => {
             let rhs_ty = name();
