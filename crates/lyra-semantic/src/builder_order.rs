@@ -11,6 +11,7 @@ use crate::symbols::SymbolId;
 enum OrderItem {
     UseSite(usize),
     Import(usize),
+    LocalDecl(usize),
 }
 
 /// Assign monotonic order keys to imports and use-sites via preorder syntax walk.
@@ -34,7 +35,17 @@ pub(crate) fn assign_order_keys(ctx: &mut DefContext<'_>, root: &SyntaxNode) {
             .or_default()
             .push(OrderItem::Import(i));
     }
-    let total_items = ctx.use_sites.len() + ctx.imports.len();
+    for (i, decl) in ctx.local_decls.iter().enumerate() {
+        let entry = items_by_ast_id.entry(decl.ast_id).or_default();
+        debug_assert!(
+            !entry
+                .iter()
+                .any(|item| matches!(item, OrderItem::LocalDecl(_))),
+            "duplicate LocalDecl AstId"
+        );
+        entry.push(OrderItem::LocalDecl(i));
+    }
+    let total_items = ctx.use_sites.len() + ctx.imports.len() + ctx.local_decls.len();
 
     // Collect (OrderItem, order_key) assignments via preorder walk
     let mut assignments: Vec<(OrderItem, u32)> = Vec::with_capacity(total_items);
@@ -54,6 +65,7 @@ pub(crate) fn assign_order_keys(ctx: &mut DefContext<'_>, root: &SyntaxNode) {
         match item {
             OrderItem::UseSite(i) => ctx.use_sites[*i].order_key = *key,
             OrderItem::Import(i) => ctx.imports[*i].order_key = *key,
+            OrderItem::LocalDecl(i) => ctx.local_decls[*i].order_key = *key,
         }
     }
 }

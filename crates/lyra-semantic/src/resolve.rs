@@ -5,14 +5,15 @@ use smallvec::{SmallVec, smallvec};
 use smol_str::SmolStr;
 
 use crate::def_index::{
-    CompilationUnitEnv, DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, NamePath,
+    CompilationUnitEnv, DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, LocalDeclId,
+    NamePath,
 };
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
 use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
 use crate::name_graph::NameGraph;
 use crate::resolve_index::{
     CoreResolution, CoreResolveOutput, CoreResolveResult, ImportConflict, ImportConflictKind,
-    ImportError, Resolution, ResolveIndex, UnresolvedReason,
+    ImportError, Resolution, ResolveIndex, UnresolvedReason, WildcardLocalConflict,
 };
 use crate::scopes::{ScopeId, SymbolNameLookup};
 use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
@@ -80,18 +81,18 @@ pub fn build_resolve_core(
             NamePath::Simple(name) => {
                 resolve_simple(&ctx, entry.scope, name, entry.expected_ns, entry.order_key)
             }
-            // Qualified names (P::x) bypass positional import filtering
-            // because visibility is determined solely by the package
-            // qualification, not by import declaration position.
             NamePath::Qualified { segments } => {
                 resolve_qualified(segments, global, pkg_scope, entry.expected_ns)
             }
         })
         .collect();
 
+    let wildcard_local_conflicts = detect_wildcard_local_conflicts(&ctx, &graph.use_entries);
+
     CoreResolveOutput {
         resolutions,
         import_errors: import_errors.into_boxed_slice(),
+        wildcard_local_conflicts: wildcard_local_conflicts.into_boxed_slice(),
     }
 }
 
@@ -494,8 +495,6 @@ fn resolve_simple(
     }
 
     // For type-position lookups, fall back to the definition namespace.
-    // Interface names used as types (e.g. `my_bus b;`) live in the
-    // definition namespace per IEEE 1800 section 3.13(a).
     if matches!(expected, ExpectedNs::TypeThenValue)
         && let Some((def_id, _)) = ctx.global.resolve_definition(name)
     {
@@ -674,6 +673,226 @@ fn resolve_via_implicit_import(
         });
     }
     WildcardResult::NotFound
+}
+
+/// Detect LRM 26.3 wildcard-local declaration conflicts.
+///
+/// For each scope with wildcard imports, check if any local declaration
+/// conflicts with a name provided by a wildcard import where a use-site
+/// "realizes" the wildcard name before the local declaration.
+///
+/// A wildcard name is "realized" when a use-site references the name
+/// after the wildcard import but before the local declaration. The
+/// use-site need not resolve via the wildcard -- the realization occurs
+/// simply by the name being used in a context where the wildcard
+/// provides it (LRM 26.3).
+fn detect_wildcard_local_conflicts(
+    ctx: &ResolveCtx<'_>,
+    use_entries: &[crate::name_graph::UseEntry],
+) -> Vec<WildcardLocalConflict> {
+    use std::collections::HashMap as StdHashMap;
+    let graph = ctx.graph;
+
+    let mut by_local: StdHashMap<LocalDeclId, WildcardLocalConflict> = StdHashMap::new();
+
+    for scope_idx in 0..graph.scopes.len() {
+        let scope_id = ScopeId(scope_idx as u32);
+
+        // Find wildcard imports in this scope that provide names
+        let wildcard_imports: Vec<_> = graph
+            .imports_for_scope(scope_id)
+            .iter()
+            .filter(|imp| imp.name == ImportName::Wildcard)
+            .collect();
+        if wildcard_imports.is_empty() {
+            continue;
+        }
+
+        let local_decls = graph.local_decls_for_scope(scope_id);
+        if local_decls.is_empty() {
+            continue;
+        }
+
+        // For each local_decl, check if a wildcard import provides the same
+        // name and there's a use-site between import and local_decl that
+        // "realizes" the name.
+        for local in local_decls {
+            for wc_imp in &wildcard_imports {
+                // The wildcard import must be before the local declaration
+                if wc_imp.order_key >= local.order_key {
+                    continue;
+                }
+
+                // Check if the wildcard provides this name in the local's namespace
+                if ctx
+                    .pkg_scope
+                    .resolve(&wc_imp.package, &local.name, local.namespace)
+                    .is_none()
+                {
+                    continue;
+                }
+
+                // Find a use-site that realizes the name: any use-site referencing
+                // this name where order_key is between import and local_decl.
+                // The use-site can be in this scope or any descendant scope.
+                let realizing_use = find_realizing_use_site(
+                    ctx,
+                    use_entries,
+                    scope_id,
+                    &local.name,
+                    local.namespace,
+                    wc_imp.order_key,
+                    local.order_key,
+                );
+
+                if let Some(use_idx) = realizing_use {
+                    let existing = by_local.entry(local.id).or_insert(WildcardLocalConflict {
+                        local_decl_id: local.id,
+                        namespace: local.namespace,
+                        import_id: wc_imp.id,
+                        use_site_idx: use_idx as u32,
+                    });
+                    // Keep the earliest use-site
+                    if use_entries[use_idx].order_key
+                        < use_entries[existing.use_site_idx as usize].order_key
+                    {
+                        existing.use_site_idx = use_idx as u32;
+                        existing.import_id = wc_imp.id;
+                    }
+                    break; // One wildcard is enough to trigger the conflict
+                }
+            }
+        }
+    }
+
+    let mut conflicts: Vec<WildcardLocalConflict> = by_local.into_values().collect();
+    conflicts.sort_by_key(|c| (c.local_decl_id.scope, c.local_decl_id.ordinal));
+    conflicts
+}
+
+/// Find a use-site that "realizes" a wildcard-imported name.
+///
+/// Returns the index of the earliest use-site in `scope` or any descendant
+/// that references `name` with a compatible namespace and has an `order_key`
+/// between `after_key` (exclusive) and `before_key` (exclusive).
+fn find_realizing_use_site(
+    ctx: &ResolveCtx<'_>,
+    use_entries: &[crate::name_graph::UseEntry],
+    scope: ScopeId,
+    name: &str,
+    ns: Namespace,
+    after_key: u32,
+    before_key: u32,
+) -> Option<usize> {
+    let mut best: Option<(usize, u32)> = None;
+
+    for (idx, entry) in use_entries.iter().enumerate() {
+        // Must be a simple name
+        let Some(use_name) = entry.path.as_simple() else {
+            continue;
+        };
+        if use_name != name {
+            continue;
+        }
+        // Must be in the right order_key window
+        if entry.order_key <= after_key || entry.order_key >= before_key {
+            continue;
+        }
+        // Must match namespace
+        let ns_match = match entry.expected_ns {
+            ExpectedNs::Exact(expected_ns) => expected_ns == ns,
+            ExpectedNs::TypeThenValue => ns == Namespace::Type || ns == Namespace::Value,
+        };
+        if !ns_match {
+            continue;
+        }
+        // Must be in scope or a descendant of scope
+        if !is_scope_or_descendant(ctx.graph, entry.scope, scope) {
+            continue;
+        }
+        // Check that no local declaration or explicit import in the
+        // use-site's lexical chain (before reaching the wildcard scope)
+        // would take precedence over the wildcard import.
+        if has_higher_precedence_binding(
+            ctx.graph,
+            ctx.pkg_scope,
+            entry.scope,
+            scope,
+            name,
+            ns,
+            entry.order_key,
+        ) {
+            continue;
+        }
+
+        if best.is_none() || entry.order_key < best.as_ref().map_or(u32::MAX, |(_, k)| *k) {
+            best = Some((idx, entry.order_key));
+        }
+    }
+
+    best.map(|(idx, _)| idx)
+}
+
+/// Check if `child` is the same as `ancestor` or a descendant of it.
+fn is_scope_or_descendant(graph: &NameGraph, child: ScopeId, ancestor: ScopeId) -> bool {
+    let mut current = Some(child);
+    while let Some(s) = current {
+        if s == ancestor {
+            return true;
+        }
+        current = graph.scopes.get(s).parent;
+    }
+    false
+}
+
+/// Check if any scope between `start` (inclusive) and `stop` (exclusive)
+/// in the parent chain has a local declaration or an explicit import
+/// that would shadow the wildcard import for the given name.
+///
+/// An explicit import `import pkg::name;` in a descendant scope has
+/// higher precedence than a wildcard import in an ancestor scope
+/// (LRM 26.3 resolution order), so a use-site resolved via such an
+/// explicit import does not count as a wildcard realization.
+fn has_higher_precedence_binding(
+    graph: &NameGraph,
+    pkg_scope: &PackageScopeIndex,
+    start: ScopeId,
+    stop: ScopeId,
+    name: &str,
+    ns: Namespace,
+    use_order_key: u32,
+) -> bool {
+    let mut current = Some(start);
+    while let Some(s) = current {
+        if s == stop {
+            return false;
+        }
+        // Check local declarations (scope-wide visibility)
+        let scope_data = graph.scopes.get(s);
+        let bindings = match ns {
+            Namespace::Value => &scope_data.value_ns,
+            Namespace::Type => &scope_data.type_ns,
+            Namespace::Definition => return false,
+        };
+        if bindings
+            .binary_search_by(|id| graph.name(*id).cmp(name))
+            .is_ok()
+        {
+            return true;
+        }
+        // Check explicit imports (positional: must precede the use-site)
+        for imp in graph.imports_for_scope(s) {
+            if let ImportName::Explicit(ref member) = imp.name
+                && member.as_str() == name
+                && imp.order_key < use_order_key
+                && pkg_scope.resolve(&imp.package, name, ns).is_some()
+            {
+                return true;
+            }
+        }
+        current = scope_data.parent;
+    }
+    false
 }
 
 /// Build the per-file resolution index from pre-computed core results.

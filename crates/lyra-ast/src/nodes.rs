@@ -640,21 +640,22 @@ impl<I: Iterator<Item = rowan::NodeOrToken<lyra_parser::SyntaxNode, SyntaxToken>
 mod tests {
     use super::*;
 
+    fn find_range(node: &lyra_parser::SyntaxNode) -> Option<RangeExpr> {
+        if node.kind() == SyntaxKind::RangeExpr {
+            return RangeExpr::cast(node.clone());
+        }
+        for child in node.children() {
+            if let Some(r) = find_range(&child) {
+                return Some(r);
+            }
+        }
+        None
+    }
+
     fn parse_range_expr(src: &str) -> RangeExpr {
         let tokens = lyra_lexer::lex(src);
         let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, src);
         let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
-        fn find_range(node: &lyra_parser::SyntaxNode) -> Option<RangeExpr> {
-            if node.kind() == SyntaxKind::RangeExpr {
-                return RangeExpr::cast(node.clone());
-            }
-            for child in node.children() {
-                if let Some(r) = find_range(&child) {
-                    return Some(r);
-                }
-            }
-            None
-        }
         find_range(&parse.syntax()).expect("should contain a RangeExpr")
     }
 

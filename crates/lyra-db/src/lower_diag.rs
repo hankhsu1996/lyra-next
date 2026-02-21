@@ -2,7 +2,9 @@ use lyra_diag::{Arg, Diagnostic, DiagnosticCode, Label, LabelKind, Message, Mess
 use lyra_preprocess::PreprocOutput;
 use lyra_semantic::def_index::DefIndex;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
-use lyra_semantic::resolve_index::{ImportConflict, ImportConflictKind, ResolveIndex};
+use lyra_semantic::resolve_index::{
+    CoreResolveOutput, ImportConflict, ImportConflictKind, ResolveIndex,
+};
 use lyra_source::{FileId, Span, TextRange, TextSize};
 use smol_str::SmolStr;
 
@@ -166,6 +168,81 @@ pub(crate) fn lower_import_conflicts(
         if let Some(d) = lower_single_import_conflict(file_id, pp, def, conflict) {
             diags.push(d);
         }
+    }
+    diags
+}
+
+/// Lower LRM 26.3 wildcard-local declaration conflicts to diagnostics.
+pub(crate) fn lower_wildcard_local_conflicts(
+    file_id: FileId,
+    pp: &PreprocOutput,
+    def: &DefIndex,
+    core: &CoreResolveOutput,
+) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    for conflict in &*core.wildcard_local_conflicts {
+        // Look up local decl by (scope, ordinal)
+        let local = def
+            .local_decls
+            .binary_search_by_key(
+                &(conflict.local_decl_id.scope, conflict.local_decl_id.ordinal),
+                |d| (d.id.scope, d.id.ordinal),
+            )
+            .ok()
+            .map(|idx| &def.local_decls[idx]);
+        let Some(local) = local else { continue };
+
+        // Look up import by (scope, ordinal)
+        let import = def
+            .imports
+            .binary_search_by_key(
+                &(conflict.import_id.scope, conflict.import_id.ordinal),
+                |i| (i.id.scope, i.id.ordinal),
+            )
+            .ok()
+            .map(|idx| &def.imports[idx]);
+
+        let (primary_span, _) = map_span_or_fallback(file_id, &pp.source_map, local.range);
+        let name = local.name.clone();
+        let pkg = import.map_or_else(|| SmolStr::new("?"), |i| i.package.clone());
+
+        let mut d = Diagnostic::new(
+            Severity::Error,
+            DiagnosticCode::IMPORT_CONFLICT,
+            Message::new(
+                MessageId::WildcardLocalConflict,
+                vec![Arg::Name(name.clone()), Arg::Name(pkg)],
+            ),
+        )
+        .with_label(Label {
+            kind: LabelKind::Primary,
+            span: primary_span,
+            message: Message::simple(MessageId::RedefinedHere),
+        });
+
+        // Secondary label: "wildcard import of `name` realized here"
+        if let Some(us) = def.use_sites.get(conflict.use_site_idx as usize)
+            && let Some(use_span) = pp.source_map.map_span(us.range)
+        {
+            d = d.with_label(Label {
+                kind: LabelKind::Secondary,
+                span: use_span,
+                message: Message::new(MessageId::RealizedHere, vec![Arg::Name(name.clone())]),
+            });
+        }
+
+        // Secondary label: "wildcard import here"
+        if let Some(imp) = import
+            && let Some(imp_span) = pp.source_map.map_span(imp.range)
+        {
+            d = d.with_label(Label {
+                kind: LabelKind::Secondary,
+                span: imp_span,
+                message: Message::simple(MessageId::WildcardImportHere),
+            });
+        }
+
+        diags.push(d);
     }
     diags
 }
