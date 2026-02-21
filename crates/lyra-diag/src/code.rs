@@ -59,6 +59,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 6,
     };
+    pub const ENUM_ASSIGN_INCOMPAT: Self = Self {
+        namespace: "lyra.type",
+        number: 7,
+    };
     pub const UNDECLARED_TYPE: Self = Self {
         namespace: "lyra.type",
         number: 2,

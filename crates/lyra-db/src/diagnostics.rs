@@ -88,89 +88,214 @@ pub fn type_diagnostics(
     let mut seen = std::collections::HashSet::new();
     let mut diags = Vec::new();
     for item in &items {
-        match item {
-            TypeCheckItem::AssignTruncation {
-                assign_range,
-                lhs_range,
-                rhs_range,
-                lhs_width,
-                rhs_width,
-            } => {
-                let Some(assign_span) = pp.source_map.map_span(*assign_range) else {
-                    continue;
-                };
-                let key = (assign_span.range.start(), *lhs_range, *rhs_range);
-                if !seen.insert(key) {
-                    continue;
-                }
-                let lhs_span = pp.source_map.map_span(*lhs_range).unwrap_or(assign_span);
-                let rhs_span = pp.source_map.map_span(*rhs_range).unwrap_or(assign_span);
-
-                diags.push(
-                    lyra_diag::Diagnostic::new(
-                        lyra_diag::Severity::Warning,
-                        lyra_diag::DiagnosticCode::WIDTH_MISMATCH,
-                        lyra_diag::Message::new(
-                            lyra_diag::MessageId::WidthMismatch,
-                            vec![
-                                lyra_diag::Arg::Width(*lhs_width),
-                                lyra_diag::Arg::Width(*rhs_width),
-                            ],
-                        ),
-                    )
-                    .with_label(lyra_diag::Label {
-                        kind: lyra_diag::LabelKind::Primary,
-                        span: assign_span,
-                        message: lyra_diag::Message::new(
-                            lyra_diag::MessageId::WidthMismatch,
-                            vec![
-                                lyra_diag::Arg::Width(*lhs_width),
-                                lyra_diag::Arg::Width(*rhs_width),
-                            ],
-                        ),
-                    })
-                    .with_label(lyra_diag::Label {
-                        kind: lyra_diag::LabelKind::Secondary,
-                        span: lhs_span,
-                        message: lyra_diag::Message::new(
-                            lyra_diag::MessageId::BitsWide,
-                            vec![lyra_diag::Arg::Width(*lhs_width)],
-                        ),
-                    })
-                    .with_label(lyra_diag::Label {
-                        kind: lyra_diag::LabelKind::Secondary,
-                        span: rhs_span,
-                        message: lyra_diag::Message::new(
-                            lyra_diag::MessageId::BitsWide,
-                            vec![lyra_diag::Arg::Width(*rhs_width)],
-                        ),
-                    }),
-                );
-            }
-            TypeCheckItem::BitsNonDataType {
-                call_range,
-                arg_range,
-            } => {
-                let Some(call_span) = pp.source_map.map_span(*call_range) else {
-                    continue;
-                };
-                let arg_span = pp.source_map.map_span(*arg_range).unwrap_or(call_span);
-                diags.push(
-                    lyra_diag::Diagnostic::new(
-                        lyra_diag::Severity::Error,
-                        lyra_diag::DiagnosticCode::BITS_NON_DATA_TYPE,
-                        lyra_diag::Message::simple(lyra_diag::MessageId::BitsNonDataType),
-                    )
-                    .with_label(lyra_diag::Label {
-                        kind: lyra_diag::LabelKind::Primary,
-                        span: arg_span,
-                        message: lyra_diag::Message::simple(lyra_diag::MessageId::NotADataType),
-                    }),
-                );
-            }
-        }
+        lower_type_check_item(db, unit, item, &pp.source_map, &mut seen, &mut diags);
     }
     diags
+}
+
+fn lower_type_check_item(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    seen: &mut std::collections::HashSet<(
+        lyra_source::TextSize,
+        lyra_source::TextRange,
+        lyra_source::TextRange,
+    )>,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    match item {
+        TypeCheckItem::AssignTruncation {
+            assign_range,
+            lhs_range,
+            rhs_range,
+            lhs_width,
+            rhs_width,
+        } => {
+            let Some(assign_span) = source_map.map_span(*assign_range) else {
+                return;
+            };
+            let key = (assign_span.range.start(), *lhs_range, *rhs_range);
+            if !seen.insert(key) {
+                return;
+            }
+            let lhs_span = source_map.map_span(*lhs_range).unwrap_or(assign_span);
+            let rhs_span = source_map.map_span(*rhs_range).unwrap_or(assign_span);
+            diags.push(truncation_diag(
+                *lhs_width,
+                *rhs_width,
+                assign_span,
+                lhs_span,
+                rhs_span,
+            ));
+        }
+        TypeCheckItem::BitsNonDataType {
+            call_range,
+            arg_range,
+        } => {
+            let Some(call_span) = source_map.map_span(*call_range) else {
+                return;
+            };
+            let arg_span = source_map.map_span(*arg_range).unwrap_or(call_span);
+            diags.push(
+                lyra_diag::Diagnostic::new(
+                    lyra_diag::Severity::Error,
+                    lyra_diag::DiagnosticCode::BITS_NON_DATA_TYPE,
+                    lyra_diag::Message::simple(lyra_diag::MessageId::BitsNonDataType),
+                )
+                .with_label(lyra_diag::Label {
+                    kind: lyra_diag::LabelKind::Primary,
+                    span: arg_span,
+                    message: lyra_diag::Message::simple(lyra_diag::MessageId::NotADataType),
+                }),
+            );
+        }
+        TypeCheckItem::EnumAssignFromNonEnum {
+            assign_range,
+            lhs_range,
+            rhs_range,
+            lhs_enum,
+            rhs_ty,
+        } => {
+            let Some(assign_span) = source_map.map_span(*assign_range) else {
+                return;
+            };
+            let rhs_span = source_map.map_span(*rhs_range).unwrap_or(assign_span);
+            let lhs_span = source_map.map_span(*lhs_range).unwrap_or(assign_span);
+            let lhs_name = enum_name(db, unit, lhs_enum);
+            let rhs_pretty = rhs_ty.pretty();
+            diags.push(enum_assign_diag(
+                lyra_diag::MessageId::EnumAssignFromNonEnum,
+                rhs_pretty,
+                lhs_name,
+                rhs_span,
+                lhs_span,
+            ));
+        }
+        TypeCheckItem::EnumAssignWrongEnum {
+            assign_range,
+            lhs_range,
+            rhs_range,
+            lhs_enum,
+            rhs_enum,
+        } => {
+            let Some(assign_span) = source_map.map_span(*assign_range) else {
+                return;
+            };
+            let rhs_span = source_map.map_span(*rhs_range).unwrap_or(assign_span);
+            let lhs_span = source_map.map_span(*lhs_range).unwrap_or(assign_span);
+            let lhs_name = enum_name(db, unit, lhs_enum);
+            let rhs_name = enum_name(db, unit, rhs_enum);
+            diags.push(enum_assign_diag(
+                lyra_diag::MessageId::EnumAssignWrongEnum,
+                rhs_name,
+                lhs_name,
+                rhs_span,
+                lhs_span,
+            ));
+        }
+    }
+}
+
+fn enum_name(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    id: &lyra_semantic::enum_def::EnumId,
+) -> smol_str::SmolStr {
+    let Some(sf) = source_file_by_id(db, unit, id.file) else {
+        return smol_str::SmolStr::new_static("<anonymous enum>");
+    };
+    let def = def_index_file(db, sf);
+    for enum_def in &*def.enum_defs {
+        if enum_def.owner == id.owner && enum_def.ordinal == id.ordinal {
+            return enum_def
+                .name
+                .clone()
+                .unwrap_or_else(|| smol_str::SmolStr::new_static("<anonymous enum>"));
+        }
+    }
+    smol_str::SmolStr::new_static("<anonymous enum>")
+}
+
+fn truncation_diag(
+    lhs_width: u32,
+    rhs_width: u32,
+    assign_span: lyra_source::Span,
+    lhs_span: lyra_source::Span,
+    rhs_span: lyra_source::Span,
+) -> lyra_diag::Diagnostic {
+    let width_args = || {
+        vec![
+            lyra_diag::Arg::Width(lhs_width),
+            lyra_diag::Arg::Width(rhs_width),
+        ]
+    };
+    lyra_diag::Diagnostic::new(
+        lyra_diag::Severity::Warning,
+        lyra_diag::DiagnosticCode::WIDTH_MISMATCH,
+        lyra_diag::Message::new(lyra_diag::MessageId::WidthMismatch, width_args()),
+    )
+    .with_label(lyra_diag::Label {
+        kind: lyra_diag::LabelKind::Primary,
+        span: assign_span,
+        message: lyra_diag::Message::new(lyra_diag::MessageId::WidthMismatch, width_args()),
+    })
+    .with_label(lyra_diag::Label {
+        kind: lyra_diag::LabelKind::Secondary,
+        span: lhs_span,
+        message: lyra_diag::Message::new(
+            lyra_diag::MessageId::BitsWide,
+            vec![lyra_diag::Arg::Width(lhs_width)],
+        ),
+    })
+    .with_label(lyra_diag::Label {
+        kind: lyra_diag::LabelKind::Secondary,
+        span: rhs_span,
+        message: lyra_diag::Message::new(
+            lyra_diag::MessageId::BitsWide,
+            vec![lyra_diag::Arg::Width(rhs_width)],
+        ),
+    })
+}
+
+fn enum_assign_diag(
+    msg_id: lyra_diag::MessageId,
+    rhs_label: smol_str::SmolStr,
+    lhs_name: smol_str::SmolStr,
+    rhs_span: lyra_source::Span,
+    lhs_span: lyra_source::Span,
+) -> lyra_diag::Diagnostic {
+    lyra_diag::Diagnostic::new(
+        lyra_diag::Severity::Error,
+        lyra_diag::DiagnosticCode::ENUM_ASSIGN_INCOMPAT,
+        lyra_diag::Message::new(
+            msg_id,
+            vec![
+                lyra_diag::Arg::Name(rhs_label.clone()),
+                lyra_diag::Arg::Name(lhs_name.clone()),
+            ],
+        ),
+    )
+    .with_label(lyra_diag::Label {
+        kind: lyra_diag::LabelKind::Primary,
+        span: rhs_span,
+        message: lyra_diag::Message::new(
+            msg_id,
+            vec![
+                lyra_diag::Arg::Name(rhs_label),
+                lyra_diag::Arg::Name(lhs_name.clone()),
+            ],
+        ),
+    })
+    .with_label(lyra_diag::Label {
+        kind: lyra_diag::LabelKind::Secondary,
+        span: lhs_span,
+        message: lyra_diag::Message::new(
+            lyra_diag::MessageId::EnumTypeHere,
+            vec![lyra_diag::Arg::Name(lhs_name)],
+        ),
+    })
 }
 
 struct DbTypeCheckCtx<'a> {

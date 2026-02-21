@@ -3,11 +3,12 @@ use lyra_parser::SyntaxNode;
 use lyra_source::TextRange;
 
 use crate::coerce::IntegralCtx;
+use crate::enum_def::EnumId;
 use crate::expr_helpers::is_expression_kind;
 use crate::syntax_helpers::{system_tf_args, system_tf_name};
 use crate::system_functions::{BitsArgKind, classify_bits_arg, iter_args};
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
-use crate::types::SymbolType;
+use crate::types::{SymbolType, Ty};
 
 /// A type-check finding.
 pub enum TypeCheckItem {
@@ -21,6 +22,20 @@ pub enum TypeCheckItem {
     BitsNonDataType {
         call_range: TextRange,
         arg_range: TextRange,
+    },
+    EnumAssignFromNonEnum {
+        assign_range: TextRange,
+        lhs_range: TextRange,
+        rhs_range: TextRange,
+        lhs_enum: EnumId,
+        rhs_ty: Ty,
+    },
+    EnumAssignWrongEnum {
+        assign_range: TextRange,
+        lhs_range: TextRange,
+        rhs_range: TextRange,
+        lhs_enum: EnumId,
+        rhs_enum: EnumId,
     },
 }
 
@@ -96,30 +111,17 @@ fn check_var_decl(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<Typ
             continue;
         };
 
-        let Some(lhs_bv) = symbol_type_bitvec(&sym_type) else {
-            continue;
-        };
-        let Some(lhs_w) = lhs_bv.width.self_determined() else {
-            continue;
-        };
-
+        let lhs_type = ExprType::from_symbol_type(&sym_type);
         let rhs_type = ctx.expr_type(&init_expr);
-        if is_context_dependent(&rhs_type) {
-            continue;
-        }
-        let Some(rhs_w) = bitvec_known_width(&rhs_type) else {
-            continue;
-        };
 
-        if rhs_w > lhs_w {
-            items.push(TypeCheckItem::AssignTruncation {
-                assign_range: node.text_range(),
-                lhs_range: child.text_range(),
-                rhs_range: init_expr.text_range(),
-                lhs_width: lhs_w,
-                rhs_width: rhs_w,
-            });
-        }
+        check_assignment_compat(
+            &lhs_type,
+            &rhs_type,
+            node.text_range(),
+            child.text_range(),
+            init_expr.text_range(),
+            items,
+        );
     }
 }
 
@@ -150,24 +152,91 @@ fn check_assignment_pair(
     ctx: &dyn TypeCheckCtx,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(lhs_w) = simple_lvalue_width(lhs, ctx) else {
+    let Some(simple) = simple_lvalue(lhs) else {
         return;
     };
+    let lhs_type = ctx.expr_type(&simple);
     let rhs_type = ctx.expr_type(rhs);
-    if is_context_dependent(&rhs_type) {
+
+    check_assignment_compat(
+        &lhs_type,
+        &rhs_type,
+        stmt_node.text_range(),
+        lhs.text_range(),
+        rhs.text_range(),
+        items,
+    );
+}
+
+/// Return the inner node if `lhs` is a simple lvalue (name, qualified name,
+/// index expression, or parenthesized simple lvalue). Concat and other
+/// compound forms return `None` -- we skip assignment checks for those.
+fn simple_lvalue(lhs: &SyntaxNode) -> Option<SyntaxNode> {
+    match lhs.kind() {
+        SyntaxKind::NameRef | SyntaxKind::QualifiedName | SyntaxKind::IndexExpr => {
+            Some(lhs.clone())
+        }
+        SyntaxKind::Expression | SyntaxKind::ParenExpr => {
+            let inner = lhs.children().find(|c| is_expression_kind(c.kind()))?;
+            simple_lvalue(&inner)
+        }
+        _ => None,
+    }
+}
+
+fn check_assignment_compat(
+    lhs: &ExprType,
+    rhs: &ExprType,
+    assign_range: TextRange,
+    lhs_range: TextRange,
+    rhs_range: TextRange,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    if matches!(lhs.ty, Ty::Error)
+        || matches!(rhs.ty, Ty::Error)
+        || matches!(lhs.view, ExprView::Error(_))
+        || matches!(rhs.view, ExprView::Error(_))
+    {
         return;
     }
-    let Some(rhs_w) = bitvec_known_width(&rhs_type) else {
-        return;
-    };
-    if rhs_w > lhs_w {
+
+    // Truncation check (existing)
+    if let (Some(lhs_w), Some(rhs_w)) = (bitvec_known_width(lhs), bitvec_known_width(rhs))
+        && !is_context_dependent(rhs)
+        && rhs_w > lhs_w
+    {
         items.push(TypeCheckItem::AssignTruncation {
-            assign_range: stmt_node.text_range(),
-            lhs_range: lhs.text_range(),
-            rhs_range: rhs.text_range(),
+            assign_range,
+            lhs_range,
+            rhs_range,
             lhs_width: lhs_w,
             rhs_width: rhs_w,
         });
+    }
+
+    // Enum assignment compatibility check (LRM 6.19.3)
+    if let Ty::Enum(ref lhs_id) = lhs.ty {
+        match &rhs.ty {
+            Ty::Enum(rhs_id) if lhs_id == rhs_id => {}
+            Ty::Enum(rhs_id) => {
+                items.push(TypeCheckItem::EnumAssignWrongEnum {
+                    assign_range,
+                    lhs_range,
+                    rhs_range,
+                    lhs_enum: lhs_id.clone(),
+                    rhs_enum: rhs_id.clone(),
+                });
+            }
+            _ => {
+                items.push(TypeCheckItem::EnumAssignFromNonEnum {
+                    assign_range,
+                    lhs_range,
+                    rhs_range,
+                    lhs_enum: lhs_id.clone(),
+                    rhs_ty: rhs.ty.clone(),
+                });
+            }
+        }
     }
 }
 
@@ -195,19 +264,6 @@ fn check_system_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
     }
 }
 
-fn simple_lvalue_width(lhs: &SyntaxNode, ctx: &dyn TypeCheckCtx) -> Option<u32> {
-    match lhs.kind() {
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName | SyntaxKind::IndexExpr => {
-            bitvec_known_width(&ctx.expr_type(lhs))
-        }
-        SyntaxKind::Expression | SyntaxKind::ParenExpr => {
-            let inner = lhs.children().find(|c| is_expression_kind(c.kind()))?;
-            simple_lvalue_width(&inner, ctx)
-        }
-        _ => None,
-    }
-}
-
 fn is_context_dependent(ty: &ExprType) -> bool {
     matches!(
         ty.view,
@@ -224,14 +280,6 @@ fn bitvec_known_width(ty: &ExprType) -> Option<u32> {
             width: BitWidth::Known(w),
             ..
         }) => Some(*w),
-        _ => None,
-    }
-}
-
-fn symbol_type_bitvec(st: &SymbolType) -> Option<BitVecType> {
-    let et = ExprType::from_symbol_type(st);
-    match et.view {
-        ExprView::BitVec(bv) => Some(bv),
         _ => None,
     }
 }

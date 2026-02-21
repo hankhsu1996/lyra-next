@@ -90,6 +90,16 @@ fn concat_lhs_no_diag() {
 }
 
 #[test]
+fn concat_lhs_wider_rhs_no_diag() {
+    let src = "module m; logic [3:0] a, b; logic [15:0] c; assign {a, b} = c; endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(
+        diags.is_empty(),
+        "no truncation warning for concat LHS even when RHS is wider"
+    );
+}
+
+#[test]
 fn unbased_unsized_var_init_no_diag() {
     let src = "module m; logic [7:0] x = '1; endmodule";
     let diags = type_diag_warnings(src);
@@ -166,4 +176,134 @@ fn comparison_truncation_to_narrower() {
     let src = "module m; logic [3:0] a, b; logic c; assign c = (a < b); endmodule";
     let diags = type_diag_warnings(src);
     assert!(diags.is_empty(), "1-bit result to 1-bit target: no warning");
+}
+
+fn type_diag_errors(src: &str) -> Vec<lyra_diag::Diagnostic> {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, src);
+    let unit = single_file_unit(&db, file);
+    type_diagnostics(&db, file, unit)
+        .iter()
+        .filter(|d| d.severity == lyra_diag::Severity::Error)
+        .cloned()
+        .collect()
+}
+
+fn all_file_diags(src: &str) -> Vec<lyra_diag::Diagnostic> {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, src);
+    let unit = single_file_unit(&db, file);
+    file_diagnostics(&db, file, unit).to_vec()
+}
+
+#[test]
+fn enum_same_member_init_no_diag() {
+    let src = "module m; typedef enum {A, B} E; E x = A; endmodule";
+    let diags = type_diag_errors(src);
+    assert!(diags.is_empty(), "enum member init should not error");
+}
+
+#[test]
+fn enum_var_to_var_no_diag() {
+    let src = "module m; typedef enum {A, B} E; E e = A; E f = e; endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "enum-to-same-enum assignment should not error"
+    );
+}
+
+#[test]
+fn enum_from_integral_error() {
+    let src = "module m; typedef enum {A, B} E; E x = 1; endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(diags.len(), 1, "diags: {diags:?}");
+    let msg = diag_message(&diags[0]);
+    assert!(msg.contains("cannot assign"), "msg: {msg}");
+    assert!(msg.contains("E"), "msg: {msg}");
+    assert_eq!(
+        diags[0].code,
+        lyra_diag::DiagnosticCode::ENUM_ASSIGN_INCOMPAT
+    );
+}
+
+#[test]
+fn enum_to_integral_no_diag() {
+    let src = "module m; typedef enum {A, B} E; E e = A; int x; assign x = e; endmodule";
+    let diags = type_diag_errors(src);
+    assert!(diags.is_empty(), "enum to integral should not error");
+}
+
+#[test]
+fn enum_member_to_integral_no_diag() {
+    let src = "module m; typedef enum {A, B} E; int x = A; endmodule";
+    let diags = type_diag_errors(src);
+    assert!(diags.is_empty(), "enum member to integral should not error");
+}
+
+#[test]
+fn enum_cross_type_assign_error() {
+    let src = "module m; typedef enum {X, Y} E1; typedef enum {P, Q} E2; E1 a = X; E2 b = P; assign a = b; endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(diags.len(), 1, "diags: {diags:?}");
+    let msg = diag_message(&diags[0]);
+    assert!(msg.contains("cannot assign"), "msg: {msg}");
+    assert!(msg.contains("E2"), "msg: {msg}");
+    assert!(msg.contains("E1"), "msg: {msg}");
+    assert_eq!(
+        diags[0].code,
+        lyra_diag::DiagnosticCode::ENUM_ASSIGN_INCOMPAT
+    );
+}
+
+#[test]
+fn enum_cross_type_init_error() {
+    let src =
+        "module m; typedef enum {X, Y} E1; typedef enum {P, Q} E2; E2 b = P; E1 a = b; endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(diags.len(), 1, "diags: {diags:?}");
+    let msg = diag_message(&diags[0]);
+    assert!(msg.contains("cannot assign"), "msg: {msg}");
+}
+
+#[test]
+fn enum_expr_result_error() {
+    let src = "module m; typedef enum {A, B} E; E e = A; E f = e + 1; endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(diags.len(), 1, "diags: {diags:?}");
+    let msg = diag_message(&diags[0]);
+    assert!(msg.contains("cannot assign"), "msg: {msg}");
+}
+
+#[test]
+fn enum_member_assign_no_diag() {
+    let src = "module m; typedef enum {A, B, C} E; E e = A; assign e = B; endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "assigning enum member via continuous assign should not error"
+    );
+}
+
+#[test]
+fn enum_unresolved_rhs_no_cascade() {
+    let src = "module m; typedef enum {A, B} E; E x = UNKNOWN; endmodule";
+    let diags = all_file_diags(src);
+    let enum_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == lyra_diag::DiagnosticCode::ENUM_ASSIGN_INCOMPAT)
+        .collect();
+    assert!(
+        enum_diags.is_empty(),
+        "no enum compat error for unresolved RHS"
+    );
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == lyra_diag::DiagnosticCode::UNRESOLVED_NAME)
+        .collect();
+    assert_eq!(
+        unresolved.len(),
+        1,
+        "should have one unresolved name diagnostic"
+    );
 }
