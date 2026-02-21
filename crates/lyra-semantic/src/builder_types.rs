@@ -6,7 +6,7 @@ use smol_str::SmolStr;
 use crate::builder::DefContext;
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
-use crate::enum_def::{EnumBase, EnumDef, EnumDefIdx, EnumVariant};
+use crate::enum_def::{EnumBase, EnumDef, EnumDefIdx, EnumMemberDef, EnumMemberRangeKind};
 use crate::record::{
     Packing, RecordDef, RecordDefIdx, RecordField, RecordKind, SymbolOrigin, TypeRef,
     extract_typeref_from_typespec,
@@ -164,8 +164,9 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
         }
     };
 
-    // Extract variants and inject each as a value-namespace symbol
-    let mut variants = Vec::new();
+    // Extract members. Plain members get real symbols; range members are stored
+    // as raw EnumMemberDef for later expansion via enum_variants query.
+    let mut members = Vec::new();
     let mut variant_ordinal: u32 = 0;
     for member in enum_type.members() {
         let Some(name_tok) = member.name() else {
@@ -175,33 +176,65 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
         let init = member
             .init_expr()
             .and_then(|expr| ctx.ast_id_map.erased_ast_id(expr.syntax()));
-        variants.push(EnumVariant {
+
+        // Check for range specification
+        let (range_kind, range_text_range) = if let Some(range_spec) = member.range_spec() {
+            let rtr = range_spec.text_range();
+            if let Some(first) = range_spec.first_expr() {
+                let first_id = ctx.ast_id_map.erased_ast_id(first.syntax());
+                if let Some(second) = range_spec.second_expr() {
+                    let second_id = ctx.ast_id_map.erased_ast_id(second.syntax());
+                    match (first_id, second_id) {
+                        (Some(f), Some(s)) => (Some(EnumMemberRangeKind::FromTo(f, s)), Some(rtr)),
+                        _ => (None, Some(rtr)),
+                    }
+                } else {
+                    match first_id {
+                        Some(f) => (Some(EnumMemberRangeKind::Count(f)), Some(rtr)),
+                        None => (None, Some(rtr)),
+                    }
+                }
+            } else {
+                (None, Some(rtr))
+            }
+        } else {
+            (None, None)
+        };
+
+        let has_range = range_kind.is_some();
+
+        members.push(EnumMemberDef {
             name: name.clone(),
+            name_range: name_tok.text_range(),
+            range: range_kind,
+            range_text_range,
             init,
         });
 
-        // Binding granularity: 1 EnumMember node -> 1 variant symbol (1:1).
-        // When enum ranges land (gap 6.19.3: `name[N]` expanding 1 node
-        // into N variants), this will need a composite decl key such as
-        // (ast_id, sub_ordinal) or a dedicated VariantDeclId.
-        let sym_id = ctx.add_symbol_with_origin(
-            name,
-            SymbolKind::EnumMember,
-            name_tok.text_range(),
-            scope,
-            SymbolOrigin::EnumVariant {
-                enum_idx: idx,
-                variant_ordinal,
-            },
-        );
-        // EnumMember is a node kind (>= NODE_START), so AstIdMap always
-        // indexes it. debug_assert catches regressions in test/debug builds.
-        let ast_id = ctx.ast_id_map.ast_id(&member);
-        debug_assert!(ast_id.is_some(), "EnumMember node must have an AstId");
-        if let Some(ast_id) = ast_id {
-            ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
+        if has_range {
+            // Range members: no symbol injection. These are resolved
+            // exclusively via EnumVariantIndex after expansion.
+            // We don't know how many variants there are until const-eval,
+            // so we don't advance variant_ordinal here.
+        } else {
+            // Plain members: inject real symbol with decl binding.
+            let sym_id = ctx.add_symbol_with_origin(
+                name,
+                SymbolKind::EnumMember,
+                name_tok.text_range(),
+                scope,
+                SymbolOrigin::EnumVariant {
+                    enum_idx: idx,
+                    variant_ordinal,
+                },
+            );
+            let ast_id = ctx.ast_id_map.ast_id(&member);
+            debug_assert!(ast_id.is_some(), "EnumMember node must have an AstId");
+            if let Some(ast_id) = ast_id {
+                ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
+            }
+            variant_ordinal += 1;
         }
-        variant_ordinal += 1;
     }
 
     ctx.enum_defs.push(EnumDef {
@@ -210,7 +243,7 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
         ordinal: ord,
         scope,
         base,
-        variants: variants.into_boxed_slice(),
+        members: members.into_boxed_slice(),
     });
     idx
 }

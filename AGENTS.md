@@ -8,6 +8,21 @@ If `AGENTS.local.md` exists, read it for additional local/personal instructions 
 
 Lyra Next is a Rust-based SystemVerilog **semantic platform** --a single incremental semantic model that all tools (LSP, linter, formatter, compiler, simulator) query as clients.
 
+### North Star
+
+- **One canonical incremental semantic database.** Salsa-based, ID-keyed, no borrowed semantic objects across boundaries. This is the shared core for sim, synth, lint, and LSP.
+- **Deterministic and reproducible.** Same input produces same IDs, outputs, and diagnostics. Stable naming, stable ordering, no hidden global state.
+- **Strict layering.** Parse -> def/index -> name resolution -> typing/elab. Each layer is pure and query-driven. No back-edges that create cycles.
+- **High performance and parallel friendly.** Shardable queries, cheap recompute, minimal cloning, owned/Arc data, predictable memory.
+- **LRM-accurate by test signoff.** A feature is only "done" when lrm-add tests exist and pass; otherwise it stays in gaps.
+
+When planning, protect invariants in this order:
+
+1. **Protect the DAG** -- if a step risks making lower layers depend on higher ones, redesign.
+2. **Protect the ID model** -- if a feature can't be represented with stable IDs and owned data, it's not done.
+3. **Protect determinism and diagnostics** -- if order or duplicates are ambiguous, define it precisely and test it.
+4. **Then implement mechanics** -- parser/AST/builder changes are easy; getting the query boundaries correct is the real work.
+
 ### Crate Map
 
 | Crate | Purpose |
@@ -126,10 +141,19 @@ After debugging and finding the immediate cause:
 
 1. **Step back** -- why does this bug exist? What allowed it?
 2. **Look for design issues** -- bugs often indicate deeper problems
-3. **Fix the root cause** -- not just the symptom
+3. **Fix the root cause** -- not just the symptom. Change the API, don't work around it at the call site. If a function should accept `&str` but you have `String`, change the function signature -- don't sprinkle `.as_str()` conversions everywhere.
 4. **Avoid band-aids** -- don't just add a control branch; address the fundamental issue
 
 The goal: leave the codebase stronger, not just patched.
+
+### Design Principles
+
+- **No hacks, no short-term solutions.** The codebase is meant to be clean long-term. Never introduce workarounds. If existing code has a bad pattern, flag it and fix it properly rather than copying it. Prefer the right fix even if it touches more files. Do not minimize change count -- make the right change.
+- **Abstraction level matching.** Do not put implementation-specific helpers on high-level interfaces. Keep helpers file-local in the implementation that uses them. When adding a function, ask: "is this the right level?"
+- **Co-locate runtime validations.** Runtime invariant checks should be co-located in a single place so they can be enabled/disabled together. Do not scatter validation helpers across unrelated files.
+- **Flag existing bad patterns.** When you encounter a pre-existing bad pattern (e.g., local `#[allow(...)]` instead of a workspace-level lint config), fix it as part of the current change. Do not silently copy bad patterns.
+- **No code history in comments.** Comments describe what the code IS, not what it used to be or what changed. Avoid phrases like "not stored here", "moved from X", "previously Y". Describe the current design directly.
+- **Roadmap/progress: capabilities, not implementation.** Roadmap and progress docs describe what the system can do, not how it's built. No line items for internal quality fixes, refactors, or implementation details. No code-level names (types, functions, modules) in these docs.
 
 ### Capturing Learnings
 
@@ -205,6 +229,63 @@ Run the checker:
 python3 tools/policy/check_lines.py
 python3 tools/policy/check_lines.py --staged    # staged files only
 ```
+
+## LRM Signoff Workflow
+
+Full methodology is in `docs/lrm-signoff.md`. This section covers operational instructions.
+
+### Creating an LRM Test Case
+
+LRM test cases go in `crates/lyra-tests/testdata/corpus/lrm/chXX/` as subdirectories. The corpus runner discovers test cases by finding `test.yaml` marker files via `walkdir`. Everything in the corpus must pass on main.
+
+**Directory structure:** `lrm/chXX/short_name/` (e.g., `lrm/ch05/literals/`, `lrm/ch06/integer_types/`, `lrm/ch23/port_connections/`). Use the LRM chapter number and a short snake_case description. Multiple test directories per chapter are expected. Regression tests go in `regression/short_name/`.
+
+**Each directory contains:**
+- A `test.yaml` marker file with metadata (required for discovery).
+- One or more `.sv` files with inline annotations encoding expected diagnostics.
+- A passing test has no annotations (runner asserts zero diagnostics).
+- A failing test has `// ^ error[code]: message` annotations pinning each expected diagnostic.
+- Use `// ALLOW-EXTRA-DIAGS` only for in-progress tests where not all diagnostics are pinned yet. Remove it before signing off.
+
+**test.yaml for LRM tests:**
+```yaml
+kind: lrm
+lrm:
+  chapter: 5
+  section: "5.7"
+  title: "Numbers"
+```
+
+**test.yaml for regression tests:**
+```yaml
+kind: regression
+```
+
+**Do not create:** sidecar `.diag` files, `pass/`/`fail/` subdirectories, README files per test case, or per-chapter `.md` files unless recording an LRM ambiguity decision.
+
+### Review Snapshots After Accepting
+
+After running `cargo insta accept`, always read the snapshot file and review its contents. Check that every diagnostic makes sense for what the test is testing. Don't let unrelated diagnostics (e.g., type warnings in a lexer test) leak in -- either fix the test inputs to avoid them or pin them with annotations. Blindly accepting snapshots hides problems.
+
+### Recording Gaps
+
+When `/lrm-add` discovers a feature the engine cannot handle yet, do NOT commit a failing test. Instead:
+
+1. Only commit tests that pass with current capabilities.
+2. Add an entry to `docs/lrm/gaps.md` describing what is missing, what blocks it, and what test names will be added once the fix lands.
+
+This is mandatory -- every deferred test must have a gaps.md entry. The gap ledger is the work queue.
+
+When fixing a gap: add the now-passing test to the corpus AND remove the entry from gaps.md in the same PR.
+
+### Signing Off a Chapter
+
+1. Skim the LRM chapter section headings (use `pdftotext` on the IEEE 1800-2023 PDF).
+2. For each rule/example/edge case, create a test directory in `testdata/corpus/lrm/chXX/*/`.
+3. Include at least one cross-feature interaction test per chapter.
+4. Verify `docs/lrm/gaps.md` has no remaining entries for this chapter.
+5. Run `cargo test -p lyra-tests` and verify all annotations match.
+6. Update `docs/lrm/progress.md` -- set the chapter status to "Signed off" and fill in the test path column.
 
 ## What Not To Do
 

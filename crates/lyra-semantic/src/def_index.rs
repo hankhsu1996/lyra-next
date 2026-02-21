@@ -10,7 +10,7 @@ use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId};
 use crate::record::{RecordDef, RecordDefIdx, RecordId};
-use crate::scopes::{ScopeId, ScopeTree};
+use crate::scopes::{ScopeId, ScopeKind, ScopeTree};
 use crate::symbols::{GlobalDefId, Namespace, SymbolId, SymbolTable};
 
 /// Lookup strategy for a use-site.
@@ -99,6 +99,19 @@ impl DefIndex {
         debug_assert!(sym.index() < self.symbol_to_decl.len());
         let ast_id = self.symbol_to_decl.get(sym.index()).and_then(|o| *o)?;
         Some(GlobalDefId::new(ast_id))
+    }
+
+    pub fn package_scope(&self, name: &str) -> Option<ScopeId> {
+        for &sym_id in &*self.exports.packages {
+            let sym = self.symbols.get(sym_id);
+            if sym.name == name {
+                let scope_data = self.scopes.get(sym.scope);
+                if scope_data.kind == ScopeKind::Package {
+                    return Some(sym.scope);
+                }
+            }
+        }
+        None
     }
 
     pub fn record_id(&self, idx: RecordDefIdx) -> RecordId {

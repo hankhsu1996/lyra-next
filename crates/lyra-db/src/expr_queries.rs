@@ -123,9 +123,16 @@ impl InferCtx for DbInferCtx<'_> {
             return ExprType::error(ExprTypeErrorKind::Unresolved);
         };
 
-        let sym_ref = SymbolRef::new(self.db, self.unit, resolution.symbol);
-        let sym_type = type_of_symbol(self.db, sym_ref);
-        ExprType::from_symbol_type(&sym_type)
+        match &resolution.target {
+            lyra_semantic::resolve_index::ResolvedTarget::Symbol(sym_id) => {
+                let sym_ref = SymbolRef::new(self.db, self.unit, *sym_id);
+                let sym_type = type_of_symbol(self.db, sym_ref);
+                ExprType::from_symbol_type(&sym_type)
+            }
+            lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
+                ExprType::from_ty(&Ty::Enum(target.enum_id.clone()))
+            }
+        }
     }
 
     fn const_eval(&self, expr_node: &lyra_parser::SyntaxNode) -> ConstInt {
@@ -149,7 +156,12 @@ impl InferCtx for DbInferCtx<'_> {
             return Err(ResolveCallableError::NotFound);
         };
 
-        let target_id = res.symbol;
+        let target_id = match &res.target {
+            lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+            lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
+                return Err(ResolveCallableError::NotACallable(SymbolKind::EnumMember));
+            }
+        };
 
         // Check that the resolved symbol is actually a function or task
         let Some(target_file) = source_file_by_id(self.db, self.unit, target_id.file) else {

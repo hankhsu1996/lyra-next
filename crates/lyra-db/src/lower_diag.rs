@@ -146,6 +146,24 @@ pub(crate) fn lower_semantic_diag(
             vec![],
             primary_span,
         ),
+        SemanticDiagKind::EnumRangeBoundNotEvaluable => lower_args_diag(
+            DiagnosticCode::ENUM_RANGE_INVALID,
+            MessageId::EnumRangeBoundNotEvaluable,
+            vec![],
+            primary_span,
+        ),
+        SemanticDiagKind::EnumRangeCountNegative { count } => lower_args_diag(
+            DiagnosticCode::ENUM_RANGE_INVALID,
+            MessageId::EnumRangeCountNegative,
+            vec![Arg::Name(SmolStr::new(format!("{count}")))],
+            primary_span,
+        ),
+        SemanticDiagKind::EnumRangeTooLarge { count } => lower_args_diag(
+            DiagnosticCode::ENUM_RANGE_INVALID,
+            MessageId::EnumRangeTooLarge,
+            vec![Arg::Name(SmolStr::new(format!("{count}")))],
+            primary_span,
+        ),
     }
 }
 

@@ -100,7 +100,12 @@ impl SigCtx<'_> {
         let Some(res) = resolve.resolutions.get(&name_ast_id) else {
             return Ty::Error;
         };
-        let target = res.symbol;
+        let target = match &res.target {
+            lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+            lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
+                return Ty::Enum(ev.enum_id.clone());
+            }
+        };
         let Some(target_file) = source_file_by_id(self.db, self.unit, target.file) else {
             return Ty::Error;
         };

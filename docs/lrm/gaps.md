@@ -6,10 +6,6 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 6 -- Data Types
 
-### 6.19.3: Enum ranges
-
-`name[N]` and `name[N:M]` range syntax for auto-generating variant names is not supported by the parser. Test: `lrm/ch06/enum_ranges`.
-
 ### 6.19.4: Enum methods
 
 `.first()`, `.last()`, `.next()`, `.prev()`, `.num()`, `.name()` are not implemented. Blocked by: method resolution infrastructure. Test: `lrm/ch06/enum_methods`.

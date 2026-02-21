@@ -1,7 +1,7 @@
 use lyra_semantic::types::{ConstEvalError, ConstInt};
 
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::semantic::{def_index_file, resolve_index_file};
+use crate::semantic::{base_resolve_index, def_index_file};
 use crate::{CompilationUnit, source_file_by_id};
 
 /// Identifies a constant expression for evaluation.
@@ -42,16 +42,22 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
             .erased_ast_id(name_node)
             .ok_or(ConstEvalError::Unresolved)?;
 
-        // Resolve the name to a GlobalSymbolId
-        let resolve = resolve_index_file(db, source_file, unit);
+        // Resolve the name to a GlobalSymbolId (base index, no enum enrichment)
+        let resolve = base_resolve_index(db, source_file, unit);
         let resolution = resolve
             .resolutions
             .get(&name_ast_id)
             .ok_or(ConstEvalError::Unresolved)?;
 
         // Look up target symbol -- only parameters are allowed
-        let target_file_id = resolution.symbol.file;
-        let target_local = resolution.symbol.local;
+        let sym = match &resolution.target {
+            lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => s,
+            lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
+                return Err(ConstEvalError::NonConstant);
+            }
+        };
+        let target_file_id = sym.file;
+        let target_local = sym.local;
         let target_file =
             source_file_by_id(db, unit, target_file_id).ok_or(ConstEvalError::Unresolved)?;
         let target_def = def_index_file(db, target_file);

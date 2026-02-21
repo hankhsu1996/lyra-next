@@ -3,7 +3,7 @@ use lyra_semantic::type_check::{TypeCheckCtx, TypeCheckItem};
 use lyra_semantic::type_infer::ExprType;
 use lyra_semantic::types::SymbolType;
 
-use crate::enum_queries::{EnumRef, enum_sem};
+use crate::enum_queries::{EnumRef, enum_sem, enum_variant_index};
 use crate::expr_queries::{ExprRef, IntegralCtxKey};
 use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
 use crate::record_queries::{RecordRef, record_diagnostics};
@@ -61,6 +61,18 @@ pub fn file_diagnostics(
                 &pp.source_map,
             ));
         }
+    }
+
+    // Enum variant expansion diagnostics (range bounds, collisions)
+    let ev_idx = enum_variant_index(db, file, unit);
+    for diag in &*ev_idx.diagnostics {
+        let (primary_span, _) =
+            crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, diag.range);
+        diags.push(crate::lower_diag::lower_semantic_diag(
+            diag,
+            primary_span,
+            &pp.source_map,
+        ));
     }
 
     // Record diagnostics (type resolution errors + packed union width)

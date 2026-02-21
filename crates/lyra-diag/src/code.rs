@@ -51,6 +51,10 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 8,
     };
+    pub const ENUM_RANGE_INVALID: Self = Self {
+        namespace: "lyra.semantic",
+        number: 9,
+    };
     pub const WIDTH_MISMATCH: Self = Self {
         namespace: "lyra.type",
         number: 1,

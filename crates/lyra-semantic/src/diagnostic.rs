@@ -45,6 +45,13 @@ pub enum SemanticDiagKind {
         name: SmolStr,
     },
     EnumBaseDimsNotConstant,
+    EnumRangeBoundNotEvaluable,
+    EnumRangeCountNegative {
+        count: i64,
+    },
+    EnumRangeTooLarge {
+        count: u64,
+    },
 }
 
 impl SemanticDiag {
@@ -84,6 +91,15 @@ impl SemanticDiag {
             }
             SemanticDiagKind::EnumBaseDimsNotConstant => {
                 "enum base type has non-constant packed dimensions".to_string()
+            }
+            SemanticDiagKind::EnumRangeBoundNotEvaluable => {
+                "enum member range bound is not a constant expression".to_string()
+            }
+            SemanticDiagKind::EnumRangeCountNegative { count } => {
+                format!("enum member range count is negative ({count})")
+            }
+            SemanticDiagKind::EnumRangeTooLarge { count } => {
+                format!("enum member range count is too large ({count})")
             }
         }
     }

@@ -1,16 +1,21 @@
+use std::collections::{HashMap, HashSet};
+
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
-use lyra_semantic::enum_def::{EnumId, EnumSem};
+use lyra_semantic::enum_def::{
+    EnumId, EnumMemberRangeKind, EnumSem, EnumVariantIndex, EnumVariantTarget,
+};
 use lyra_semantic::record::TypeRef;
 use lyra_semantic::type_infer::{BitVecType, BitWidth, Signedness};
 use lyra_semantic::types::{ConstInt, Ty};
+use smol_str::SmolStr;
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::semantic::{
     compilation_unit_env, def_index_file, global_def_index, name_graph_file, package_scope_index,
 };
 use crate::ty_resolve::resolve_result_to_ty;
-use crate::{CompilationUnit, source_file_by_id};
+use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
 /// Identifies an enum for semantic resolution.
 #[salsa::interned]
@@ -24,6 +29,247 @@ enum EnumBaseError {
     NonIntegral,
     DimsNotConstant,
     TyError,
+}
+
+/// A single expanded variant from an enum range member.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpandedVariant {
+    pub name: SmolStr,
+    pub variant_ordinal: u32,
+    pub def_range: lyra_source::TextRange,
+    pub source_member: u32,
+}
+
+/// Result of expanding an enum's range members.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpandedEnum {
+    pub variants: Box<[ExpandedVariant]>,
+    pub diagnostics: Box<[SemanticDiag]>,
+}
+
+const MAX_ENUM_RANGE_COUNT: u64 = 65536;
+
+/// Expand an enum's range members into flat variant lists (Salsa-tracked).
+///
+/// Plain members (no range) are skipped -- they are real symbols in scope.
+/// Only range members (`name[N]`, `name[N:M]`) produce expanded variants.
+#[salsa::tracked]
+pub fn enum_variants<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> ExpandedEnum {
+    let unit = eref.unit(db);
+    let enum_id = eref.enum_id(db);
+    let file_id = enum_id.file;
+
+    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
+        return ExpandedEnum {
+            variants: Box::new([]),
+            diagnostics: Box::new([]),
+        };
+    };
+
+    let def = def_index_file(db, source_file);
+    let enum_def = def
+        .enum_defs
+        .iter()
+        .find(|ed| ed.owner == enum_id.owner && ed.ordinal == enum_id.ordinal);
+    let Some(enum_def) = enum_def else {
+        return ExpandedEnum {
+            variants: Box::new([]),
+            diagnostics: Box::new([]),
+        };
+    };
+
+    let mut out = ExpandOutput::default();
+
+    for (member_idx, member) in enum_def.members.iter().enumerate() {
+        let Some(ref range_kind) = member.range else {
+            out.ordinal += 1;
+            continue;
+        };
+        let diag_range = member.range_text_range.unwrap_or(member.name_range);
+        match range_kind {
+            EnumMemberRangeKind::Count(expr_id) => {
+                let result = eval_const_int(db, ConstExprRef::new(db, unit, *expr_id));
+                expand_count(&result, member, member_idx as u32, diag_range, &mut out);
+            }
+            EnumMemberRangeKind::FromTo(from_id, to_id) => {
+                let from_val = eval_const_int(db, ConstExprRef::new(db, unit, *from_id));
+                let to_val = eval_const_int(db, ConstExprRef::new(db, unit, *to_id));
+                expand_from_to(
+                    &from_val,
+                    &to_val,
+                    member,
+                    member_idx as u32,
+                    diag_range,
+                    &mut out,
+                );
+            }
+        }
+    }
+
+    ExpandedEnum {
+        variants: out.variants.into_boxed_slice(),
+        diagnostics: out.diagnostics.into_boxed_slice(),
+    }
+}
+
+#[derive(Default)]
+struct ExpandOutput {
+    variants: Vec<ExpandedVariant>,
+    diagnostics: Vec<SemanticDiag>,
+    ordinal: u32,
+}
+
+fn expand_count(
+    result: &ConstInt,
+    member: &lyra_semantic::enum_def::EnumMemberDef,
+    member_idx: u32,
+    diag_range: lyra_source::TextRange,
+    out: &mut ExpandOutput,
+) {
+    let ConstInt::Known(n) = *result else {
+        out.diagnostics.push(SemanticDiag {
+            kind: SemanticDiagKind::EnumRangeBoundNotEvaluable,
+            range: diag_range,
+        });
+        return;
+    };
+    if n < 0 {
+        out.diagnostics.push(SemanticDiag {
+            kind: SemanticDiagKind::EnumRangeCountNegative { count: n },
+            range: diag_range,
+        });
+    } else if n.cast_unsigned() > MAX_ENUM_RANGE_COUNT {
+        out.diagnostics.push(SemanticDiag {
+            kind: SemanticDiagKind::EnumRangeTooLarge {
+                count: n.cast_unsigned(),
+            },
+            range: diag_range,
+        });
+    } else {
+        for i in 0..n {
+            out.variants.push(ExpandedVariant {
+                name: SmolStr::new(format!("{}{i}", member.name)),
+                variant_ordinal: out.ordinal,
+                def_range: member.name_range,
+                source_member: member_idx,
+            });
+            out.ordinal += 1;
+        }
+    }
+}
+
+fn expand_from_to(
+    from_val: &ConstInt,
+    to_val: &ConstInt,
+    member: &lyra_semantic::enum_def::EnumMemberDef,
+    member_idx: u32,
+    diag_range: lyra_source::TextRange,
+    out: &mut ExpandOutput,
+) {
+    let (&ConstInt::Known(from), &ConstInt::Known(to)) = (from_val, to_val) else {
+        out.diagnostics.push(SemanticDiag {
+            kind: SemanticDiagKind::EnumRangeBoundNotEvaluable,
+            range: diag_range,
+        });
+        return;
+    };
+    let count = (from - to).unsigned_abs() + 1;
+    if count > MAX_ENUM_RANGE_COUNT {
+        out.diagnostics.push(SemanticDiag {
+            kind: SemanticDiagKind::EnumRangeTooLarge { count },
+            range: diag_range,
+        });
+        return;
+    }
+    let step: i64 = if from <= to { 1 } else { -1 };
+    let mut val = from;
+    for _ in 0..count {
+        out.variants.push(ExpandedVariant {
+            name: SmolStr::new(format!("{}{val}", member.name)),
+            variant_ordinal: out.ordinal,
+            def_range: member.name_range,
+            source_member: member_idx,
+        });
+        out.ordinal += 1;
+        val += step;
+    }
+}
+
+/// Build the per-file enum variant index for range-generated names (Salsa-tracked).
+///
+/// Iterates all enum defs in a file, expands their range members via
+/// `enum_variants`, and builds a `(ScopeId, name) -> EnumVariantTarget`
+/// index. Collision checking is done here.
+#[salsa::tracked(return_ref)]
+pub fn enum_variant_index(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+) -> EnumVariantIndex {
+    let def = def_index_file(db, file);
+
+    let mut by_scope: HashMap<lyra_semantic::scopes::ScopeId, HashMap<SmolStr, EnumVariantTarget>> =
+        HashMap::new();
+    let mut diagnostics = Vec::new();
+
+    for (def_idx, enum_def) in def.enum_defs.iter().enumerate() {
+        let enum_id = def.enum_id(lyra_semantic::enum_def::EnumDefIdx(def_idx as u32));
+        let eref = EnumRef::new(db, unit, enum_id.clone());
+        let expanded = enum_variants(db, eref);
+
+        // Collect diagnostics from expansion
+        diagnostics.extend(expanded.diagnostics.iter().cloned());
+
+        // Build existing-names set for collision detection
+        let scope_data = def.scopes.get(enum_def.scope);
+        let existing_names: HashSet<&str> = scope_data
+            .value_ns
+            .iter()
+            .map(|sym_id| def.symbols.get(*sym_id).name.as_str())
+            .collect();
+
+        let scope_map = by_scope.entry(enum_def.scope).or_default();
+
+        for variant in &*expanded.variants {
+            // Check collision with other generated names in this scope
+            if scope_map.contains_key(&variant.name) {
+                let diag_range = variant.def_range;
+                diagnostics.push(SemanticDiag {
+                    kind: SemanticDiagKind::DuplicateDefinition {
+                        name: variant.name.clone(),
+                        original: diag_range,
+                    },
+                    range: diag_range,
+                });
+                continue;
+            }
+            // Check collision with real symbols in scope
+            if existing_names.contains(variant.name.as_str()) {
+                let diag_range = variant.def_range;
+                diagnostics.push(SemanticDiag {
+                    kind: SemanticDiagKind::DuplicateDefinition {
+                        name: variant.name.clone(),
+                        original: diag_range,
+                    },
+                    range: diag_range,
+                });
+                continue;
+            }
+            scope_map.insert(
+                variant.name.clone(),
+                EnumVariantTarget {
+                    enum_id: enum_id.clone(),
+                    variant_ordinal: variant.variant_ordinal,
+                    def_range: variant.def_range,
+                },
+            );
+        }
+    }
+
+    EnumVariantIndex {
+        by_scope,
+        diagnostics: diagnostics.into_boxed_slice(),
+    }
 }
 
 /// Resolve an enum's base type (Salsa-tracked).

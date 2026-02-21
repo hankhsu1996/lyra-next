@@ -124,7 +124,7 @@ fn enum_def_variants_stable() {
     let def = def_index_file(&db, file);
     assert_eq!(def.enum_defs.len(), 1);
     let names: Vec<&str> = def.enum_defs[0]
-        .variants
+        .members
         .iter()
         .map(|v| v.name.as_str())
         .collect();

@@ -9,11 +9,12 @@ use crate::def_index::{
     NamePath,
 };
 use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::enum_def::{EnumVariantIndex, PkgEnumVariantIndex};
 use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
 use crate::name_graph::NameGraph;
 use crate::resolve_index::{
     CoreResolution, CoreResolveOutput, CoreResolveResult, ImportConflict, ImportConflictKind,
-    ImportError, Resolution, ResolveIndex, UnresolvedReason, WildcardLocalConflict,
+    ImportError, Resolution, ResolveIndex, ResolvedTarget, UnresolvedReason, WildcardLocalConflict,
 };
 use crate::scopes::{ScopeId, SymbolNameLookup};
 use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
@@ -24,6 +25,8 @@ struct ResolveCtx<'a> {
     global: &'a GlobalDefIndex,
     pkg_scope: &'a PackageScopeIndex,
     cu_env: &'a CompilationUnitEnv,
+    local_enum_variants: Option<&'a EnumVariantIndex>,
+    pkg_enum_variants: Option<&'a PkgEnumVariantIndex>,
 }
 
 /// Resolve all use-sites using only offset-independent data.
@@ -42,6 +45,8 @@ pub fn build_resolve_core(
     global: &GlobalDefIndex,
     pkg_scope: &PackageScopeIndex,
     cu_env: &CompilationUnitEnv,
+    local_enum_variants: Option<&EnumVariantIndex>,
+    pkg_enum_variants: Option<&PkgEnumVariantIndex>,
 ) -> CoreResolveOutput {
     // Validate imports first
     let mut import_errors = Vec::new();
@@ -73,6 +78,8 @@ pub fn build_resolve_core(
         global,
         pkg_scope,
         cu_env,
+        local_enum_variants,
+        pkg_enum_variants,
     };
     let resolutions: Box<[CoreResolveResult]> = graph
         .use_entries
@@ -417,6 +424,8 @@ pub fn resolve_name_in_scope(
         global,
         pkg_scope,
         cu_env,
+        local_enum_variants: None,
+        pkg_enum_variants: None,
     };
     resolve_simple(&ctx, scope, name, expected, u32::MAX)
 }
@@ -461,6 +470,25 @@ fn resolve_simple(
                 namespace: ctx.graph.symbol_kinds[sym_id.0 as usize].namespace(),
             });
         }
+        // 1b. Local enum variant names (range-generated, LRM 6.19.3)
+        if ns == Namespace::Value
+            && let Some(ev_idx) = ctx.local_enum_variants
+        {
+            let mut s = scope;
+            loop {
+                if let Some(inner) = ev_idx.by_scope.get(&s)
+                    && let Some(target) = inner.get(name)
+                {
+                    return CoreResolveResult::Resolved(CoreResolution::EnumVariant(
+                        target.clone(),
+                    ));
+                }
+                match ctx.graph.scopes.get(s).parent {
+                    Some(p) => s = p,
+                    None => break,
+                }
+            }
+        }
         // 2. Explicit imports in scope chain (positional filter)
         if let Some(resolution) =
             resolve_via_explicit_import(ctx.graph, ctx.pkg_scope, scope, name, ns, use_order_key)
@@ -468,8 +496,7 @@ fn resolve_simple(
             return CoreResolveResult::Resolved(resolution);
         }
         // 3. Wildcard imports in scope chain (positional filter)
-        match resolve_via_wildcard_import(ctx.graph, ctx.pkg_scope, scope, name, ns, use_order_key)
-        {
+        match resolve_via_wildcard_import(ctx, scope, name, ns, use_order_key) {
             WildcardResult::Found(resolution) => {
                 return CoreResolveResult::Resolved(resolution);
             }
@@ -582,9 +609,14 @@ enum WildcardResult {
     NotFound,
 }
 
+/// Result from wildcard import resolution: symbol, enum variant, or not found.
+enum WildcardFound {
+    Symbol(GlobalDefId, SmolStr),
+    EnumVariant(crate::enum_def::EnumVariantTarget, SmolStr),
+}
+
 fn resolve_via_wildcard_import(
-    graph: &NameGraph,
-    pkg_scope: &PackageScopeIndex,
+    ctx: &ResolveCtx<'_>,
     scope: ScopeId,
     name: &str,
     ns: Namespace,
@@ -592,24 +624,53 @@ fn resolve_via_wildcard_import(
 ) -> WildcardResult {
     let mut current = Some(scope);
     while let Some(sid) = current {
-        let mut found: Option<(GlobalDefId, SmolStr)> = None;
+        let mut found: Option<WildcardFound> = None;
         let mut ambiguous_pkgs: Vec<SmolStr> = Vec::new();
 
-        for imp in graph.imports_for_scope(sid) {
-            if imp.name == ImportName::Wildcard
-                && imp.order_key < use_order_key
-                && let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns)
-            {
-                if let Some((existing_id, _)) = &found {
-                    if *existing_id != def_id {
-                        if ambiguous_pkgs.is_empty() {
-                            ambiguous_pkgs
-                                .push(found.as_ref().map(|(_, p)| p.clone()).unwrap_or_default());
-                        }
+        for imp in ctx.graph.imports_for_scope(sid) {
+            if imp.name != ImportName::Wildcard || imp.order_key >= use_order_key {
+                continue;
+            }
+            // Try regular package scope resolution first
+            if let Some(def_id) = ctx.pkg_scope.resolve(&imp.package, name, ns) {
+                match &found {
+                    Some(WildcardFound::Symbol(existing_id, _)) if *existing_id != def_id => {
+                        push_first_pkg(found.as_ref(), &mut ambiguous_pkgs);
                         ambiguous_pkgs.push(imp.package.clone());
                     }
-                } else {
-                    found = Some((def_id, imp.package.clone()));
+                    Some(WildcardFound::EnumVariant(..)) => {
+                        push_first_pkg(found.as_ref(), &mut ambiguous_pkgs);
+                        ambiguous_pkgs.push(imp.package.clone());
+                    }
+                    None => {
+                        found = Some(WildcardFound::Symbol(def_id, imp.package.clone()));
+                    }
+                    _ => {} // Same def_id, no conflict
+                }
+                continue;
+            }
+            // Try package-level enum variants (range-generated names)
+            if ns == Namespace::Value
+                && let Some(pkg_ev) = ctx.pkg_enum_variants
+                && let Some(pkg_map) = pkg_ev.get(imp.package.as_str())
+                && let Some(target) = pkg_map.get(name)
+            {
+                match &found {
+                    Some(WildcardFound::EnumVariant(existing, _)) if *existing != *target => {
+                        push_first_pkg(found.as_ref(), &mut ambiguous_pkgs);
+                        ambiguous_pkgs.push(imp.package.clone());
+                    }
+                    Some(WildcardFound::Symbol(..)) => {
+                        push_first_pkg(found.as_ref(), &mut ambiguous_pkgs);
+                        ambiguous_pkgs.push(imp.package.clone());
+                    }
+                    None => {
+                        found = Some(WildcardFound::EnumVariant(
+                            target.clone(),
+                            imp.package.clone(),
+                        ));
+                    }
+                    _ => {} // Same target, no conflict
                 }
             }
         }
@@ -617,15 +678,31 @@ fn resolve_via_wildcard_import(
         if !ambiguous_pkgs.is_empty() {
             return WildcardResult::Ambiguous(ambiguous_pkgs.into_boxed_slice());
         }
-        if let Some((def_id, _)) = found {
-            return WildcardResult::Found(CoreResolution::Global {
-                decl: def_id,
-                namespace: ns,
-            });
+        match found {
+            Some(WildcardFound::Symbol(def_id, _)) => {
+                return WildcardResult::Found(CoreResolution::Global {
+                    decl: def_id,
+                    namespace: ns,
+                });
+            }
+            Some(WildcardFound::EnumVariant(target, _)) => {
+                return WildcardResult::Found(CoreResolution::EnumVariant(target));
+            }
+            None => {}
         }
-        current = graph.scopes.get(sid).parent;
+        current = ctx.graph.scopes.get(sid).parent;
     }
     WildcardResult::NotFound
+}
+
+/// Push the package name from the first wildcard match into the ambiguity list
+/// (only on the first ambiguity detection).
+fn push_first_pkg(found: Option<&WildcardFound>, ambiguous: &mut Vec<SmolStr>) {
+    if ambiguous.is_empty()
+        && let Some(WildcardFound::Symbol(_, p) | WildcardFound::EnumVariant(_, p)) = found
+    {
+        ambiguous.push(p.clone());
+    }
 }
 
 fn resolve_via_implicit_import(
@@ -937,10 +1014,10 @@ pub fn build_resolve_index(
                 resolutions.insert(
                     use_site.ast_id,
                     Resolution {
-                        symbol: GlobalSymbolId {
+                        target: ResolvedTarget::Symbol(GlobalSymbolId {
                             file: def.file,
                             local: *symbol,
-                        },
+                        }),
                         namespace: *namespace,
                     },
                 );
@@ -958,10 +1035,10 @@ pub fn build_resolve_index(
                     resolutions.insert(
                         use_site.ast_id,
                         Resolution {
-                            symbol: GlobalSymbolId {
+                            target: ResolvedTarget::Symbol(GlobalSymbolId {
                                 file: decl.file(),
                                 local,
-                            },
+                            }),
                             namespace: *namespace,
                         },
                     );
@@ -974,6 +1051,15 @@ pub fn build_resolve_index(
                         diagnostics.push(diag);
                     }
                 }
+            }
+            CoreResolveResult::Resolved(CoreResolution::EnumVariant(target)) => {
+                resolutions.insert(
+                    use_site.ast_id,
+                    Resolution {
+                        target: ResolvedTarget::EnumVariant(target.clone()),
+                        namespace: Namespace::Value,
+                    },
+                );
             }
             CoreResolveResult::Unresolved(reason) => {
                 let diag = reason_to_diagnostic(

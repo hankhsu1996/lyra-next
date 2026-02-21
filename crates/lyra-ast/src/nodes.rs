@@ -157,6 +157,8 @@ ast_nodes! {
         name: token([Ident, EscapedIdent]),
     }
 
+    EnumMemberRange(SyntaxKind::EnumMemberRange) {}
+
     StructType(SyntaxKind::StructType) {
         members: [StructMember],
     }
@@ -338,8 +340,22 @@ impl RangeExpr {
 }
 
 impl EnumMember {
+    pub fn range_spec(&self) -> Option<EnumMemberRange> {
+        support::child(&self.syntax)
+    }
+
     pub fn init_expr(&self) -> Option<Expression> {
         support::child(&self.syntax)
+    }
+}
+
+impl EnumMemberRange {
+    pub fn first_expr(&self) -> Option<Expression> {
+        support::children::<Expression>(&self.syntax).next()
+    }
+
+    pub fn second_expr(&self) -> Option<Expression> {
+        support::children::<Expression>(&self.syntax).nth(1)
     }
 }
 
