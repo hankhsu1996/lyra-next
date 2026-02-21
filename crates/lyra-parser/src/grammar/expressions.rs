@@ -294,16 +294,21 @@ fn concat_or_replic(p: &mut Parser) -> CompletedMarker {
 }
 
 // Streaming operator: outer { already consumed by caller.
+//
+// Disambiguation: `{` immediately after `<<`/`>>` always starts the operands
+// list (no slice_size). A `{`-starting constant expression as slice_size is
+// syntactically ambiguous and not supported; use a parameter name instead.
 fn stream_expr(p: &mut Parser, m: crate::parser::Marker) -> CompletedMarker {
     p.bump(); // >> or <<
 
     // Optional slice_size: wrapped in StreamSliceSize node.
+    // Data-type keywords and identifiers parse as a full TypeSpec (handles
+    // packed dims, signing, qualified names). Everything else parses as an
+    // expression.
     if !p.at(SyntaxKind::LBrace) {
         let ss = p.start();
-        if super::declarations::is_scalar_type_keyword(p.current()) {
-            let ts = p.start();
-            p.bump(); // type keyword
-            ts.complete(p, SyntaxKind::TypeSpec);
+        if super::declarations::is_data_type_keyword(p.current()) || p.at(SyntaxKind::Ident) {
+            super::declarations::type_spec(p);
         } else {
             expr_bp(p, 0, ExprMode::Normal);
         }

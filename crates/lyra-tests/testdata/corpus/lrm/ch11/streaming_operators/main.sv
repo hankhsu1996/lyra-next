@@ -12,5 +12,8 @@ module streaming_ops;
 
     // Numeric slice_size
     packed_val = {<< 16 {a, b}};
+
+    // Packed type with dimensions as slice_size
+    packed_val = {<< logic [3:0] {a, b}};
   end
 endmodule

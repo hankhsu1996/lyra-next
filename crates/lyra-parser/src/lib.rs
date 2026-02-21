@@ -321,10 +321,65 @@ mod tests {
     }
 
     #[test]
+    fn stream_expr_packed_type_slice_size() {
+        // logic [3:0] as slice_size: full type_spec with packed dimension
+        let (p, root) = parse_module("initial begin a = {<< logic [3:0] {b}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let stream = find_node(&root, SyntaxKind::StreamExpr);
+        assert!(stream.is_some(), "should have StreamExpr node");
+        let stream = stream.unwrap();
+        let ss = stream
+            .children()
+            .find(|c| c.kind() == SyntaxKind::StreamSliceSize);
+        assert!(ss.is_some(), "should have StreamSliceSize");
+        let ts = find_node(ss.as_ref().unwrap(), SyntaxKind::TypeSpec);
+        assert!(ts.is_some(), "should contain TypeSpec");
+        let pd = find_node(&ts.unwrap(), SyntaxKind::PackedDimension);
+        assert!(pd.is_some(), "TypeSpec should contain PackedDimension");
+    }
+
+    #[test]
+    fn stream_expr_user_type_slice_size() {
+        // User-defined type name as slice_size
+        let (p, root) = parse_module("initial begin a = {<< my_type {b}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let stream = find_node(&root, SyntaxKind::StreamExpr);
+        assert!(stream.is_some(), "should have StreamExpr node");
+        let stream = stream.unwrap();
+        let ss = stream
+            .children()
+            .find(|c| c.kind() == SyntaxKind::StreamSliceSize);
+        assert!(ss.is_some(), "should have StreamSliceSize");
+        let ts = find_node(&ss.unwrap(), SyntaxKind::TypeSpec);
+        assert!(
+            ts.is_some(),
+            "StreamSliceSize should contain TypeSpec for user type"
+        );
+    }
+
+    #[test]
+    fn stream_expr_signed_type_slice_size() {
+        // int unsigned as slice_size: type keyword with signing
+        let (p, root) = parse_module("initial begin a = {<< int unsigned {b}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let stream = find_node(&root, SyntaxKind::StreamExpr);
+        assert!(stream.is_some(), "should have StreamExpr node");
+    }
+
+    #[test]
     fn stream_expr_roundtrip() {
         let src = "module m; initial begin a = {<< byte {b, c}}; end endmodule";
         let tokens = lyra_lexer::lex(src);
         let p = parse(&tokens, src);
+        assert_eq!(p.syntax().text().to_string(), src);
+    }
+
+    #[test]
+    fn stream_expr_roundtrip_packed_type() {
+        let src = "module m; initial begin a = {<< logic [3:0] {b, c}}; end endmodule";
+        let tokens = lyra_lexer::lex(src);
+        let p = parse(&tokens, src);
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
         assert_eq!(p.syntax().text().to_string(), src);
     }
 
