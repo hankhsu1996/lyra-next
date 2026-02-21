@@ -193,7 +193,7 @@ fn all_file_diags(src: &str) -> Vec<lyra_diag::Diagnostic> {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, src);
     let unit = single_file_unit(&db, file);
-    file_diagnostics(&db, file, unit).to_vec()
+    file_diagnostics(&db, file, unit).clone()
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn enum_from_integral_error() {
     assert_eq!(diags.len(), 1, "diags: {diags:?}");
     let msg = diag_message(&diags[0]);
     assert!(msg.contains("cannot assign"), "msg: {msg}");
-    assert!(msg.contains("E"), "msg: {msg}");
+    assert!(msg.contains('E'), "msg: {msg}");
     assert_eq!(
         diags[0].code,
         lyra_diag::DiagnosticCode::ENUM_ASSIGN_INCOMPAT

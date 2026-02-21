@@ -6,7 +6,9 @@ use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
 use crate::expr_helpers::is_expression_kind;
 use crate::syntax_helpers::{system_tf_args, system_tf_name};
-use crate::system_functions::{BitsArgKind, classify_bits_arg, iter_args};
+use crate::system_functions::{
+    BitsArgKind, SystemFnKind, classify_bits_arg, iter_args, lookup_builtin,
+};
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
 use crate::types::{SymbolType, Ty};
 
@@ -36,6 +38,19 @@ pub enum TypeCheckItem {
         rhs_range: TextRange,
         lhs_enum: EnumId,
         rhs_enum: EnumId,
+    },
+    ConversionArgCategory {
+        call_range: TextRange,
+        arg_range: TextRange,
+        fn_name: smol_str::SmolStr,
+        expected: &'static str,
+    },
+    ConversionWidthMismatch {
+        call_range: TextRange,
+        arg_range: TextRange,
+        fn_name: smol_str::SmolStr,
+        expected_width: u32,
+        actual_width: u32,
     },
 }
 
@@ -244,13 +259,38 @@ fn check_system_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
     let Some(tok) = system_tf_name(node) else {
         return;
     };
-    if tok.text() != "$bits" {
+    let name = tok.text();
+    let Some(entry) = lookup_builtin(name) else {
         return;
-    }
+    };
     let Some(arg_list) = system_tf_args(node) else {
         return;
     };
-    let Some(first) = iter_args(&arg_list).next() else {
+    match entry.kind {
+        SystemFnKind::Bits => check_bits_call(node, &arg_list, ctx, items),
+        SystemFnKind::IntToReal => {
+            check_conversion_arg_integral(node, &arg_list, name, ctx, items);
+        }
+        SystemFnKind::RealToInt | SystemFnKind::RealToBits | SystemFnKind::ShortRealToBits => {
+            check_conversion_arg_real(node, &arg_list, name, ctx, items);
+        }
+        SystemFnKind::BitsToReal => {
+            check_conversion_bits_to_real(node, &arg_list, name, 64, ctx, items);
+        }
+        SystemFnKind::BitsToShortReal => {
+            check_conversion_bits_to_real(node, &arg_list, name, 32, ctx, items);
+        }
+        _ => {}
+    }
+}
+
+fn check_bits_call(
+    node: &SyntaxNode,
+    arg_list: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let Some(first) = iter_args(arg_list).next() else {
         return;
     };
     let kind = classify_bits_arg(&first, &|n| ctx.resolve_type_arg(n));
@@ -260,6 +300,91 @@ fn check_system_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
         items.push(TypeCheckItem::BitsNonDataType {
             call_range: node.text_range(),
             arg_range: first.text_range(),
+        });
+    }
+}
+
+fn check_conversion_arg_integral(
+    node: &SyntaxNode,
+    arg_list: &SyntaxNode,
+    fn_name: &str,
+    ctx: &dyn TypeCheckCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let Some(first) = iter_args(arg_list).next() else {
+        return;
+    };
+    let arg_ty = ctx.expr_type(&first);
+    if matches!(arg_ty.view, ExprView::Error(_)) {
+        return;
+    }
+    if !matches!(arg_ty.ty, Ty::Integral(_) | Ty::Enum(_)) {
+        items.push(TypeCheckItem::ConversionArgCategory {
+            call_range: node.text_range(),
+            arg_range: first.text_range(),
+            fn_name: smol_str::SmolStr::new(fn_name),
+            expected: "integral",
+        });
+    }
+}
+
+fn check_conversion_arg_real(
+    node: &SyntaxNode,
+    arg_list: &SyntaxNode,
+    fn_name: &str,
+    ctx: &dyn TypeCheckCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let Some(first) = iter_args(arg_list).next() else {
+        return;
+    };
+    let arg_ty = ctx.expr_type(&first);
+    if matches!(arg_ty.view, ExprView::Error(_)) {
+        return;
+    }
+    if !arg_ty.ty.is_real() {
+        items.push(TypeCheckItem::ConversionArgCategory {
+            call_range: node.text_range(),
+            arg_range: first.text_range(),
+            fn_name: smol_str::SmolStr::new(fn_name),
+            expected: "real",
+        });
+    }
+}
+
+fn check_conversion_bits_to_real(
+    node: &SyntaxNode,
+    arg_list: &SyntaxNode,
+    fn_name: &str,
+    expected_width: u32,
+    ctx: &dyn TypeCheckCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let Some(first) = iter_args(arg_list).next() else {
+        return;
+    };
+    let arg_ty = ctx.expr_type(&first);
+    if matches!(arg_ty.view, ExprView::Error(_)) {
+        return;
+    }
+    if !matches!(arg_ty.ty, Ty::Integral(_)) {
+        items.push(TypeCheckItem::ConversionArgCategory {
+            call_range: node.text_range(),
+            arg_range: first.text_range(),
+            fn_name: smol_str::SmolStr::new(fn_name),
+            expected: "integral",
+        });
+        return;
+    }
+    if let Some(actual_width) = bitvec_known_width(&arg_ty)
+        && actual_width != expected_width
+    {
+        items.push(TypeCheckItem::ConversionWidthMismatch {
+            call_range: node.text_range(),
+            arg_range: first.text_range(),
+            fn_name: smol_str::SmolStr::new(fn_name),
+            expected_width,
+            actual_width,
         });
     }
 }

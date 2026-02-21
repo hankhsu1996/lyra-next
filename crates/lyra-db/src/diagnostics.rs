@@ -151,51 +151,101 @@ fn lower_type_check_item(
                 }),
             );
         }
+        TypeCheckItem::EnumAssignFromNonEnum { .. } | TypeCheckItem::EnumAssignWrongEnum { .. } => {
+            lower_enum_assign_item(db, unit, item, source_map, diags);
+        }
+        TypeCheckItem::ConversionArgCategory {
+            call_range,
+            arg_range,
+            fn_name,
+            expected,
+        } => {
+            let Some(call_span) = source_map.map_span(*call_range) else {
+                return;
+            };
+            let arg_span = source_map.map_span(*arg_range).unwrap_or(call_span);
+            let msg_args = vec![
+                lyra_diag::Arg::Name(fn_name.clone()),
+                lyra_diag::Arg::Name(smol_str::SmolStr::new(expected)),
+            ];
+            diags.push(conversion_diag(
+                lyra_diag::MessageId::ConversionArgCategory,
+                msg_args,
+                arg_span,
+            ));
+        }
+        TypeCheckItem::ConversionWidthMismatch {
+            call_range,
+            arg_range,
+            fn_name,
+            expected_width,
+            actual_width,
+        } => {
+            let Some(call_span) = source_map.map_span(*call_range) else {
+                return;
+            };
+            let arg_span = source_map.map_span(*arg_range).unwrap_or(call_span);
+            let msg_args = vec![
+                lyra_diag::Arg::Name(fn_name.clone()),
+                lyra_diag::Arg::Width(*expected_width),
+                lyra_diag::Arg::Width(*actual_width),
+            ];
+            diags.push(conversion_diag(
+                lyra_diag::MessageId::ConversionWidthMismatch,
+                msg_args,
+                arg_span,
+            ));
+        }
+    }
+}
+
+fn lower_enum_assign_item(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let (assign_range, lhs_range, rhs_range, msg_id, rhs_label, lhs_enum) = match item {
         TypeCheckItem::EnumAssignFromNonEnum {
             assign_range,
             lhs_range,
             rhs_range,
             lhs_enum,
             rhs_ty,
-        } => {
-            let Some(assign_span) = source_map.map_span(*assign_range) else {
-                return;
-            };
-            let rhs_span = source_map.map_span(*rhs_range).unwrap_or(assign_span);
-            let lhs_span = source_map.map_span(*lhs_range).unwrap_or(assign_span);
-            let lhs_name = enum_name(db, unit, lhs_enum);
-            let rhs_pretty = rhs_ty.pretty();
-            diags.push(enum_assign_diag(
-                lyra_diag::MessageId::EnumAssignFromNonEnum,
-                rhs_pretty,
-                lhs_name,
-                rhs_span,
-                lhs_span,
-            ));
-        }
+        } => (
+            *assign_range,
+            *lhs_range,
+            *rhs_range,
+            lyra_diag::MessageId::EnumAssignFromNonEnum,
+            rhs_ty.pretty(),
+            lhs_enum,
+        ),
         TypeCheckItem::EnumAssignWrongEnum {
             assign_range,
             lhs_range,
             rhs_range,
             lhs_enum,
             rhs_enum,
-        } => {
-            let Some(assign_span) = source_map.map_span(*assign_range) else {
-                return;
-            };
-            let rhs_span = source_map.map_span(*rhs_range).unwrap_or(assign_span);
-            let lhs_span = source_map.map_span(*lhs_range).unwrap_or(assign_span);
-            let lhs_name = enum_name(db, unit, lhs_enum);
-            let rhs_name = enum_name(db, unit, rhs_enum);
-            diags.push(enum_assign_diag(
-                lyra_diag::MessageId::EnumAssignWrongEnum,
-                rhs_name,
-                lhs_name,
-                rhs_span,
-                lhs_span,
-            ));
-        }
-    }
+        } => (
+            *assign_range,
+            *lhs_range,
+            *rhs_range,
+            lyra_diag::MessageId::EnumAssignWrongEnum,
+            enum_name(db, unit, rhs_enum),
+            lhs_enum,
+        ),
+        _ => return,
+    };
+    let Some(assign_span) = source_map.map_span(assign_range) else {
+        return;
+    };
+    let rhs_span = source_map.map_span(rhs_range).unwrap_or(assign_span);
+    let lhs_span = source_map.map_span(lhs_range).unwrap_or(assign_span);
+    let lhs_name = enum_name(db, unit, lhs_enum);
+    diags.push(enum_assign_diag(
+        msg_id, rhs_label, lhs_name, rhs_span, lhs_span,
+    ));
 }
 
 fn enum_name(
@@ -295,6 +345,23 @@ fn enum_assign_diag(
             lyra_diag::MessageId::EnumTypeHere,
             vec![lyra_diag::Arg::Name(lhs_name)],
         ),
+    })
+}
+
+fn conversion_diag(
+    msg_id: lyra_diag::MessageId,
+    msg_args: Vec<lyra_diag::Arg>,
+    arg_span: lyra_source::Span,
+) -> lyra_diag::Diagnostic {
+    lyra_diag::Diagnostic::new(
+        lyra_diag::Severity::Error,
+        lyra_diag::DiagnosticCode::CONVERSION_ARG_TYPE,
+        lyra_diag::Message::new(msg_id, msg_args.clone()),
+    )
+    .with_label(lyra_diag::Label {
+        kind: lyra_diag::LabelKind::Primary,
+        span: arg_span,
+        message: lyra_diag::Message::new(msg_id, msg_args),
     })
 }
 

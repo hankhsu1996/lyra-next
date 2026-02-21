@@ -82,14 +82,6 @@ Bit-select and part-select currently return unsigned (engine policy). LRM signed
 
 `$size`, `$left`, `$right`, `$low`, `$high`, `$increment`, `$dimensions`, `$unpacked_dimensions` not implemented. Need dimension navigation on `Ty` and optional second argument. Test: `lrm/ch20/array_query`.
 
-### 20.8.2: Real math functions
-
-`$ln`, `$sqrt`, `$exp`, etc. (~20 functions) all take `real` and return `real`. Test: `lrm/ch20/real_math`.
-
-### 20.5: Real conversion functions
-
-`$itor`, `$rtoi`, `$realtobits`, `$bitstoreal`, `$shortrealtobits`, `$bitstoshortreal` not implemented. Test: `lrm/ch20/real_conversion`.
-
 ## Chapter 25 -- Interfaces
 
 ### 25.3.3: Generic interface reference
