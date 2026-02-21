@@ -90,6 +90,16 @@ fn concat_lhs_no_diag() {
 }
 
 #[test]
+fn concat_lhs_wider_rhs_no_diag() {
+    let src = "module m; logic [3:0] a, b; logic [15:0] c; assign {a, b} = c; endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(
+        diags.is_empty(),
+        "no truncation warning for concat LHS even when RHS is wider"
+    );
+}
+
+#[test]
 fn unbased_unsized_var_init_no_diag() {
     let src = "module m; logic [7:0] x = '1; endmodule";
     let diags = type_diag_warnings(src);

@@ -152,7 +152,10 @@ fn check_assignment_pair(
     ctx: &dyn TypeCheckCtx,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let lhs_type = ctx.expr_type(lhs);
+    let Some(simple) = simple_lvalue(lhs) else {
+        return;
+    };
+    let lhs_type = ctx.expr_type(&simple);
     let rhs_type = ctx.expr_type(rhs);
 
     check_assignment_compat(
@@ -163,6 +166,22 @@ fn check_assignment_pair(
         rhs.text_range(),
         items,
     );
+}
+
+/// Return the inner node if `lhs` is a simple lvalue (name, qualified name,
+/// index expression, or parenthesized simple lvalue). Concat and other
+/// compound forms return `None` -- we skip assignment checks for those.
+fn simple_lvalue(lhs: &SyntaxNode) -> Option<SyntaxNode> {
+    match lhs.kind() {
+        SyntaxKind::NameRef | SyntaxKind::QualifiedName | SyntaxKind::IndexExpr => {
+            Some(lhs.clone())
+        }
+        SyntaxKind::Expression | SyntaxKind::ParenExpr => {
+            let inner = lhs.children().find(|c| is_expression_kind(c.kind()))?;
+            simple_lvalue(&inner)
+        }
+        _ => None,
+    }
 }
 
 fn check_assignment_compat(
