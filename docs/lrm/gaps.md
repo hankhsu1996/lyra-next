@@ -6,9 +6,9 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 6 -- Data Types
 
-### 6.19: Enum named base type (parser limitation)
+### 6.19: Enum named base type
 
-Named base types (`enum my_base_t { ... }`) are not supported because the parser does not recognize user-defined types in enum base position. Keyword bases (`enum logic [7:0] { ... }`) and the default base (int) are fully resolved. Blocked by: parser extension for named enum bases. Test: deferred until parser support lands.
+User-defined type names as enum base types (`enum my_base_t { ... }`) are not parsed -- the parser only recognizes keyword types (`int`, `logic`, `byte`, etc.) as enum base types. Keyword base types with dimensions and signing (`enum logic [2:0] { ... }`, `enum int unsigned { ... }`) parse and are stored correctly. Blocked by: parser extension for `type_identifier` in `enum_base_type`. Test: `lrm/ch06/enum_named_base`.
 
 ### 6.19.3: Enum ranges
 
