@@ -655,14 +655,22 @@ fn resolve_via_wildcard_import(
                 && let Some(pkg_map) = pkg_ev.get(imp.package.as_str())
                 && let Some(target) = pkg_map.get(name)
             {
-                if found.is_none() {
-                    found = Some(WildcardFound::EnumVariant(
-                        target.clone(),
-                        imp.package.clone(),
-                    ));
-                } else {
-                    push_first_pkg(found.as_ref(), &mut ambiguous_pkgs);
-                    ambiguous_pkgs.push(imp.package.clone());
+                match &found {
+                    Some(WildcardFound::EnumVariant(existing, _)) if *existing != *target => {
+                        push_first_pkg(found.as_ref(), &mut ambiguous_pkgs);
+                        ambiguous_pkgs.push(imp.package.clone());
+                    }
+                    Some(WildcardFound::Symbol(..)) => {
+                        push_first_pkg(found.as_ref(), &mut ambiguous_pkgs);
+                        ambiguous_pkgs.push(imp.package.clone());
+                    }
+                    None => {
+                        found = Some(WildcardFound::EnumVariant(
+                            target.clone(),
+                            imp.package.clone(),
+                        ));
+                    }
+                    _ => {} // Same target, no conflict
                 }
             }
         }

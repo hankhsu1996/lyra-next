@@ -214,7 +214,8 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
         if has_range {
             // Range members: no symbol injection. These are resolved
             // exclusively via EnumVariantIndex after expansion.
-            // We don't know how many variants there are until const-eval.
+            // We don't know how many variants there are until const-eval,
+            // so we don't advance variant_ordinal here.
         } else {
             // Plain members: inject real symbol with decl binding.
             let sym_id = ctx.add_symbol_with_origin(
@@ -232,8 +233,8 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
             if let Some(ast_id) = ast_id {
                 ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
             }
+            variant_ordinal += 1;
         }
-        variant_ordinal += 1;
     }
 
     ctx.enum_defs.push(EnumDef {
