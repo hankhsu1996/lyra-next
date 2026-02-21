@@ -1,8 +1,7 @@
 // LRM 6.19: Enum base type resolution
 //
-// Keyword bases and default base types are resolved to determine
-// variant width, signedness, and 2-state/4-state behavior.
-// Named bases (typedef) require parser support not yet available.
+// Keyword bases, default base, and named (typedef) bases are resolved
+// to determine variant width, signedness, and 2-state/4-state behavior.
 
 module enum_named_base;
 
@@ -17,5 +16,12 @@ module enum_named_base;
 
   // Keyword base: bit [3:0] -> 4-bit unsigned 2-state
   enum bit [3:0] { B_A, B_B } bit_enum;
+
+  // Named base: typedef in same module
+  typedef logic [7:0] byte_t;
+  enum byte_t { N_A, N_B } named_enum;
+
+  // Qualified base: typedef from another package
+  enum pkg::nibble_t { Q_X, Q_Y } qual_enum;
 
 endmodule
