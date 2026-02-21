@@ -180,7 +180,11 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
             init,
         });
 
-        ctx.add_symbol_with_origin(
+        // Binding granularity: 1 EnumMember node -> 1 variant symbol (1:1).
+        // When enum ranges land (gap 6.19.3: `name[N]` expanding 1 node
+        // into N variants), this will need a composite decl key such as
+        // (ast_id, sub_ordinal) or a dedicated VariantDeclId.
+        let sym_id = ctx.add_symbol_with_origin(
             name,
             SymbolKind::EnumMember,
             name_tok.text_range(),
@@ -190,6 +194,13 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
                 variant_ordinal,
             },
         );
+        // EnumMember is a node kind (>= NODE_START), so AstIdMap always
+        // indexes it. debug_assert catches regressions in test/debug builds.
+        let ast_id = ctx.ast_id_map.ast_id(&member);
+        debug_assert!(ast_id.is_some(), "EnumMember node must have an AstId");
+        if let Some(ast_id) = ast_id {
+            ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
+        }
         variant_ordinal += 1;
     }
 

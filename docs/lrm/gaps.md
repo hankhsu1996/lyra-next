@@ -126,10 +126,6 @@ Types and localparams not listed in modport should remain accessible through por
 
 ## Chapter 26 -- Packages
 
-### 26.3: Enum literal import semantics
-
-Importing an enum type does not import its enumeration literals (LRM 26.3 teeth_t example). Importing `teeth_t` from package `q` does not make `FALSE` visible -- a bare reference to `FALSE` still resolves to `p::FALSE` via a wildcard import of `p`. Not tested. Blocked by: semantic (enum literal visibility tracking). Test: `lrm/ch26/enum_literal_import`.
-
 ### 26.7: std package contents (Annex G)
 
 The std built-in package should contain process, mailbox, and semaphore classes per Annex G. Not tested. Blocked by: class support (Ch 8). Test: deferred until class support lands.
