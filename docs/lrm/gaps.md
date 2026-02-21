@@ -24,9 +24,9 @@ Enum member names are injected into the enclosing scope unconditionally. The LRM
 
 ## Chapter 7 -- Aggregate Types
 
-### 7.4: Dynamic arrays, queues, and associative arrays
+### 7.4: Dynamic arrays, queues, and associative arrays -- behavioral rules
 
-`UnpackedDim` only represents fixed-size dimensions. No dynamic (`[]`), queue (`[$]`), or associative (`[string]`) dims. Blocked by: unpacked dim model extension. Tests: `lrm/ch07/dynamic_array`, `lrm/ch07/queue`, `lrm/ch07/assoc_array`.
+Type representation now handles all unpacked dimension forms (dynamic `[]`, queue `[$]`/`[$:N]`, associative `[*]`/`[string]`). Remaining gaps: assignment compatibility between array types, built-in array methods (`.size()`, `.delete()`, `.push_back()`, etc.), `new[]` constructor, `foreach` iteration, and array query system functions. Tests for type representation: `crates/lyra-db/src/tests/type_of/dims.rs`.
 
 ### 7.4.6: Array slicing
 

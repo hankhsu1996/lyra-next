@@ -117,9 +117,15 @@ fn lex_one(s: &str, after_at: bool, attr_depth: u32) -> (SyntaxKind, usize) {
         return lex_escaped_ident(bytes);
     }
 
-    // System identifier ($display, $finish, etc.)
+    // Dollar: system identifier ($display, $finish) or standalone dollar (queue dim)
     if c == b'$' {
-        return lex_system_ident(bytes);
+        if bytes
+            .get(1)
+            .is_some_and(|&c| c.is_ascii_alphabetic() || c == b'_' || c == b'$')
+        {
+            return lex_system_ident(bytes);
+        }
+        return (SyntaxKind::Dollar, 1);
     }
 
     // Compiler directive (`define, `ifdef, etc.)

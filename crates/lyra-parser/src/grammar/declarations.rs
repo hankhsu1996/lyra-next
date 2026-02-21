@@ -165,7 +165,28 @@ pub(crate) fn packed_dimension(p: &mut Parser) {
 pub(crate) fn unpacked_dimension(p: &mut Parser) {
     let m = p.start();
     p.bump(); // [
-    if !p.at(SyntaxKind::RBracket) {
+    if p.at(SyntaxKind::RBracket) {
+        // [] -- unsized/dynamic
+    } else if p.at(SyntaxKind::Star) && p.nth(1) == SyntaxKind::RBracket {
+        // [*] -- associative wildcard
+        p.bump(); // Star
+    } else if p.at(SyntaxKind::Dollar) {
+        // [$] or [$:expr] -- queue
+        p.bump(); // Dollar
+        if p.at(SyntaxKind::Colon) {
+            p.bump(); // Colon
+            expressions::expr(p); // bound expression
+        } else if !p.at(SyntaxKind::RBracket) {
+            p.error("expected ']' or ':' after '$' in queue dimension");
+            while !p.at(SyntaxKind::RBracket) && !p.at(SyntaxKind::Eof) {
+                p.bump();
+            }
+        }
+    } else if is_scalar_type_keyword(p.current()) && p.nth(1) == SyntaxKind::RBracket {
+        // [string], [int], etc. -- associative type-indexed (scalar keywords only)
+        type_spec(p);
+    } else {
+        // [expr] or [expr:expr] -- size or range
         expressions::expr(p);
         if p.eat(SyntaxKind::Colon) {
             expressions::expr(p);

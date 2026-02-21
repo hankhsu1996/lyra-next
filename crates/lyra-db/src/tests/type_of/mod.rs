@@ -7,7 +7,8 @@ mod typedef;
 use lyra_semantic::record::{Packing, RecordKind};
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::{
-    ConstEvalError, ConstInt, IntegralKw, NetKind, SymbolType, SymbolTypeError, Ty, UnpackedDim,
+    AssocIndex, ConstEvalError, ConstInt, IntegralKw, NetKind, SymbolType, SymbolTypeError, Ty,
+    UnpackedDim,
 };
 
 use super::*;

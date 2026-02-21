@@ -457,6 +457,9 @@ pub enum SyntaxKind {
     StreamSliceSize,
     StreamOperands,
 
+    // Standalone dollar (queue/assoc dim delimiter)
+    Dollar,
+
     #[doc(hidden)]
     __Last,
 }

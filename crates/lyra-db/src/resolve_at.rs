@@ -281,7 +281,7 @@ impl<'db> TyFmt<'db> {
 
 fn fmt_unpacked_dim(out: &mut String, dim: &lyra_semantic::types::UnpackedDim) {
     use core::fmt::Write;
-    use lyra_semantic::types::UnpackedDim;
+    use lyra_semantic::types::{AssocIndex, UnpackedDim};
     match dim {
         UnpackedDim::Range { msb, lsb } => {
             let _ = write!(out, "[{}:{}]", FmtConst(msb), FmtConst(lsb));
@@ -289,6 +289,16 @@ fn fmt_unpacked_dim(out: &mut String, dim: &lyra_semantic::types::UnpackedDim) {
         UnpackedDim::Size(c) => {
             let _ = write!(out, "[{}]", FmtConst(c));
         }
+        UnpackedDim::Unsized => out.push_str("[]"),
+        UnpackedDim::Queue { bound: None } => out.push_str("[$]"),
+        UnpackedDim::Queue { bound: Some(c) } => {
+            let _ = write!(out, "[$:{}]", FmtConst(c));
+        }
+        UnpackedDim::Assoc(AssocIndex::Wildcard) => out.push_str("[*]"),
+        UnpackedDim::Assoc(AssocIndex::Type(r)) => {
+            let _ = write!(out, "[{}]", r.keyword);
+        }
+        UnpackedDim::Assoc(AssocIndex::Unsupported(_)) => out.push_str("[?]"),
     }
 }
 
