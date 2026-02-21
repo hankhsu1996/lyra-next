@@ -9,7 +9,7 @@ This document defines the pattern that breaks such cycles and the contract that 
 Resolution is split into two paths:
 
 - **Core** (`resolve_core_file` -> `base_resolve_index`): resolves names using scope-chain lookup and imports only. No augmentation data. This is the path `eval_const_int` depends on.
-- **Augmented** (`enriched_resolve_core` -> `resolve_index_file`): takes the same inputs as core, plus precomputed augmentation data produced by feature-specific queries. All consumers except `eval_const_int` use this path.
+- **Augmented** (`augmented_resolve_core` -> `resolve_index_file`): takes the same inputs as core, plus precomputed augmentation data produced by feature-specific queries. All consumers except `eval_const_int` use this path.
 
 The split guarantees that `eval_const_int` never transitively depends on a query that calls `eval_const_int`.
 
@@ -30,12 +30,12 @@ All of these are real symbols with scope bindings, found by scope-chain lookup o
 An augmentation query may:
 
 - Depend on `eval_const_int` (and therefore on `base_resolve_index`).
-- Produce additional name-to-target mappings that `enriched_resolve_core` consults.
-- Add new `CoreResolution` variants or extend existing resolution logic.
+- Produce additional name-to-target mappings that `augmented_resolve_core` consults.
+- Add augmented resolution targets (core resolution targets and logic stay stable).
 
 An augmentation query must not:
 
-- Depend on `resolve_index_file` or `enriched_resolve_core`.
+- Depend on `resolve_index_file` or `augmented_resolve_core`.
 - Modify how core resolution works for names that `eval_const_int` can see.
 
 ### Adding a new augmentation
@@ -44,7 +44,7 @@ When a new feature generates names from constant expressions:
 
 1. Create a Salsa query that expands names using `eval_const_int`.
 2. Pass the expansion data into `build_resolve_core` as an additional parameter.
-3. Wire it through `enriched_resolve_core`, not `resolve_core_file`.
+3. Wire it through `augmented_resolve_core`, not `resolve_core_file`.
 4. Add an example section below documenting the dependency path.
 
 ## Example: enum range expansion (LRM 6.19.3)
@@ -52,6 +52,8 @@ When a new feature generates names from constant expressions:
 Enum members like `name[N]` generate names (`name0`, `name1`, ...) where `N` is a constant expression evaluated by `eval_const_int`.
 
 ### Queries
+
+The augmented query is `enriched_resolve_core` in the source:
 
 ```
 resolve_core_file(file, unit)           -- core: no enum variant data
