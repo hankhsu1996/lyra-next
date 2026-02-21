@@ -35,6 +35,7 @@ pub enum RecordKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Packing {
     Packed,
+    SoftPacked,
     Unpacked,
 }
 

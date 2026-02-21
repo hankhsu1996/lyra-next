@@ -358,6 +358,10 @@ impl StructType {
     pub fn is_tagged(&self) -> bool {
         support::token(&self.syntax, SyntaxKind::TaggedKw).is_some()
     }
+
+    pub fn is_soft(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::SoftKw).is_some()
+    }
 }
 
 impl TypeSpec {

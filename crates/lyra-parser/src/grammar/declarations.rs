@@ -225,11 +225,17 @@ fn enum_member(p: &mut Parser) {
 }
 
 // Parse struct/union type body:
-// `(struct|union) [packed] [tagged] [signing] '{' member+ '}'`
+// `(struct|union) [soft] [packed] [tagged] [signing] '{' member+ '}'`
+// `[soft]` is union-only (LRM 7.3.1).
 // Produces a StructType child node within the enclosing TypeSpec.
 fn struct_type(p: &mut Parser) {
     let m = p.start();
+    let is_union = p.at(SyntaxKind::UnionKw);
     p.bump(); // struct | union
+    // soft is union-only (LRM 7.3.1)
+    if is_union && p.at(SyntaxKind::SoftKw) {
+        p.bump();
+    }
     if p.at(SyntaxKind::PackedKw) {
         p.bump();
     }

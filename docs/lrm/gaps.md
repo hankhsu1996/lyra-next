@@ -34,9 +34,9 @@ Enum member names are injected into the enclosing scope unconditionally. The LRM
 
 ## Chapter 7 -- Structures and Unions
 
-### 7.3.1: Soft packed unions
+### 7.3.1: Soft packed union layout semantics
 
-The `soft` qualifier is not recognized by the parser. `SoftKw` is lexed but not handled in `struct_type()`. Blocked by: parser extension. Test: `lrm/ch07/soft_packed_union`.
+The `soft` qualifier is parsed and tracked as `Packing::SoftPacked`. Need record layout computation for packed unions; `SoftPacked` uses width=max(member widths) and right-justified placement. Test: `lrm/ch07/soft_packed_union_layout`.
 
 ### 7.3.1: Packed union width/shape constraints
 
