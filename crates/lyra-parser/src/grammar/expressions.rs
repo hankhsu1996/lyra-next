@@ -253,10 +253,15 @@ fn system_tf_arg_list(p: &mut Parser) {
     m.complete(p, SyntaxKind::SystemTfArgList);
 }
 
-// `{ expr, expr }` or `{ count { expr } }` (replication)
+// `{ expr, expr }`, `{ count { expr } }` (replication), or `{>> ...}` / `{<< ...}` (streaming)
 fn concat_or_replic(p: &mut Parser) -> CompletedMarker {
     let m = p.start();
     p.bump(); // {
+
+    // Streaming: {>> ...} or {<< ...}
+    if p.at(SyntaxKind::GtGt) || p.at(SyntaxKind::LtLt) {
+        return stream_expr(p, m);
+    }
 
     if p.at(SyntaxKind::RBrace) {
         p.bump();
@@ -286,6 +291,44 @@ fn concat_or_replic(p: &mut Parser) -> CompletedMarker {
         p.expect(SyntaxKind::RBrace);
         m.complete(p, SyntaxKind::ConcatExpr)
     }
+}
+
+// Streaming operator: outer { already consumed by caller.
+//
+// Disambiguation: `{` immediately after `<<`/`>>` always starts the operands
+// list (no slice_size). A `{`-starting constant expression as slice_size is
+// syntactically ambiguous and not supported; use a parameter name instead.
+fn stream_expr(p: &mut Parser, m: crate::parser::Marker) -> CompletedMarker {
+    p.bump(); // >> or <<
+
+    // Optional slice_size: wrapped in StreamSliceSize node.
+    // Data-type keywords and identifiers parse as a full TypeSpec (handles
+    // packed dims, signing, qualified names). Everything else parses as an
+    // expression.
+    if !p.at(SyntaxKind::LBrace) {
+        let ss = p.start();
+        if super::declarations::is_data_type_keyword(p.current()) || p.at(SyntaxKind::Ident) {
+            super::declarations::type_spec(p);
+        } else {
+            expr_bp(p, 0, ExprMode::Normal);
+        }
+        ss.complete(p, SyntaxKind::StreamSliceSize);
+    }
+
+    // Inner { expr_list } wrapped in StreamOperands node
+    let ops = p.start();
+    p.expect(SyntaxKind::LBrace);
+    if !p.at(SyntaxKind::RBrace) {
+        expr_bp(p, 0, ExprMode::Normal);
+        while p.eat(SyntaxKind::Comma) {
+            expr_bp(p, 0, ExprMode::Normal);
+        }
+    }
+    p.expect(SyntaxKind::RBrace); // inner }
+    ops.complete(p, SyntaxKind::StreamOperands);
+
+    p.expect(SyntaxKind::RBrace); // outer }
+    m.complete(p, SyntaxKind::StreamExpr)
 }
 
 // Parse a single item inside an assignment pattern `'{...}`.
