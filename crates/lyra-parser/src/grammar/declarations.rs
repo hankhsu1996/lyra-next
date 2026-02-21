@@ -193,8 +193,8 @@ pub(crate) fn typedef_decl(p: &mut Parser) {
 fn enum_type(p: &mut Parser) {
     let m = p.start();
     p.bump(); // enum
-    // Optional base type (keyword types only for M4)
-    if is_base_type_keyword(p.current()) {
+    // Optional base type: keyword integral types or user-defined type names
+    if is_base_type_keyword(p.current()) || p.at(SyntaxKind::Ident) {
         type_spec(p);
     }
     p.expect(SyntaxKind::LBrace);
@@ -263,7 +263,8 @@ fn struct_member(p: &mut Parser) {
     m.complete(p, SyntaxKind::StructMember);
 }
 
-// Base type keywords valid as enum base type (integral types only, per LRM 6.19).
+// Keyword subset of valid enum base types (integral types only, per LRM 6.19).
+// User-defined type names are also valid but handled via the Ident guard in enum_type().
 fn is_base_type_keyword(kind: SyntaxKind) -> bool {
     matches!(
         kind,

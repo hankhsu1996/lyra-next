@@ -3,5 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (0 diagnostics)
+// file: pkg.sv (0 diagnostics)
 ---
 unit (0 diagnostics)
