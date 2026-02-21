@@ -257,6 +257,7 @@ fn collect_record_def(
             if let Some(name_tok) = decl.name() {
                 fields.push(RecordField {
                     name: SmolStr::new(name_tok.text()),
+                    name_range: name_tok.text_range(),
                     ty: ty.clone(),
                 });
             }

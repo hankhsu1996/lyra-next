@@ -1,17 +1,19 @@
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
 use lyra_semantic::modport_def::ModportDefId;
-use lyra_semantic::record::{FieldSem, RecordId, RecordSem, TypeRef};
+use lyra_semantic::record::{FieldSem, Packing, RecordId, RecordKind, RecordSem, TypeRef};
 use lyra_semantic::symbols::Namespace;
-use lyra_semantic::types::{ConstInt, ModportView};
+use lyra_semantic::types::{ConstInt, ModportView, Ty};
 use smol_str::SmolStr;
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
+use crate::pipeline::preprocess_file;
 use crate::semantic::{
     compilation_unit_env, def_index_file, def_symbol, global_def_index, name_graph_file,
     package_scope_index,
 };
-use crate::ty_resolve::resolve_result_to_ty;
+use crate::ty_resolve::{FieldTyError, FieldTyErrorKind, classify_for_record_field};
+use crate::type_queries::{TyRef, bit_width_total};
 use crate::{CompilationUnit, source_file_by_id};
 
 /// Identifies a record (struct/union) for semantic resolution.
@@ -21,16 +23,104 @@ pub struct RecordRef<'db> {
     pub record_id: RecordId,
 }
 
+/// A lowered field type: raw Ty (may contain Unevaluated dims) plus optional error.
+///
+/// Diagnostic-metadata-free: no ranges, no formatted strings. Salsa backdates
+/// when only spans change in the source, keeping `bit_width_total` stable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoweredFieldTy {
+    pub ty: Ty,
+    pub(crate) err: Option<FieldTyError>,
+}
+
+/// Pure type lowering for record fields (Salsa-tracked).
+///
+/// Resolves each field's `TypeRef` to a raw `Ty` without const-eval or
+/// normalization. Returns compact, diagnostic-metadata-free output suitable
+/// for backdating.
+#[salsa::tracked]
+pub fn record_field_tys<'db>(
+    db: &'db dyn salsa::Database,
+    rref: RecordRef<'db>,
+) -> Box<[LoweredFieldTy]> {
+    let unit = rref.unit(db);
+    let record_id = rref.record_id(db);
+    let file_id = record_id.file;
+
+    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
+        return Box::new([]);
+    };
+
+    let def = def_index_file(db, source_file);
+
+    let record_def = def
+        .record_defs
+        .iter()
+        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal);
+    let Some(record_def) = record_def else {
+        return Box::new([]);
+    };
+
+    let graph = name_graph_file(db, source_file);
+    let global = global_def_index(db, unit);
+    let pkg_scope = package_scope_index(db, unit);
+    let cu_env = compilation_unit_env(db, unit);
+
+    let mut result = Vec::with_capacity(record_def.fields.len());
+
+    for field in &*record_def.fields {
+        let lowered = match &field.ty {
+            TypeRef::Resolved(ty) => LoweredFieldTy {
+                ty: ty.clone(),
+                err: None,
+            },
+            TypeRef::Named { name, span } => {
+                let resolve_result = lyra_semantic::resolve_name_in_scope(
+                    graph,
+                    global,
+                    pkg_scope,
+                    cu_env,
+                    record_def.scope,
+                    name,
+                    ExpectedNs::TypeThenValue,
+                );
+                let path = Box::new([name.clone()]) as Box<[SmolStr]>;
+                let (ty, err) = classify_for_record_field(db, unit, file_id, &resolve_result, path);
+                // Preserve span file for FieldSem construction downstream
+                let _ = span;
+                LoweredFieldTy { ty, err }
+            }
+            TypeRef::Qualified { segments, span } => {
+                let resolve_result = lyra_semantic::resolve_qualified_name(
+                    segments,
+                    global,
+                    pkg_scope,
+                    ExpectedNs::TypeThenValue,
+                );
+                let path = segments.clone();
+                let (ty, err) = classify_for_record_field(db, unit, file_id, &resolve_result, path);
+                let _ = span;
+                LoweredFieldTy { ty, err }
+            }
+        };
+        result.push(lowered);
+    }
+
+    result.into_boxed_slice()
+}
+
 /// Resolve a record's field types (Salsa-tracked).
 ///
-/// Looks up the `RecordDef` from the definition index, resolves each
-/// field's `TypeRef` in the record's defining scope, and builds the
-/// sorted field lookup table.
+/// Reads `record_field_tys` for raw lowered types, normalizes dims via
+/// const-eval, and builds the sorted field lookup table. Type resolution
+/// errors are converted to `SemanticDiag` using spans from `RecordDef`.
 #[salsa::tracked]
 pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> RecordSem {
     let unit = rref.unit(db);
     let record_id = rref.record_id(db);
     let file_id = record_id.file;
+
+    let lowered_tys = record_field_tys(db, rref);
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
         return empty_record_sem();
@@ -38,7 +128,6 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
 
     let def = def_index_file(db, source_file);
 
-    // Find the RecordDef by owner + ordinal
     let record_def = def
         .record_defs
         .iter()
@@ -46,12 +135,6 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
     let Some(record_def) = record_def else {
         return empty_record_sem();
     };
-
-    // Get resolution context for the record's defining file
-    let graph = name_graph_file(db, source_file);
-    let global = global_def_index(db, unit);
-    let pkg_scope = package_scope_index(db, unit);
-    let cu_env = compilation_unit_env(db, unit);
 
     let eval = |expr_ast_id: lyra_ast::ErasedAstId| -> ConstInt {
         let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
@@ -61,49 +144,47 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
     let mut fields = Vec::new();
     let mut diags = Vec::new();
 
-    for field in &*record_def.fields {
-        let (ty, span) = match &field.ty {
-            TypeRef::Resolved(ty) => {
-                let span = lyra_source::Span {
-                    file: file_id,
-                    range: lyra_source::TextRange::default(),
-                };
-                (lyra_semantic::normalize_ty(ty, &eval), span)
+    for (i, field) in record_def.fields.iter().enumerate() {
+        let lowered = &lowered_tys[i];
+
+        // Normalize unevaluated dims
+        let ty = lyra_semantic::normalize_ty(&lowered.ty, &eval);
+
+        // Convert field type errors to SemanticDiag using spans from RecordDef
+        if let Some(err) = &lowered.err {
+            let range = match &field.ty {
+                TypeRef::Named { span, .. } | TypeRef::Qualified { span, .. } => span.range,
+                TypeRef::Resolved(_) => lyra_source::TextRange::default(),
+            };
+            let display_name = err.path.join("::");
+            match err.kind {
+                FieldTyErrorKind::UndeclaredType => {
+                    diags.push(SemanticDiag {
+                        kind: SemanticDiagKind::UndeclaredType {
+                            name: SmolStr::new(&display_name),
+                        },
+                        range,
+                    });
+                }
+                FieldTyErrorKind::NotAType => {
+                    diags.push(SemanticDiag {
+                        kind: SemanticDiagKind::NotAType {
+                            name: SmolStr::new(&display_name),
+                        },
+                        range,
+                    });
+                }
             }
-            TypeRef::Named { name, span } => {
-                let result = lyra_semantic::resolve_name_in_scope(
-                    graph,
-                    global,
-                    pkg_scope,
-                    cu_env,
-                    record_def.scope,
-                    name,
-                    ExpectedNs::TypeThenValue,
-                );
-                let ty =
-                    resolve_result_to_ty(db, unit, file_id, &result, name, span.range, &mut diags);
-                (ty, *span)
-            }
-            TypeRef::Qualified { segments, span } => {
-                let result = lyra_semantic::resolve_qualified_name(
-                    segments,
-                    global,
-                    pkg_scope,
-                    ExpectedNs::TypeThenValue,
-                );
-                let display_name = segments.join("::");
-                let ty = resolve_result_to_ty(
-                    db,
-                    unit,
-                    file_id,
-                    &result,
-                    &display_name,
-                    span.range,
-                    &mut diags,
-                );
-                (ty, *span)
-            }
+        }
+
+        let span = match &field.ty {
+            TypeRef::Named { span, .. } | TypeRef::Qualified { span, .. } => *span,
+            TypeRef::Resolved(_) => lyra_source::Span {
+                file: file_id,
+                range: lyra_source::TextRange::default(),
+            },
         };
+
         fields.push(FieldSem {
             name: field.name.clone(),
             ty,
@@ -131,6 +212,151 @@ fn empty_record_sem() -> RecordSem {
         fields: Box::new([]),
         field_lookup: Box::new([]),
         diags: Box::new([]),
+    }
+}
+
+/// Per-record diagnostics: type resolution errors + packed union width validation.
+#[salsa::tracked(return_ref)]
+pub fn record_diagnostics<'db>(
+    db: &'db dyn salsa::Database,
+    rref: RecordRef<'db>,
+) -> Box<[lyra_diag::Diagnostic]> {
+    let unit = rref.unit(db);
+    let record_id = rref.record_id(db);
+    let file_id = record_id.file;
+
+    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
+        return Box::new([]);
+    };
+
+    let pp = preprocess_file(db, source_file);
+    let sem = record_sem(db, rref);
+
+    // Lower record_sem.diags
+    let mut diags = Vec::new();
+    for diag in &*sem.diags {
+        let (primary_span, _) =
+            crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, diag.range);
+        diags.push(crate::lower_diag::lower_semantic_diag(
+            diag,
+            primary_span,
+            &pp.source_map,
+        ));
+    }
+
+    // Packed union width validation
+    let def = def_index_file(db, source_file);
+    let record_def = def
+        .record_defs
+        .iter()
+        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal);
+    if let Some(record_def) = record_def
+        && record_def.kind == RecordKind::Union
+        && record_def.packing == Packing::Packed
+    {
+        check_packed_union_widths(db, unit, &sem, record_def, file_id, pp, &mut diags);
+    }
+
+    diags.into_boxed_slice()
+}
+
+fn check_packed_union_widths(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    sem: &RecordSem,
+    record_def: &lyra_semantic::record::RecordDef,
+    file_id: lyra_source::FileId,
+    pp: &lyra_preprocess::PreprocOutput,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let widths: Vec<Option<u32>> = sem
+        .fields
+        .iter()
+        .map(|f| {
+            let ty_ref = TyRef::new(db, f.ty.clone());
+            bit_width_total(db, unit, ty_ref)
+        })
+        .collect();
+
+    // Find first field with known width as reference
+    let mut ref_width: Option<u32> = None;
+    let mut ref_idx: usize = 0;
+    for (i, w) in widths.iter().enumerate() {
+        if let Some(w) = w {
+            ref_width = Some(*w);
+            ref_idx = i;
+            break;
+        }
+    }
+
+    let Some(expected_w) = ref_width else {
+        return;
+    };
+
+    for (i, w) in widths.iter().enumerate() {
+        if i == ref_idx {
+            continue;
+        }
+        let Some(actual_w) = w else {
+            continue;
+        };
+        if *actual_w == expected_w {
+            continue;
+        }
+
+        let field_name = &sem.fields[i].name;
+        let mismatch_range = record_def.fields[i].name_range;
+        let ref_range = record_def.fields[ref_idx].name_range;
+
+        let mismatch_span = pp
+            .source_map
+            .map_span(mismatch_range)
+            .unwrap_or(lyra_source::Span {
+                file: file_id,
+                range: lyra_source::TextRange::default(),
+            });
+        let ref_span = pp
+            .source_map
+            .map_span(ref_range)
+            .unwrap_or(lyra_source::Span {
+                file: file_id,
+                range: lyra_source::TextRange::default(),
+            });
+
+        diags.push(
+            lyra_diag::Diagnostic::new(
+                lyra_diag::Severity::Error,
+                lyra_diag::DiagnosticCode::PACKED_UNION_WIDTH,
+                lyra_diag::Message::new(
+                    lyra_diag::MessageId::PackedUnionWidthMismatch,
+                    vec![
+                        lyra_diag::Arg::Name(field_name.clone()),
+                        lyra_diag::Arg::Width(*actual_w),
+                        lyra_diag::Arg::Width(expected_w),
+                    ],
+                ),
+            )
+            .with_label(lyra_diag::Label {
+                kind: lyra_diag::LabelKind::Primary,
+                span: mismatch_span,
+                message: lyra_diag::Message::new(
+                    lyra_diag::MessageId::PackedUnionWidthMismatch,
+                    vec![
+                        lyra_diag::Arg::Name(field_name.clone()),
+                        lyra_diag::Arg::Width(*actual_w),
+                        lyra_diag::Arg::Width(expected_w),
+                    ],
+                ),
+            })
+            .with_label(lyra_diag::Label {
+                kind: lyra_diag::LabelKind::Secondary,
+                span: ref_span,
+                message: lyra_diag::Message::new(
+                    lyra_diag::MessageId::ExpectedMemberWidth,
+                    vec![lyra_diag::Arg::Width(expected_w)],
+                ),
+            }),
+        );
     }
 }
 

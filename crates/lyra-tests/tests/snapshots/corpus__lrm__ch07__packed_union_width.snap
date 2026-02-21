@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.type[9]] 16:17..16:17: packed union member `d` is 16 bits, expected 8 bits
+---
+unit (0 diagnostics)

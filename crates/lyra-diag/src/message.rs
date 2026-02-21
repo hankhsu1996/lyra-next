@@ -33,6 +33,8 @@ pub enum MessageId {
     EnumTypeHere,
     ConversionArgCategory,
     ConversionWidthMismatch,
+    PackedUnionWidthMismatch,
+    ExpectedMemberWidth,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -157,6 +159,52 @@ pub fn render_message(msg: &Message) -> String {
                 "import of `{sym_name}` from package `{explicit_pkg}` conflicts with wildcard import from package `{wildcard_pkg}`"
             )
         }
+        MessageId::WidthMismatch
+        | MessageId::BitsWide
+        | MessageId::UndeclaredType
+        | MessageId::NotAType
+        | MessageId::BitsNonDataType
+        | MessageId::NotADataType
+        | MessageId::UnsupportedTaggedUnion
+        | MessageId::IllegalEnumBaseType
+        | MessageId::EnumBaseDimsNotConstant
+        | MessageId::EnumAssignFromNonEnum
+        | MessageId::EnumAssignWrongEnum
+        | MessageId::EnumTypeHere
+        | MessageId::ConversionArgCategory
+        | MessageId::ConversionWidthMismatch
+        | MessageId::PackedUnionWidthMismatch
+        | MessageId::ExpectedMemberWidth => render_type_message(msg),
+        MessageId::WildcardLocalConflict => {
+            let sym_name = name();
+            let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!(
+                "local declaration of `{sym_name}` conflicts with wildcard import from package `{pkg}`"
+            )
+        }
+        MessageId::RealizedHere => {
+            let sym_name = name();
+            format!("wildcard import of `{sym_name}` realized here")
+        }
+        MessageId::WildcardImportHere => "wildcard import here".into(),
+        MessageId::NotFoundInScope => "not found in this scope".into(),
+        MessageId::NotFoundAsType => "not found as a type in this scope".into(),
+        MessageId::ValueNotType => "this is a value, not a type".into(),
+        MessageId::RedefinedHere => "redefined here".into(),
+        MessageId::FirstDefinedHere => "first defined here".into(),
+        MessageId::ParseError | MessageId::PreprocessError => msg
+            .args
+            .first()
+            .and_then(Arg::as_name)
+            .map(String::from)
+            .unwrap_or_default(),
+        _ => render_elab_message(msg),
+    }
+}
+
+fn render_type_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
         MessageId::WidthMismatch => {
             let lhs_w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
             let rhs_w = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
@@ -193,30 +241,17 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::ConversionArgCategory | MessageId::ConversionWidthMismatch => {
             render_conversion_message(msg)
         }
-        MessageId::WildcardLocalConflict => {
-            let sym_name = name();
-            let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            format!(
-                "local declaration of `{sym_name}` conflicts with wildcard import from package `{pkg}`"
-            )
+        MessageId::PackedUnionWidthMismatch => {
+            let field = name();
+            let actual = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
+            let expected = msg.args.get(2).and_then(Arg::as_width).unwrap_or(0);
+            format!("packed union member `{field}` is {actual} bits, expected {expected} bits")
         }
-        MessageId::RealizedHere => {
-            let sym_name = name();
-            format!("wildcard import of `{sym_name}` realized here")
+        MessageId::ExpectedMemberWidth => {
+            let w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
+            format!("expected width: {w} bits")
         }
-        MessageId::WildcardImportHere => "wildcard import here".into(),
-        MessageId::NotFoundInScope => "not found in this scope".into(),
-        MessageId::NotFoundAsType => "not found as a type in this scope".into(),
-        MessageId::ValueNotType => "this is a value, not a type".into(),
-        MessageId::RedefinedHere => "redefined here".into(),
-        MessageId::FirstDefinedHere => "first defined here".into(),
-        MessageId::ParseError | MessageId::PreprocessError => msg
-            .args
-            .first()
-            .and_then(Arg::as_name)
-            .map(String::from)
-            .unwrap_or_default(),
-        _ => render_elab_message(msg),
+        _ => String::new(),
     }
 }
 

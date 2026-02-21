@@ -36,11 +36,7 @@ Enum member names are injected into the enclosing scope unconditionally. The LRM
 
 ### 7.3.1: Soft packed union layout semantics
 
-The `soft` qualifier is parsed and tracked as `Packing::SoftPacked`. Need record layout computation for packed unions; `SoftPacked` uses width=max(member widths) and right-justified placement. Test: `lrm/ch07/soft_packed_union_layout`.
-
-### 7.3.1: Packed union width/shape constraints
-
-Packed union members must satisfy LRM compatibility rules for packed widths. No width validation is performed. Blocked by: width computation on record types. Test: `lrm/ch07/packed_union_width`.
+Width computation (`bit_width_total`) handles packed records internally (struct=sum, union=max). No observable SV-level behavior depends on it yet -- blocked by `$bits` const-eval (gap 20.6.2). Right-justified member placement and layout mapping are not modeled. Test: `lrm/ch07/soft_packed_union_layout`.
 
 ### 7.3.2: Tagged unions
 

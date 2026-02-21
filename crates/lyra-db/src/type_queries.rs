@@ -1,13 +1,16 @@
 use lyra_lexer::SyntaxKind;
 use lyra_semantic::UserTypeRef;
 use lyra_semantic::interface_id::InterfaceDefId;
-use lyra_semantic::record::SymbolOrigin;
+use lyra_semantic::record::{Packing, RecordKind, SymbolOrigin};
 use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::GlobalSymbolId;
+use lyra_semantic::type_infer::BitWidth;
 use lyra_semantic::types::{ConstEvalError, ConstInt, InterfaceType, Ty, UnpackedDim};
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
+use crate::enum_queries::{EnumRef, enum_sem};
 use crate::pipeline::{ast_id_map, parse_file};
+use crate::record_queries::{RecordRef, record_field_tys};
 use crate::semantic::{def_index_file, global_def_index, resolve_core_file, resolve_index_file};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
@@ -31,21 +34,98 @@ pub struct TyRef<'db> {
     pub ty: lyra_semantic::types::Ty,
 }
 
-/// Total bit width of a type (Salsa-tracked).
+/// Total bit width of a type (Salsa-tracked with cycle recovery).
 ///
-/// V1: handles Integral and Real. Compound types (Record, Enum, Array)
-/// return None -- extending to walk fields is future work.
-#[salsa::tracked]
+/// Returns `Some(w)` when all sub-widths are known, `None` otherwise.
+/// Handles Integral, Real, Enum (via base type), and Record (struct=sum, union=max).
+#[salsa::tracked(recovery_fn = bit_width_total_recover)]
 pub fn bit_width_total<'db>(
     db: &'db dyn salsa::Database,
-    _unit: CompilationUnit,
+    unit: CompilationUnit,
     ty_ref: TyRef<'db>,
 ) -> Option<u32> {
     let ty = ty_ref.ty(db);
     match &ty {
-        lyra_semantic::types::Ty::Integral(i) => i.try_packed_width(),
-        lyra_semantic::types::Ty::Real(rk) => Some(rk.bit_width()),
+        Ty::Integral(i) => i.try_packed_width(),
+        Ty::Real(rk) => Some(rk.bit_width()),
+        Ty::Enum(id) => {
+            let eref = EnumRef::new(db, unit, id.clone());
+            let sem = enum_sem(db, eref);
+            sem.base_int.and_then(|bi| match bi.width {
+                BitWidth::Known(w) => Some(w),
+                _ => None,
+            })
+        }
+        Ty::Record(id) => {
+            let rref = RecordRef::new(db, unit, id.clone());
+            record_width(db, unit, rref)
+        }
         _ => None,
+    }
+}
+
+fn bit_width_total_recover<'db>(
+    _db: &'db dyn salsa::Database,
+    _cycle: &salsa::Cycle,
+    _unit: CompilationUnit,
+    _ty_ref: TyRef<'db>,
+) -> Option<u32> {
+    None
+}
+
+/// Compute the total bit width of a packed record (struct or union).
+///
+/// Struct: sum of field widths. Union (hard or soft): max of field widths.
+/// Unpacked records and tagged unions return None.
+fn record_width<'db>(
+    db: &'db dyn salsa::Database,
+    unit: CompilationUnit,
+    rref: RecordRef<'db>,
+) -> Option<u32> {
+    let record_id = rref.record_id(db);
+    let file_id = record_id.file;
+
+    let source_file = source_file_by_id(db, unit, file_id)?;
+    let def = def_index_file(db, source_file);
+
+    let record_def = def
+        .record_defs
+        .iter()
+        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal)?;
+
+    match (record_def.kind, record_def.packing) {
+        (RecordKind::TaggedUnion, _) | (_, Packing::Unpacked) => return None,
+        _ => {}
+    }
+
+    let lowered = record_field_tys(db, rref);
+    if lowered.is_empty() {
+        return Some(0);
+    }
+
+    let eval = |expr_ast_id: lyra_ast::ErasedAstId| -> ConstInt {
+        let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
+        eval_const_int(db, expr_ref)
+    };
+
+    let mut widths = Vec::with_capacity(lowered.len());
+    for field_ty in &*lowered {
+        let normalized = lyra_semantic::normalize_ty(&field_ty.ty, &eval);
+        let ty_ref = TyRef::new(db, normalized);
+        let w = bit_width_total(db, unit, ty_ref)?;
+        widths.push(w);
+    }
+
+    match record_def.kind {
+        RecordKind::Struct => {
+            let mut total: u32 = 0;
+            for w in &widths {
+                total = total.checked_add(*w)?;
+            }
+            Some(total)
+        }
+        RecordKind::Union => widths.iter().copied().max(),
+        RecordKind::TaggedUnion => None,
     }
 }
 

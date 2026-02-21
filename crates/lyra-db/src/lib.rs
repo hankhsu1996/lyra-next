@@ -48,7 +48,10 @@ pub use resolve_at::{TypeAtResult, resolve_at, symbol_global, type_at};
 pub use enum_queries::{EnumRef, enum_sem};
 
 // Re-export record queries
-pub use record_queries::{ModportRef, ModportSem, RecordRef, modport_sem, record_sem};
+pub use record_queries::{
+    LoweredFieldTy, ModportRef, ModportSem, RecordRef, modport_sem, record_diagnostics,
+    record_field_tys, record_sem,
+};
 
 // Re-export diagnostics
 pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};
