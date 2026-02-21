@@ -231,7 +231,9 @@ fn collect_record_def(
     } else {
         RecordKind::Struct
     };
-    let packing = if struct_type.is_packed() {
+    let packing = if struct_type.is_soft() {
+        Packing::SoftPacked
+    } else if struct_type.is_packed() {
         Packing::Packed
     } else {
         Packing::Unpacked

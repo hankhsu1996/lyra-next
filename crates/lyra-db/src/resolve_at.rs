@@ -263,8 +263,10 @@ impl<'db> TyFmt<'db> {
                     RecordKind::Union | RecordKind::TaggedUnion => s.push_str("union"),
                     RecordKind::Struct => s.push_str("struct"),
                 }
-                if d.packing == Packing::Packed {
-                    s.push_str(" packed");
+                match d.packing {
+                    Packing::SoftPacked => s.push_str(" soft"),
+                    Packing::Packed => s.push_str(" packed"),
+                    Packing::Unpacked => {}
                 }
                 if let Some(ref n) = d.name {
                     s.push(' ');
