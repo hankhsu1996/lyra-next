@@ -5,26 +5,11 @@ use lyra_parser::SyntaxNode;
 ///
 /// Used by type inference, type checking, type extraction, and the def-index
 /// builder to filter expression children from syntax trees.
+///
+/// Delegates to `lyra_ast::is_expression_kind` but also includes `ArgList`
+/// which is needed for argument iteration in the inference layer.
 pub fn is_expression_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Expression
-            | SyntaxKind::BinExpr
-            | SyntaxKind::PrefixExpr
-            | SyntaxKind::ParenExpr
-            | SyntaxKind::CondExpr
-            | SyntaxKind::ConcatExpr
-            | SyntaxKind::ReplicExpr
-            | SyntaxKind::IndexExpr
-            | SyntaxKind::RangeExpr
-            | SyntaxKind::FieldExpr
-            | SyntaxKind::CallExpr
-            | SyntaxKind::SystemTfCall
-            | SyntaxKind::ArgList
-            | SyntaxKind::NameRef
-            | SyntaxKind::Literal
-            | SyntaxKind::QualifiedName
-    )
+    lyra_ast::is_expression_kind(kind) || kind == SyntaxKind::ArgList
 }
 
 /// Find the first non-whitespace operator token in a prefix expression.

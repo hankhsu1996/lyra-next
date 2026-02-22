@@ -1,8 +1,11 @@
 use lyra_semantic::coerce::IntegralCtx;
+use lyra_semantic::member::{
+    BuiltinMethodKind, EnumMethodKind, MemberInfo, MemberKind, MemberLookupError,
+};
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::type_infer::{
-    CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx, MemberInfo,
-    MemberKind, MemberLookupError, ResolveCallableError, Signedness,
+    CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx,
+    ResolveCallableError, Signedness,
 };
 use lyra_semantic::types::{ConstInt, Ty};
 
@@ -230,9 +233,9 @@ impl InferCtx for DbInferCtx<'_> {
             }
             Ty::Interface(iface_ty) => {
                 let gsym = def_symbol(self.db, self.unit, iface_ty.iface.global_def())
-                    .ok_or(MemberLookupError::NotComposite)?;
+                    .ok_or(MemberLookupError::NoMembersOnType)?;
                 let src = source_file_by_id(self.db, self.unit, gsym.file)
-                    .ok_or(MemberLookupError::NotComposite)?;
+                    .ok_or(MemberLookupError::NoMembersOnType)?;
                 let def = def_index_file(self.db, src);
                 let iface_scope = def.symbols.get(gsym.local).scope;
                 let member_sym = def
@@ -266,7 +269,15 @@ impl InferCtx for DbInferCtx<'_> {
                     kind: MemberKind::InterfaceMember { member: member_sym },
                 })
             }
-            _ => Err(MemberLookupError::NotComposite),
+            Ty::Enum(enum_id) => {
+                let method = EnumMethodKind::from_name(member_name)
+                    .ok_or(MemberLookupError::UnknownMember)?;
+                Ok(MemberInfo {
+                    ty: method.return_ty(enum_id.clone()),
+                    kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Enum(method)),
+                })
+            }
+            _ => Err(MemberLookupError::NoMembersOnType),
         }
     }
 

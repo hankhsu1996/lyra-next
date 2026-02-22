@@ -13,6 +13,7 @@ pub mod instance_decl;
 pub mod interface_id;
 
 pub(crate) mod literal;
+pub mod member;
 pub mod modport_def;
 pub mod name_graph;
 pub mod record;

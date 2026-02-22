@@ -111,7 +111,7 @@ ast_nodes! {
         arg_list: ArgList,
     }
 
-    ArgList(SyntaxKind::ArgList) {}
+    ArgList(SyntaxKind::ArgList) { @custom }
 
     SystemTfCall(SyntaxKind::SystemTfCall) {
         arg_list: SystemTfArgList,
@@ -301,6 +301,13 @@ impl PrefixExpr {
 }
 
 impl FieldExpr {
+    /// The base expression before the dot.
+    pub fn base_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|c| crate::node::is_expression_kind(c.kind()))
+    }
+
     pub fn field_name(&self) -> Option<SyntaxToken> {
         // The field name is the last identifier token (simple or escaped)
         self.syntax
@@ -308,6 +315,15 @@ impl FieldExpr {
             .filter_map(rowan::NodeOrToken::into_token)
             .filter(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
             .last()
+    }
+}
+
+impl ArgList {
+    /// Iterate over argument expression nodes.
+    pub fn args(&self) -> impl Iterator<Item = lyra_parser::SyntaxNode> + '_ {
+        self.syntax
+            .children()
+            .filter(|c| crate::node::is_expression_kind(c.kind()))
     }
 }
 

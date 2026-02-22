@@ -29,6 +29,30 @@ pub trait AstNode: Sized {
     }
 }
 
+/// Whether a `SyntaxKind` represents an expression node.
+pub fn is_expression_kind(kind: lyra_lexer::SyntaxKind) -> bool {
+    use lyra_lexer::SyntaxKind;
+    matches!(
+        kind,
+        SyntaxKind::Expression
+            | SyntaxKind::BinExpr
+            | SyntaxKind::PrefixExpr
+            | SyntaxKind::ParenExpr
+            | SyntaxKind::CondExpr
+            | SyntaxKind::ConcatExpr
+            | SyntaxKind::ReplicExpr
+            | SyntaxKind::IndexExpr
+            | SyntaxKind::RangeExpr
+            | SyntaxKind::FieldExpr
+            | SyntaxKind::CallExpr
+            | SyntaxKind::SystemTfCall
+            | SyntaxKind::NameRef
+            | SyntaxKind::Literal
+            | SyntaxKind::QualifiedName
+            | SyntaxKind::StreamExpr
+    )
+}
+
 /// Declare typed AST node wrappers with optional generated accessors.
 ///
 /// Each entry declares a struct, its `AstNode` impl, and (optionally)
