@@ -1,0 +1,10 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: test.sv (3 diagnostics)
+  error[lyra.type[7]] 19:12..19:12: cannot assign int to enum `Colors` without an explicit cast
+  error[lyra.type[7]] 23:12..23:12: cannot assign enum `OtherColors` to enum `Colors` without an explicit cast
+  warning[lyra.type[12]] 35:7..35:7: cast value 2 is not a member of enum `E`
+---
+unit (0 diagnostics)

@@ -469,13 +469,14 @@ pub(crate) enum BitsArgKind {
 /// `InferCtx` (inference) and `TypeCheckCtx` (validation) callers.
 pub(crate) fn classify_bits_arg(
     first: &SyntaxNode,
+    file_id: lyra_source::FileId,
     resolve_type: &dyn Fn(&SyntaxNode) -> Option<crate::types::Ty>,
 ) -> BitsArgKind {
     if first.kind() == SyntaxKind::TypeSpec {
         if let Some(ty) = resolve_type(first) {
             return BitsArgKind::Type(ty);
         }
-        let map = lyra_ast::AstIdMap::from_root(lyra_source::FileId(0), first);
+        let map = lyra_ast::AstIdMap::from_root(file_id, first);
         let ty = crate::extract_base_ty_from_typespec(first, &map);
         return BitsArgKind::Type(ty);
     }

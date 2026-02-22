@@ -40,6 +40,7 @@ pub enum MessageId {
     ExpectedMemberWidth,
     ModportDirectionViolation,
     ModportRefUnsupported,
+    EnumCastOutOfRange,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -184,7 +185,8 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::PackedUnionWidthMismatch
         | MessageId::ExpectedMemberWidth
         | MessageId::ModportDirectionViolation
-        | MessageId::ModportRefUnsupported => render_type_message(msg),
+        | MessageId::ModportRefUnsupported
+        | MessageId::EnumCastOutOfRange => render_type_message(msg),
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -279,6 +281,11 @@ fn render_type_message(msg: &Message) -> String {
         }
         MessageId::ModportRefUnsupported => {
             "direction enforcement for 'ref' modport members is not yet supported".into()
+        }
+        MessageId::EnumCastOutOfRange => {
+            let value = name();
+            let enum_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("cast value {value} is not a member of enum `{enum_name}`")
         }
         _ => String::new(),
     }

@@ -6,10 +6,10 @@ mod support;
 pub use ast_id::{AstId, AstIdMap, ErasedAstId};
 pub use node::{AstNode, is_expression_kind};
 pub use nodes::{
-    AlwaysBlock, ArgList, AssignStmt, BinExpr, BlockStmt, CallExpr, CaseItem, CaseStmt, ConcatExpr,
-    CondExpr, ConfigDecl, ContinuousAssign, Declarator, DottedName, EnumMember, EnumType,
-    ErrorNode, EventExpr, EventItem, ExportDecl, ExportItem, Expression, FieldExpr, ForStmt,
-    ForeverStmt, FunctionDecl, IfStmt, ImportDecl, ImportItem, IndexExpr, InitialBlock,
+    AlwaysBlock, ArgList, AssignStmt, BinExpr, BlockStmt, CallExpr, CaseItem, CaseStmt, CastExpr,
+    ConcatExpr, CondExpr, ConfigDecl, ContinuousAssign, Declarator, DottedName, EnumMember,
+    EnumType, ErrorNode, EventExpr, EventItem, ExportDecl, ExportItem, Expression, FieldExpr,
+    ForStmt, ForeverStmt, FunctionDecl, IfStmt, ImportDecl, ImportItem, IndexExpr, InitialBlock,
     InstancePort, InstancePortList, InterfaceBody, InterfaceDecl, Literal, ModportDecl,
     ModportItem, ModportPort, ModuleBody, ModuleDecl, ModuleInstantiation, NameRef, NetDecl,
     PackageBody, PackageDecl, PackedDimension, ParamDecl, ParamPortList, ParenExpr, Port, PortList,

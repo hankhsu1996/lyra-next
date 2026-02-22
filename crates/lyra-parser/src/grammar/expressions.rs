@@ -89,6 +89,23 @@ fn lhs(p: &mut Parser, mode: ExprMode) -> Option<CompletedMarker> {
 }
 
 fn atom(p: &mut Parser) -> Option<CompletedMarker> {
+    // Cast expression: data_type ' ( expr )
+    // Speculatively parse a type; commit only if followed by Tick + LParen.
+    if super::declarations::at_cast_type(p.current()) {
+        let state = p.save_state();
+        let m = p.start();
+        super::declarations::type_spec(p);
+        if p.at(SyntaxKind::Tick) && p.nth(1) == SyntaxKind::LParen {
+            p.bump(); // '
+            p.bump(); // (
+            expr(p);
+            p.expect(SyntaxKind::RParen);
+            return Some(m.complete(p, SyntaxKind::CastExpr));
+        }
+        m.abandon(p);
+        p.restore_state(state);
+    }
+
     match p.current() {
         SyntaxKind::IntLiteral => {
             let m = p.start();

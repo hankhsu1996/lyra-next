@@ -103,6 +103,7 @@ ast_nodes! {
     StreamExpr(SyntaxKind::StreamExpr) {}
     StreamSliceSize(SyntaxKind::StreamSliceSize) {}
     StreamOperands(SyntaxKind::StreamOperands) {}
+    CastExpr(SyntaxKind::CastExpr) { @custom }
     IndexExpr(SyntaxKind::IndexExpr) { @custom }
     RangeExpr(SyntaxKind::RangeExpr) {}
     FieldExpr(SyntaxKind::FieldExpr) { @custom }
@@ -423,6 +424,20 @@ impl StructType {
 
     pub fn is_soft(&self) -> bool {
         support::token(&self.syntax, SyntaxKind::SoftKw).is_some()
+    }
+}
+
+impl CastExpr {
+    pub fn cast_type(&self) -> Option<TypeSpec> {
+        support::child(&self.syntax)
+    }
+
+    /// The inner expression of the cast (the operand inside parentheses).
+    /// Returns the first expression-kind direct child that is not a `TypeSpec`.
+    pub fn inner_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|c| c.kind() != SyntaxKind::TypeSpec && crate::node::is_expression_kind(c.kind()))
     }
 }
 

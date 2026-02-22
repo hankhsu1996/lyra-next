@@ -355,6 +355,19 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                     });
                 }
             }
+        } else if child.kind() == SyntaxKind::CastExpr {
+            // CastExpr contains a TypeSpec (the cast target type) and an
+            // inner expression. Process the TypeSpec as a type reference and
+            // recurse into the rest of the expression.
+            for cast_child in child.children() {
+                if cast_child.kind() == SyntaxKind::TypeSpec {
+                    if let Some(ts) = lyra_ast::TypeSpec::cast(cast_child) {
+                        collect_type_spec_refs(ctx, &ts, scope);
+                    }
+                } else {
+                    collect_name_refs(ctx, &cast_child, scope);
+                }
+            }
         } else if child.kind() == SyntaxKind::TypeSpec {
             // Handled by collect_type_spec_refs with TypeThenValue.
         } else if child.kind() == SyntaxKind::Declarator {

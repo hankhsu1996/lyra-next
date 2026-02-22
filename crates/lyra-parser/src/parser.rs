@@ -21,6 +21,14 @@ pub(crate) struct Parser<'t> {
     offsets: Vec<u32>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct ParserState {
+    pos: usize,
+    events_len: usize,
+    errors_len: usize,
+    fuel: u32,
+}
+
 pub(crate) struct Marker {
     pos: usize,
     completed: bool,
@@ -169,6 +177,22 @@ impl<'t> Parser<'t> {
             self.events.push(Event::Token { n_raw_tokens: 1 });
             self.pos += 1;
         }
+    }
+
+    pub(crate) fn save_state(&self) -> ParserState {
+        ParserState {
+            pos: self.pos,
+            events_len: self.events.len(),
+            errors_len: self.errors.len(),
+            fuel: self.fuel.get(),
+        }
+    }
+
+    pub(crate) fn restore_state(&mut self, state: ParserState) {
+        self.pos = state.pos;
+        self.events.truncate(state.events_len);
+        self.errors.truncate(state.errors_len);
+        self.fuel.set(state.fuel);
     }
 
     pub(crate) fn finish(self) -> (Vec<Event>, Vec<ParseError>) {

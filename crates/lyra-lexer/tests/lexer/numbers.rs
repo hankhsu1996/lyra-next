@@ -61,8 +61,8 @@ fn real_literals() {
 
 #[test]
 fn numeric_negative_cases() {
-    assert_eq!(lex_kinds("'2")[0].0, SyntaxKind::Error);
-    assert_eq!(lex_kinds("'sx")[0].0, SyntaxKind::Error);
+    assert_eq!(lex_kinds("'2")[0].0, SyntaxKind::Tick);
+    assert_eq!(lex_kinds("'sx")[0].0, SyntaxKind::Tick);
 
     let k = lex_kinds("1.");
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "1"));
@@ -72,7 +72,7 @@ fn numeric_negative_cases() {
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "1"));
     assert_eq!(k[1], (SyntaxKind::Ident, "e"));
 
-    assert_eq!(lex_kinds("'")[0].0, SyntaxKind::Error);
+    assert_eq!(lex_kinds("'")[0].0, SyntaxKind::Tick);
 }
 
 #[test]

@@ -367,9 +367,13 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
         }
     };
 
+    // Compute per-member values
+    let member_values = compute_member_values(db, unit, enum_def);
+
     EnumSem {
         base_ty,
         base_int,
+        member_values,
         diags: diags.into_boxed_slice(),
     }
 }
@@ -403,10 +407,61 @@ fn classify_enum_base(ty: &Ty) -> Result<BitVecType, EnumBaseError> {
     }
 }
 
+/// Compute member values: const-eval explicit inits, auto-increment implicit ones.
+fn compute_member_values(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    enum_def: &lyra_semantic::enum_def::EnumDef,
+) -> std::sync::Arc<[ConstInt]> {
+    use lyra_semantic::types::ConstEvalError;
+
+    let mut values = Vec::with_capacity(enum_def.members.len());
+    let mut next_val: ConstInt = ConstInt::Known(0);
+
+    for member in &*enum_def.members {
+        if let Some(expr_id) = member.init {
+            let result = eval_const_int(db, ConstExprRef::new(db, unit, expr_id));
+            values.push(result.clone());
+            next_val = match result {
+                ConstInt::Known(v) => ConstInt::Known(v + 1),
+                _ => ConstInt::Error(ConstEvalError::AutoIncrementAfterUnknown),
+            };
+        } else {
+            values.push(next_val.clone());
+            next_val = match next_val {
+                ConstInt::Known(v) => ConstInt::Known(v + 1),
+                _ => ConstInt::Error(ConstEvalError::AutoIncrementAfterUnknown),
+            };
+        }
+    }
+
+    std::sync::Arc::from(values)
+}
+
+/// Sorted set of known enum member values. Returns None if any member value is not Known.
+#[salsa::tracked]
+pub fn enum_known_value_set<'db>(
+    db: &'db dyn salsa::Database,
+    eref: EnumRef<'db>,
+) -> Option<std::sync::Arc<[i64]>> {
+    let sem = enum_sem(db, eref);
+    let mut vals: Vec<i64> = Vec::with_capacity(sem.member_values.len());
+    for v in &*sem.member_values {
+        match v {
+            ConstInt::Known(n) => vals.push(*n),
+            _ => return None,
+        }
+    }
+    vals.sort_unstable();
+    vals.dedup();
+    Some(std::sync::Arc::from(vals))
+}
+
 fn empty_enum_sem() -> EnumSem {
     EnumSem {
         base_ty: Ty::Error,
         base_int: None,
+        member_values: std::sync::Arc::from(Vec::<ConstInt>::new()),
         diags: Box::new([]),
     }
 }

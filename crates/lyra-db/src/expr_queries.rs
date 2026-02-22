@@ -191,6 +191,10 @@ struct DbInferCtx<'a> {
 }
 
 impl InferCtx for DbInferCtx<'_> {
+    fn file_id(&self) -> lyra_source::FileId {
+        self.source_file.file_id(self.db)
+    }
+
     fn type_of_name(&self, name_node: &lyra_parser::SyntaxNode) -> ExprType {
         type_of_name_impl(
             self.db,
@@ -354,6 +358,10 @@ struct DbInferCtxRaw<'a> {
 }
 
 impl InferCtx for DbInferCtxRaw<'_> {
+    fn file_id(&self) -> lyra_source::FileId {
+        self.source_file.file_id(self.db)
+    }
+
     fn type_of_name(&self, name_node: &lyra_parser::SyntaxNode) -> ExprType {
         type_of_name_impl(
             self.db,

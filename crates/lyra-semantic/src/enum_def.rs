@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use lyra_ast::ErasedAstId;
 use lyra_source::{FileId, TextRange};
@@ -8,7 +9,7 @@ use crate::diagnostic::SemanticDiag;
 use crate::record::TypeRef;
 use crate::scopes::ScopeId;
 use crate::type_infer::BitVecType;
-use crate::types::Ty;
+use crate::types::{ConstInt, Ty};
 
 // Index type for enum def table (file-local dense index)
 
@@ -81,6 +82,7 @@ pub struct EnumDef {
 pub struct EnumSem {
     pub base_ty: Ty,
     pub base_int: Option<BitVecType>,
+    pub member_values: Arc<[ConstInt]>,
     pub diags: Box<[SemanticDiag]>,
 }
 
