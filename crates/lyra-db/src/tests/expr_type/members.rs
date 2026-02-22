@@ -507,3 +507,453 @@ fn expr_type_enum_member_in_assign() {
         "RUNNING should resolve without errors: {diags:?}"
     );
 }
+
+// Array method tests (LRM 7.5, 7.9, 7.10)
+
+#[test]
+fn expr_type_dynamic_array_size() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int d[];\n\
+         parameter P = d.size();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_dynamic_array_delete_void() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int d[];\n\
+         parameter P = d.delete();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr),
+    );
+}
+
+#[test]
+fn expr_type_dynamic_array_push_back_wrong_kind() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int d[];\n\
+         parameter P = d.push_back(1);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(
+            MethodInvalidReason::WrongArrayKind
+        )),
+    );
+}
+
+#[test]
+fn expr_type_dynamic_array_num_wrong_kind() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int d[];\n\
+         parameter P = d.num();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(
+            MethodInvalidReason::WrongArrayKind
+        )),
+    );
+}
+
+#[test]
+fn expr_type_queue_size() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int q[$];\n\
+         parameter P = q.size();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_queue_pop_front() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int q[$];\n\
+         parameter P = q.pop_front();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_queue_pop_back() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int q[$];\n\
+         parameter P = q.pop_back();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_queue_push_back_void() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int q[$];\n\
+         parameter P = q.push_back(1);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr),
+    );
+}
+
+#[test]
+fn expr_type_queue_exists_wrong_kind() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int q[$];\n\
+         parameter P = q.exists(0);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(
+            MethodInvalidReason::WrongArrayKind
+        )),
+    );
+}
+
+#[test]
+fn expr_type_assoc_typed_size() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int aa[string];\n\
+         parameter P = aa.size();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_assoc_typed_num() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int aa[string];\n\
+         parameter P = aa.num();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_assoc_typed_exists() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int aa[string];\n\
+         parameter P = aa.exists(\"k\");\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_assoc_typed_first() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int aa[string];\n\
+         string s;\n\
+         parameter P = aa.first(s);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_assoc_push_back_wrong_kind() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int aa[string];\n\
+         parameter P = aa.push_back(1);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(
+            MethodInvalidReason::WrongArrayKind
+        )),
+    );
+}
+
+#[test]
+fn expr_type_assoc_wildcard_size() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int ww[*];\n\
+         parameter P = ww.size();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_assoc_wildcard_num() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int ww[*];\n\
+         parameter P = ww.num();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_assoc_wildcard_first_rejected() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int ww[*];\n\
+         int k;\n\
+         parameter P = ww.first(k);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(
+            MethodInvalidReason::AssocKeyWildcard
+        )),
+    );
+}
+
+#[test]
+fn expr_type_assoc_wildcard_exists_rejected() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int ww[*];\n\
+         parameter P = ww.exists(0);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(
+            MethodInvalidReason::AssocKeyWildcard
+        )),
+    );
+}
+
+#[test]
+fn expr_type_fixed_array_size_rejected() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int fa[10];\n\
+         parameter P = fa.size();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(
+            MethodInvalidReason::WrongArrayKind
+        )),
+    );
+}
+
+#[test]
+fn expr_type_queue_size_arity_mismatch() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int q[$];\n\
+         parameter P = q.size(1);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodArityMismatch),
+    );
+}
+
+#[test]
+fn expr_type_queue_insert_arity_mismatch() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int q[$];\n\
+         parameter P = q.insert(0);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodArityMismatch),
+    );
+}
+
+#[test]
+fn expr_type_assoc_first_not_lvalue() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int aa[string];\n\
+         parameter P = aa.first(\"literal\");\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodArgNotLvalue),
+    );
+}
+
+#[test]
+fn expr_type_array_unknown_method() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int d[];\n\
+         parameter P = d.foo();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::UnknownMember),
+    );
+}
+
+#[test]
+fn expr_type_array_method_bare_ref() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int d[];\n\
+         parameter P = d.size;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodRequiresCall),
+    );
+}

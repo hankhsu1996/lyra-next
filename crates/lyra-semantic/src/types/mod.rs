@@ -46,19 +46,11 @@ impl PackedDim {
     }
 }
 
-/// A type reference in an associative array index, e.g. `[string]`, `[int]`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AssocTypeRef {
-    pub keyword: SmolStr,
-    pub ast_id: ErasedAstId,
-}
-
 /// The index type of an associative array dimension.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AssocIndex {
     Wildcard,
-    Type(AssocTypeRef),
-    Unsupported(ErasedAstId),
+    Typed(Box<Ty>),
 }
 
 /// An unpacked dimension on a variable declaration.
@@ -700,12 +692,11 @@ fn fmt_unpacked_dim(s: &mut String, dim: &UnpackedDim) {
             s.push(']');
         }
         UnpackedDim::Assoc(AssocIndex::Wildcard) => s.push_str("[*]"),
-        UnpackedDim::Assoc(AssocIndex::Type(r)) => {
+        UnpackedDim::Assoc(AssocIndex::Typed(ty)) => {
             s.push('[');
-            s.push_str(&r.keyword);
+            s.push_str(ty.pretty().as_str());
             s.push(']');
         }
-        UnpackedDim::Assoc(AssocIndex::Unsupported(_)) => s.push_str("[?]"),
     }
 }
 

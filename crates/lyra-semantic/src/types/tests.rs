@@ -414,11 +414,7 @@ fn try_size_assoc_wildcard_returns_none() {
 #[test]
 fn try_size_assoc_type_returns_none() {
     assert_eq!(
-        UnpackedDim::Assoc(AssocIndex::Type(AssocTypeRef {
-            keyword: SmolStr::new("string"),
-            ast_id: dummy_ast_id(),
-        }))
-        .try_size(),
+        UnpackedDim::Assoc(AssocIndex::Typed(Box::new(Ty::String))).try_size(),
         None
     );
 }
@@ -465,19 +461,16 @@ fn pretty_assoc_wildcard() {
 fn pretty_assoc_type() {
     let ty = Ty::Array {
         elem: Box::new(Ty::int()),
-        dim: UnpackedDim::Assoc(AssocIndex::Type(AssocTypeRef {
-            keyword: SmolStr::new("string"),
-            ast_id: dummy_ast_id(),
-        })),
+        dim: UnpackedDim::Assoc(AssocIndex::Typed(Box::new(Ty::String))),
     };
     assert_eq!(ty.pretty(), "int [string]");
 }
 
 #[test]
-fn pretty_assoc_unsupported() {
+fn pretty_assoc_error() {
     let ty = Ty::Array {
         elem: Box::new(Ty::int()),
-        dim: UnpackedDim::Assoc(AssocIndex::Unsupported(dummy_ast_id())),
+        dim: UnpackedDim::Assoc(AssocIndex::Typed(Box::new(Ty::Error))),
     };
-    assert_eq!(ty.pretty(), "int [?]");
+    assert_eq!(ty.pretty(), "int [<error>]");
 }

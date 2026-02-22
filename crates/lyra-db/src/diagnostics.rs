@@ -414,6 +414,14 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         crate::expr_queries::type_of_expr_in_ctx(self.db, expr_ref, ctx_key)
     }
 
+    fn expr_type_stmt(&self, node: &lyra_parser::SyntaxNode) -> ExprType {
+        let Some(ast_id) = self.ast_id_map.erased_ast_id(node) else {
+            return ExprType::error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
+        };
+        let expr_ref = ExprRef::new(self.db, self.unit, ast_id);
+        crate::expr_queries::type_of_expr_stmt(self.db, expr_ref)
+    }
+
     fn symbol_type_of_declarator(
         &self,
         declarator: &lyra_parser::SyntaxNode,

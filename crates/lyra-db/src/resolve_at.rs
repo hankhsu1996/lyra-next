@@ -303,10 +303,9 @@ fn fmt_unpacked_dim(out: &mut String, dim: &lyra_semantic::types::UnpackedDim) {
             let _ = write!(out, "[$:{}]", FmtConst(c));
         }
         UnpackedDim::Assoc(AssocIndex::Wildcard) => out.push_str("[*]"),
-        UnpackedDim::Assoc(AssocIndex::Type(r)) => {
-            let _ = write!(out, "[{}]", r.keyword);
+        UnpackedDim::Assoc(AssocIndex::Typed(ty)) => {
+            let _ = write!(out, "[{}]", ty.pretty());
         }
-        UnpackedDim::Assoc(AssocIndex::Unsupported(_)) => out.push_str("[?]"),
     }
 }
 

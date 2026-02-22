@@ -1,0 +1,5 @@
+kind: lrm
+lrm:
+  chapter: 7
+  section: "7.5"
+  title: "Dynamic arrays, queues, and associative arrays -- built-in methods"

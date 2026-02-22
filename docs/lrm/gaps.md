@@ -18,7 +18,7 @@ Enum member names are injected into the enclosing scope unconditionally. The LRM
 
 ### 7.4: Dynamic arrays, queues, and associative arrays -- behavioral rules
 
-Type representation now handles all unpacked dimension forms (dynamic `[]`, queue `[$]`/`[$:N]`, associative `[*]`/`[string]`). Remaining gaps: assignment compatibility between array types, built-in array methods (`.size()`, `.delete()`, `.push_back()`, etc.), `new[]` constructor, `foreach` iteration, and array query system functions. Tests for type representation: `crates/lyra-db/src/tests/type_of/dims.rs`.
+Type representation handles all unpacked dimension forms (dynamic `[]`, queue `[$]`/`[$:N]`, associative `[*]`/`[string]`). Built-in array methods (`.size()`, `.delete()`, `.push_back()`, `.pop_front()`, `.exists()`, `.first()`, `.last()`, `.next()`, `.prev()`, `.insert()`, `.num()`, `.push_front()`, `.pop_back()`) are implemented with receiver classification, arity/arg-type checking, and void-in-expression detection. Remaining gaps: assignment compatibility between array types, `new[]` constructor, `foreach` iteration, and array query system functions. Tests: `crates/lyra-db/src/tests/expr_type/members.rs`, `lrm/ch07/array_methods`.
 
 ### 7.4.6: Array slicing
 

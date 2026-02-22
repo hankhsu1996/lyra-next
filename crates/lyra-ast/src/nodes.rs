@@ -103,7 +103,7 @@ ast_nodes! {
     StreamExpr(SyntaxKind::StreamExpr) {}
     StreamSliceSize(SyntaxKind::StreamSliceSize) {}
     StreamOperands(SyntaxKind::StreamOperands) {}
-    IndexExpr(SyntaxKind::IndexExpr) {}
+    IndexExpr(SyntaxKind::IndexExpr) { @custom }
     RangeExpr(SyntaxKind::RangeExpr) {}
     FieldExpr(SyntaxKind::FieldExpr) { @custom }
 
@@ -297,6 +297,33 @@ impl PrefixExpr {
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
             .find(|tok| tok.kind() != SyntaxKind::Whitespace)
+    }
+}
+
+impl IndexExpr {
+    /// The (base, index) expression pair. Returns None if not exactly 2
+    /// expression children (error recovery).
+    fn expr_pair(&self) -> Option<(lyra_parser::SyntaxNode, lyra_parser::SyntaxNode)> {
+        let mut iter = self
+            .syntax
+            .children()
+            .filter(|c| crate::node::is_expression_kind(c.kind()));
+        let first = iter.next()?;
+        let second = iter.next()?;
+        if iter.next().is_some() {
+            return None;
+        }
+        Some((first, second))
+    }
+
+    /// The base expression (left of the brackets).
+    pub fn base_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.expr_pair().map(|(base, _)| base)
+    }
+
+    /// The index expression (inside the brackets).
+    pub fn index_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.expr_pair().map(|(_, idx)| idx)
     }
 }
 

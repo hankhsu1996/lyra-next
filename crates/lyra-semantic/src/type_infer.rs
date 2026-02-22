@@ -9,7 +9,9 @@ use crate::coerce::{
 use crate::enum_def::EnumId;
 use crate::expr_helpers::{find_binary_op, find_operator_token, is_expression_kind};
 use crate::literal::parse_literal_shape;
-use crate::member::{BuiltinMethodKind, MemberInfo, MemberKind, MemberLookupError};
+use crate::member::{
+    BuiltinMethodKind, MemberInfo, MemberKind, MemberLookupError, MethodInvalidReason, ReceiverInfo,
+};
 use crate::symbols::{GlobalSymbolId, SymbolKind};
 use crate::syntax_helpers::system_tf_name;
 use crate::types::{
@@ -113,6 +115,11 @@ pub enum ExprTypeErrorKind {
     UnresolvedCall,
     NotACallable(SymbolKind),
     TaskInExprContext,
+    MethodNotValidOnReceiver(MethodInvalidReason),
+    MethodArgTypeMismatch,
+    MethodArgNotLvalue,
+    MethodKeyTypeUnknown,
+    VoidUsedAsExpr,
 }
 
 /// How an expression's type is viewed for operations.
@@ -315,7 +322,7 @@ pub trait InferCtx {
 
 /// Extract an integral view from an `ExprType`, auto-casting enums to
 /// their base integral type when needed for arithmetic/bitwise operations.
-fn try_integral_view(et: &ExprType, ctx: &dyn InferCtx) -> Option<BitVecType> {
+pub(crate) fn try_integral_view(et: &ExprType, ctx: &dyn InferCtx) -> Option<BitVecType> {
     match &et.view {
         ExprView::BitVec(bv) => Some(*bv),
         ExprView::Plain => {
@@ -356,6 +363,22 @@ pub fn infer_expr_type(
         SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => infer_call(expr, ctx),
         SyntaxKind::StreamExpr => infer_stream(expr, ctx),
         _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
+    }
+}
+
+/// Infer the type of an expression in statement context.
+///
+/// Void methods are legal in statement context; `VoidUsedAsExpr` is
+/// replaced with a successful `Ty::Void` result.
+pub fn infer_expr_type_stmt(expr: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    let result = infer_expr_type(expr, ctx, None);
+    if matches!(
+        result.view,
+        ExprView::Error(ExprTypeErrorKind::VoidUsedAsExpr)
+    ) {
+        ExprType::from_ty(&Ty::Void)
+    } else {
+        result
     }
 }
 
@@ -772,20 +795,23 @@ fn classify_index(ty: &Ty) -> Result<IndexKind, ExprTypeErrorKind> {
 }
 
 fn infer_index(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let children: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if children.len() < 2 {
+    use lyra_ast::AstNode;
+    let Some(idx_expr) = lyra_ast::IndexExpr::cast(node.clone()) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    }
+    };
+    let Some(base_node) = idx_expr.base_expr() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let Some(index_node) = idx_expr.index_expr() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
 
-    let base = infer_expr_type(&children[0], ctx, None);
+    let base = infer_expr_type(&base_node, ctx, None);
     if matches!(base.view, ExprView::Error(_)) {
         return base;
     }
 
-    let idx = infer_expr_type(&children[1], ctx, None);
+    let idx = infer_expr_type(&index_node, ctx, None);
     if matches!(idx.view, ExprView::Error(_)) {
         return idx;
     }
@@ -942,6 +968,9 @@ fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         Err(MemberLookupError::NotInModport) => {
             ExprType::error(ExprTypeErrorKind::MemberNotInModport)
         }
+        Err(MemberLookupError::MethodNotValidOnReceiver(reason)) => {
+            ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(reason))
+        }
     }
 }
 
@@ -1057,14 +1086,17 @@ fn infer_method_call(
         Ok(MemberInfo {
             kind: MemberKind::BuiltinMethod(bm),
             ty,
-            ..
-        }) => infer_builtin_method_call(call_node, bm, &ty, ctx),
+            receiver,
+        }) => infer_builtin_method_call(call_node, bm, &ty, receiver.as_ref(), ctx),
         Ok(_) | Err(MemberLookupError::NoMembersOnType) => ExprType::error(
             ExprTypeErrorKind::UnsupportedCalleeForm(CalleeFormKind::MethodCall),
         ),
         Err(MemberLookupError::UnknownMember) => ExprType::error(ExprTypeErrorKind::UnknownMember),
         Err(MemberLookupError::NotInModport) => {
             ExprType::error(ExprTypeErrorKind::MemberNotInModport)
+        }
+        Err(MemberLookupError::MethodNotValidOnReceiver(reason)) => {
+            ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(reason))
         }
     }
 }
@@ -1073,36 +1105,10 @@ fn infer_builtin_method_call(
     call_node: &SyntaxNode,
     bm: BuiltinMethodKind,
     result_ty: &Ty,
+    receiver: Option<&ReceiverInfo>,
     ctx: &dyn InferCtx,
 ) -> ExprType {
-    use lyra_ast::{AstNode, CallExpr};
-
-    let args: Vec<SyntaxNode> = CallExpr::cast(call_node.clone())
-        .and_then(|c| c.arg_list())
-        .map(|al| al.args().collect())
-        .unwrap_or_default();
-
-    let (min, max) = match bm {
-        BuiltinMethodKind::Enum(ek) => ek.arity(),
-    };
-    if args.len() < min || args.len() > max {
-        return ExprType::error(ExprTypeErrorKind::MethodArityMismatch);
-    }
-
-    let requires_integral = match bm {
-        BuiltinMethodKind::Enum(ek) => ek.arg_requires_integral(),
-    };
-    if requires_integral && let Some(arg_node) = args.first() {
-        let arg_type = infer_expr_type(arg_node, ctx, None);
-        if let ExprView::Error(_) = &arg_type.view {
-            return arg_type;
-        }
-        if try_integral_view(&arg_type, ctx).is_none() {
-            return ExprType::error(ExprTypeErrorKind::MethodArgNotIntegral);
-        }
-    }
-
-    ExprType::from_ty(result_ty)
+    crate::builtin_methods::infer_builtin_method_call(call_node, bm, result_ty, receiver, ctx)
 }
 
 fn merge_bitvec(a: &BitVecType, b: &BitVecType) -> BitVecType {
