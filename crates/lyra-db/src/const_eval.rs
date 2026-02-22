@@ -1,8 +1,19 @@
-use lyra_semantic::types::{ConstEvalError, ConstInt};
+use lyra_ast::{AstNode, NameRef, QualifiedName};
+use lyra_lexer::SyntaxKind;
+use lyra_semantic::resolve_index::{CoreResolution, CoreResolveResult};
+use lyra_semantic::symbols::{GlobalSymbolId, Namespace};
+use lyra_semantic::system_call_view::SystemCallView;
+use lyra_semantic::types::{ConstEvalError, ConstInt, SymbolType, Ty};
+use smol_str::SmolStr;
 
+use crate::expr_queries::{ExprRef, type_of_expr_raw};
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::semantic::{base_resolve_index, def_index_file};
-use crate::{CompilationUnit, source_file_by_id};
+use crate::semantic::{
+    base_resolve_index, compilation_unit_env, def_index_file, global_def_index, name_graph_file,
+    package_scope_index,
+};
+use crate::type_queries::{SymbolRef, TyRef, bit_width_total, type_of_symbol_raw};
+use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
 /// Identifies a constant expression for evaluation.
 ///
@@ -12,6 +23,20 @@ use crate::{CompilationUnit, source_file_by_id};
 pub struct ConstExprRef<'db> {
     pub unit: CompilationUnit,
     pub expr_ast_id: lyra_ast::ErasedAstId,
+}
+
+/// System functions that can be evaluated at const-eval time.
+enum ConstIntrinsic {
+    Bits,
+}
+
+impl ConstIntrinsic {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "$bits" => Some(Self::Bits),
+            _ => None,
+        }
+    }
 }
 
 /// Evaluate a constant integer expression (Salsa-tracked with cycle recovery).
@@ -37,19 +62,16 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
     };
 
     let resolve_name = |name_node: &lyra_parser::SyntaxNode| -> Result<i64, ConstEvalError> {
-        // Look up the NameRef/QualifiedName's AstId
         let name_ast_id = map
             .erased_ast_id(name_node)
             .ok_or(ConstEvalError::Unresolved)?;
 
-        // Resolve the name to a GlobalSymbolId (base index, no enum enrichment)
         let resolve = base_resolve_index(db, source_file, unit);
         let resolution = resolve
             .resolutions
             .get(&name_ast_id)
             .ok_or(ConstEvalError::Unresolved)?;
 
-        // Look up target symbol -- only parameters are allowed
         let sym = match &resolution.target {
             lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => s,
             lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
@@ -67,21 +89,18 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
             return Err(ConstEvalError::NonConstant);
         }
 
-        // Look up declarator AstId via symbol_to_decl
         let decl_ast_id = target_def
             .symbol_to_decl
             .get(target_local.index())
             .and_then(|opt| *opt)
             .ok_or(ConstEvalError::Unresolved)?;
 
-        // Look up init expression AstId
         let init_ast_id = target_def
             .decl_to_init_expr
             .get(&decl_ast_id)
             .ok_or(ConstEvalError::Unresolved)?
             .ok_or(ConstEvalError::Unresolved)?;
 
-        // Recursively evaluate via Salsa (cycle detection here)
         let init_ref = ConstExprRef::new(db, unit, init_ast_id);
         match eval_const_int(db, init_ref) {
             ConstInt::Known(v) => Ok(v),
@@ -90,7 +109,20 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
         }
     };
 
-    match lyra_semantic::const_eval::eval_const_expr(&node, &resolve_name) {
+    let eval_call = |call_node: &lyra_parser::SyntaxNode| -> Option<Result<i64, ConstEvalError>> {
+        let view = SystemCallView::try_from_node(call_node)?;
+        let intrinsic = ConstIntrinsic::from_name(view.name())?;
+        let result = match intrinsic {
+            ConstIntrinsic::Bits => eval_bits_intrinsic(db, &view, unit, source_file, map),
+        };
+        Some(match result {
+            ConstInt::Known(v) => Ok(v),
+            ConstInt::Error(e) => Err(e),
+            ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
+        })
+    };
+
+    match lyra_semantic::const_eval::eval_const_expr_full(&node, &resolve_name, &eval_call) {
         Ok(v) => ConstInt::Known(v),
         Err(e) => ConstInt::Error(e),
     }
@@ -102,4 +134,223 @@ fn const_eval_recover<'db>(
     _expr_ref: ConstExprRef<'db>,
 ) -> ConstInt {
     ConstInt::Error(ConstEvalError::Cycle)
+}
+
+/// Evaluate `$bits(arg)` at const-eval time.
+///
+/// Classification follows the same logic as `classify_bits_arg`:
+/// - `TypeSpec` -> type-form (extract base type from typespec)
+/// - `NameRef`/`QualifiedName` resolved to `TypeAlias` -> type-form
+/// - Everything else -> expr-form (infer via `type_of_expr_raw`)
+fn eval_bits_intrinsic(
+    db: &dyn salsa::Database,
+    view: &SystemCallView,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    map: &lyra_ast::AstIdMap,
+) -> ConstInt {
+    if view.arg_count() != 1 {
+        return ConstInt::Error(ConstEvalError::InvalidArgument);
+    }
+    let Some(arg) = view.nth_arg(0) else {
+        return ConstInt::Error(ConstEvalError::InvalidArgument);
+    };
+
+    let ty = classify_bits_arg_for_const(db, unit, source_file, map, &arg);
+    bits_from_ty(db, unit, &ty)
+}
+
+/// Classify a `$bits` argument and resolve to a `Ty`.
+///
+/// Type-form: `TypeSpec` or `NameRef`/`QualifiedName` that resolves to a `TypeAlias`.
+/// Expr-form: everything else -- infer type via `type_of_expr_raw`.
+fn classify_bits_arg_for_const(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    map: &lyra_ast::AstIdMap,
+    arg: &lyra_parser::SyntaxNode,
+) -> Ty {
+    if arg.kind() == SyntaxKind::TypeSpec {
+        // Check for user-defined type reference
+        if let Some(ty) = resolve_type_from_typespec(db, unit, source_file, map, arg) {
+            return ty;
+        }
+        return lyra_semantic::extract_base_ty_from_typespec(arg, map);
+    }
+
+    if matches!(arg.kind(), SyntaxKind::NameRef | SyntaxKind::QualifiedName)
+        && let Some(ty) = resolve_as_type(db, unit, source_file, map, arg)
+    {
+        return ty;
+    }
+
+    // Expr-form: infer type via type_of_expr_raw
+    let Some(ast_id) = map.erased_ast_id(arg) else {
+        return Ty::Error;
+    };
+    let expr_ref = ExprRef::new(db, unit, ast_id);
+    let et = type_of_expr_raw(db, expr_ref);
+    et.ty
+}
+
+/// Resolve a user-defined type reference inside a `TypeSpec` for `$bits`.
+fn resolve_type_from_typespec(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    map: &lyra_ast::AstIdMap,
+    typespec: &lyra_parser::SyntaxNode,
+) -> Option<Ty> {
+    let utr = lyra_semantic::user_type_ref(typespec)?;
+    let name_ast_id = map.erased_ast_id(utr.resolve_node())?;
+    let resolve = base_resolve_index(db, source_file, unit);
+    let res = resolve.resolutions.get(&name_ast_id)?;
+    let sym_id = match &res.target {
+        lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+        lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
+            return Some(Ty::Enum(ev.enum_id.clone()));
+        }
+    };
+    let sym_ref = SymbolRef::new(db, unit, sym_id);
+    let sym_type = type_of_symbol_raw(db, sym_ref);
+    match sym_type {
+        SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => Some(ty),
+        _ => None,
+    }
+}
+
+/// Resolve a `NameRef`/`QualifiedName` as a type (`TypeAlias`) for `$bits`.
+///
+/// The pre-built resolve index only has Value-namespace entries for bare
+/// `NameRef`s in expression positions. Typedefs live in the Type namespace,
+/// so we do ad-hoc Type-namespace resolution when the pre-built index
+/// doesn't have the name.
+fn resolve_as_type(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    map: &lyra_ast::AstIdMap,
+    name_node: &lyra_parser::SyntaxNode,
+) -> Option<Ty> {
+    // First try the pre-built resolve index (handles Value-namespace hits)
+    let ast_id = map.erased_ast_id(name_node)?;
+    let resolve = base_resolve_index(db, source_file, unit);
+    if let Some(res) = resolve.resolutions.get(&ast_id) {
+        let sym_id = match &res.target {
+            lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+            lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
+                return Some(Ty::Enum(ev.enum_id.clone()));
+            }
+        };
+        let sym_ref = SymbolRef::new(db, unit, sym_id);
+        let sym_type = type_of_symbol_raw(db, sym_ref);
+        if let SymbolType::TypeAlias(ty) = sym_type {
+            return Some(ty);
+        }
+        return None;
+    }
+
+    // Not in pre-built index -- do ad-hoc Type-namespace resolution
+    resolve_name_as_type(db, unit, source_file, map, name_node)
+}
+
+/// Ad-hoc Type-namespace resolution for a `NameRef` or `QualifiedName`.
+///
+/// Used when the pre-built resolve index (which only has Value-namespace
+/// entries for expression-position `NameRef`s) doesn't contain the name.
+fn resolve_name_as_type(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    map: &lyra_ast::AstIdMap,
+    name_node: &lyra_parser::SyntaxNode,
+) -> Option<Ty> {
+    let expected = lyra_semantic::def_index::ExpectedNs::Exact(Namespace::Type);
+    let global = global_def_index(db, unit);
+    let pkg_scope = package_scope_index(db, unit);
+
+    let result = if let Some(nr) = NameRef::cast(name_node.clone()) {
+        let ident = nr.ident()?;
+        let name = ident.text();
+        let def = def_index_file(db, source_file);
+        let scope = find_use_site_scope(def, name_node, map)?;
+        let graph = name_graph_file(db, source_file);
+        let cu_env = compilation_unit_env(db, unit);
+        lyra_semantic::resolve_name_in_scope(
+            graph, global, pkg_scope, cu_env, scope, name, expected,
+        )
+    } else if let Some(qn) = QualifiedName::cast(name_node.clone()) {
+        let segments: Vec<SmolStr> = qn.segments().map(|t| SmolStr::new(t.text())).collect();
+        if segments.len() < 2 {
+            return None;
+        }
+        lyra_semantic::resolve_qualified_name(&segments, global, pkg_scope, expected)
+    } else {
+        return None;
+    };
+
+    core_resolution_to_ty(db, unit, source_file, &result)
+}
+
+/// Find the scope for a node by looking up its `use_site` in the def index.
+fn find_use_site_scope(
+    def: &lyra_semantic::def_index::DefIndex,
+    node: &lyra_parser::SyntaxNode,
+    map: &lyra_ast::AstIdMap,
+) -> Option<lyra_semantic::scopes::ScopeId> {
+    let ast_id = map.erased_ast_id(node)?;
+    def.use_sites
+        .iter()
+        .find(|us| us.ast_id == ast_id)
+        .map(|us| us.scope)
+}
+
+/// Convert a [`CoreResolveResult`] to a [`Ty`] via `type_of_symbol_raw`.
+fn core_resolution_to_ty(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    result: &CoreResolveResult,
+) -> Option<Ty> {
+    match result {
+        CoreResolveResult::Resolved(CoreResolution::Local { symbol, .. }) => {
+            let def = def_index_file(db, source_file);
+            let sym_id = GlobalSymbolId {
+                file: def.file,
+                local: *symbol,
+            };
+            let sym_ref = SymbolRef::new(db, unit, sym_id);
+            match type_of_symbol_raw(db, sym_ref) {
+                SymbolType::TypeAlias(ty) => Some(ty),
+                _ => None,
+            }
+        }
+        CoreResolveResult::Resolved(CoreResolution::Global { decl, .. }) => {
+            let sym_id = crate::semantic::def_symbol(db, unit, *decl)?;
+            let sym_ref = SymbolRef::new(db, unit, sym_id);
+            match type_of_symbol_raw(db, sym_ref) {
+                SymbolType::TypeAlias(ty) => Some(ty),
+                _ => None,
+            }
+        }
+        CoreResolveResult::Resolved(CoreResolution::EnumVariant(target)) => {
+            Some(Ty::Enum(target.enum_id.clone()))
+        }
+        CoreResolveResult::Unresolved(_) => None,
+    }
+}
+
+/// Convert a [`Ty`] to a bit width via `normalize_ty` + `bit_width_total`.
+fn bits_from_ty(db: &dyn salsa::Database, unit: CompilationUnit, ty: &Ty) -> ConstInt {
+    let eval = |expr_ast_id: lyra_ast::ErasedAstId| -> ConstInt {
+        let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
+        eval_const_int(db, expr_ref)
+    };
+    let normalized = lyra_semantic::normalize_ty(ty, &eval);
+    let ty_ref = TyRef::new(db, normalized);
+    match bit_width_total(db, unit, ty_ref) {
+        Some(w) => ConstInt::Known(i64::from(w)),
+        None => ConstInt::Error(ConstEvalError::Unsupported),
+    }
 }
