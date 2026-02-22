@@ -10,14 +10,14 @@ use lyra_semantic::type_infer::{
 };
 use lyra_semantic::types::{ConstInt, Ty};
 
-use crate::callable_queries::{CallableRef, callable_signature};
+use crate::callable_queries::{CallableRef, callable_signature, callable_signature_raw};
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::enum_queries::{EnumRef, enum_sem};
 use crate::module_sig::CallableKind as DbCallableKind;
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::record_queries::{ModportRef, RecordRef, modport_sem, record_sem};
-use crate::semantic::{def_index_file, def_symbol, resolve_index_file};
-use crate::type_queries::{SymbolRef, type_of_symbol};
+use crate::record_queries::{ModportRef, RecordRef, modport_sem, record_fields_raw, record_sem};
+use crate::semantic::{base_resolve_index, def_index_file, def_symbol, resolve_index_file};
+use crate::type_queries::{SymbolRef, type_of_symbol, type_of_symbol_raw};
 use crate::{CompilationUnit, source_file_by_id};
 
 /// Identifies an expression for type inference.
@@ -138,6 +138,50 @@ pub fn type_of_expr_in_ctx<'db>(
     lyra_semantic::type_infer::infer_expr_type(&node, &ctx, Some(&integral_ctx))
 }
 
+/// Const-eval-safe expression typing (Salsa-tracked with cycle recovery).
+///
+/// This query must NOT call `resolve_index_file`, `type_of_symbol`,
+/// or `record_sem`. It uses only the core/raw paths:
+/// - `base_resolve_index` for name resolution
+/// - `type_of_symbol_raw` for symbol types (unevaluated dims)
+/// - `record_fields_raw` for record member lookup (no const-eval)
+/// - `callable_signature_raw` for callable return types (no normalized dims)
+/// - `eval_const_int` only via `InferCtx::const_eval` (already uses base resolve)
+#[salsa::tracked(recovery_fn = type_of_expr_raw_recover)]
+pub fn type_of_expr_raw<'db>(db: &'db dyn salsa::Database, expr_ref: ExprRef<'db>) -> ExprType {
+    let unit = expr_ref.unit(db);
+    let expr_ast_id = expr_ref.expr_ast_id(db);
+    let file_id = expr_ast_id.file();
+
+    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
+    };
+
+    let parse = parse_file(db, source_file);
+    let map = ast_id_map(db, source_file);
+
+    let Some(node) = map.get_node(&parse.syntax(), expr_ast_id) else {
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
+    };
+
+    let ctx = DbInferCtxRaw {
+        db,
+        unit,
+        source_file,
+        ast_id_map: map,
+    };
+
+    lyra_semantic::type_infer::infer_expr_type(&node, &ctx, None)
+}
+
+fn type_of_expr_raw_recover<'db>(
+    _db: &'db dyn salsa::Database,
+    _cycle: &salsa::Cycle,
+    _expr_ref: ExprRef<'db>,
+) -> ExprType {
+    ExprType::error(ExprTypeErrorKind::Unresolved)
+}
+
 /// Database-backed implementation of `InferCtx`.
 struct DbInferCtx<'a> {
     db: &'a dyn salsa::Database,
@@ -148,75 +192,34 @@ struct DbInferCtx<'a> {
 
 impl InferCtx for DbInferCtx<'_> {
     fn type_of_name(&self, name_node: &lyra_parser::SyntaxNode) -> ExprType {
-        let Some(name_ast_id) = self.ast_id_map.erased_ast_id(name_node) else {
-            return ExprType::error(ExprTypeErrorKind::Unresolved);
-        };
-
-        let resolve = resolve_index_file(self.db, self.source_file, self.unit);
-        let Some(resolution) = resolve.resolutions.get(&name_ast_id) else {
-            return ExprType::error(ExprTypeErrorKind::Unresolved);
-        };
-
-        match &resolution.target {
-            lyra_semantic::resolve_index::ResolvedTarget::Symbol(sym_id) => {
-                let sym_ref = SymbolRef::new(self.db, self.unit, *sym_id);
-                let sym_type = type_of_symbol(self.db, sym_ref);
-                ExprType::from_symbol_type(&sym_type)
-            }
-            lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
-                ExprType::from_ty(&Ty::Enum(target.enum_id.clone()))
-            }
-        }
+        type_of_name_impl(
+            self.db,
+            self.unit,
+            self.ast_id_map,
+            name_node,
+            resolve_index_file(self.db, self.source_file, self.unit),
+            &|db, unit, sym_id| {
+                let sym_ref = SymbolRef::new(db, unit, sym_id);
+                type_of_symbol(db, sym_ref)
+            },
+        )
     }
 
     fn const_eval(&self, expr_node: &lyra_parser::SyntaxNode) -> ConstInt {
-        let Some(ast_id) = self.ast_id_map.erased_ast_id(expr_node) else {
-            return ConstInt::Error(lyra_semantic::types::ConstEvalError::Unsupported);
-        };
-        let expr_ref = ConstExprRef::new(self.db, self.unit, ast_id);
-        eval_const_int(self.db, expr_ref)
+        const_eval_impl(self.db, self.unit, self.ast_id_map, expr_node)
     }
 
     fn resolve_callable(
         &self,
         callee_node: &lyra_parser::SyntaxNode,
     ) -> Result<GlobalSymbolId, ResolveCallableError> {
-        let Some(ast_id) = self.ast_id_map.erased_ast_id(callee_node) else {
-            return Err(ResolveCallableError::NotFound);
-        };
-
         let resolve = resolve_index_file(self.db, self.source_file, self.unit);
-        let Some(res) = resolve.resolutions.get(&ast_id) else {
-            return Err(ResolveCallableError::NotFound);
-        };
-
-        let target_id = match &res.target {
-            lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
-            lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
-                return Err(ResolveCallableError::NotACallable(SymbolKind::EnumMember));
-            }
-        };
-
-        // Check that the resolved symbol is actually a function or task
-        let Some(target_file) = source_file_by_id(self.db, self.unit, target_id.file) else {
-            return Err(ResolveCallableError::NotFound);
-        };
-        let target_def = def_index_file(self.db, target_file);
-        let target_info = target_def.symbols.get(target_id.local);
-
-        match target_info.kind {
-            SymbolKind::Function | SymbolKind::Task => Ok(target_id),
-            other => Err(ResolveCallableError::NotACallable(other)),
-        }
+        resolve_callable_impl(self.db, self.unit, self.ast_id_map, callee_node, resolve)
     }
 
     fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef> {
         let callable_ref = CallableRef::new(self.db, self.unit, sym);
         let sig = callable_signature(self.db, callable_ref);
-        let kind = match sig.kind {
-            DbCallableKind::Function => CallableKind::Function,
-            DbCallableKind::Task => CallableKind::Task,
-        };
         let eval = |expr_ast_id: lyra_ast::ErasedAstId| -> ConstInt {
             let expr_ref = ConstExprRef::new(self.db, self.unit, expr_ast_id);
             eval_const_int(self.db, expr_ref)
@@ -234,7 +237,7 @@ impl InferCtx for DbInferCtx<'_> {
             })
             .collect();
         Some(CallableSigRef {
-            kind,
+            kind: db_to_infer_callable_kind(sig.kind),
             return_ty: normalize(&sig.return_ty),
             ports: ports.into(),
         })
@@ -244,9 +247,7 @@ impl InferCtx for DbInferCtx<'_> {
         &self,
         id: &lyra_semantic::enum_def::EnumId,
     ) -> Option<lyra_semantic::type_infer::BitVecType> {
-        let eref = EnumRef::new(self.db, self.unit, id.clone());
-        let sem = enum_sem(self.db, eref);
-        sem.base_int
+        enum_integral_view_impl(self.db, self.unit, id)
     }
 
     fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError> {
@@ -337,5 +338,298 @@ impl InferCtx for DbInferCtx<'_> {
             self.ast_id_map,
             name_node,
         )
+    }
+}
+
+/// Const-eval-safe implementation of `InferCtx`.
+///
+/// Uses `base_resolve_index` + `type_of_symbol_raw` instead of
+/// `resolve_index_file` + `type_of_symbol`. Uses `record_fields_raw`
+/// instead of `record_sem` for member lookup.
+struct DbInferCtxRaw<'a> {
+    db: &'a dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: crate::SourceFile,
+    ast_id_map: &'a lyra_ast::AstIdMap,
+}
+
+impl InferCtx for DbInferCtxRaw<'_> {
+    fn type_of_name(&self, name_node: &lyra_parser::SyntaxNode) -> ExprType {
+        type_of_name_impl(
+            self.db,
+            self.unit,
+            self.ast_id_map,
+            name_node,
+            base_resolve_index(self.db, self.source_file, self.unit),
+            &|db, unit, sym_id| {
+                let sym_ref = SymbolRef::new(db, unit, sym_id);
+                let raw = type_of_symbol_raw(db, sym_ref);
+                lyra_semantic::normalize_symbol_type(&raw, &|expr_ast_id| {
+                    let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
+                    eval_const_int(db, expr_ref)
+                })
+            },
+        )
+    }
+
+    fn const_eval(&self, expr_node: &lyra_parser::SyntaxNode) -> ConstInt {
+        const_eval_impl(self.db, self.unit, self.ast_id_map, expr_node)
+    }
+
+    fn resolve_callable(
+        &self,
+        callee_node: &lyra_parser::SyntaxNode,
+    ) -> Result<GlobalSymbolId, ResolveCallableError> {
+        let resolve = base_resolve_index(self.db, self.source_file, self.unit);
+        resolve_callable_impl(self.db, self.unit, self.ast_id_map, callee_node, resolve)
+    }
+
+    fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef> {
+        let sig = callable_signature_raw(self.db, self.unit, sym);
+        let eval = |expr_ast_id: lyra_ast::ErasedAstId| -> ConstInt {
+            let expr_ref = ConstExprRef::new(self.db, self.unit, expr_ast_id);
+            eval_const_int(self.db, expr_ref)
+        };
+        let normalize = |ty: &Ty| -> Ty { lyra_semantic::normalize_ty(ty, &eval) };
+        let ports: Vec<CallablePort> = sig
+            .ports
+            .iter()
+            .map(|p| CallablePort {
+                name: p.name.clone(),
+                ty: normalize(&p.ty),
+                has_default: p.has_default,
+            })
+            .collect();
+        Some(CallableSigRef {
+            kind: db_to_infer_callable_kind(sig.kind),
+            return_ty: normalize(&sig.return_ty),
+            ports: ports.into(),
+        })
+    }
+
+    fn enum_integral_view(
+        &self,
+        id: &lyra_semantic::enum_def::EnumId,
+    ) -> Option<lyra_semantic::type_infer::BitVecType> {
+        enum_integral_view_impl(self.db, self.unit, id)
+    }
+
+    fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError> {
+        let normalize_field = |ty: Ty| -> Ty {
+            lyra_semantic::normalize_ty(&ty, &|expr_ast_id| {
+                let expr_ref = ConstExprRef::new(self.db, self.unit, expr_ast_id);
+                eval_const_int(self.db, expr_ref)
+            })
+        };
+        match ty {
+            Ty::Record(id) => {
+                let rref = RecordRef::new(self.db, self.unit, id.clone());
+                let fields = record_fields_raw(self.db, rref);
+                let (idx, field) = fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, f)| f.name == member_name)
+                    .ok_or(MemberLookupError::UnknownMember)?;
+                Ok(MemberInfo {
+                    ty: normalize_field(field.ty.clone()),
+                    kind: MemberKind::Field { index: idx as u32 },
+                    receiver: None,
+                })
+            }
+            Ty::Interface(iface_ty) => {
+                let gsym = def_symbol(self.db, self.unit, iface_ty.iface.global_def())
+                    .ok_or(MemberLookupError::NoMembersOnType)?;
+                let src = source_file_by_id(self.db, self.unit, gsym.file)
+                    .ok_or(MemberLookupError::NoMembersOnType)?;
+                let def = def_index_file(self.db, src);
+                let iface_scope = def.symbols.get(gsym.local).scope;
+                let member_sym = def
+                    .scopes
+                    .resolve(
+                        &def.symbols,
+                        iface_scope,
+                        lyra_semantic::symbols::Namespace::Value,
+                        member_name,
+                    )
+                    .ok_or(MemberLookupError::UnknownMember)?;
+                let global_member = lyra_semantic::symbols::GlobalSymbolId {
+                    file: gsym.file,
+                    local: member_sym,
+                };
+                let sym_ref = SymbolRef::new(self.db, self.unit, global_member);
+                let raw = type_of_symbol_raw(self.db, sym_ref);
+                let normalized = lyra_semantic::normalize_symbol_type(&raw, &|expr_ast_id| {
+                    let expr_ref = ConstExprRef::new(self.db, self.unit, expr_ast_id);
+                    eval_const_int(self.db, expr_ref)
+                });
+                let ty = match normalized {
+                    lyra_semantic::types::SymbolType::Value(ty) => ty,
+                    lyra_semantic::types::SymbolType::Net(net) => net.data.clone(),
+                    _ => return Err(MemberLookupError::UnknownMember),
+                };
+                if let Some(mp_id) = iface_ty.modport {
+                    let mref = ModportRef::new(self.db, self.unit, mp_id);
+                    let sem = modport_sem(self.db, mref);
+                    if sem.view.direction_of(member_sym).is_none() {
+                        return Err(MemberLookupError::NotInModport);
+                    }
+                }
+                Ok(MemberInfo {
+                    ty,
+                    kind: MemberKind::InterfaceMember { member: member_sym },
+                    receiver: None,
+                })
+            }
+            Ty::Enum(enum_id) => {
+                let method = EnumMethodKind::from_name(member_name)
+                    .ok_or(MemberLookupError::UnknownMember)?;
+                Ok(MemberInfo {
+                    ty: method.return_ty(enum_id.clone()),
+                    kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Enum(method)),
+                    receiver: None,
+                })
+            }
+            Ty::Array { .. } => {
+                let recv = classify_array_receiver(ty).ok_or(MemberLookupError::NoMembersOnType)?;
+                let method = ArrayMethodKind::from_name(member_name)
+                    .ok_or(MemberLookupError::UnknownMember)?;
+                method
+                    .allowed_on(&recv)
+                    .map_err(MemberLookupError::MethodNotValidOnReceiver)?;
+                let ret_ty = method.return_ty(&recv);
+                Ok(MemberInfo {
+                    ty: ret_ty,
+                    kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Array(method)),
+                    receiver: Some(ReceiverInfo::Array(recv)),
+                })
+            }
+            _ => Err(MemberLookupError::NoMembersOnType),
+        }
+    }
+
+    fn resolve_type_arg(&self, name_node: &lyra_parser::SyntaxNode) -> Option<Ty> {
+        resolve_type_arg_raw_impl(
+            self.db,
+            self.unit,
+            self.source_file,
+            self.ast_id_map,
+            name_node,
+        )
+    }
+}
+
+// Shared helpers used by both DbInferCtx and DbInferCtxRaw
+
+fn type_of_name_impl(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    ast_id_map: &lyra_ast::AstIdMap,
+    name_node: &lyra_parser::SyntaxNode,
+    resolve: &lyra_semantic::resolve_index::ResolveIndex,
+    type_of_sym: &dyn Fn(
+        &dyn salsa::Database,
+        CompilationUnit,
+        GlobalSymbolId,
+    ) -> lyra_semantic::types::SymbolType,
+) -> ExprType {
+    let Some(name_ast_id) = ast_id_map.erased_ast_id(name_node) else {
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
+    };
+    let Some(resolution) = resolve.resolutions.get(&name_ast_id) else {
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
+    };
+    match &resolution.target {
+        lyra_semantic::resolve_index::ResolvedTarget::Symbol(sym_id) => {
+            let sym_type = type_of_sym(db, unit, *sym_id);
+            ExprType::from_symbol_type(&sym_type)
+        }
+        lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
+            ExprType::from_ty(&Ty::Enum(target.enum_id.clone()))
+        }
+    }
+}
+
+fn const_eval_impl(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    ast_id_map: &lyra_ast::AstIdMap,
+    expr_node: &lyra_parser::SyntaxNode,
+) -> ConstInt {
+    let Some(ast_id) = ast_id_map.erased_ast_id(expr_node) else {
+        return ConstInt::Error(lyra_semantic::types::ConstEvalError::Unsupported);
+    };
+    let expr_ref = ConstExprRef::new(db, unit, ast_id);
+    eval_const_int(db, expr_ref)
+}
+
+fn resolve_callable_impl(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    ast_id_map: &lyra_ast::AstIdMap,
+    callee_node: &lyra_parser::SyntaxNode,
+    resolve: &lyra_semantic::resolve_index::ResolveIndex,
+) -> Result<GlobalSymbolId, ResolveCallableError> {
+    let Some(ast_id) = ast_id_map.erased_ast_id(callee_node) else {
+        return Err(ResolveCallableError::NotFound);
+    };
+    let Some(res) = resolve.resolutions.get(&ast_id) else {
+        return Err(ResolveCallableError::NotFound);
+    };
+    let target_id = match &res.target {
+        lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+        lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
+            return Err(ResolveCallableError::NotACallable(SymbolKind::EnumMember));
+        }
+    };
+    let Some(target_file) = source_file_by_id(db, unit, target_id.file) else {
+        return Err(ResolveCallableError::NotFound);
+    };
+    let target_def = def_index_file(db, target_file);
+    let target_info = target_def.symbols.get(target_id.local);
+    match target_info.kind {
+        SymbolKind::Function | SymbolKind::Task => Ok(target_id),
+        other => Err(ResolveCallableError::NotACallable(other)),
+    }
+}
+
+fn enum_integral_view_impl(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    id: &lyra_semantic::enum_def::EnumId,
+) -> Option<lyra_semantic::type_infer::BitVecType> {
+    let eref = EnumRef::new(db, unit, id.clone());
+    let sem = enum_sem(db, eref);
+    sem.base_int
+}
+
+fn db_to_infer_callable_kind(kind: DbCallableKind) -> CallableKind {
+    match kind {
+        DbCallableKind::Function => CallableKind::Function,
+        DbCallableKind::Task => CallableKind::Task,
+    }
+}
+
+/// Resolve a NameRef/QualifiedName as a type using raw (base) resolution.
+fn resolve_type_arg_raw_impl(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: crate::SourceFile,
+    ast_id_map: &lyra_ast::AstIdMap,
+    name_node: &lyra_parser::SyntaxNode,
+) -> Option<Ty> {
+    let ast_id = ast_id_map.erased_ast_id(name_node)?;
+    let resolve = base_resolve_index(db, source_file, unit);
+    let resolution = resolve.resolutions.get(&ast_id)?;
+    let sym_id = match &resolution.target {
+        lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+        lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
+            return Some(Ty::Enum(target.enum_id.clone()));
+        }
+    };
+    let sym_ref = SymbolRef::new(db, unit, sym_id);
+    let sym_type = type_of_symbol_raw(db, sym_ref);
+    match &sym_type {
+        lyra_semantic::types::SymbolType::TypeAlias(ty) => Some(ty.clone()),
+        _ => None,
     }
 }

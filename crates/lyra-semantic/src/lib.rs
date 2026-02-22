@@ -24,6 +24,7 @@ pub mod resolve_index;
 pub mod scopes;
 pub mod symbols;
 pub(crate) mod syntax_helpers;
+pub mod system_call_view;
 pub(crate) mod system_functions;
 pub mod type_check;
 mod type_extract;

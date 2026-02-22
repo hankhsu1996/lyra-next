@@ -40,7 +40,7 @@ pub use type_queries::{SymbolRef, TyRef, bit_width_total, type_of_symbol, type_o
 pub use callable_queries::{CallableRef, callable_signature};
 
 // Re-export expression queries
-pub use expr_queries::{ExprRef, type_of_expr};
+pub use expr_queries::{ExprRef, type_of_expr, type_of_expr_raw};
 
 // Re-export resolve-at helpers
 pub use resolve_at::{TypeAtResult, resolve_at, symbol_global, type_at};
@@ -50,8 +50,8 @@ pub use enum_queries::{EnumRef, enum_sem};
 
 // Re-export record queries
 pub use record_queries::{
-    LoweredFieldTy, ModportRef, ModportSem, RecordRef, modport_sem, record_diagnostics,
-    record_field_tys, record_sem,
+    LoweredFieldTy, ModportRef, ModportSem, RawField, RecordRef, modport_sem, record_diagnostics,
+    record_field_tys, record_fields_raw, record_sem,
 };
 
 // Re-export facts queries

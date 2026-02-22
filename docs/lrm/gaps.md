@@ -28,7 +28,7 @@ Type representation handles all unpacked dimension forms (dynamic `[]`, queue `[
 
 ### 7.3.1: Soft packed union layout semantics
 
-Width computation (`bit_width_total`) handles packed records internally (struct=sum, union=max). No observable SV-level behavior depends on it yet -- blocked by `$bits` const-eval (gap 20.6.2). Right-justified member placement and layout mapping are not modeled. Test: `lrm/ch07/soft_packed_union_layout`.
+Width computation (`bit_width_total`) handles packed records internally (struct=sum, union=max). `$bits` const-eval now exposes these widths at the SV level. Right-justified member placement and layout mapping are not modeled. Test: `lrm/ch07/soft_packed_union_layout`.
 
 ### 7.3.2: Tagged unions
 
@@ -62,9 +62,9 @@ Bit-select and part-select currently return unsigned (engine policy). LRM signed
 
 ## Chapter 20 -- System Functions
 
-### 20.6.2: $bits constant evaluation
+### 20.6.2: $bits constant evaluation -- unsupported type categories
 
-`$bits` returns `int` for typing but the actual value is not computed at const-eval time. `bit_width_total` query exists (v1: Integral and Real only). Extending it to walk Record fields, Enum base types, and Array dimensions requires recursing via `record_sem` and enum queries. Blocked by: const_eval extension for compound types. Test: `lrm/ch20/bits_consteval`.
+`$bits` const-eval handles packed integral types (all packed dims), real types, enums (base type width), and packed records (struct=sum, union=max). Unsupported: `$bits` on unpacked arrays, strings, chandles, events, void, and interfaces (implementation-defined or not applicable per LRM). Test: `lrm/ch20/bits_consteval`.
 
 ### 20.7: Array query functions
 

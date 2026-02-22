@@ -55,16 +55,35 @@ pub fn eval_const_expr(
     node: &SyntaxNode,
     resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
 ) -> EvalResult {
+    eval_const_expr_full(node, resolve_name, &|_| None)
+}
+
+/// Extended constant expression evaluator with system-call dispatch.
+///
+/// `eval_call` handles system function calls that the pure evaluator
+/// cannot (e.g. `$bits`). It receives the call node and returns
+/// `Some(Ok(v))` or `Some(Err(e))` if handled, `None` to fall through
+/// to the built-in handlers (`$clog2`).
+pub fn eval_const_expr_full(
+    node: &SyntaxNode,
+    resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
+    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
+) -> EvalResult {
     match node.kind() {
         SyntaxKind::Literal => eval_literal(node),
-        SyntaxKind::BinExpr => eval_bin_expr(node, resolve_name),
-        SyntaxKind::PrefixExpr => eval_prefix_expr(node, resolve_name),
+        SyntaxKind::BinExpr => eval_bin_expr(node, resolve_name, eval_call),
+        SyntaxKind::PrefixExpr => eval_prefix_expr(node, resolve_name, eval_call),
         SyntaxKind::Expression | SyntaxKind::ParenExpr => {
             let child = node.first_child().ok_or(ConstEvalError::Unsupported)?;
-            eval_const_expr(&child, resolve_name)
+            eval_const_expr_full(&child, resolve_name, eval_call)
         }
         SyntaxKind::NameRef | SyntaxKind::QualifiedName => resolve_name(node),
-        SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => eval_call_expr(node, resolve_name),
+        SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => {
+            if let Some(result) = eval_call(node) {
+                return result;
+            }
+            eval_call_expr(node, resolve_name, eval_call)
+        }
         _ => Err(ConstEvalError::Unsupported),
     }
 }
@@ -184,13 +203,14 @@ fn truncate_to_size(value: u128, size: u32) -> EvalResult {
 fn eval_bin_expr(
     node: &SyntaxNode,
     resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
+    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
 ) -> EvalResult {
     let children: Vec<SyntaxNode> = node.children().collect();
     if children.len() < 2 {
         return Err(ConstEvalError::Unsupported);
     }
 
-    let lhs = eval_const_expr(&children[0], resolve_name)?;
+    let lhs = eval_const_expr_full(&children[0], resolve_name, eval_call)?;
 
     // Find operator token between child nodes
     let op = node
@@ -199,7 +219,7 @@ fn eval_bin_expr(
         .find(|tok| tok.kind() != SyntaxKind::Whitespace)
         .ok_or(ConstEvalError::Unsupported)?;
 
-    let rhs = eval_const_expr(&children[1], resolve_name)?;
+    let rhs = eval_const_expr_full(&children[1], resolve_name, eval_call)?;
 
     match op.kind() {
         SyntaxKind::Plus => lhs.checked_add(rhs).ok_or(ConstEvalError::Overflow),
@@ -237,9 +257,10 @@ fn eval_bin_expr(
 fn eval_prefix_expr(
     node: &SyntaxNode,
     resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
+    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
 ) -> EvalResult {
     let child = node.first_child().ok_or(ConstEvalError::Unsupported)?;
-    let operand = eval_const_expr(&child, resolve_name)?;
+    let operand = eval_const_expr_full(&child, resolve_name, eval_call)?;
 
     let op = node
         .children_with_tokens()
@@ -258,6 +279,7 @@ fn eval_prefix_expr(
 fn eval_call_expr(
     node: &SyntaxNode,
     resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
+    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
 ) -> EvalResult {
     let func_token = system_tf_name(node).ok_or(ConstEvalError::Unsupported)?;
 
@@ -272,7 +294,7 @@ fn eval_call_expr(
         .next()
         .ok_or(ConstEvalError::Unsupported)?;
 
-    let value = eval_const_expr(&first_arg, resolve_name)?;
+    let value = eval_const_expr_full(&first_arg, resolve_name, eval_call)?;
     clog2(value)
 }
 

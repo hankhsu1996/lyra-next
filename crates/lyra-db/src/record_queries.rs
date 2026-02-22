@@ -33,6 +33,55 @@ pub struct LoweredFieldTy {
     pub(crate) err: Option<FieldTyError>,
 }
 
+/// A raw field: name + unevaluated type (no const-eval normalization).
+///
+/// Used by `type_of_expr_raw` for const-eval-safe record member lookup
+/// without depending on `record_sem` (which runs const-eval for dim normalization).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawField {
+    pub name: SmolStr,
+    pub ty: Ty,
+}
+
+/// Raw record fields: names zipped with lowered types (Salsa-tracked).
+///
+/// Reads `record_field_tys` for raw lowered types and pairs them with
+/// field names from `RecordDef`. No const-eval normalization.
+#[salsa::tracked]
+pub fn record_fields_raw<'db>(
+    db: &'db dyn salsa::Database,
+    rref: RecordRef<'db>,
+) -> Box<[RawField]> {
+    let unit = rref.unit(db);
+    let record_id = rref.record_id(db);
+    let file_id = record_id.file;
+
+    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
+        return Box::new([]);
+    };
+
+    let lowered = record_field_tys(db, rref);
+    let def = def_index_file(db, source_file);
+
+    let record_def = def
+        .record_defs
+        .iter()
+        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal);
+    let Some(record_def) = record_def else {
+        return Box::new([]);
+    };
+
+    record_def
+        .fields
+        .iter()
+        .zip(lowered.iter())
+        .map(|(f, lt)| RawField {
+            name: f.name.clone(),
+            ty: lt.ty.clone(),
+        })
+        .collect()
+}
+
 /// Pure type lowering for record fields (Salsa-tracked).
 ///
 /// Resolves each field's `TypeRef` to a raw `Ty` without const-eval or
