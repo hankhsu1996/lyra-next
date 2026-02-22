@@ -393,3 +393,225 @@ fn const_eval_no_initializer() {
         }
     }
 }
+
+// Array query function const-eval tests (LRM 20.7)
+
+#[test]
+fn const_eval_dimensions_int() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $dimensions(int); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(1));
+}
+
+#[test]
+fn const_eval_dimensions_logic_vec() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $dimensions(logic [7:0]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(1));
+}
+
+#[test]
+fn const_eval_dimensions_packed_2d() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $dimensions(logic [3:0][7:0]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(2));
+}
+
+#[test]
+fn const_eval_dimensions_with_unpacked() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x [3:0]; parameter P = $dimensions(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(2));
+}
+
+#[test]
+fn const_eval_unpacked_dimensions() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x [3:0]; parameter P = $unpacked_dimensions(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(1));
+}
+
+#[test]
+fn const_eval_unpacked_dimensions_none() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $unpacked_dimensions(int); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(0));
+}
+
+#[test]
+fn const_eval_size_packed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $size(logic [7:0]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(8));
+}
+
+#[test]
+fn const_eval_size_unpacked() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int x [10]; parameter P = $size(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(10));
+}
+
+#[test]
+fn const_eval_left_packed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $left(logic [7:0]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(7));
+}
+
+#[test]
+fn const_eval_right_packed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $right(logic [7:0]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(0));
+}
+
+#[test]
+fn const_eval_low_packed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $low(logic [7:0]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(0));
+}
+
+#[test]
+fn const_eval_high_packed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $high(logic [7:0]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(7));
+}
+
+#[test]
+fn const_eval_increment_descending() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $increment(logic [7:0]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(1));
+}
+
+#[test]
+fn const_eval_increment_ascending() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $increment(logic [0:7]); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(-1));
+}
+
+#[test]
+fn const_eval_size_dim2() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x [4]; parameter P = $size(x, 2); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(8));
+}
+
+#[test]
+fn const_eval_left_int_scalar() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; parameter P = $left(int); endmodule");
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(31));
+}
+
+#[test]
+fn const_eval_size_int_scalar() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; parameter P = $size(int); endmodule");
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(32));
+}
+
+#[test]
+fn const_eval_size_in_expr() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; parameter P = $size(logic [7:0]) + 1; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(9));
+}
+
+#[test]
+fn const_eval_dimensions_variable() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [3:0][7:0] x [10][5]; parameter P = $dimensions(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(4));
+}

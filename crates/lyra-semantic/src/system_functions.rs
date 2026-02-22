@@ -212,6 +212,55 @@ static BUILTINS: &[SystemFnEntry] = &[
         max_args: Some(2),
         kind: SystemFnKind::RealMath2,
     },
+    // Array query functions (LRM 20.7)
+    SystemFnEntry {
+        name: "$left",
+        min_args: 1,
+        max_args: Some(2),
+        kind: SystemFnKind::ReturnsInt,
+    },
+    SystemFnEntry {
+        name: "$right",
+        min_args: 1,
+        max_args: Some(2),
+        kind: SystemFnKind::ReturnsInt,
+    },
+    SystemFnEntry {
+        name: "$low",
+        min_args: 1,
+        max_args: Some(2),
+        kind: SystemFnKind::ReturnsInt,
+    },
+    SystemFnEntry {
+        name: "$high",
+        min_args: 1,
+        max_args: Some(2),
+        kind: SystemFnKind::ReturnsInt,
+    },
+    SystemFnEntry {
+        name: "$size",
+        min_args: 1,
+        max_args: Some(2),
+        kind: SystemFnKind::ReturnsInt,
+    },
+    SystemFnEntry {
+        name: "$increment",
+        min_args: 1,
+        max_args: Some(2),
+        kind: SystemFnKind::ReturnsInt,
+    },
+    SystemFnEntry {
+        name: "$dimensions",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::ReturnsInt,
+    },
+    SystemFnEntry {
+        name: "$unpacked_dimensions",
+        min_args: 1,
+        max_args: Some(1),
+        kind: SystemFnKind::ReturnsInt,
+    },
     // Real conversion functions (LRM 20.5)
     SystemFnEntry {
         name: "$itor",
