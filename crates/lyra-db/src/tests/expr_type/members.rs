@@ -648,7 +648,8 @@ fn expr_type_queue_push_back_void() {
         0,
         "module m;\n\
          int q[$];\n\
-         parameter P = q.push_back(1);\n\
+         int v;\n\
+         parameter P = q.push_back(v);\n\
          endmodule",
     );
     let unit = single_file_unit(&db, file);
@@ -955,5 +956,24 @@ fn expr_type_array_method_bare_ref() {
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
         ExprType::error(ExprTypeErrorKind::MethodRequiresCall),
+    );
+}
+
+#[test]
+fn expr_type_queue_push_back_bad_arg_type() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int q[$];\n\
+         string s;\n\
+         parameter P = q.push_back(s);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodArgTypeMismatch),
     );
 }

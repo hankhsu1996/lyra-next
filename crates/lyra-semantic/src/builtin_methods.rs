@@ -47,11 +47,11 @@ pub(crate) fn infer_builtin_method_call(
             }
         }
         BuiltinMethodKind::Array(ak) => {
-            if ak.returns_void() {
-                return ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr);
-            }
             if let Some(err) = check_array_method_args(ak, &args, receiver, ctx) {
                 return err;
+            }
+            if ak.returns_void() {
+                return ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr);
             }
         }
     }
