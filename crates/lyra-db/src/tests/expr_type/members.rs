@@ -467,6 +467,25 @@ fn expr_type_enum_method_next_bad_arg() {
 }
 
 #[test]
+fn expr_type_enum_method_next_unresolved_arg() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.next(undefined_name);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::Unresolved),
+    );
+}
+
+#[test]
 fn expr_type_enum_member_in_assign() {
     let db = LyraDatabase::default();
     let file = new_file(

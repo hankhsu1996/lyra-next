@@ -1094,6 +1094,9 @@ fn infer_builtin_method_call(
     };
     if requires_integral && let Some(arg_node) = args.first() {
         let arg_type = infer_expr_type(arg_node, ctx, None);
+        if let ExprView::Error(_) = &arg_type.view {
+            return arg_type;
+        }
         if try_integral_view(&arg_type, ctx).is_none() {
             return ExprType::error(ExprTypeErrorKind::MethodArgNotIntegral);
         }
