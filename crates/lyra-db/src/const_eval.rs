@@ -28,12 +28,28 @@ pub struct ConstExprRef<'db> {
 /// System functions that can be evaluated at const-eval time.
 enum ConstIntrinsic {
     Bits,
+    Left,
+    Right,
+    Low,
+    High,
+    Size,
+    Increment,
+    Dimensions,
+    UnpackedDimensions,
 }
 
 impl ConstIntrinsic {
     fn from_name(name: &str) -> Option<Self> {
         match name {
             "$bits" => Some(Self::Bits),
+            "$left" => Some(Self::Left),
+            "$right" => Some(Self::Right),
+            "$low" => Some(Self::Low),
+            "$high" => Some(Self::High),
+            "$size" => Some(Self::Size),
+            "$increment" => Some(Self::Increment),
+            "$dimensions" => Some(Self::Dimensions),
+            "$unpacked_dimensions" => Some(Self::UnpackedDimensions),
             _ => None,
         }
     }
@@ -114,6 +130,16 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
         let intrinsic = ConstIntrinsic::from_name(view.name())?;
         let result = match intrinsic {
             ConstIntrinsic::Bits => eval_bits_intrinsic(db, &view, unit, source_file, map),
+            ConstIntrinsic::Left
+            | ConstIntrinsic::Right
+            | ConstIntrinsic::Low
+            | ConstIntrinsic::High
+            | ConstIntrinsic::Size
+            | ConstIntrinsic::Increment
+            | ConstIntrinsic::Dimensions
+            | ConstIntrinsic::UnpackedDimensions => {
+                eval_dim_intrinsic(db, &view, unit, source_file, map, &intrinsic, &resolve_name)
+            }
         };
         Some(match result {
             ConstInt::Known(v) => Ok(v),
@@ -339,6 +365,100 @@ fn core_resolution_to_ty(
         }
         CoreResolveResult::Unresolved(_) => None,
     }
+}
+
+/// Evaluate an array query intrinsic ($left, $right, etc.) at const-eval time.
+fn eval_dim_intrinsic(
+    db: &dyn salsa::Database,
+    view: &SystemCallView,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    map: &lyra_ast::AstIdMap,
+    intrinsic: &ConstIntrinsic,
+    resolve_name: &dyn Fn(&lyra_parser::SyntaxNode) -> Result<i64, ConstEvalError>,
+) -> ConstInt {
+    let arg_count = view.arg_count();
+    let is_counting = matches!(
+        intrinsic,
+        ConstIntrinsic::Dimensions | ConstIntrinsic::UnpackedDimensions
+    );
+
+    if arg_count < 1 || (is_counting && arg_count > 1) || (!is_counting && arg_count > 2) {
+        return ConstInt::Error(ConstEvalError::InvalidArgument);
+    }
+
+    let Some(first_arg) = view.nth_arg(0) else {
+        return ConstInt::Error(ConstEvalError::InvalidArgument);
+    };
+
+    let ty = classify_bits_arg_for_const(db, unit, source_file, map, &first_arg);
+    let normalized = normalize_for_dim(db, unit, &ty);
+
+    if matches!(normalized, Ty::Error) {
+        return ConstInt::Error(ConstEvalError::Unsupported);
+    }
+
+    if is_counting {
+        let (unpacked, packed) = crate::dim_model::dim_counts(&normalized);
+        return match intrinsic {
+            ConstIntrinsic::Dimensions => ConstInt::Known(i64::from(unpacked + packed)),
+            ConstIntrinsic::UnpackedDimensions => ConstInt::Known(i64::from(unpacked)),
+            _ => ConstInt::Error(ConstEvalError::Unsupported),
+        };
+    }
+
+    // Per-dimension queries: resolve optional second arg (default 1)
+    let dim_num = if arg_count >= 2 {
+        let Some(dim_arg) = view.nth_arg(1) else {
+            return ConstInt::Error(ConstEvalError::InvalidArgument);
+        };
+        match lyra_semantic::const_eval::eval_const_expr_full(&dim_arg, resolve_name, &|_| None) {
+            Ok(v) => match u32::try_from(v) {
+                Ok(0) | Err(_) => {
+                    return ConstInt::Error(ConstEvalError::InvalidArgument);
+                }
+                Ok(n) => n,
+            },
+            Err(e) => return ConstInt::Error(e),
+        }
+    } else {
+        1
+    };
+
+    let Some(shape) = crate::dim_model::select_dim(&normalized, dim_num) else {
+        return ConstInt::Error(ConstEvalError::InvalidArgument);
+    };
+
+    match intrinsic {
+        ConstIntrinsic::Left => ConstInt::Known(shape.left()),
+        ConstIntrinsic::Right => match shape.right() {
+            Some(v) => ConstInt::Known(v),
+            None => ConstInt::Error(ConstEvalError::NonConstant),
+        },
+        ConstIntrinsic::Low => match shape.low() {
+            Some(v) => ConstInt::Known(v),
+            None => ConstInt::Error(ConstEvalError::NonConstant),
+        },
+        ConstIntrinsic::High => match shape.high() {
+            Some(v) => ConstInt::Known(v),
+            None => ConstInt::Error(ConstEvalError::NonConstant),
+        },
+        ConstIntrinsic::Size => match shape.size() {
+            Some(v) => ConstInt::Known(v),
+            None => ConstInt::Error(ConstEvalError::NonConstant),
+        },
+        ConstIntrinsic::Increment => ConstInt::Known(shape.increment()),
+        _ => ConstInt::Error(ConstEvalError::Unsupported),
+    }
+}
+
+/// Normalize a `Ty` for dimension queries (resolve unevaluated const ints).
+fn normalize_for_dim(db: &dyn salsa::Database, unit: CompilationUnit, ty: &Ty) -> Ty {
+    let eval = |expr_ast_id: lyra_ast::ErasedAstId| -> ConstInt {
+        let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
+        eval_const_int(db, expr_ref)
+    };
+    lyra_semantic::normalize_ty(ty, &eval)
 }
 
 /// Convert a [`Ty`] to a bit width via `normalize_ty` + `bit_width_total`.

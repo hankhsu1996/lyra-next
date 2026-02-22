@@ -18,7 +18,7 @@ Enum member names are injected into the enclosing scope unconditionally. The LRM
 
 ### 7.4: Dynamic arrays, queues, and associative arrays -- behavioral rules
 
-Type representation handles all unpacked dimension forms (dynamic `[]`, queue `[$]`/`[$:N]`, associative `[*]`/`[string]`). Built-in array methods (`.size()`, `.delete()`, `.push_back()`, `.pop_front()`, `.exists()`, `.first()`, `.last()`, `.next()`, `.prev()`, `.insert()`, `.num()`, `.push_front()`, `.pop_back()`) are implemented with receiver classification, arity/arg-type checking, and void-in-expression detection. Remaining gaps: assignment compatibility between array types, `new[]` constructor, `foreach` iteration, and array query system functions. Tests: `crates/lyra-db/src/tests/expr_type/members.rs`, `lrm/ch07/array_methods`.
+Type representation handles all unpacked dimension forms (dynamic `[]`, queue `[$]`/`[$:N]`, associative `[*]`/`[string]`). Built-in array methods (`.size()`, `.delete()`, `.push_back()`, `.pop_front()`, `.exists()`, `.first()`, `.last()`, `.next()`, `.prev()`, `.insert()`, `.num()`, `.push_front()`, `.pop_back()`) are implemented with receiver classification, arity/arg-type checking, and void-in-expression detection. Remaining gaps: assignment compatibility between array types, `new[]` constructor, and `foreach` iteration. Tests: `crates/lyra-db/src/tests/expr_type/members.rs`, `lrm/ch07/array_methods`.
 
 ### 7.4.6: Array slicing
 
@@ -66,9 +66,9 @@ Bit-select and part-select currently return unsigned (engine policy). LRM signed
 
 `$bits` const-eval handles packed integral types (all packed dims), real types, enums (base type width), and packed records (struct=sum, union=max). Unsupported: `$bits` on unpacked arrays, strings, chandles, events, void, and interfaces (implementation-defined or not applicable per LRM). Test: `lrm/ch20/bits_consteval`.
 
-### 20.7: Array query functions
+### 20.7: Array query functions -- runtime evaluation
 
-`$size`, `$left`, `$right`, `$low`, `$high`, `$increment`, `$dimensions`, `$unpacked_dimensions` not implemented. Need dimension navigation on `Ty` and optional second argument. Test: `lrm/ch20/array_query`.
+Typing (arity validation, return type) and const-eval for fixed packed/unpacked dimensions implemented for `$left`, `$right`, `$low`, `$high`, `$size`, `$increment`, `$dimensions`, `$unpacked_dimensions`. Remaining gaps: runtime evaluation (`$left`/`$right`/`$size` on dynamic arrays, queues, and associative arrays with current state) and type-form with dynamically-sized type identifiers. Test: `lrm/ch07/array_query_functions`.
 
 ## Chapter 25 -- Interfaces
 
