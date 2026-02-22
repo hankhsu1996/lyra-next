@@ -207,7 +207,7 @@ fn expr_type_field_error_non_composite() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::error(ExprTypeErrorKind::MemberAccessOnNonComposite)
+        ExprType::error(ExprTypeErrorKind::NoMembersOnReceiver)
     );
 }
 

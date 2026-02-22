@@ -4,7 +4,7 @@ mod nodes;
 mod support;
 
 pub use ast_id::{AstId, AstIdMap, ErasedAstId};
-pub use node::AstNode;
+pub use node::{AstNode, is_expression_kind};
 pub use nodes::{
     AlwaysBlock, ArgList, AssignStmt, BinExpr, BlockStmt, CallExpr, CaseItem, CaseStmt, ConcatExpr,
     CondExpr, ConfigDecl, ContinuousAssign, Declarator, DottedName, EnumMember, EnumType,

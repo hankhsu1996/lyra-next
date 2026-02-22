@@ -195,6 +195,278 @@ fn expr_type_enum_member_ref() {
 }
 
 #[test]
+fn expr_type_enum_method_first() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.first();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let result = expr_type_of_first_param(&db, file, unit);
+    assert!(
+        matches!(result.ty, Ty::Enum(_)),
+        "first() should return enum type, got {result:?}"
+    );
+}
+
+#[test]
+fn expr_type_enum_method_last() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.last();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let result = expr_type_of_first_param(&db, file, unit);
+    assert!(
+        matches!(result.ty, Ty::Enum(_)),
+        "last() should return enum type, got {result:?}"
+    );
+}
+
+#[test]
+fn expr_type_enum_method_next() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.next();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let result = expr_type_of_first_param(&db, file, unit);
+    assert!(
+        matches!(result.ty, Ty::Enum(_)),
+        "next() should return enum type, got {result:?}"
+    );
+}
+
+#[test]
+fn expr_type_enum_method_prev() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.prev();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let result = expr_type_of_first_param(&db, file, unit);
+    assert!(
+        matches!(result.ty, Ty::Enum(_)),
+        "prev() should return enum type, got {result:?}"
+    );
+}
+
+#[test]
+fn expr_type_enum_method_num() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.num();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_enum_method_name() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.name();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::String),
+    );
+}
+
+#[test]
+fn expr_type_enum_method_next_with_arg() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.next(2);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let result = expr_type_of_first_param(&db, file, unit);
+    assert!(
+        matches!(result.ty, Ty::Enum(_)),
+        "next(2) should return enum type, got {result:?}"
+    );
+}
+
+#[test]
+fn expr_type_enum_method_prev_with_arg() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.prev(1);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let result = expr_type_of_first_param(&db, file, unit);
+    assert!(
+        matches!(result.ty, Ty::Enum(_)),
+        "prev(1) should return enum type, got {result:?}"
+    );
+}
+
+#[test]
+fn expr_type_enum_method_bare_ref() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.first;\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodRequiresCall),
+    );
+}
+
+#[test]
+fn expr_type_enum_method_first_arity() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.first(1);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodArityMismatch),
+    );
+}
+
+#[test]
+fn expr_type_enum_method_next_arity() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.next(1, 2);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodArityMismatch),
+    );
+}
+
+#[test]
+fn expr_type_enum_method_name_arity() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.name(1);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodArityMismatch),
+    );
+}
+
+#[test]
+fn expr_type_enum_unknown_method() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.foo();\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::UnknownMember),
+    );
+}
+
+#[test]
+fn expr_type_enum_method_next_bad_arg() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         typedef enum { A, B, C } e_t;\n\
+         e_t e;\n\
+         parameter P = e.next(\"x\");\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodArgNotIntegral),
+    );
+}
+
+#[test]
 fn expr_type_enum_member_in_assign() {
     let db = LyraDatabase::default();
     let file = new_file(

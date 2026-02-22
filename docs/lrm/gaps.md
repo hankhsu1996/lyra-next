@@ -6,10 +6,6 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 6 -- Data Types
 
-### 6.19.4: Enum methods
-
-`.first()`, `.last()`, `.next()`, `.prev()`, `.num()`, `.name()` are not implemented. Blocked by: method resolution infrastructure. Test: `lrm/ch06/enum_methods`.
-
 ### 6.19.5: Enum type compatibility -- casts and value-set membership
 
 Enum assignment requires identical enum type on LHS/RHS (integral-to-enum and cross-enum assignments are diagnosed). Missing: explicit casts (`Colors'(5)`) making assignment legal (cast expressions not parsed); value-set membership / range checking (needs const-eval). Test: `lrm/ch06/enum_type_compat`.

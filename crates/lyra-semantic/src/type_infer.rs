@@ -9,7 +9,8 @@ use crate::coerce::{
 use crate::enum_def::EnumId;
 use crate::expr_helpers::{find_binary_op, find_operator_token, is_expression_kind};
 use crate::literal::parse_literal_shape;
-use crate::symbols::{GlobalSymbolId, SymbolId, SymbolKind};
+use crate::member::{BuiltinMethodKind, MemberInfo, MemberKind, MemberLookupError};
+use crate::symbols::{GlobalSymbolId, SymbolKind};
 use crate::syntax_helpers::system_tf_name;
 use crate::types::{
     ConstEvalError, ConstInt, Integral, IntegralKw, PackedDim, PackedDims, RealKw, SymbolType, Ty,
@@ -101,9 +102,12 @@ pub enum ExprTypeErrorKind {
     PartSelectNonIntegral,
     PartSelectBoundsNonConst,
     PartSelectWidthNonConst,
-    MemberAccessOnNonComposite,
+    NoMembersOnReceiver,
     UnknownMember,
     MemberNotInModport,
+    MethodRequiresCall,
+    MethodArityMismatch,
+    MethodArgNotIntegral,
     UserCallUnsupported,
     UnsupportedCalleeForm(CalleeFormKind),
     UnresolvedCall,
@@ -285,25 +289,6 @@ pub struct CallablePort {
     pub name: SmolStr,
     pub ty: Ty,
     pub has_default: bool,
-}
-
-/// Information about a resolved member access.
-pub struct MemberInfo {
-    pub ty: Ty,
-    pub kind: MemberKind,
-}
-
-/// What kind of member was accessed.
-pub enum MemberKind {
-    Field { index: u32 },
-    InterfaceMember { member: SymbolId },
-}
-
-/// Reasons a member lookup can fail.
-pub enum MemberLookupError {
-    NotComposite,
-    UnknownMember,
-    NotInModport,
 }
 
 /// Callbacks for the inference engine. No DB access -- pure.
@@ -930,28 +915,28 @@ fn infer_range(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     use lyra_ast::{AstNode, FieldExpr};
 
-    let lhs = match node.first_child() {
-        Some(c) if is_expression_kind(c.kind()) => c,
-        _ => return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
+    let Some(field_expr) = FieldExpr::cast(node.clone()) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-
-    let field_expr = FieldExpr::cast(node.clone());
-    let field_tok = field_expr.and_then(|f| f.field_name());
-    let Some(field_tok) = field_tok else {
+    let Some(lhs) = field_expr.base_expr() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let Some(field_tok) = field_expr.field_name() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
     let lhs_type = infer_expr_type(&lhs, ctx, None);
-
-    // Propagate LHS errors rather than masking them
     if let ExprView::Error(_) = &lhs_type.view {
         return lhs_type;
     }
 
     match ctx.member_lookup(&lhs_type.ty, field_tok.text()) {
-        Ok(info) => ExprType::from_ty(&info.ty),
-        Err(MemberLookupError::NotComposite) => {
-            ExprType::error(ExprTypeErrorKind::MemberAccessOnNonComposite)
+        Ok(info) => match info.kind {
+            MemberKind::BuiltinMethod(_) => ExprType::error(ExprTypeErrorKind::MethodRequiresCall),
+            _ => ExprType::from_ty(&info.ty),
+        },
+        Err(MemberLookupError::NoMembersOnType) => {
+            ExprType::error(ExprTypeErrorKind::NoMembersOnReceiver)
         }
         Err(MemberLookupError::UnknownMember) => ExprType::error(ExprTypeErrorKind::UnknownMember),
         Err(MemberLookupError::NotInModport) => {
@@ -975,9 +960,7 @@ fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     match callee_node.kind() {
         SyntaxKind::NameRef | SyntaxKind::QualifiedName => {}
         SyntaxKind::FieldExpr => {
-            return ExprType::error(ExprTypeErrorKind::UnsupportedCalleeForm(
-                CalleeFormKind::MethodCall,
-            ));
+            return infer_method_call(node, &callee_node, ctx);
         }
         _ => {
             return ExprType::error(ExprTypeErrorKind::UnsupportedCalleeForm(
@@ -1046,6 +1029,77 @@ fn check_call_args(call_node: &SyntaxNode, sig: &CallableSigRef, ctx: &dyn Infer
         });
         infer_expr_type(arg, ctx, expected_ctx.as_ref());
     }
+}
+
+fn infer_method_call(
+    call_node: &SyntaxNode,
+    callee_node: &SyntaxNode,
+    ctx: &dyn InferCtx,
+) -> ExprType {
+    use lyra_ast::{AstNode, FieldExpr};
+
+    let Some(field_expr) = FieldExpr::cast(callee_node.clone()) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let Some(field_tok) = field_expr.field_name() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let Some(lhs_node) = field_expr.base_expr() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+
+    let lhs_type = infer_expr_type(&lhs_node, ctx, None);
+    if let ExprView::Error(_) = &lhs_type.view {
+        return lhs_type;
+    }
+
+    match ctx.member_lookup(&lhs_type.ty, field_tok.text()) {
+        Ok(MemberInfo {
+            kind: MemberKind::BuiltinMethod(bm),
+            ty,
+            ..
+        }) => infer_builtin_method_call(call_node, bm, &ty, ctx),
+        Ok(_) | Err(MemberLookupError::NoMembersOnType) => ExprType::error(
+            ExprTypeErrorKind::UnsupportedCalleeForm(CalleeFormKind::MethodCall),
+        ),
+        Err(MemberLookupError::UnknownMember) => ExprType::error(ExprTypeErrorKind::UnknownMember),
+        Err(MemberLookupError::NotInModport) => {
+            ExprType::error(ExprTypeErrorKind::MemberNotInModport)
+        }
+    }
+}
+
+fn infer_builtin_method_call(
+    call_node: &SyntaxNode,
+    bm: BuiltinMethodKind,
+    result_ty: &Ty,
+    ctx: &dyn InferCtx,
+) -> ExprType {
+    use lyra_ast::{AstNode, CallExpr};
+
+    let args: Vec<SyntaxNode> = CallExpr::cast(call_node.clone())
+        .and_then(|c| c.arg_list())
+        .map(|al| al.args().collect())
+        .unwrap_or_default();
+
+    let (min, max) = match bm {
+        BuiltinMethodKind::Enum(ek) => ek.arity(),
+    };
+    if args.len() < min || args.len() > max {
+        return ExprType::error(ExprTypeErrorKind::MethodArityMismatch);
+    }
+
+    let requires_integral = match bm {
+        BuiltinMethodKind::Enum(ek) => ek.arg_requires_integral(),
+    };
+    if requires_integral && let Some(arg_node) = args.first() {
+        let arg_type = infer_expr_type(arg_node, ctx, None);
+        if try_integral_view(&arg_type, ctx).is_none() {
+            return ExprType::error(ExprTypeErrorKind::MethodArgNotIntegral);
+        }
+    }
+
+    ExprType::from_ty(result_ty)
 }
 
 fn merge_bitvec(a: &BitVecType, b: &BitVecType) -> BitVecType {
