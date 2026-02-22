@@ -1,5 +1,3 @@
-use smol_str::SmolStr;
-
 use super::*;
 
 #[test]
@@ -149,12 +147,12 @@ fn type_of_assoc_string() {
     let ty = get_type(&db, file, unit, "a");
     match ty {
         SymbolType::Value(Ty::Array { ref dim, .. }) => match dim {
-            UnpackedDim::Assoc(AssocIndex::Type(r)) => {
-                assert_eq!(r.keyword, SmolStr::new("string"));
+            UnpackedDim::Assoc(AssocIndex::Typed(key_ty)) => {
+                assert_eq!(**key_ty, Ty::String);
             }
-            other => panic!("expected Assoc(Type), got {other:?}"),
+            other => panic!("expected Assoc(Typed), got {other:?}"),
         },
-        other => panic!("expected Value(Array(Assoc(Type))), got {other:?}"),
+        other => panic!("expected Value(Array(Assoc(Typed))), got {other:?}"),
     }
     assert_eq!(ty.pretty(), "int [string]");
 }

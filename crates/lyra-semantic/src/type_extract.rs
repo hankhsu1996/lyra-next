@@ -1,4 +1,4 @@
-use lyra_ast::{AstIdMap, AstNode, DottedName, ErasedAstId, NameRef, QualifiedName};
+use lyra_ast::{AstIdMap, AstNode, DottedName, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
 use lyra_source::TextRange;
@@ -6,8 +6,8 @@ use smol_str::SmolStr;
 
 use crate::expr_helpers::is_expression_kind;
 use crate::types::{
-    AssocIndex, AssocTypeRef, ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType,
-    PackedDim, PackedDims, RealKw, SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
+    AssocIndex, ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType, PackedDim,
+    PackedDims, RealKw, SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
 };
 
 /// Extract a `SymbolType` from a declaration container node.
@@ -433,7 +433,7 @@ fn extract_single_unpacked_dim(node: &SyntaxNode, ast_id_map: &AstIdMap) -> Unpa
     }
 }
 
-fn extract_assoc_from_typespec(ts: &SyntaxNode, ast_id_map: &AstIdMap) -> UnpackedDim {
+fn extract_assoc_from_typespec(ts: &SyntaxNode, _ast_id_map: &AstIdMap) -> UnpackedDim {
     // Find the first token in the TypeSpec (the keyword)
     let first_token = ts
         .children_with_tokens()
@@ -441,10 +441,7 @@ fn extract_assoc_from_typespec(ts: &SyntaxNode, ast_id_map: &AstIdMap) -> Unpack
         .find(|t| t.kind() != SyntaxKind::Whitespace);
 
     let Some(token) = first_token else {
-        let ast_id = ast_id_map
-            .erased_ast_id(ts)
-            .unwrap_or_else(dummy_erased_ast_id);
-        return UnpackedDim::Assoc(AssocIndex::Unsupported(ast_id));
+        return UnpackedDim::Assoc(AssocIndex::Typed(Box::new(Ty::Error)));
     };
 
     // Check that the TypeSpec is simple (just a scalar keyword, no dims/signing)
@@ -456,16 +453,10 @@ fn extract_assoc_from_typespec(ts: &SyntaxNode, ast_id_map: &AstIdMap) -> Unpack
     });
 
     if is_scalar_type_token(token.kind()) && !has_extra_children {
-        let keyword = SmolStr::new(token.text());
-        let ast_id = ast_id_map
-            .erased_ast_id(ts)
-            .unwrap_or_else(dummy_erased_ast_id);
-        UnpackedDim::Assoc(AssocIndex::Type(AssocTypeRef { keyword, ast_id }))
+        let key_ty = keyword_to_ty(token.kind()).unwrap_or(Ty::Error);
+        UnpackedDim::Assoc(AssocIndex::Typed(Box::new(key_ty)))
     } else {
-        let ast_id = ast_id_map
-            .erased_ast_id(ts)
-            .unwrap_or_else(dummy_erased_ast_id);
-        UnpackedDim::Assoc(AssocIndex::Unsupported(ast_id))
+        UnpackedDim::Assoc(AssocIndex::Typed(Box::new(Ty::Error)))
     }
 }
 
@@ -489,10 +480,6 @@ fn is_scalar_type_token(kind: SyntaxKind) -> bool {
             | SyntaxKind::EventKw
             | SyntaxKind::VoidKw
     )
-}
-
-fn dummy_erased_ast_id() -> ErasedAstId {
-    ErasedAstId::placeholder(lyra_source::FileId(u32::MAX))
 }
 
 fn expr_to_const_int(expr: &SyntaxNode, ast_id_map: &AstIdMap) -> ConstInt {

@@ -1,11 +1,12 @@
 use lyra_semantic::coerce::IntegralCtx;
 use lyra_semantic::member::{
-    BuiltinMethodKind, EnumMethodKind, MemberInfo, MemberKind, MemberLookupError,
+    ArrayMethodKind, BuiltinMethodKind, EnumMethodKind, MemberInfo, MemberKind, MemberLookupError,
+    ReceiverInfo, classify_array_receiver,
 };
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::type_infer::{
     CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx,
-    ResolveCallableError, Signedness,
+    ResolveCallableError, Signedness, infer_expr_type_stmt,
 };
 use lyra_semantic::types::{ConstInt, Ty};
 
@@ -54,6 +55,36 @@ pub fn type_of_expr<'db>(db: &'db dyn salsa::Database, expr_ref: ExprRef<'db>) -
     };
 
     lyra_semantic::type_infer::infer_expr_type(&node, &ctx, None)
+}
+
+/// Infer the type of an expression in statement context (Salsa-tracked).
+///
+/// Unlike `type_of_expr`, void methods are legal here.
+#[salsa::tracked]
+pub fn type_of_expr_stmt<'db>(db: &'db dyn salsa::Database, expr_ref: ExprRef<'db>) -> ExprType {
+    let unit = expr_ref.unit(db);
+    let expr_ast_id = expr_ref.expr_ast_id(db);
+    let file_id = expr_ast_id.file();
+
+    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
+    };
+
+    let parse = parse_file(db, source_file);
+    let map = ast_id_map(db, source_file);
+
+    let Some(node) = map.get_node(&parse.syntax(), expr_ast_id) else {
+        return ExprType::error(ExprTypeErrorKind::Unresolved);
+    };
+
+    let ctx = DbInferCtx {
+        db,
+        unit,
+        source_file,
+        ast_id_map: map,
+    };
+
+    infer_expr_type_stmt(&node, &ctx)
 }
 
 /// Salsa-interned key for an integral context (width, signedness, four-state).
@@ -227,6 +258,7 @@ impl InferCtx for DbInferCtx<'_> {
                     Some((idx, field)) => Ok(MemberInfo {
                         ty: field.ty.clone(),
                         kind: MemberKind::Field { index: idx },
+                        receiver: None,
                     }),
                     None => Err(MemberLookupError::UnknownMember),
                 }
@@ -267,6 +299,7 @@ impl InferCtx for DbInferCtx<'_> {
                 Ok(MemberInfo {
                     ty,
                     kind: MemberKind::InterfaceMember { member: member_sym },
+                    receiver: None,
                 })
             }
             Ty::Enum(enum_id) => {
@@ -275,6 +308,21 @@ impl InferCtx for DbInferCtx<'_> {
                 Ok(MemberInfo {
                     ty: method.return_ty(enum_id.clone()),
                     kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Enum(method)),
+                    receiver: None,
+                })
+            }
+            Ty::Array { .. } => {
+                let recv = classify_array_receiver(ty).ok_or(MemberLookupError::NoMembersOnType)?;
+                let method = ArrayMethodKind::from_name(member_name)
+                    .ok_or(MemberLookupError::UnknownMember)?;
+                method
+                    .allowed_on(&recv)
+                    .map_err(MemberLookupError::MethodNotValidOnReceiver)?;
+                let ret_ty = method.return_ty(&recv);
+                Ok(MemberInfo {
+                    ty: ret_ty,
+                    kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Array(method)),
+                    receiver: Some(ReceiverInfo::Array(recv)),
                 })
             }
             _ => Err(MemberLookupError::NoMembersOnType),

@@ -60,6 +60,8 @@ pub trait TypeCheckCtx {
     fn expr_type(&self, node: &SyntaxNode) -> ExprType;
     /// Infer the type of an expression node under an integral context.
     fn expr_type_in_ctx(&self, node: &SyntaxNode, ctx: &IntegralCtx) -> ExprType;
+    /// Infer the type of an expression in statement context.
+    fn expr_type_stmt(&self, node: &SyntaxNode) -> ExprType;
     /// Get the declared type of a symbol via its Declarator node.
     fn symbol_type_of_declarator(&self, declarator: &SyntaxNode) -> Option<SymbolType>;
     /// Resolve a `NameRef` node as a type (typedef/enum/struct name).
@@ -106,10 +108,24 @@ fn check_assign_stmt(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
         .children()
         .filter(|c| is_expression_kind(c.kind()))
         .collect();
-    if exprs.len() < 2 {
-        return;
+    if exprs.len() >= 2 {
+        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, items);
+    } else if exprs.len() == 1 && !has_assign_op(node) {
+        // Bare expression-statement (e.g. `q.delete();`). Infer in
+        // statement context so void methods are legal.
+        let _result = ctx.expr_type_stmt(&exprs[0]);
     }
-    check_assignment_pair(node, &exprs[0], &exprs[1], ctx, items);
+}
+
+fn has_assign_op(node: &SyntaxNode) -> bool {
+    use lyra_parser::SyntaxElement;
+    node.children_with_tokens().any(|el| {
+        if let SyntaxElement::Token(tok) = el {
+            matches!(tok.kind(), SyntaxKind::Assign | SyntaxKind::LtEq)
+        } else {
+            false
+        }
+    })
 }
 
 fn check_var_decl(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
