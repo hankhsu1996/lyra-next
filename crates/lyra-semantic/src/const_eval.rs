@@ -84,6 +84,7 @@ pub fn eval_const_expr_full(
             }
             eval_call_expr(node, resolve_name, eval_call)
         }
+        SyntaxKind::CastExpr => eval_cast_expr(node, resolve_name, eval_call),
         _ => Err(ConstEvalError::Unsupported),
     }
 }
@@ -298,6 +299,19 @@ fn eval_call_expr(
     clog2(value)
 }
 
+fn eval_cast_expr(
+    node: &SyntaxNode,
+    resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
+    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
+) -> EvalResult {
+    // Find the inner expression (skip TypeSpec, find expression child)
+    let inner = node
+        .children()
+        .find(|c| crate::expr_helpers::is_expression_kind(c.kind()))
+        .ok_or(ConstEvalError::Unsupported)?;
+    eval_const_expr_full(&inner, resolve_name, eval_call)
+}
+
 fn clog2(n: i64) -> EvalResult {
     if n < 0 {
         return Err(ConstEvalError::InvalidArgument);
@@ -357,6 +371,7 @@ mod tests {
                 | SyntaxKind::NameRef
                 | SyntaxKind::QualifiedName
                 | SyntaxKind::Expression
+                | SyntaxKind::CastExpr
         )
     }
 

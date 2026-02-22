@@ -227,6 +227,9 @@ fn lower_type_check_item(
         | TypeCheckItem::ModportRefUnsupported { .. } => {
             lower_modport_item(item, source_map, diags);
         }
+        TypeCheckItem::EnumCastOutOfRange { .. } => {
+            lower_enum_cast_item(db, unit, item, source_map, diags);
+        }
     }
 }
 
@@ -298,6 +301,43 @@ fn lower_modport_item(
         }
         _ => {}
     }
+}
+
+fn lower_enum_cast_item(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::EnumCastOutOfRange {
+        cast_range,
+        enum_id,
+        value,
+    } = item
+    else {
+        return;
+    };
+    let Some(cast_span) = source_map.map_span(*cast_range) else {
+        return;
+    };
+    let ename = enum_name(db, unit, enum_id);
+    let msg_args = vec![
+        lyra_diag::Arg::Name(smol_str::SmolStr::new(value.to_string())),
+        lyra_diag::Arg::Name(ename),
+    ];
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Warning,
+            lyra_diag::DiagnosticCode::ENUM_CAST_OUT_OF_RANGE,
+            lyra_diag::Message::new(lyra_diag::MessageId::EnumCastOutOfRange, msg_args.clone()),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span: cast_span,
+            message: lyra_diag::Message::new(lyra_diag::MessageId::EnumCastOutOfRange, msg_args),
+        }),
+    );
 }
 
 fn lower_enum_assign_item(
@@ -474,6 +514,10 @@ struct DbTypeCheckCtx<'a> {
 }
 
 impl TypeCheckCtx for DbTypeCheckCtx<'_> {
+    fn file_id(&self) -> lyra_source::FileId {
+        self.source_file.file_id(self.db)
+    }
+
     fn expr_type(&self, node: &lyra_parser::SyntaxNode) -> ExprType {
         let Some(ast_id) = self.ast_id_map.erased_ast_id(node) else {
             return ExprType::error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
@@ -529,6 +573,23 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
 
     fn node_id(&self, node: &lyra_parser::SyntaxNode) -> Option<lyra_ast::ErasedAstId> {
         self.ast_id_map.erased_ast_id(node)
+    }
+
+    fn const_eval_int(&self, node: &lyra_parser::SyntaxNode) -> Option<i64> {
+        let ast_id = self.ast_id_map.erased_ast_id(node)?;
+        let expr_ref = crate::const_eval::ConstExprRef::new(self.db, self.unit, ast_id);
+        match crate::const_eval::eval_const_int(self.db, expr_ref) {
+            lyra_semantic::types::ConstInt::Known(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    fn enum_known_value_set(
+        &self,
+        id: &lyra_semantic::enum_def::EnumId,
+    ) -> Option<std::sync::Arc<[i64]>> {
+        let eref = EnumRef::new(self.db, self.unit, id.clone());
+        crate::enum_queries::enum_known_value_set(self.db, eref)
     }
 }
 

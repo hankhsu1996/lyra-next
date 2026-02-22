@@ -368,6 +368,9 @@ pub enum SyntaxKind {
     AttrOpen,
     AttrClose,
 
+    // Bare tick (cast expression prefix)
+    Tick,
+
     // Node boundary
     #[doc(hidden)]
     __NodeStart,
@@ -462,6 +465,9 @@ pub enum SyntaxKind {
 
     // Enum member range (LRM 6.19.3)
     EnumMemberRange,
+
+    // Cast expression (LRM 6.24)
+    CastExpr,
 
     #[doc(hidden)]
     __Last,

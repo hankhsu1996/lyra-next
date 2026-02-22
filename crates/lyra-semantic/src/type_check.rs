@@ -70,10 +70,17 @@ pub enum TypeCheckItem {
     ModportRefUnsupported {
         member_range: TextRange,
     },
+    EnumCastOutOfRange {
+        cast_range: TextRange,
+        enum_id: EnumId,
+        value: i64,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
 pub trait TypeCheckCtx {
+    /// The file being analyzed.
+    fn file_id(&self) -> lyra_source::FileId;
     /// Infer the type of an expression node (self-determined).
     fn expr_type(&self, node: &SyntaxNode) -> ExprType;
     /// Infer the type of an expression node under an integral context.
@@ -88,6 +95,10 @@ pub trait TypeCheckCtx {
     /// O(1) map lookup, no DB calls, no allocations.
     /// Returns None for nodes without stable IDs (e.g. error-recovered trees).
     fn node_id(&self, node: &SyntaxNode) -> Option<ErasedAstId>;
+    /// Evaluate a constant integer expression. Returns None if non-const.
+    fn const_eval_int(&self, node: &SyntaxNode) -> Option<i64>;
+    /// Get sorted set of known enum member values. None if any value unknown.
+    fn enum_known_value_set(&self, id: &EnumId) -> Option<std::sync::Arc<[i64]>>;
 }
 
 /// Walk a file's AST and produce type-check items.
@@ -128,6 +139,7 @@ fn walk_for_checks(
         SyntaxKind::VarDecl => check_var_decl(node, ctx, items),
         SyntaxKind::SystemTfCall => check_system_call(node, ctx, items),
         SyntaxKind::FieldExpr => check_field_direction(node, ctx, facts, access, items),
+        SyntaxKind::CastExpr => check_cast_expr(node, ctx, items),
         _ => {}
     }
     for child in node.children() {
@@ -448,6 +460,41 @@ fn check_assignment_compat(
     }
 }
 
+fn check_cast_expr(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+    use lyra_ast::{AstNode, CastExpr};
+    let Some(cast) = CastExpr::cast(node.clone()) else {
+        return;
+    };
+    let Some(typespec) = cast.cast_type() else {
+        return;
+    };
+    let Some(utr) = crate::type_extract::user_type_ref(typespec.syntax()) else {
+        return;
+    };
+    let Some(ty) = ctx.resolve_type_arg(utr.resolve_node()) else {
+        return;
+    };
+    let Ty::Enum(ref enum_id) = ty else {
+        return;
+    };
+    let Some(inner) = cast.inner_expr() else {
+        return;
+    };
+    let Some(value) = ctx.const_eval_int(&inner) else {
+        return;
+    };
+    let Some(value_set) = ctx.enum_known_value_set(enum_id) else {
+        return;
+    };
+    if value_set.binary_search(&value).is_err() {
+        items.push(TypeCheckItem::EnumCastOutOfRange {
+            cast_range: node.text_range(),
+            enum_id: enum_id.clone(),
+            value,
+        });
+    }
+}
+
 fn check_system_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
     let Some(tok) = system_tf_name(node) else {
         return;
@@ -486,7 +533,7 @@ fn check_bits_call(
     let Some(first) = iter_args(arg_list).next() else {
         return;
     };
-    let kind = classify_bits_arg(&first, &|n| ctx.resolve_type_arg(n));
+    let kind = classify_bits_arg(&first, ctx.file_id(), &|n| ctx.resolve_type_arg(n));
     if let BitsArgKind::Type(ty) = kind
         && !ty.is_data_type()
     {

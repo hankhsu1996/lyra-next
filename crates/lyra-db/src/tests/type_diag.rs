@@ -307,3 +307,36 @@ fn enum_unresolved_rhs_no_cascade() {
         "should have one unresolved name diagnostic"
     );
 }
+
+#[test]
+fn enum_cast_out_of_range_warning() {
+    let src =
+        "module m; typedef enum int { A=1, B=3 } E; E e; initial begin e = E'(2); end endmodule";
+    let diags = type_diag_warnings(src);
+    assert_eq!(diags.len(), 1, "diags: {diags:?}");
+    let msg = diag_message(&diags[0]);
+    assert!(msg.contains('2'), "msg: {msg}");
+    assert!(msg.contains('E'), "msg: {msg}");
+    assert_eq!(
+        diags[0].code,
+        lyra_diag::DiagnosticCode::ENUM_CAST_OUT_OF_RANGE
+    );
+}
+
+#[test]
+fn enum_cast_in_range_no_warning() {
+    let src =
+        "module m; typedef enum int { A=1, B=3 } E; E e; initial begin e = E'(3); end endmodule";
+    let diags = type_diag_warnings(src);
+    assert!(diags.is_empty(), "cast value 3 is in range, no warning");
+}
+
+#[test]
+fn enum_cast_with_same_type_no_assign_error() {
+    let src = "module m; typedef enum { A, B } E; E e; initial begin e = E'(0); end endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "enum cast result is same enum type, no assign error"
+    );
+}

@@ -28,6 +28,7 @@ pub enum ConstEvalError {
     Unresolved,
     Cycle,
     Unsupported,
+    AutoIncrementAfterUnknown,
 }
 
 /// A packed dimension with msb and lsb bounds, e.g. `[7:0]`.

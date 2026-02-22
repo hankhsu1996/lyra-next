@@ -120,6 +120,7 @@ pub enum ExprTypeErrorKind {
     MethodArgNotLvalue,
     MethodKeyTypeUnknown,
     VoidUsedAsExpr,
+    CastTargetNotAType,
 }
 
 /// How an expression's type is viewed for operations.
@@ -300,6 +301,8 @@ pub struct CallablePort {
 
 /// Callbacks for the inference engine. No DB access -- pure.
 pub trait InferCtx {
+    /// The file being analyzed.
+    fn file_id(&self) -> lyra_source::FileId;
     /// Resolve a `NameRef`/`QualifiedName` to its type.
     fn type_of_name(&self, name_node: &SyntaxNode) -> ExprType;
     /// Evaluate a constant expression (for replication count).
@@ -362,6 +365,7 @@ pub fn infer_expr_type(
         SyntaxKind::FieldExpr => infer_field_access(expr, ctx),
         SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => infer_call(expr, ctx),
         SyntaxKind::StreamExpr => infer_stream(expr, ctx),
+        SyntaxKind::CastExpr => infer_cast(expr, ctx),
         _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
     }
 }
@@ -1109,6 +1113,40 @@ fn infer_builtin_method_call(
     ctx: &dyn InferCtx,
 ) -> ExprType {
     crate::builtin_methods::infer_builtin_method_call(call_node, bm, result_ty, receiver, ctx)
+}
+
+fn infer_cast(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    use lyra_ast::{AstNode, CastExpr};
+
+    let Some(cast) = CastExpr::cast(node.clone()) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+
+    // Infer the inner expression (for side effects / context propagation)
+    if let Some(inner) = cast.inner_expr() {
+        let _ = infer_expr_type(&inner, ctx, None);
+    }
+
+    // Resolve the target type from the TypeSpec child
+    let Some(typespec) = cast.cast_type() else {
+        return ExprType::error(ExprTypeErrorKind::CastTargetNotAType);
+    };
+    let ts_node = typespec.syntax();
+
+    // Try user-defined type (enum/typedef name) via resolve_type_arg
+    if let Some(utr) = crate::user_type_ref(ts_node)
+        && let Some(ty) = ctx.resolve_type_arg(utr.resolve_node())
+    {
+        return ExprType::from_ty(&ty);
+    }
+
+    // Keyword type: extract from TypeSpec directly
+    let map = lyra_ast::AstIdMap::from_root(ctx.file_id(), ts_node);
+    let ty = crate::extract_base_ty_from_typespec(ts_node, &map);
+    if matches!(ty, Ty::Error) {
+        return ExprType::error(ExprTypeErrorKind::CastTargetNotAType);
+    }
+    ExprType::from_ty(&ty)
 }
 
 fn merge_bitvec(a: &BitVecType, b: &BitVecType) -> BitVecType {

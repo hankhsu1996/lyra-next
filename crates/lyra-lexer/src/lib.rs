@@ -401,9 +401,9 @@ fn lex_tick(bytes: &[u8]) -> (SyntaxKind, usize) {
         Some(&c) if is_base_char(c) => lex_based_value(bytes, 2),
         Some(&(b's' | b'S')) => match bytes.get(2) {
             Some(&c) if is_base_char(c) => lex_based_value(bytes, 3),
-            _ => (SyntaxKind::Error, 1),
+            _ => (SyntaxKind::Tick, 1),
         },
-        _ => (SyntaxKind::Error, 1),
+        _ => (SyntaxKind::Tick, 1),
     }
 }
 

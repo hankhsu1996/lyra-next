@@ -357,6 +357,12 @@ pub(crate) fn is_data_type_keyword(kind: SyntaxKind) -> bool {
         )
 }
 
+/// Whether `kind` can start a cast target type (`data_type` production).
+/// Covers keyword types and user-defined type names (Ident).
+pub(crate) fn at_cast_type(kind: SyntaxKind) -> bool {
+    is_scalar_type_keyword(kind) || kind == SyntaxKind::Ident
+}
+
 /// Tokens that unambiguously start a data declaration.
 /// Does NOT handle bare `Ident Ident` (ambiguous with module instantiation).
 pub(crate) fn at_unambiguous_data_decl_start(p: &Parser) -> bool {

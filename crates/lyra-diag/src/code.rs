@@ -99,6 +99,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 11,
     };
+    pub const ENUM_CAST_OUT_OF_RANGE: Self = Self {
+        namespace: "lyra.type",
+        number: 12,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,
