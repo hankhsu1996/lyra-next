@@ -121,6 +121,7 @@ pub enum ExprTypeErrorKind {
     MethodKeyTypeUnknown,
     VoidUsedAsExpr,
     CastTargetNotAType,
+    InternalStreamOperandError,
 }
 
 /// How an expression's type is viewed for operations.
@@ -646,7 +647,59 @@ fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     })
 }
 
+/// Pack-width accumulator with explicit merge semantics.
+enum StreamWidth {
+    Known(u32),
+    Dynamic,
+    Error,
+}
+
+impl StreamWidth {
+    fn add(self, rhs: StreamWidth) -> StreamWidth {
+        match (self, rhs) {
+            (StreamWidth::Error, _) | (_, StreamWidth::Error) => StreamWidth::Error,
+            (StreamWidth::Dynamic, _) | (_, StreamWidth::Dynamic) => StreamWidth::Dynamic,
+            (StreamWidth::Known(a), StreamWidth::Known(b)) => match a.checked_add(b) {
+                Some(total) => StreamWidth::Known(total),
+                None => StreamWidth::Error,
+            },
+        }
+    }
+
+    fn mul(count: u32, elem_width: u32) -> StreamWidth {
+        match count.checked_mul(elem_width) {
+            Some(total) => StreamWidth::Known(total),
+            None => StreamWidth::Error,
+        }
+    }
+}
+
+/// Normalized view of an array element type for streaming width computation.
+struct StreamElemView {
+    bit_width: Option<u32>,
+    four_state: bool,
+}
+
+fn stream_elem_view(elem_ty: &Ty, ctx: &dyn InferCtx) -> Option<StreamElemView> {
+    match elem_ty {
+        Ty::Integral(i) => Some(StreamElemView {
+            bit_width: i.try_packed_width(),
+            four_state: i.keyword.four_state(),
+        }),
+        Ty::Enum(id) => {
+            let bv = ctx.enum_integral_view(id)?;
+            Some(StreamElemView {
+                bit_width: bv.width.self_determined(),
+                four_state: bv.four_state,
+            })
+        }
+        _ => None,
+    }
+}
+
 fn infer_stream(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    use lyra_ast::{AstNode, StreamOperandItem};
+
     let Some(operands) = node
         .children()
         .find(|c| c.kind() == SyntaxKind::StreamOperands)
@@ -654,39 +707,126 @@ fn infer_stream(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    let mut total_width: u32 = 0;
-    let mut all_known = true;
+    let mut width = StreamWidth::Known(0);
     let mut any_four_state = false;
 
-    for child in operands.children() {
-        if !is_expression_kind(child.kind()) {
+    for item_node in operands.children() {
+        if item_node.kind() != SyntaxKind::StreamOperandItem {
             continue;
         }
-        let child_ty = infer_expr_type(&child, ctx, None);
-        if let ExprView::Error(_) = &child_ty.view {
-            return child_ty;
-        }
-        let Some(bv) = try_integral_view(&child_ty, ctx) else {
-            return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
+        let Some(item) = StreamOperandItem::cast(item_node) else {
+            continue;
         };
-        any_four_state = any_four_state || bv.four_state;
-        match bv.width.self_determined() {
-            Some(w) => total_width = total_width.saturating_add(w),
-            None => all_known = false,
+        let Some(expr_node) = item.expr() else {
+            width = width.add(StreamWidth::Error);
+            continue;
+        };
+
+        let child_ty = infer_expr_type(&expr_node, ctx, None);
+        if let ExprView::Error(_) = &child_ty.view {
+            width = width.add(StreamWidth::Error);
+            continue;
+        }
+
+        if let Some(with_clause) = item.with_clause() {
+            // Operand has `with [range]` clause
+            let operand_width =
+                infer_stream_with_operand(&child_ty, &with_clause, &mut any_four_state, ctx);
+            width = width.add(operand_width);
+        } else {
+            // No with-clause: existing path -- require integral
+            let Some(bv) = try_integral_view(&child_ty, ctx) else {
+                width = width.add(StreamWidth::Error);
+                continue;
+            };
+            any_four_state = any_four_state || bv.four_state;
+            match bv.width.self_determined() {
+                Some(w) => width = width.add(StreamWidth::Known(w)),
+                None => width = width.add(StreamWidth::Dynamic),
+            }
         }
     }
 
-    let width = if all_known {
-        BitWidth::Known(total_width)
-    } else {
-        BitWidth::Unknown
+    let result_width = match width {
+        StreamWidth::Known(n) => BitWidth::Known(n),
+        StreamWidth::Dynamic => BitWidth::Unknown,
+        StreamWidth::Error => {
+            return ExprType::error(ExprTypeErrorKind::InternalStreamOperandError);
+        }
     };
 
     ExprType::bitvec(BitVecType {
-        width,
+        width: result_width,
         signed: Signedness::Unsigned,
         four_state: any_four_state,
     })
+}
+
+fn infer_stream_with_operand(
+    operand_ty: &ExprType,
+    with_clause: &lyra_ast::StreamWithClause,
+    any_four_state: &mut bool,
+    ctx: &dyn InferCtx,
+) -> StreamWidth {
+    use lyra_ast::StreamRangeOp;
+
+    let Some(range) = with_clause.range() else {
+        return StreamWidth::Error;
+    };
+
+    // Operand must be an array type
+    let Ty::Array { elem, .. } = &operand_ty.ty else {
+        return StreamWidth::Error;
+    };
+
+    let Some(ev) = stream_elem_view(elem, ctx) else {
+        // Element type is not bit-streamable (e.g. real, packed struct)
+        return StreamWidth::Error;
+    };
+    *any_four_state = *any_four_state || ev.four_state;
+
+    let Some(op) = range.op() else {
+        return StreamWidth::Error;
+    };
+
+    let elem_count: StreamWidth = match op {
+        StreamRangeOp::Single => StreamWidth::Known(1),
+        StreamRangeOp::IndexedPlus | StreamRangeOp::IndexedMinus => {
+            let Some(width_node) = range.rhs() else {
+                return StreamWidth::Error;
+            };
+            match ctx.const_eval(&width_node) {
+                ConstInt::Known(w) if w > 0 => match u32::try_from(w) {
+                    Ok(v) => StreamWidth::Known(v),
+                    Err(_) => StreamWidth::Dynamic,
+                },
+                ConstInt::Known(_) | ConstInt::Unevaluated(_) | ConstInt::Error(_) => {
+                    StreamWidth::Dynamic
+                }
+            }
+        }
+        StreamRangeOp::Fixed => {
+            let (Some(lo_node), Some(hi_node)) = (range.lhs(), range.rhs()) else {
+                return StreamWidth::Error;
+            };
+            match (ctx.const_eval(&lo_node), ctx.const_eval(&hi_node)) {
+                (ConstInt::Known(lo), ConstInt::Known(hi)) => {
+                    let diff = (i128::from(hi) - i128::from(lo)).unsigned_abs() + 1;
+                    match u32::try_from(diff) {
+                        Ok(v) => StreamWidth::Known(v),
+                        Err(_) => StreamWidth::Error,
+                    }
+                }
+                _ => StreamWidth::Dynamic,
+            }
+        }
+    };
+
+    match (elem_count, ev.bit_width) {
+        (StreamWidth::Known(count), Some(bw)) => StreamWidth::mul(count, bw),
+        (StreamWidth::Error, _) => StreamWidth::Error,
+        _ => StreamWidth::Dynamic,
+    }
 }
 
 fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {

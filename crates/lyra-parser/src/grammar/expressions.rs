@@ -217,6 +217,21 @@ fn postfix(p: &mut Parser, mut lhs: CompletedMarker) -> CompletedMarker {
     lhs
 }
 
+/// Consume `+:` or `-:` as indexed part-select operator tokens.
+fn eat_indexed_part_select_op(p: &mut Parser) -> bool {
+    if p.at(SyntaxKind::Plus) && p.nth(1) == SyntaxKind::Colon {
+        p.bump(); // +
+        p.bump(); // :
+        true
+    } else if p.at(SyntaxKind::Minus) && p.nth(1) == SyntaxKind::Colon {
+        p.bump(); // -
+        p.bump(); // :
+        true
+    } else {
+        false
+    }
+}
+
 fn parse_index_or_range(p: &mut Parser, lhs: CompletedMarker) -> CompletedMarker {
     let m = lhs.precede(p);
     p.bump(); // [
@@ -227,10 +242,8 @@ fn parse_index_or_range(p: &mut Parser, lhs: CompletedMarker) -> CompletedMarker
         expr_bp(p, 0, ExprMode::Normal);
         p.expect(SyntaxKind::RBracket);
         m.complete(p, SyntaxKind::RangeExpr)
-    } else if (p.at(SyntaxKind::Plus) || p.at(SyntaxKind::Minus)) && p.nth(1) == SyntaxKind::Colon {
+    } else if eat_indexed_part_select_op(p) {
         // Indexed part select: [base+:width] or [base-:width]
-        p.bump(); // + or -
-        p.bump(); // :
         expr_bp(p, 0, ExprMode::Normal);
         p.expect(SyntaxKind::RBracket);
         m.complete(p, SyntaxKind::RangeExpr)
@@ -332,13 +345,13 @@ fn stream_expr(p: &mut Parser, m: crate::parser::Marker) -> CompletedMarker {
         ss.complete(p, SyntaxKind::StreamSliceSize);
     }
 
-    // Inner { expr_list } wrapped in StreamOperands node
+    // Inner { operand_list } wrapped in StreamOperands node
     let ops = p.start();
     p.expect(SyntaxKind::LBrace);
     if !p.at(SyntaxKind::RBrace) {
-        expr_bp(p, 0, ExprMode::Normal);
+        stream_operand_item(p);
         while p.eat(SyntaxKind::Comma) {
-            expr_bp(p, 0, ExprMode::Normal);
+            stream_operand_item(p);
         }
     }
     p.expect(SyntaxKind::RBrace); // inner }
@@ -346,6 +359,38 @@ fn stream_expr(p: &mut Parser, m: crate::parser::Marker) -> CompletedMarker {
 
     p.expect(SyntaxKind::RBrace); // outer }
     m.complete(p, SyntaxKind::StreamExpr)
+}
+
+fn stream_operand_item(p: &mut Parser) {
+    let m = p.start();
+    expr_bp(p, 0, ExprMode::Normal);
+    if p.at(SyntaxKind::WithKw) {
+        stream_with_clause(p);
+    }
+    m.complete(p, SyntaxKind::StreamOperandItem);
+}
+
+fn stream_with_clause(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // with
+    if !p.at(SyntaxKind::LBracket) {
+        p.error("expected `[` after `with`");
+        m.complete(p, SyntaxKind::StreamWithClause);
+        return;
+    }
+    p.bump(); // [
+    stream_range(p);
+    p.expect(SyntaxKind::RBracket);
+    m.complete(p, SyntaxKind::StreamWithClause);
+}
+
+fn stream_range(p: &mut Parser) {
+    let m = p.start();
+    expr_bp(p, 0, ExprMode::Bracket);
+    if p.eat(SyntaxKind::Colon) || eat_indexed_part_select_op(p) {
+        expr_bp(p, 0, ExprMode::Normal);
+    }
+    m.complete(p, SyntaxKind::StreamRange);
 }
 
 // Parse a single item inside an assignment pattern `'{...}`.

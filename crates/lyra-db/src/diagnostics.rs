@@ -157,26 +157,8 @@ fn lower_type_check_item(
                 rhs_span,
             ));
         }
-        TypeCheckItem::BitsNonDataType {
-            call_range,
-            arg_range,
-        } => {
-            let Some(call_span) = source_map.map_span(*call_range) else {
-                return;
-            };
-            let arg_span = source_map.map_span(*arg_range).unwrap_or(call_span);
-            diags.push(
-                lyra_diag::Diagnostic::new(
-                    lyra_diag::Severity::Error,
-                    lyra_diag::DiagnosticCode::BITS_NON_DATA_TYPE,
-                    lyra_diag::Message::simple(lyra_diag::MessageId::BitsNonDataType),
-                )
-                .with_label(lyra_diag::Label {
-                    kind: lyra_diag::LabelKind::Primary,
-                    span: arg_span,
-                    message: lyra_diag::Message::simple(lyra_diag::MessageId::NotADataType),
-                }),
-            );
+        TypeCheckItem::BitsNonDataType { .. } => {
+            lower_bits_non_data_type(item, source_map, diags);
         }
         TypeCheckItem::EnumAssignFromNonEnum { .. } | TypeCheckItem::EnumAssignWrongEnum { .. } => {
             lower_enum_assign_item(db, unit, item, source_map, diags);
@@ -229,6 +211,9 @@ fn lower_type_check_item(
         }
         TypeCheckItem::EnumCastOutOfRange { .. } => {
             lower_enum_cast_item(db, unit, item, source_map, diags);
+        }
+        TypeCheckItem::StreamWithNonArray { .. } => {
+            lower_stream_with_non_array(item, source_map, diags);
         }
     }
 }
@@ -487,6 +472,61 @@ fn enum_assign_diag(
             vec![lyra_diag::Arg::Name(lhs_name)],
         ),
     })
+}
+
+fn lower_bits_non_data_type(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::BitsNonDataType {
+        call_range,
+        arg_range,
+    } = item
+    else {
+        return;
+    };
+    let Some(call_span) = source_map.map_span(*call_range) else {
+        return;
+    };
+    let arg_span = source_map.map_span(*arg_range).unwrap_or(call_span);
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::DiagnosticCode::BITS_NON_DATA_TYPE,
+            lyra_diag::Message::simple(lyra_diag::MessageId::BitsNonDataType),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span: arg_span,
+            message: lyra_diag::Message::simple(lyra_diag::MessageId::NotADataType),
+        }),
+    );
+}
+
+fn lower_stream_with_non_array(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::StreamWithNonArray { with_range } = item else {
+        return;
+    };
+    let Some(with_span) = source_map.map_span(*with_range) else {
+        return;
+    };
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::DiagnosticCode::STREAM_WITH_NON_ARRAY,
+            lyra_diag::Message::simple(lyra_diag::MessageId::StreamWithNonArray),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span: with_span,
+            message: lyra_diag::Message::simple(lyra_diag::MessageId::StreamWithNonArray),
+        }),
+    );
 }
 
 fn conversion_diag(
