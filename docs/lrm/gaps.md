@@ -52,10 +52,6 @@ Parser accepts any expression as `slice_size`. The LRM requires it to be a const
 
 Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Supporting non-constant bounds needs symbolic/dynamic width representation. Blocked by: dynamic width model. Test: `lrm/ch11/part_select_nonconstant`.
 
-### 11.5.1: Bit-select and part-select signedness
-
-Bit-select and part-select currently return unsigned (engine policy). LRM signedness rules for these in different contexts need verification. Blocked by: signedness rule audit. Test: `lrm/ch11/select_signedness`.
-
 ## Chapter 20 -- System Functions
 
 ### 20.6.2: $bits constant evaluation -- unsupported type categories
