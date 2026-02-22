@@ -489,4 +489,136 @@ mod tests {
         let p = parse(&tokens, src);
         assert_eq!(p.syntax().text().to_string(), src);
     }
+
+    #[test]
+    fn stream_expr_with_single_index() {
+        let (p, root) = parse_module("initial begin a = {>> {arr with [i]}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let item = find_node(&root, SyntaxKind::StreamOperandItem);
+        assert!(item.is_some(), "should have StreamOperandItem");
+        let wc = find_node(&item.unwrap(), SyntaxKind::StreamWithClause);
+        assert!(wc.is_some(), "should have StreamWithClause");
+        let sr = find_node(&wc.unwrap(), SyntaxKind::StreamRange);
+        assert!(sr.is_some(), "should have StreamRange");
+    }
+
+    #[test]
+    fn stream_expr_with_fixed_range() {
+        let (p, root) = parse_module("initial begin a = {<< byte {arr with [0:3]}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let sr = find_node(&root, SyntaxKind::StreamRange);
+        assert!(sr.is_some(), "should have StreamRange");
+        let sr = sr.unwrap();
+        let has_colon = sr
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .any(|tok| tok.kind() == SyntaxKind::Colon);
+        assert!(has_colon, "StreamRange should have Colon token");
+    }
+
+    #[test]
+    fn stream_expr_with_indexed_plus() {
+        let (p, root) = parse_module("initial begin a = {<< byte {arr with [0 +: len]}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let sr = find_node(&root, SyntaxKind::StreamRange);
+        assert!(sr.is_some(), "should have StreamRange");
+        let sr = sr.unwrap();
+        let has_plus = sr
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .any(|tok| tok.kind() == SyntaxKind::Plus);
+        assert!(has_plus, "StreamRange should have Plus token for +:");
+    }
+
+    #[test]
+    fn stream_expr_with_indexed_minus() {
+        let (p, root) = parse_module("initial begin a = {<< byte {arr with [7 -: 4]}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let sr = find_node(&root, SyntaxKind::StreamRange);
+        assert!(sr.is_some(), "should have StreamRange");
+        let sr = sr.unwrap();
+        let has_minus = sr
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .any(|tok| tok.kind() == SyntaxKind::Minus);
+        assert!(has_minus, "StreamRange should have Minus token for -:");
+    }
+
+    #[test]
+    fn stream_expr_with_mixed_operands() {
+        let (p, root) = parse_module("initial begin a = {<< byte {a, arr with [0 +: n], b}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let ops = find_node(&root, SyntaxKind::StreamOperands);
+        assert!(ops.is_some(), "should have StreamOperands");
+        let items: Vec<_> = ops
+            .unwrap()
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::StreamOperandItem)
+            .collect();
+        assert_eq!(items.len(), 3, "should have 3 StreamOperandItem children");
+        // Only the second has a with-clause
+        let wc0 = find_node(&items[0], SyntaxKind::StreamWithClause);
+        let wc1 = find_node(&items[1], SyntaxKind::StreamWithClause);
+        let wc2 = find_node(&items[2], SyntaxKind::StreamWithClause);
+        assert!(wc0.is_none(), "first operand should have no with-clause");
+        assert!(wc1.is_some(), "second operand should have with-clause");
+        assert!(wc2.is_none(), "third operand should have no with-clause");
+    }
+
+    #[test]
+    fn stream_expr_with_roundtrip() {
+        let src = "module m; initial begin a = {<< byte {arr with [0 +: len]}}; end endmodule";
+        let tokens = lyra_lexer::lex(src);
+        let p = parse(&tokens, src);
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        assert_eq!(p.syntax().text().to_string(), src);
+    }
+
+    #[test]
+    fn stream_expr_with_missing_bracket() {
+        // `with` without `[` -- error emitted, node completed
+        let src = "module m; initial begin a = {>> {arr with}}; end endmodule";
+        let tokens = lyra_lexer::lex(src);
+        let p = parse(&tokens, src);
+        assert!(
+            !p.errors.is_empty(),
+            "should have error for missing bracket after `with`"
+        );
+        // Tree still completes and roundtrips
+        assert_eq!(p.syntax().text().to_string(), src);
+    }
+
+    #[test]
+    fn eat_indexed_part_select_op_in_bracket() {
+        // Ensure a +: b inside [] stops correctly
+        let (p, root) = parse_module("initial begin a = b[x +: 4]; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let range = find_node(&root, SyntaxKind::RangeExpr);
+        assert!(range.is_some(), "should have RangeExpr for [x +: 4]");
+    }
+
+    #[test]
+    fn stream_range_plus_in_expr_is_single() {
+        // [a + b] -- the + is inside a BinExpr, not a direct token of StreamRange
+        let (p, root) = parse_module("initial begin a = {>> {arr with [a + b]}}; end");
+        assert!(p.errors.is_empty(), "errors: {:?}", p.errors);
+        let sr = find_node(&root, SyntaxKind::StreamRange);
+        assert!(sr.is_some(), "should have StreamRange");
+        let sr = sr.unwrap();
+        // Should have exactly 1 direct expression child (the BinExpr)
+        let bin_expr = find_node(&sr, SyntaxKind::BinExpr);
+        assert!(
+            bin_expr.is_some(),
+            "StreamRange [a + b] should contain a BinExpr"
+        );
+        // No direct Plus token on StreamRange (it's inside BinExpr)
+        let direct_plus = sr
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .any(|tok| tok.kind() == SyntaxKind::Plus);
+        assert!(
+            !direct_plus,
+            "StreamRange [a + b] should not have a direct Plus token"
+        );
+    }
 }

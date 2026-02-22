@@ -41,6 +41,7 @@ pub enum MessageId {
     ModportDirectionViolation,
     ModportRefUnsupported,
     EnumCastOutOfRange,
+    StreamWithNonArray,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -186,7 +187,8 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::ExpectedMemberWidth
         | MessageId::ModportDirectionViolation
         | MessageId::ModportRefUnsupported
-        | MessageId::EnumCastOutOfRange => render_type_message(msg),
+        | MessageId::EnumCastOutOfRange
+        | MessageId::StreamWithNonArray => render_type_message(msg),
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -287,6 +289,7 @@ fn render_type_message(msg: &Message) -> String {
             let enum_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
             format!("cast value {value} is not a member of enum `{enum_name}`")
         }
+        MessageId::StreamWithNonArray => "`with` clause requires an array operand".into(),
         _ => String::new(),
     }
 }

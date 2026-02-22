@@ -103,6 +103,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 12,
     };
+    pub const STREAM_WITH_NON_ARRAY: Self = Self {
+        namespace: "lyra.type",
+        number: 13,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,

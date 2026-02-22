@@ -75,6 +75,9 @@ pub enum TypeCheckItem {
         enum_id: EnumId,
         value: i64,
     },
+    StreamWithNonArray {
+        with_range: TextRange,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -140,6 +143,9 @@ fn walk_for_checks(
         SyntaxKind::SystemTfCall => check_system_call(node, ctx, items),
         SyntaxKind::FieldExpr => check_field_direction(node, ctx, facts, access, items),
         SyntaxKind::CastExpr => check_cast_expr(node, ctx, items),
+        SyntaxKind::StreamOperandItem => {
+            check_stream_operand(node, ctx, items);
+        }
         _ => {}
     }
     for child in node.children() {
@@ -625,6 +631,29 @@ fn check_conversion_bits_to_real(
             fn_name: smol_str::SmolStr::new(fn_name),
             expected_width,
             actual_width,
+        });
+    }
+}
+
+fn check_stream_operand(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+    use lyra_ast::{AstNode, StreamOperandItem};
+
+    let Some(item) = StreamOperandItem::cast(node.clone()) else {
+        return;
+    };
+    let Some(with_clause) = item.with_clause() else {
+        return;
+    };
+    let Some(expr_node) = item.expr() else {
+        return;
+    };
+    let operand_ty = ctx.expr_type(&expr_node);
+    if matches!(operand_ty.view, ExprView::Error(_)) {
+        return;
+    }
+    if !matches!(operand_ty.ty, Ty::Array { .. }) {
+        items.push(TypeCheckItem::StreamWithNonArray {
+            with_range: with_clause.text_range(),
         });
     }
 }

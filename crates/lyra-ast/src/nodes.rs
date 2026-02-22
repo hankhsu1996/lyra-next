@@ -243,6 +243,11 @@ ast_nodes! {
         declarators: [Declarator],
         direction: token([InputKw, OutputKw, InoutKw, RefKw]),
     }
+
+    // Streaming `with` clause (LRM 11.4.14.4)
+    StreamOperandItem(SyntaxKind::StreamOperandItem) { @custom }
+    StreamWithClause(SyntaxKind::StreamWithClause) { @custom }
+    StreamRange(SyntaxKind::StreamRange) { @custom }
 }
 
 // Custom accessors
@@ -610,6 +615,106 @@ impl TaskDecl {
 
     pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
         support::children(&self.syntax)
+    }
+}
+
+/// Classification of the range form inside a `StreamRange` node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamRangeOp {
+    /// `[expr]` -- single element.
+    Single,
+    /// `[lo : hi]` -- fixed range.
+    Fixed,
+    /// `[base +: width]` -- indexed ascending.
+    IndexedPlus,
+    /// `[base -: width]` -- indexed descending.
+    IndexedMinus,
+}
+
+impl StreamOperandItem {
+    /// The operand expression (first expression-kind child).
+    pub fn expr(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|c| crate::node::is_expression_kind(c.kind()))
+    }
+
+    /// The optional `with [...]` clause.
+    pub fn with_clause(&self) -> Option<StreamWithClause> {
+        support::child(&self.syntax)
+    }
+}
+
+impl StreamWithClause {
+    /// The range inside `[...]`.
+    pub fn range(&self) -> Option<StreamRange> {
+        support::child(&self.syntax)
+    }
+}
+
+impl StreamRange {
+    /// Classify the range form by inspecting direct token children.
+    ///
+    /// A `+` inside a `BinExpr` child (e.g. `[a + b]`) is NOT a direct
+    /// token of `StreamRange`, so it cannot trigger `IndexedPlus`.
+    pub fn op(&self) -> Option<StreamRangeOp> {
+        let expr_count = self
+            .syntax
+            .children()
+            .filter(|c| crate::node::is_expression_kind(c.kind()))
+            .count();
+        match expr_count {
+            1 => Some(StreamRangeOp::Single),
+            2 => {
+                // Collect direct non-trivia tokens between expression children
+                let direct_tokens: Vec<SyntaxKind> = self
+                    .syntax
+                    .children_with_tokens()
+                    .filter_map(rowan::NodeOrToken::into_token)
+                    .map(|t| t.kind())
+                    .filter(|k| {
+                        !matches!(
+                            k,
+                            SyntaxKind::Whitespace
+                                | SyntaxKind::LineComment
+                                | SyntaxKind::BlockComment
+                        )
+                    })
+                    .collect();
+                // Look for Plus+Colon, Minus+Colon, or lone Colon
+                let has_plus_colon = direct_tokens
+                    .windows(2)
+                    .any(|w| w[0] == SyntaxKind::Plus && w[1] == SyntaxKind::Colon);
+                let has_minus_colon = direct_tokens
+                    .windows(2)
+                    .any(|w| w[0] == SyntaxKind::Minus && w[1] == SyntaxKind::Colon);
+                if has_plus_colon {
+                    Some(StreamRangeOp::IndexedPlus)
+                } else if has_minus_colon {
+                    Some(StreamRangeOp::IndexedMinus)
+                } else if direct_tokens.contains(&SyntaxKind::Colon) {
+                    Some(StreamRangeOp::Fixed)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// First expression child (the index/base).
+    pub fn lhs(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|c| crate::node::is_expression_kind(c.kind()))
+    }
+
+    /// Second expression child (upper bound/width), `None` for `Single`.
+    pub fn rhs(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.syntax
+            .children()
+            .filter(|c| crate::node::is_expression_kind(c.kind()))
+            .nth(1)
     }
 }
 

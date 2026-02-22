@@ -469,6 +469,11 @@ pub enum SyntaxKind {
     // Cast expression (LRM 6.24)
     CastExpr,
 
+    // Streaming `with` clause (LRM 11.4.14.4)
+    StreamOperandItem,
+    StreamWithClause,
+    StreamRange,
+
     #[doc(hidden)]
     __Last,
 }

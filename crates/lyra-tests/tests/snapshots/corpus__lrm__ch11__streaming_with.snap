@@ -1,0 +1,11 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: test.sv (4 diagnostics)
+  warning[lyra.type[1]] 7:15..7:15: implicit truncation: 128-bit value assigned to 32-bit target
+  warning[lyra.type[1]] 9:43..9:43: implicit truncation: 128-bit value assigned to 32-bit target
+  warning[lyra.type[1]] 15:41..15:41: implicit truncation: 136-bit value assigned to 32-bit target
+  error[lyra.type[13]] 21:27..21:27: `with` clause requires an array operand
+---
+unit (0 diagnostics)

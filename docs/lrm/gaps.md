@@ -32,9 +32,9 @@ The `tagged` qualifier is parsed and diagnosed as unsupported; the type resolves
 
 ## Chapter 11 -- Operators and Expressions
 
-### 11.4.14: Streaming `with` array range
+### 11.4.14: Streaming `with` array range -- unpack and dynamic arrays
 
-The `with [array_range_expression]` construct on stream expressions is not parsed. Blocked by: parser extension + dynamic array support (7.4). Test: `lrm/ch11/streaming_with`.
+Parsing and pack-width semantics for const ranges on fixed-size arrays with integral/enum elements implemented. Unpack (LHS) semantics and dynamic array resize pending (blocked by streaming assignment target gap and dynamic array support). Test: `lrm/ch11/streaming_with`.
 
 ### 11.4.14: Streaming assignment target (unpack)
 
