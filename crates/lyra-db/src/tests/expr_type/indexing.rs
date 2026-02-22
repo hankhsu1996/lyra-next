@@ -211,6 +211,76 @@ fn expr_type_field_error_non_composite() {
     );
 }
 
+// LRM 11.8.1: bit-select and part-select results are unsigned regardless of operand signedness
+
+#[test]
+fn expr_type_bitselect_signed_logic() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic signed [7:0] x; parameter P = x[3]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    // Bit-select on signed 4-state type returns unsigned 4-state 1-bit
+    assert_eq!(expr_type_of_first_param(&db, file, unit), one_bit_4());
+}
+
+#[test]
+fn expr_type_bitselect_signed_int() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; int x; parameter P = x[3]; endmodule");
+    let unit = single_file_unit(&db, file);
+    // int is signed by default; bit-select still returns unsigned 2-state 1-bit
+    assert_eq!(expr_type_of_first_param(&db, file, unit), one_bit());
+}
+
+#[test]
+fn expr_type_part_select_signed_fixed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic signed [7:0] x; parameter P = x[7:0]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    // Full-range part-select on signed type returns unsigned
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(8));
+}
+
+#[test]
+fn expr_type_part_select_signed_indexed_plus() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic signed [7:0] x; parameter P = x[0+:4]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(4));
+}
+
+#[test]
+fn expr_type_part_select_signed_indexed_minus() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic signed [7:0] x; parameter P = x[7-:4]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(4));
+}
+
+#[test]
+fn expr_type_part_select_signed_int() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m; int x; parameter P = x[15:0]; endmodule");
+    let unit = single_file_unit(&db, file);
+    // int is 2-state signed; part-select returns 2-state unsigned
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u(16));
+}
+
 #[test]
 fn expr_type_system_call_unsupported() {
     let db = LyraDatabase::default();

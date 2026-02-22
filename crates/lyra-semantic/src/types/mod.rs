@@ -456,8 +456,7 @@ impl Ty {
 
     /// Produce a 1-bit result for bit-select on an integral type.
     ///
-    /// Preserves 4-state/2-state. Returns unsigned (engine policy -- see
-    /// gaps.md for signedness verification status).
+    /// Preserves 4-state/2-state. Returns unsigned per LRM 11.8.1.
     pub fn bit_select_result(&self) -> Option<Ty> {
         match self {
             Self::Integral(i) => {
