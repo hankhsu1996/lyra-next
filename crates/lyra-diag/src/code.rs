@@ -91,6 +91,14 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 9,
     };
+    pub const MODPORT_DIRECTION: Self = Self {
+        namespace: "lyra.type",
+        number: 10,
+    };
+    pub const MODPORT_REF_UNSUPPORTED: Self = Self {
+        namespace: "lyra.type",
+        number: 11,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,

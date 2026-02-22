@@ -1,0 +1,10 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (3 diagnostics)
+  error[lyra.type[10]] 25:18..25:18: modport member declared 'input' cannot be used in write context
+  error[lyra.type[10]] 32:30..32:30: modport member declared 'output' cannot be used in read context
+  error[lyra.type[10]] 38:18..38:18: modport member declared 'input' cannot be used in write context
+---
+unit (0 diagnostics)

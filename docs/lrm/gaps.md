@@ -76,10 +76,6 @@ Bit-select and part-select currently return unsigned (engine policy). LRM signed
 
 Module ports declared with bare `interface` keyword as type (generic interface). Parser and semantic layer do not recognize this syntax. Test: `lrm/ch25/generic_interface`.
 
-### 25.5: Modport direction enforcement
-
-Accessing modport members should enforce direction. Writing to an `input` modport member or reading an `output`-only member is not diagnosed. Test: `lrm/ch25/modport_direction_check`.
-
 ### 25.5: Modport conflict detection
 
 When modport is specified at both instantiation and module header, they must be identical. Not checked. Test: `lrm/ch25/modport_conflict`.

@@ -1,10 +1,12 @@
 use lyra_semantic::coerce::IntegralCtx;
-use lyra_semantic::type_check::{TypeCheckCtx, TypeCheckItem};
+use lyra_semantic::modport_def::PortDirection;
+use lyra_semantic::type_check::{AccessKind, TypeCheckCtx, TypeCheckItem};
 use lyra_semantic::type_infer::ExprType;
 use lyra_semantic::types::SymbolType;
 
 use crate::enum_queries::{EnumRef, enum_sem, enum_variant_index};
 use crate::expr_queries::{ExprRef, IntegralCtxKey};
+use crate::facts::modport::field_access_facts;
 use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
 use crate::record_queries::{RecordRef, record_diagnostics};
 use crate::semantic::{
@@ -107,7 +109,8 @@ pub fn type_diagnostics(
         ast_id_map: map,
     };
 
-    let items = lyra_semantic::type_check::check_types(&parse.syntax(), &ctx);
+    let facts = field_access_facts(db, file, unit);
+    let items = lyra_semantic::type_check::check_types(&parse.syntax(), &ctx, facts);
 
     let mut seen = std::collections::HashSet::new();
     let mut diags = Vec::new();
@@ -220,6 +223,80 @@ fn lower_type_check_item(
                 arg_span,
             ));
         }
+        TypeCheckItem::ModportDirectionViolation { .. }
+        | TypeCheckItem::ModportRefUnsupported { .. } => {
+            lower_modport_item(item, source_map, diags);
+        }
+    }
+}
+
+fn lower_modport_item(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    match item {
+        TypeCheckItem::ModportDirectionViolation {
+            member_range,
+            direction,
+            access,
+        } => {
+            let Some(member_span) = source_map.map_span(*member_range) else {
+                return;
+            };
+            let dir_name = match direction {
+                PortDirection::Input => "input",
+                PortDirection::Output => "output",
+                PortDirection::Inout => "inout",
+                PortDirection::Ref => "ref",
+            };
+            let access_name = match access {
+                AccessKind::Read => "read",
+                AccessKind::Write => "write",
+            };
+            let msg_args = vec![
+                lyra_diag::Arg::Name(smol_str::SmolStr::new(dir_name)),
+                lyra_diag::Arg::Name(smol_str::SmolStr::new(access_name)),
+            ];
+            diags.push(
+                lyra_diag::Diagnostic::new(
+                    lyra_diag::Severity::Error,
+                    lyra_diag::DiagnosticCode::MODPORT_DIRECTION,
+                    lyra_diag::Message::new(
+                        lyra_diag::MessageId::ModportDirectionViolation,
+                        msg_args.clone(),
+                    ),
+                )
+                .with_label(lyra_diag::Label {
+                    kind: lyra_diag::LabelKind::Primary,
+                    span: member_span,
+                    message: lyra_diag::Message::new(
+                        lyra_diag::MessageId::ModportDirectionViolation,
+                        msg_args,
+                    ),
+                }),
+            );
+        }
+        TypeCheckItem::ModportRefUnsupported { member_range } => {
+            let Some(member_span) = source_map.map_span(*member_range) else {
+                return;
+            };
+            diags.push(
+                lyra_diag::Diagnostic::new(
+                    lyra_diag::Severity::Warning,
+                    lyra_diag::DiagnosticCode::MODPORT_REF_UNSUPPORTED,
+                    lyra_diag::Message::simple(lyra_diag::MessageId::ModportRefUnsupported),
+                )
+                .with_label(lyra_diag::Label {
+                    kind: lyra_diag::LabelKind::Primary,
+                    span: member_span,
+                    message: lyra_diag::Message::simple(
+                        lyra_diag::MessageId::ModportRefUnsupported,
+                    ),
+                }),
+            );
+        }
+        _ => {}
     }
 }
 
@@ -448,6 +525,10 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
             self.ast_id_map,
             name_node,
         )
+    }
+
+    fn node_id(&self, node: &lyra_parser::SyntaxNode) -> Option<lyra_ast::ErasedAstId> {
+        self.ast_id_map.erased_ast_id(node)
     }
 }
 

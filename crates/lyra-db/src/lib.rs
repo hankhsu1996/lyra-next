@@ -7,6 +7,7 @@ mod elab_queries;
 mod elaboration;
 mod enum_queries;
 mod expr_queries;
+pub mod facts;
 mod lower_diag;
 mod module_sig;
 pub mod pipeline;
@@ -52,6 +53,9 @@ pub use record_queries::{
     LoweredFieldTy, ModportRef, ModportSem, RecordRef, modport_sem, record_diagnostics,
     record_field_tys, record_sem,
 };
+
+// Re-export facts queries
+pub use facts::modport::field_access_facts;
 
 // Re-export diagnostics
 pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};

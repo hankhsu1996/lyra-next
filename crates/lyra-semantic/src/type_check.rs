@@ -1,3 +1,4 @@
+use lyra_ast::ErasedAstId;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_source::TextRange;
@@ -5,12 +6,21 @@ use lyra_source::TextRange;
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
 use crate::expr_helpers::is_expression_kind;
+use crate::modport_def::PortDirection;
+use crate::modport_facts::FieldAccessFacts;
 use crate::syntax_helpers::{system_tf_args, system_tf_name};
 use crate::system_functions::{
     BitsArgKind, SystemFnKind, classify_bits_arg, iter_args, lookup_builtin,
 };
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
 use crate::types::{SymbolType, Ty};
+
+/// What direction a modport member was accessed in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessKind {
+    Read,
+    Write,
+}
 
 /// A type-check finding.
 pub enum TypeCheckItem {
@@ -52,6 +62,14 @@ pub enum TypeCheckItem {
         expected_width: u32,
         actual_width: u32,
     },
+    ModportDirectionViolation {
+        member_range: TextRange,
+        direction: PortDirection,
+        access: AccessKind,
+    },
+    ModportRefUnsupported {
+        member_range: TextRange,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -66,55 +84,144 @@ pub trait TypeCheckCtx {
     fn symbol_type_of_declarator(&self, declarator: &SyntaxNode) -> Option<SymbolType>;
     /// Resolve a `NameRef` node as a type (typedef/enum/struct name).
     fn resolve_type_arg(&self, name_node: &SyntaxNode) -> Option<crate::types::Ty>;
+    /// Pure identity lookup -- returns the stable ID for a syntax node.
+    /// O(1) map lookup, no DB calls, no allocations.
+    /// Returns None for nodes without stable IDs (e.g. error-recovered trees).
+    fn node_id(&self, node: &SyntaxNode) -> Option<ErasedAstId>;
 }
 
 /// Walk a file's AST and produce type-check items.
-pub fn check_types(root: &SyntaxNode, ctx: &dyn TypeCheckCtx) -> Vec<TypeCheckItem> {
+pub fn check_types(
+    root: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    field_facts: &FieldAccessFacts,
+) -> Vec<TypeCheckItem> {
     let mut items = Vec::new();
-    walk_for_checks(root, ctx, &mut items);
+    walk_for_checks(root, ctx, field_facts, AccessCtx::Read, &mut items);
     items
 }
 
-fn walk_for_checks(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+/// Checker-internal access context propagated through the walk.
+#[derive(Debug, Clone, Copy)]
+enum AccessCtx {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+fn walk_for_checks(
+    node: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    facts: &FieldAccessFacts,
+    access: AccessCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
     match node.kind() {
-        SyntaxKind::ContinuousAssign => check_continuous_assign(node, ctx, items),
-        SyntaxKind::AssignStmt => check_assign_stmt(node, ctx, items),
+        SyntaxKind::ContinuousAssign => {
+            check_continuous_assign(node, ctx, facts, items);
+            return;
+        }
+        SyntaxKind::AssignStmt => {
+            check_assign_stmt(node, ctx, facts, items);
+            return;
+        }
         SyntaxKind::VarDecl => check_var_decl(node, ctx, items),
         SyntaxKind::SystemTfCall => check_system_call(node, ctx, items),
+        SyntaxKind::FieldExpr => check_field_direction(node, ctx, facts, access, items),
         _ => {}
     }
     for child in node.children() {
-        walk_for_checks(&child, ctx, items);
+        walk_for_checks(&child, ctx, facts, access, items);
     }
 }
 
-fn check_continuous_assign(
+fn check_field_direction(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
+    facts: &FieldAccessFacts,
+    access: AccessCtx,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let exprs: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if exprs.len() < 2 {
+    let Some(ast_id) = ctx.node_id(node) else {
+        return;
+    };
+    let Some(fact) = facts.get(&ast_id) else {
+        return;
+    };
+    if fact.direction == PortDirection::Ref {
+        items.push(TypeCheckItem::ModportRefUnsupported {
+            member_range: fact.member_range,
+        });
         return;
     }
-    check_assignment_pair(node, &exprs[0], &exprs[1], ctx, items);
+    match access {
+        AccessCtx::Read => {
+            if !direction_permits(fact.direction, AccessKind::Read) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_range: fact.member_range,
+                    direction: fact.direction,
+                    access: AccessKind::Read,
+                });
+            }
+        }
+        AccessCtx::Write => {
+            if !direction_permits(fact.direction, AccessKind::Write) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_range: fact.member_range,
+                    direction: fact.direction,
+                    access: AccessKind::Write,
+                });
+            }
+        }
+        AccessCtx::ReadWrite => {
+            if !direction_permits(fact.direction, AccessKind::Read) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_range: fact.member_range,
+                    direction: fact.direction,
+                    access: AccessKind::Read,
+                });
+            }
+            if !direction_permits(fact.direction, AccessKind::Write) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_range: fact.member_range,
+                    direction: fact.direction,
+                    access: AccessKind::Write,
+                });
+            }
+        }
+    }
 }
 
-fn check_assign_stmt(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
-    let exprs: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if exprs.len() >= 2 {
-        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, items);
-    } else if exprs.len() == 1 && !has_assign_op(node) {
-        // Bare expression-statement (e.g. `q.delete();`). Infer in
-        // statement context so void methods are legal.
-        let _result = ctx.expr_type_stmt(&exprs[0]);
-    }
+/// Check whether a modport direction permits the given access kind.
+/// Input = read-only, Output = write-only, Inout = both.
+fn direction_permits(dir: PortDirection, access: AccessKind) -> bool {
+    !matches!(
+        (dir, access),
+        (PortDirection::Input, AccessKind::Write) | (PortDirection::Output, AccessKind::Read)
+    )
+}
+
+/// Check whether a node is a compound assignment (+=, -=, etc.).
+fn is_compound_assign(node: &SyntaxNode) -> bool {
+    node.children_with_tokens().any(|child| {
+        child.as_token().is_some_and(|t| {
+            matches!(
+                t.kind(),
+                SyntaxKind::PlusEq
+                    | SyntaxKind::MinusEq
+                    | SyntaxKind::StarEq
+                    | SyntaxKind::SlashEq
+                    | SyntaxKind::PercentEq
+                    | SyntaxKind::AmpEq
+                    | SyntaxKind::PipeEq
+                    | SyntaxKind::CaretEq
+                    | SyntaxKind::LtLtEq
+                    | SyntaxKind::GtGtEq
+                    | SyntaxKind::LtLtLtEq
+                    | SyntaxKind::GtGtGtEq
+            )
+        })
+    })
 }
 
 fn has_assign_op(node: &SyntaxNode) -> bool {
@@ -126,6 +233,74 @@ fn has_assign_op(node: &SyntaxNode) -> bool {
             false
         }
     })
+}
+
+fn check_continuous_assign(
+    node: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    facts: &FieldAccessFacts,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let exprs: Vec<SyntaxNode> = node
+        .children()
+        .filter(|c| is_expression_kind(c.kind()))
+        .collect();
+    if exprs.len() >= 2 {
+        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, items);
+    }
+    // Walk LHS in Write context, RHS in Read context
+    if exprs.len() >= 2 {
+        walk_for_checks(&exprs[0], ctx, facts, AccessCtx::Write, items);
+        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, items);
+        // Walk any remaining children (unlikely but for completeness)
+        for child in node.children() {
+            let r = child.text_range();
+            if r != exprs[0].text_range() && r != exprs[1].text_range() {
+                walk_for_checks(&child, ctx, facts, AccessCtx::Read, items);
+            }
+        }
+    } else {
+        for child in node.children() {
+            walk_for_checks(&child, ctx, facts, AccessCtx::Read, items);
+        }
+    }
+}
+
+fn check_assign_stmt(
+    node: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    facts: &FieldAccessFacts,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let exprs: Vec<SyntaxNode> = node
+        .children()
+        .filter(|c| is_expression_kind(c.kind()))
+        .collect();
+    if exprs.len() >= 2 {
+        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, items);
+    } else if exprs.len() == 1 && !has_assign_op(node) {
+        let _result = ctx.expr_type_stmt(&exprs[0]);
+    }
+    let compound = is_compound_assign(node);
+    let lhs_access = if compound {
+        AccessCtx::ReadWrite
+    } else {
+        AccessCtx::Write
+    };
+    if exprs.len() >= 2 {
+        walk_for_checks(&exprs[0], ctx, facts, lhs_access, items);
+        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, items);
+        for child in node.children() {
+            let r = child.text_range();
+            if r != exprs[0].text_range() && r != exprs[1].text_range() {
+                walk_for_checks(&child, ctx, facts, AccessCtx::Read, items);
+            }
+        }
+    } else {
+        for child in node.children() {
+            walk_for_checks(&child, ctx, facts, AccessCtx::Read, items);
+        }
+    }
 }
 
 fn check_var_decl(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
@@ -200,13 +375,15 @@ fn check_assignment_pair(
 }
 
 /// Return the inner node if `lhs` is a simple lvalue (name, qualified name,
-/// index expression, or parenthesized simple lvalue). Concat and other
-/// compound forms return `None` -- we skip assignment checks for those.
+/// field expression, index expression, or parenthesized simple lvalue).
+/// Concat and other compound forms return `None` -- we skip assignment
+/// checks for those.
 fn simple_lvalue(lhs: &SyntaxNode) -> Option<SyntaxNode> {
     match lhs.kind() {
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName | SyntaxKind::IndexExpr => {
-            Some(lhs.clone())
-        }
+        SyntaxKind::NameRef
+        | SyntaxKind::QualifiedName
+        | SyntaxKind::IndexExpr
+        | SyntaxKind::FieldExpr => Some(lhs.clone()),
         SyntaxKind::Expression | SyntaxKind::ParenExpr => {
             let inner = lhs.children().find(|c| is_expression_kind(c.kind()))?;
             simple_lvalue(&inner)
@@ -231,7 +408,7 @@ fn check_assignment_compat(
         return;
     }
 
-    // Truncation check (existing)
+    // Truncation check
     if let (Some(lhs_w), Some(rhs_w)) = (bitvec_known_width(lhs), bitvec_known_width(rhs))
         && !is_context_dependent(rhs)
         && rhs_w > lhs_w

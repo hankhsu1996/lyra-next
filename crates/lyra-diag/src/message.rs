@@ -38,6 +38,8 @@ pub enum MessageId {
     ConversionWidthMismatch,
     PackedUnionWidthMismatch,
     ExpectedMemberWidth,
+    ModportDirectionViolation,
+    ModportRefUnsupported,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -180,7 +182,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::ConversionArgCategory
         | MessageId::ConversionWidthMismatch
         | MessageId::PackedUnionWidthMismatch
-        | MessageId::ExpectedMemberWidth => render_type_message(msg),
+        | MessageId::ExpectedMemberWidth
+        | MessageId::ModportDirectionViolation
+        | MessageId::ModportRefUnsupported => render_type_message(msg),
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -267,6 +271,14 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::ExpectedMemberWidth => {
             let w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
             format!("expected width: {w} bits")
+        }
+        MessageId::ModportDirectionViolation => {
+            let direction = name();
+            let access = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("modport member declared '{direction}' cannot be used in {access} context")
+        }
+        MessageId::ModportRefUnsupported => {
+            "direction enforcement for 'ref' modport members is not yet supported".into()
         }
         _ => String::new(),
     }
