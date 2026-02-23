@@ -50,7 +50,7 @@ fn classify_resolve_result(
                     }
                 }
                 CoreResolution::EnumVariant(target) => {
-                    return TypeResolveOutcome::Ok(Ty::Enum(target.enum_id.clone()));
+                    return TypeResolveOutcome::Ok(Ty::Enum(target.enum_id));
                 }
             };
             let sym_ref = SymbolRef::new(db, unit, gsym);

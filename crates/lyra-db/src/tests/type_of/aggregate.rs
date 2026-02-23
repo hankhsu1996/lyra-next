@@ -162,12 +162,19 @@ fn enum_id_churn_contained() {
     );
     let def = def_index_file(&db, file);
     assert_eq!(def.enum_defs.len(), 3);
-    assert_eq!(def.enum_defs[0].owner.as_deref(), Some("a"));
-    assert_eq!(def.enum_defs[0].ordinal, 0);
-    assert_eq!(def.enum_defs[1].owner.as_deref(), Some("a"));
-    assert_eq!(def.enum_defs[1].ordinal, 1);
-    assert_eq!(def.enum_defs[2].owner.as_deref(), Some("b"));
-    assert_eq!(def.enum_defs[2].ordinal, 0);
+    // Each enum gets a distinct ast_id anchored to its EnumType node
+    let id0 = def.enum_defs[0].ast_id;
+    let id1 = def.enum_defs[1].ast_id;
+    let id2 = def.enum_defs[2].ast_id;
+    assert_ne!(id0, id1, "enums in same module must have distinct ast_ids");
+    assert_ne!(
+        id0, id2,
+        "enums in different modules must have distinct ast_ids"
+    );
+    assert_ne!(
+        id1, id2,
+        "enums in different modules must have distinct ast_ids"
+    );
 }
 
 #[test]
@@ -186,7 +193,7 @@ fn type_of_typedef_union_unpacked() {
             let rec = &def.record_defs[0];
             assert_eq!(rec.kind, RecordKind::Union);
             assert_eq!(rec.packing, Packing::Unpacked);
-            assert_eq!(id.owner.as_deref(), Some("m"));
+            assert_eq!(id.file(), file.file_id(&db));
         }
         other => panic!("expected Value(Record) for union, got {other:?}"),
     }
@@ -208,7 +215,7 @@ fn type_of_typedef_union_packed() {
             let rec = &def.record_defs[0];
             assert_eq!(rec.kind, RecordKind::Union);
             assert_eq!(rec.packing, Packing::Packed);
-            assert_eq!(id.owner.as_deref(), Some("m"));
+            assert_eq!(id.file(), file.file_id(&db));
         }
         other => panic!("expected Value(Record) for packed union, got {other:?}"),
     }
@@ -323,22 +330,77 @@ fn type_of_enum_member_variant_id() {
         .iter()
         .find(|(_, s)| s.name == "RUNNING")
         .expect("RUNNING symbol");
-    match idle.1.origin {
-        lyra_semantic::record::SymbolOrigin::EnumVariant {
-            variant_ordinal, ..
-        } => {
-            assert_eq!(variant_ordinal, 0, "IDLE should be ordinal 0");
-        }
-        other => panic!("expected EnumVariant origin for IDLE, got {other:?}"),
+    assert!(
+        matches!(
+            idle.1.origin,
+            lyra_semantic::record::SymbolOrigin::EnumVariant(..)
+        ),
+        "expected EnumVariant origin for IDLE, got {:?}",
+        idle.1.origin
+    );
+    assert!(
+        matches!(
+            running.1.origin,
+            lyra_semantic::record::SymbolOrigin::EnumVariant(..)
+        ),
+        "expected EnumVariant origin for RUNNING, got {:?}",
+        running.1.origin
+    );
+}
+
+#[test]
+fn enum_id_anchored_to_ast_node() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef enum { A, B } e1; typedef enum { C } e2; endmodule",
+    );
+    let def = def_index_file(&db, file);
+    let id_map = ast_id_map(&db, file);
+    assert_eq!(def.enum_defs.len(), 2);
+    // Each EnumId's ErasedAstId matches the AstIdMap entry for the EnumType node
+    let root = parse_file(&db, file).syntax();
+    let enum_types: Vec<_> = root
+        .descendants()
+        .filter(|n| n.kind() == lyra_lexer::SyntaxKind::EnumType)
+        .collect();
+    assert_eq!(enum_types.len(), 2);
+    for (i, node) in enum_types.iter().enumerate() {
+        let expected = id_map.erased_ast_id(node).unwrap();
+        assert_eq!(
+            def.enum_defs[i].ast_id, expected,
+            "EnumDef[{i}].ast_id must match the EnumType node's ErasedAstId"
+        );
     }
-    match running.1.origin {
-        lyra_semantic::record::SymbolOrigin::EnumVariant {
-            variant_ordinal, ..
-        } => {
-            assert_eq!(variant_ordinal, 1, "RUNNING should be ordinal 1");
-        }
-        other => panic!("expected EnumVariant origin for RUNNING, got {other:?}"),
+}
+
+#[test]
+fn record_id_anchored_to_ast_node() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef struct packed { logic a; } s1; typedef struct packed { logic b; } s2; endmodule",
+    );
+    let def = def_index_file(&db, file);
+    let id_map = ast_id_map(&db, file);
+    assert_eq!(def.record_defs.len(), 2);
+    let root = parse_file(&db, file).syntax();
+    let struct_types: Vec<_> = root
+        .descendants()
+        .filter(|n| n.kind() == lyra_lexer::SyntaxKind::StructType)
+        .collect();
+    assert_eq!(struct_types.len(), 2);
+    for (i, node) in struct_types.iter().enumerate() {
+        let expected = id_map.erased_ast_id(node).unwrap();
+        assert_eq!(
+            def.record_defs[i].ast_id, expected,
+            "RecordDef[{i}].ast_id must match the StructType node's ErasedAstId"
+        );
     }
+    // Distinct records get distinct IDs
+    assert_ne!(def.record_defs[0].ast_id, def.record_defs[1].ast_id);
 }
 
 #[test]

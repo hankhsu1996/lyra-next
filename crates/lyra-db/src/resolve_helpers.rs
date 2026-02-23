@@ -20,7 +20,7 @@ pub(crate) fn resolve_type_arg_impl(
     let sym_id = match &resolution.target {
         lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
-            return Some(Ty::Enum(target.enum_id.clone()));
+            return Some(Ty::Enum(target.enum_id));
         }
     };
     let sym_ref = SymbolRef::new(db, unit, sym_id);

@@ -1,4 +1,4 @@
-use lyra_ast::{AstIdMap, AstNode, NameRef, QualifiedName};
+use lyra_ast::{AstIdMap, AstNode, ErasedAstId, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_source::{FileId, Span};
@@ -15,13 +15,28 @@ use crate::types::Ty;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RecordDefIdx(pub(crate) u32);
 
-// Global IDs (offset-independent, scope-owner-local ordinal)
+/// Stable identity for a record (struct/union) type definition.
+///
+/// Anchored to the `StructType` CST node's `ErasedAstId`. Invariants:
+/// - Anchor is always a `SyntaxKind::StructType` node.
+/// - Builder collects exactly once per definition via `collect_record_def`.
+/// - File identity derived via `ErasedAstId::file()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct RecordId(ErasedAstId);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RecordId {
-    pub file: FileId,
-    pub owner: Option<SmolStr>,
-    pub ordinal: u32,
+impl RecordId {
+    pub fn new(def: ErasedAstId) -> Self {
+        Self(def)
+    }
+
+    pub fn file(self) -> FileId {
+        self.0.file()
+    }
+
+    pub fn as_erased(self) -> ErasedAstId {
+        self.0
+    }
 }
 
 /// Whether a record is a struct, union, or tagged union.
@@ -60,8 +75,7 @@ pub enum TypeRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordDef {
     pub name: Option<SmolStr>,
-    pub owner: Option<SmolStr>,
-    pub ordinal: u32,
+    pub ast_id: ErasedAstId,
     pub kind: RecordKind,
     pub packing: Packing,
     pub scope: ScopeId,
@@ -117,10 +131,7 @@ pub enum SymbolOrigin {
     /// Symbol IS a record type (struct/union typedef or inline).
     Record(RecordDefIdx),
     /// Symbol is an enum variant (value-namespace constant).
-    EnumVariant {
-        enum_idx: EnumDefIdx,
-        variant_ordinal: u32,
-    },
+    EnumVariant(EnumDefIdx),
     /// Symbol is a module/interface instance (e.g., `my_bus sb();`).
     Instance(InstanceDeclIdx),
     /// Poisoned origin: type extraction failed or was suppressed.

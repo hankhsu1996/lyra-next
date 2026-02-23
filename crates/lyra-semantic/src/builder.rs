@@ -75,6 +75,16 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
     ctx.local_decls
         .sort_by(|a, b| (a.id.scope, a.id.ordinal).cmp(&(b.id.scope, b.id.ordinal)));
 
+    // Build ast_id -> idx lookup maps for enum and record defs
+    let mut enum_by_ast = HashMap::with_capacity(ctx.enum_defs.len());
+    for (i, def) in ctx.enum_defs.iter().enumerate() {
+        enum_by_ast.insert(def.ast_id, crate::enum_def::EnumDefIdx(i as u32));
+    }
+    let mut record_by_ast = HashMap::with_capacity(ctx.record_defs.len());
+    for (i, def) in ctx.record_defs.iter().enumerate() {
+        record_by_ast.insert(def.ast_id, crate::record::RecordDefIdx(i as u32));
+    }
+
     // Finalize modport defs: convert raw GlobalDefId owners to InterfaceDefId
     let mut modport_defs = HashMap::new();
     let mut modport_name_map = HashMap::new();
@@ -93,7 +103,9 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         symbol_to_decl: ctx.symbol_to_decl.into_boxed_slice(),
         decl_to_init_expr: ctx.decl_to_init_expr,
         enum_defs: ctx.enum_defs.into_boxed_slice(),
+        enum_by_ast,
         record_defs: ctx.record_defs.into_boxed_slice(),
+        record_by_ast,
         instance_decls: ctx.instance_decls.into_boxed_slice(),
         modport_defs: HashMap::new(),
         modport_name_map: HashMap::new(),
@@ -156,11 +168,8 @@ pub(crate) struct DefContext<'a> {
     pub(crate) local_decl_ordinals: HashMap<ScopeId, u32>,
     pub(crate) import_ordinals: HashMap<ScopeId, u32>,
     pub(crate) export_ordinals: HashMap<ScopeId, u32>,
-    pub(crate) current_owner: Option<SmolStr>,
     pub(crate) current_iface_def_id: Option<crate::symbols::GlobalDefId>,
     pub(crate) modport_ordinal: u32,
-    pub(crate) enum_ordinals: HashMap<Option<SmolStr>, u32>,
-    pub(crate) record_ordinals: HashMap<Option<SmolStr>, u32>,
     pub(crate) diagnostics: Vec<SemanticDiag>,
 }
 
@@ -187,11 +196,8 @@ impl<'a> DefContext<'a> {
             local_decl_ordinals: HashMap::new(),
             import_ordinals: HashMap::new(),
             export_ordinals: HashMap::new(),
-            current_owner: None,
             current_iface_def_id: None,
             modport_ordinal: 0,
-            enum_ordinals: HashMap::new(),
-            record_ordinals: HashMap::new(),
             diagnostics: Vec::new(),
         }
     }
@@ -309,7 +315,6 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
             ctx.register_binding(sym_id, module_scope, ast_id.erase(), range);
         }
 
-        let prev_owner = ctx.current_owner.replace(name);
         // Pass 1: header imports (scope facts collected first so ports see them)
         for child in node.children() {
             if child.kind() == SyntaxKind::ImportDecl {
@@ -331,7 +336,6 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
                 _ => {}
             }
         }
-        ctx.current_owner = prev_owner;
     }
 }
 
@@ -357,13 +361,11 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
             ctx.register_binding(sym_id, package_scope, ast_id.erase(), range);
         }
 
-        let prev_owner = ctx.current_owner.replace(name);
         for child in node.children() {
             if child.kind() == SyntaxKind::PackageBody {
                 collect_package_body(ctx, &child, package_scope);
             }
         }
-        ctx.current_owner = prev_owner;
     }
 }
 
@@ -392,7 +394,6 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             iface_def_id = Some(crate::symbols::GlobalDefId::new(erased));
         }
 
-        let prev_owner = ctx.current_owner.replace(name);
         let prev_iface = ctx.current_iface_def_id.take();
         ctx.current_iface_def_id = iface_def_id;
         ctx.modport_ordinal = 0;
@@ -417,7 +418,6 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
                 _ => {}
             }
         }
-        ctx.current_owner = prev_owner;
         ctx.current_iface_def_id = prev_iface;
     }
 }
@@ -444,7 +444,6 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
             ctx.register_binding(sym_id, prog_scope, ast_id.erase(), range);
         }
 
-        let prev_owner = ctx.current_owner.replace(name);
         // Pass 1: header imports
         for child in node.children() {
             if child.kind() == SyntaxKind::ImportDecl {
@@ -466,7 +465,6 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
                 _ => {}
             }
         }
-        ctx.current_owner = prev_owner;
     }
 }
 

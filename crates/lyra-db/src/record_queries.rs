@@ -55,7 +55,7 @@ pub fn record_fields_raw<'db>(
 ) -> Box<[RawField]> {
     let unit = rref.unit(db);
     let record_id = rref.record_id(db);
-    let file_id = record_id.file;
+    let file_id = record_id.file();
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
         return Box::new([]);
@@ -64,11 +64,7 @@ pub fn record_fields_raw<'db>(
     let lowered = record_field_tys(db, rref);
     let def = def_index_file(db, source_file);
 
-    let record_def = def
-        .record_defs
-        .iter()
-        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal);
-    let Some(record_def) = record_def else {
+    let Some(record_def) = def.record_def_by_id(record_id) else {
         return Box::new([]);
     };
 
@@ -95,7 +91,7 @@ pub fn record_field_tys<'db>(
 ) -> Box<[LoweredFieldTy]> {
     let unit = rref.unit(db);
     let record_id = rref.record_id(db);
-    let file_id = record_id.file;
+    let file_id = record_id.file();
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
         return Box::new([]);
@@ -103,11 +99,7 @@ pub fn record_field_tys<'db>(
 
     let def = def_index_file(db, source_file);
 
-    let record_def = def
-        .record_defs
-        .iter()
-        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal);
-    let Some(record_def) = record_def else {
+    let Some(record_def) = def.record_def_by_id(record_id) else {
         return Box::new([]);
     };
 
@@ -168,7 +160,7 @@ pub fn record_field_tys<'db>(
 pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> RecordSem {
     let unit = rref.unit(db);
     let record_id = rref.record_id(db);
-    let file_id = record_id.file;
+    let file_id = record_id.file();
 
     let lowered_tys = record_field_tys(db, rref);
 
@@ -178,11 +170,7 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
 
     let def = def_index_file(db, source_file);
 
-    let record_def = def
-        .record_defs
-        .iter()
-        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal);
-    let Some(record_def) = record_def else {
+    let Some(record_def) = def.record_def_by_id(record_id) else {
         return empty_record_sem();
     };
 
@@ -273,7 +261,7 @@ pub fn record_diagnostics<'db>(
 ) -> Box<[lyra_diag::Diagnostic]> {
     let unit = rref.unit(db);
     let record_id = rref.record_id(db);
-    let file_id = record_id.file;
+    let file_id = record_id.file();
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
         return Box::new([]);
@@ -296,10 +284,7 @@ pub fn record_diagnostics<'db>(
 
     // Packed union width validation
     let def = def_index_file(db, source_file);
-    let record_def = def
-        .record_defs
-        .iter()
-        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal);
+    let record_def = def.record_def_by_id(record_id);
     if let Some(record_def) = record_def
         && record_def.kind == RecordKind::Union
         && record_def.packing == Packing::Packed

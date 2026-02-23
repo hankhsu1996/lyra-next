@@ -260,7 +260,7 @@ impl InferCtx for DbInferCtx<'_> {
         }
         match ty {
             Ty::Record(id) => {
-                let rref = RecordRef::new(self.db, self.unit, id.clone());
+                let rref = RecordRef::new(self.db, self.unit, *id);
                 let sem = record_sem(self.db, rref);
                 match sem.field_by_name(member_name) {
                     Some((idx, field)) => Ok(MemberInfo {
@@ -389,7 +389,7 @@ impl InferCtx for DbInferCtxRaw<'_> {
         };
         match ty {
             Ty::Record(id) => {
-                let rref = RecordRef::new(self.db, self.unit, id.clone());
+                let rref = RecordRef::new(self.db, self.unit, *id);
                 let fields = record_fields_raw(self.db, rref);
                 let (idx, field) = fields
                     .iter()
@@ -462,7 +462,7 @@ fn builtin_member_lookup(
             let method =
                 EnumMethodKind::from_name(member_name).ok_or(MemberLookupError::UnknownMember)?;
             Ok(Some(MemberInfo {
-                ty: method.return_ty(enum_id.clone()),
+                ty: method.return_ty(*enum_id),
                 kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Enum(method)),
                 receiver: None,
             }))
@@ -519,7 +519,7 @@ fn type_of_name_impl(
             ExprType::from_symbol_type(&sym_type)
         }
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
-            ExprType::from_ty(&Ty::Enum(target.enum_id.clone()))
+            ExprType::from_ty(&Ty::Enum(target.enum_id))
         }
     }
 }
@@ -694,7 +694,7 @@ fn enum_integral_view_impl(
     unit: CompilationUnit,
     id: &lyra_semantic::enum_def::EnumId,
 ) -> Option<lyra_semantic::type_infer::BitVecType> {
-    let eref = EnumRef::new(db, unit, id.clone());
+    let eref = EnumRef::new(db, unit, *id);
     let sem = enum_sem(db, eref);
     sem.base_int
 }
@@ -720,7 +720,7 @@ fn resolve_type_arg_raw_impl(
     let sym_id = match &resolution.target {
         lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
-            return Some(Ty::Enum(target.enum_id.clone()));
+            return Some(Ty::Enum(target.enum_id));
         }
     };
     let sym_ref = SymbolRef::new(db, unit, sym_id);

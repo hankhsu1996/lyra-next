@@ -97,7 +97,7 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
             }
             SymbolOrigin::TypeSpec
             | SymbolOrigin::Error
-            | SymbolOrigin::EnumVariant { .. }
+            | SymbolOrigin::EnumVariant(_)
             | SymbolOrigin::Instance(_) => {}
         }
         let sym_id = ctx.add_symbol_with_origin(
@@ -126,7 +126,10 @@ pub(crate) fn detect_aggregate_type(
                 if ts_child.kind() == SyntaxKind::EnumType
                     && let Some(et) = EnumType::cast(ts_child.clone())
                 {
-                    return SymbolOrigin::Enum(collect_enum_def(ctx, &et, scope));
+                    return match collect_enum_def(ctx, &et, scope) {
+                        Some(idx) => SymbolOrigin::Enum(idx),
+                        None => SymbolOrigin::Error,
+                    };
                 } else if ts_child.kind() == SyntaxKind::StructType
                     && let Some(st) = StructType::cast(ts_child)
                 {
@@ -141,11 +144,13 @@ pub(crate) fn detect_aggregate_type(
     SymbolOrigin::TypeSpec
 }
 
-fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: ScopeId) -> EnumDefIdx {
-    let owner = ctx.current_owner.clone();
-    let ordinal = ctx.enum_ordinals.entry(owner.clone()).or_insert(0);
-    let ord = *ordinal;
-    *ordinal += 1;
+fn collect_enum_def(
+    ctx: &mut DefContext<'_>,
+    enum_type: &EnumType,
+    scope: ScopeId,
+) -> Option<EnumDefIdx> {
+    debug_assert!(enum_type.syntax().kind() == SyntaxKind::EnumType);
+    let ast_id = ctx.ast_id_map.erased_ast_id(enum_type.syntax())?;
     let idx = EnumDefIdx(ctx.enum_defs.len() as u32);
 
     // Extract base type with its source range
@@ -170,7 +175,6 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
     // Extract members. Plain members get real symbols; range members are stored
     // as raw EnumMemberDef for later expansion via enum_variants query.
     let mut members = Vec::new();
-    let mut variant_ordinal: u32 = 0;
     for member in enum_type.members() {
         let Some(name_tok) = member.name() else {
             continue;
@@ -222,25 +226,20 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
                 SymbolKind::EnumMember,
                 name_tok.text_range(),
                 scope,
-                SymbolOrigin::EnumVariant {
-                    enum_idx: idx,
-                    variant_ordinal,
-                },
+                SymbolOrigin::EnumVariant(idx),
             );
             ctx.register_binding(sym_id, scope, erased_ast_id, name_tok.text_range());
-            variant_ordinal += 1;
         }
     }
 
     ctx.enum_defs.push(EnumDef {
         name: None,
-        owner,
-        ordinal: ord,
+        ast_id,
         scope,
         base,
         members: members.into_boxed_slice(),
     });
-    idx
+    Some(idx)
 }
 
 fn extract_enum_range_spec(
@@ -288,10 +287,8 @@ fn collect_record_def(
         return None;
     }
 
-    let owner = ctx.current_owner.clone();
-    let ordinal = ctx.record_ordinals.entry(owner.clone()).or_insert(0);
-    let ord = *ordinal;
-    *ordinal += 1;
+    debug_assert!(struct_type.syntax().kind() == SyntaxKind::StructType);
+    let ast_id = ctx.ast_id_map.erased_ast_id(struct_type.syntax())?;
     let idx = RecordDefIdx(ctx.record_defs.len() as u32);
 
     let kind = if struct_type.is_union() {
@@ -331,8 +328,7 @@ fn collect_record_def(
 
     ctx.record_defs.push(RecordDef {
         name: None,
-        owner,
-        ordinal: ord,
+        ast_id,
         kind,
         packing,
         scope,

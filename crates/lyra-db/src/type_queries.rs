@@ -49,7 +49,7 @@ pub fn bit_width_total<'db>(
         Ty::Integral(i) => i.try_packed_width(),
         Ty::Real(rk) => Some(rk.bit_width()),
         Ty::Enum(id) => {
-            let eref = EnumRef::new(db, unit, id.clone());
+            let eref = EnumRef::new(db, unit, *id);
             let sem = enum_sem(db, eref);
             sem.base_int.and_then(|bi| match bi.width {
                 BitWidth::Known(w) => Some(w),
@@ -57,7 +57,7 @@ pub fn bit_width_total<'db>(
             })
         }
         Ty::Record(id) => {
-            let rref = RecordRef::new(db, unit, id.clone());
+            let rref = RecordRef::new(db, unit, *id);
             record_width(db, unit, rref)
         }
         _ => None,
@@ -83,15 +83,12 @@ fn record_width<'db>(
     rref: RecordRef<'db>,
 ) -> Option<u32> {
     let record_id = rref.record_id(db);
-    let file_id = record_id.file;
+    let file_id = record_id.file();
 
     let source_file = source_file_by_id(db, unit, file_id)?;
     let def = def_index_file(db, source_file);
 
-    let record_def = def
-        .record_defs
-        .iter()
-        .find(|rd| rd.owner == record_id.owner && rd.ordinal == record_id.ordinal)?;
+    let record_def = def.record_def_by_id(record_id)?;
 
     match (record_def.kind, record_def.packing) {
         (RecordKind::TaggedUnion, _) | (_, Packing::Unpacked) => return None,
@@ -188,7 +185,7 @@ pub fn type_of_symbol_raw<'db>(
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
-        SymbolOrigin::EnumVariant { enum_idx, .. } => {
+        SymbolOrigin::EnumVariant(enum_idx) => {
             let id = def.enum_id(enum_idx);
             return classify(Ty::Enum(id), sym.kind);
         }

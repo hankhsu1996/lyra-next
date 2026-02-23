@@ -235,7 +235,7 @@ fn resolve_type_from_typespec(
     let sym_id = match &res.target {
         lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
-            return Some(Ty::Enum(ev.enum_id.clone()));
+            return Some(Ty::Enum(ev.enum_id));
         }
     };
     let sym_ref = SymbolRef::new(db, unit, sym_id);
@@ -266,7 +266,7 @@ fn resolve_as_type(
         let sym_id = match &res.target {
             lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
             lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
-                return Some(Ty::Enum(ev.enum_id.clone()));
+                return Some(Ty::Enum(ev.enum_id));
             }
         };
         let sym_ref = SymbolRef::new(db, unit, sym_id);
@@ -361,7 +361,7 @@ fn core_resolution_to_ty(
             }
         }
         CoreResolveResult::Resolved(CoreResolution::EnumVariant(target)) => {
-            Some(Ty::Enum(target.enum_id.clone()))
+            Some(Ty::Enum(target.enum_id))
         }
         CoreResolveResult::Unresolved(_) => None,
     }
