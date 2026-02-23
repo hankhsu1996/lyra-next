@@ -183,6 +183,10 @@ impl DiagnosticCode {
         namespace: "lyra.elab",
         number: 16,
     };
+    pub const MODPORT_CONFLICT: Self = Self {
+        namespace: "lyra.elab",
+        number: 17,
+    };
 
     /// Format as `"namespace[number]"`, e.g. `"lyra.semantic[1]"`.
     pub fn as_str(&self) -> String {

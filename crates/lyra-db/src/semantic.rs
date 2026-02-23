@@ -363,6 +363,24 @@ pub fn def_symbol(
     })
 }
 
+/// Resolve a `ModportDefId` to its declared name (Salsa-tracked).
+#[salsa::tracked]
+pub fn modport_name(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    mp_id: lyra_semantic::modport_def::ModportDefId,
+) -> SmolStr {
+    let file_id = mp_id.owner.global_def().file();
+    let Some(src) = source_file_by_id(db, unit, file_id) else {
+        return SmolStr::default();
+    };
+    let def = def_index_file(db, src);
+    def.modport_defs
+        .get(&mp_id)
+        .map(|d| d.name.clone())
+        .unwrap_or_default()
+}
+
 /// Build per-package enum variant index for wildcard imports.
 ///
 /// Iterates wildcard imports in the file's name graph, resolves each

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use lyra_ast::ErasedAstId;
+use lyra_semantic::modport_def::ModportDefId;
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::ConstInt;
 use lyra_source::{FileId, Span, TextRange};
@@ -368,6 +369,13 @@ pub(crate) enum ElabDiag {
         span: Span,
         limit: usize,
     },
+    ModportConflict {
+        target_def: GlobalDefId,
+        formal_port_ordinal: u32,
+        formal_mp: ModportDefId,
+        actual_mp: ModportDefId,
+        span: Span,
+    },
 }
 
 impl ElabDiag {
@@ -386,7 +394,8 @@ impl ElabDiag {
             | Self::ParamNotConst { span, .. }
             | Self::GenCondNotConst { span }
             | Self::GenvarNotConst { span }
-            | Self::GenerateIterationLimit { span, .. } => span,
+            | Self::GenerateIterationLimit { span, .. }
+            | Self::ModportConflict { span, .. } => span,
         }
     }
 }

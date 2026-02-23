@@ -15,6 +15,7 @@ pub struct MemberInfo {
 pub enum MemberKind {
     Field { index: u32 },
     InterfaceMember { member: SymbolId },
+    Modport,
     BuiltinMethod(BuiltinMethodKind),
 }
 

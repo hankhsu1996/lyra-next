@@ -63,6 +63,7 @@ pub enum MessageId {
     GenvarNotConst,
     DuplicateGenBlockName,
     GenerateIterationLimit,
+    ModportConflict,
     WildcardLocalConflict,
     // Label messages
     RealizedHere,
@@ -398,6 +399,14 @@ fn render_elab_message(msg: &Message) -> String {
         MessageId::GenerateIterationLimit => {
             let limit = msg.args.first().and_then(Arg::as_count).unwrap_or(0);
             format!("generate-for iteration limit ({limit}) reached")
+        }
+        MessageId::ModportConflict => {
+            let port = name();
+            let formal = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            let actual = msg.args.get(2).and_then(Arg::as_name).unwrap_or("?");
+            format!(
+                "port `{port}` expects modport `{formal}` but connection has modport `{actual}`"
+            )
         }
         _ => String::new(),
     }
