@@ -6,6 +6,10 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 6 -- Data Types
 
+### 6.16: String built-in methods
+
+Only `.len()` is recognized. The LRM defines 15 additional methods: `.putc()`, `.getc()`, `.toupper()`, `.tolower()`, `.compare()`, `.icompare()`, `.substr()`, `.atoi()`, `.atohex()`, `.atooct()`, `.atobin()`, `.atoreal()`, `.itoa()`, `.hextoa()`, `.octtoa()`, `.bintoa()`, `.realtoa()`. Calls to unrecognized methods silently pass without diagnostics. Blocked by: string method typing in the member-resolution layer. Test: `lrm/ch06/string_methods`.
+
 ### 6.19: Enum member visibility vs local declaration ordering
 
 Enum member names are injected into the enclosing scope unconditionally. The LRM's ordering/visibility rules for when a name becomes visible vs later local declarations are not modeled. Collisions between enum members and other declarations are diagnosed as duplicates under the current model. This is the same class of problem as Ch26 wildcard import ordering. Test: `lrm/ch06/enum_member_ordering`.
