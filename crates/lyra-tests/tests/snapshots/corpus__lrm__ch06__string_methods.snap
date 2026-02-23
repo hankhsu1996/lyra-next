@@ -1,0 +1,10 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: errors.sv (2 diagnostics)
+  error[lyra.type[16]] 7:6..7:6: unknown method `foo` on this type
+  error[lyra.type[16]] 9:6..9:6: wrong number of arguments to method `len`
+// file: main.sv (0 diagnostics)
+---
+unit (0 diagnostics)

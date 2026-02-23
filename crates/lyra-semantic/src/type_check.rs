@@ -84,6 +84,11 @@ pub enum TypeCheckItem {
     ModportExprNotAssignable {
         member_range: TextRange,
     },
+    MethodCallError {
+        call_range: TextRange,
+        method_name: smol_str::SmolStr,
+        error_kind: crate::type_infer::ExprTypeErrorKind,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -154,6 +159,7 @@ fn walk_for_checks(
         SyntaxKind::StreamOperandItem => {
             check_stream_operand(node, ctx, items);
         }
+        SyntaxKind::CallExpr => check_method_call(node, ctx, items),
         _ => {}
     }
     for child in node.children() {
@@ -528,6 +534,42 @@ fn check_cast_expr(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<Ty
             enum_id: enum_id.clone(),
             value,
         });
+    }
+}
+
+fn check_method_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+    use crate::type_infer::ExprTypeErrorKind;
+    use lyra_ast::{AstNode, FieldExpr};
+
+    let callee = match node.first_child() {
+        Some(c) if c.kind() == SyntaxKind::FieldExpr => c,
+        _ => return,
+    };
+    let Some(field_expr) = FieldExpr::cast(callee) else {
+        return;
+    };
+    let Some(field_tok) = field_expr.field_name() else {
+        return;
+    };
+
+    let result = ctx.expr_type_stmt(node);
+    let ExprView::Error(error_kind) = &result.view else {
+        return;
+    };
+    match error_kind {
+        ExprTypeErrorKind::UnknownMember
+        | ExprTypeErrorKind::NoMembersOnReceiver
+        | ExprTypeErrorKind::MethodArityMismatch
+        | ExprTypeErrorKind::MethodArgTypeMismatch
+        | ExprTypeErrorKind::MethodArgNotIntegral
+        | ExprTypeErrorKind::MethodNotValidOnReceiver(_) => {
+            items.push(TypeCheckItem::MethodCallError {
+                call_range: field_tok.text_range(),
+                method_name: smol_str::SmolStr::new(field_tok.text()),
+                error_kind: *error_kind,
+            });
+        }
+        _ => {}
     }
 }
 

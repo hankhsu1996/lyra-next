@@ -65,6 +65,7 @@ pub enum MethodInvalidReason {
 pub enum BuiltinMethodKind {
     Enum(EnumMethodKind),
     Array(ArrayMethodKind),
+    String(StringMethodKind),
 }
 
 /// LRM 6.19.4 enum methods.
@@ -303,5 +304,169 @@ impl ArrayMethodKind {
     /// Whether the ref-arg (for assoc first/last/next/prev) must be an lvalue.
     pub fn requires_ref_arg(self) -> bool {
         matches!(self, Self::First | Self::Last | Self::Next | Self::Prev)
+    }
+}
+
+// LRM 6.16 string built-in methods
+
+/// Parameter type for builtin method signatures (maps to `Ty` at check time).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamTy {
+    Int,
+    Integer,
+    Byte,
+    SvString,
+    Real,
+}
+
+impl ParamTy {
+    /// Whether an actual argument type is acceptable for this parameter.
+    ///
+    /// Integral params accept any integral type (implicit conversion per LRM).
+    /// String and real params require exact category match.
+    pub fn accepts(self, ty: &Ty) -> bool {
+        match self {
+            Self::Int | Self::Integer | Self::Byte => matches!(ty, Ty::Integral(_)),
+            Self::SvString => *ty == Ty::String,
+            Self::Real => ty.is_real(),
+        }
+    }
+}
+
+/// Return type for builtin method signatures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetTy {
+    Int,
+    Integer,
+    Byte,
+    SvString,
+    Real,
+    Void,
+}
+
+impl RetTy {
+    /// Convert to the corresponding `Ty`.
+    pub fn to_ty(self) -> Ty {
+        match self {
+            Self::Int => Ty::int(),
+            Self::Integer => Ty::integer(),
+            Self::Byte => Ty::byte(),
+            Self::SvString => Ty::String,
+            Self::Real => Ty::Real(crate::types::RealKw::Real),
+            Self::Void => Ty::Void,
+        }
+    }
+}
+
+/// Declarative signature for a builtin method.
+pub struct BuiltinSig {
+    pub params: &'static [ParamTy],
+    pub ret: RetTy,
+}
+
+/// LRM 6.16 string built-in methods.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StringMethodKind {
+    Len,
+    Putc,
+    Getc,
+    Toupper,
+    Tolower,
+    Compare,
+    Icompare,
+    Substr,
+    Atoi,
+    Atohex,
+    Atooct,
+    Atobin,
+    Atoreal,
+    Itoa,
+    Hextoa,
+    Octtoa,
+    Bintoa,
+    Realtoa,
+}
+
+impl StringMethodKind {
+    /// Resolve method name to kind.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "len" => Some(Self::Len),
+            "putc" => Some(Self::Putc),
+            "getc" => Some(Self::Getc),
+            "toupper" => Some(Self::Toupper),
+            "tolower" => Some(Self::Tolower),
+            "compare" => Some(Self::Compare),
+            "icompare" => Some(Self::Icompare),
+            "substr" => Some(Self::Substr),
+            "atoi" => Some(Self::Atoi),
+            "atohex" => Some(Self::Atohex),
+            "atooct" => Some(Self::Atooct),
+            "atobin" => Some(Self::Atobin),
+            "atoreal" => Some(Self::Atoreal),
+            "itoa" => Some(Self::Itoa),
+            "hextoa" => Some(Self::Hextoa),
+            "octtoa" => Some(Self::Octtoa),
+            "bintoa" => Some(Self::Bintoa),
+            "realtoa" => Some(Self::Realtoa),
+            _ => None,
+        }
+    }
+
+    /// LRM-accurate signature. Single source of truth for param/return types.
+    pub fn sig(self) -> BuiltinSig {
+        match self {
+            Self::Len => BuiltinSig {
+                params: &[],
+                ret: RetTy::Int,
+            },
+            Self::Putc => BuiltinSig {
+                params: &[ParamTy::Int, ParamTy::Byte],
+                ret: RetTy::Void,
+            },
+            Self::Getc => BuiltinSig {
+                params: &[ParamTy::Int],
+                ret: RetTy::Byte,
+            },
+            Self::Toupper | Self::Tolower => BuiltinSig {
+                params: &[],
+                ret: RetTy::SvString,
+            },
+            Self::Compare | Self::Icompare => BuiltinSig {
+                params: &[ParamTy::SvString],
+                ret: RetTy::Int,
+            },
+            Self::Substr => BuiltinSig {
+                params: &[ParamTy::Int, ParamTy::Int],
+                ret: RetTy::SvString,
+            },
+            Self::Atoi | Self::Atohex | Self::Atooct | Self::Atobin => BuiltinSig {
+                params: &[],
+                ret: RetTy::Integer,
+            },
+            Self::Atoreal => BuiltinSig {
+                params: &[],
+                ret: RetTy::Real,
+            },
+            Self::Itoa | Self::Hextoa | Self::Octtoa | Self::Bintoa => BuiltinSig {
+                params: &[ParamTy::Integer],
+                ret: RetTy::Void,
+            },
+            Self::Realtoa => BuiltinSig {
+                params: &[ParamTy::Real],
+                ret: RetTy::Void,
+            },
+        }
+    }
+
+    /// Fixed arity (all string methods have exactly one valid arity).
+    pub fn arity(self) -> (usize, usize) {
+        let n = self.sig().params.len();
+        (n, n)
+    }
+
+    /// Whether this method returns void (must be used as statement).
+    pub fn returns_void(self) -> bool {
+        matches!(self.sig().ret, RetTy::Void)
     }
 }

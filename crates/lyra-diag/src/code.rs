@@ -115,6 +115,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 15,
     };
+    pub const METHOD_CALL_ERROR: Self = Self {
+        namespace: "lyra.type",
+        number: 16,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,

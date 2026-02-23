@@ -1,7 +1,7 @@
 use lyra_semantic::coerce::IntegralCtx;
 use lyra_semantic::member::{
     ArrayMethodKind, BuiltinMethodKind, EnumMethodKind, MemberInfo, MemberKind, MemberLookupError,
-    ReceiverInfo, classify_array_receiver,
+    ReceiverInfo, StringMethodKind, classify_array_receiver,
 };
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::type_infer::{
@@ -255,6 +255,9 @@ impl InferCtx for DbInferCtx<'_> {
     }
 
     fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError> {
+        if let Some(result) = builtin_member_lookup(ty, member_name)? {
+            return Ok(result);
+        }
         match ty {
             Ty::Record(id) => {
                 let rref = RecordRef::new(self.db, self.unit, id.clone());
@@ -282,29 +285,6 @@ impl InferCtx for DbInferCtx<'_> {
                     type_of_expr(db, expr_ref)
                 },
             ),
-            Ty::Enum(enum_id) => {
-                let method = EnumMethodKind::from_name(member_name)
-                    .ok_or(MemberLookupError::UnknownMember)?;
-                Ok(MemberInfo {
-                    ty: method.return_ty(enum_id.clone()),
-                    kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Enum(method)),
-                    receiver: None,
-                })
-            }
-            Ty::Array { .. } => {
-                let recv = classify_array_receiver(ty).ok_or(MemberLookupError::NoMembersOnType)?;
-                let method = ArrayMethodKind::from_name(member_name)
-                    .ok_or(MemberLookupError::UnknownMember)?;
-                method
-                    .allowed_on(&recv)
-                    .map_err(MemberLookupError::MethodNotValidOnReceiver)?;
-                let ret_ty = method.return_ty(&recv);
-                Ok(MemberInfo {
-                    ty: ret_ty,
-                    kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Array(method)),
-                    receiver: Some(ReceiverInfo::Array(recv)),
-                })
-            }
             _ => Err(MemberLookupError::NoMembersOnType),
         }
     }
@@ -398,6 +378,9 @@ impl InferCtx for DbInferCtxRaw<'_> {
     }
 
     fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError> {
+        if let Some(result) = builtin_member_lookup(ty, member_name)? {
+            return Ok(result);
+        }
         let normalize_field = |ty: Ty| -> Ty {
             lyra_semantic::normalize_ty(&ty, &|expr_ast_id| {
                 let expr_ref = ConstExprRef::new(self.db, self.unit, expr_ast_id);
@@ -421,29 +404,6 @@ impl InferCtx for DbInferCtxRaw<'_> {
             }
             Ty::Interface(iface_ty) => {
                 interface_member_lookup_raw(self.db, self.unit, iface_ty, member_name)
-            }
-            Ty::Enum(enum_id) => {
-                let method = EnumMethodKind::from_name(member_name)
-                    .ok_or(MemberLookupError::UnknownMember)?;
-                Ok(MemberInfo {
-                    ty: method.return_ty(enum_id.clone()),
-                    kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Enum(method)),
-                    receiver: None,
-                })
-            }
-            Ty::Array { .. } => {
-                let recv = classify_array_receiver(ty).ok_or(MemberLookupError::NoMembersOnType)?;
-                let method = ArrayMethodKind::from_name(member_name)
-                    .ok_or(MemberLookupError::UnknownMember)?;
-                method
-                    .allowed_on(&recv)
-                    .map_err(MemberLookupError::MethodNotValidOnReceiver)?;
-                let ret_ty = method.return_ty(&recv);
-                Ok(MemberInfo {
-                    ty: ret_ty,
-                    kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Array(method)),
-                    receiver: Some(ReceiverInfo::Array(recv)),
-                })
             }
             _ => Err(MemberLookupError::NoMembersOnType),
         }
@@ -486,6 +446,53 @@ fn interface_member_lookup_raw(
             type_of_expr_raw(db, expr_ref)
         },
     )
+}
+
+/// Shared builtin member lookup for Enum, Array, and String types.
+///
+/// `Ok(Some(info))` = resolved successfully.
+/// `Err(_)` = tried and failed (unknown method, wrong receiver).
+/// `Ok(None)` = not a builtin-method type (caller handles Record/Interface).
+fn builtin_member_lookup(
+    ty: &Ty,
+    member_name: &str,
+) -> Result<Option<MemberInfo>, MemberLookupError> {
+    match ty {
+        Ty::Enum(enum_id) => {
+            let method =
+                EnumMethodKind::from_name(member_name).ok_or(MemberLookupError::UnknownMember)?;
+            Ok(Some(MemberInfo {
+                ty: method.return_ty(enum_id.clone()),
+                kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Enum(method)),
+                receiver: None,
+            }))
+        }
+        Ty::Array { .. } => {
+            let recv = classify_array_receiver(ty).ok_or(MemberLookupError::NoMembersOnType)?;
+            let method =
+                ArrayMethodKind::from_name(member_name).ok_or(MemberLookupError::UnknownMember)?;
+            method
+                .allowed_on(&recv)
+                .map_err(MemberLookupError::MethodNotValidOnReceiver)?;
+            let ret_ty = method.return_ty(&recv);
+            Ok(Some(MemberInfo {
+                ty: ret_ty,
+                kind: MemberKind::BuiltinMethod(BuiltinMethodKind::Array(method)),
+                receiver: Some(ReceiverInfo::Array(recv)),
+            }))
+        }
+        Ty::String => {
+            let method =
+                StringMethodKind::from_name(member_name).ok_or(MemberLookupError::UnknownMember)?;
+            let sig = method.sig();
+            Ok(Some(MemberInfo {
+                ty: sig.ret.to_ty(),
+                kind: MemberKind::BuiltinMethod(BuiltinMethodKind::String(method)),
+                receiver: None,
+            }))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn type_of_name_impl(

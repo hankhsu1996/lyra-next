@@ -340,3 +340,33 @@ fn enum_cast_with_same_type_no_assign_error() {
         "enum cast result is same enum type, no assign error"
     );
 }
+
+#[test]
+fn string_unknown_method_diagnostic() {
+    let src = "module m; string s; initial begin s.foo(); end endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(
+        diags.len(),
+        1,
+        "one diagnostic for unknown method: {diags:?}"
+    );
+    let msg = diag_message(&diags[0]);
+    assert!(msg.contains("unknown method"), "msg: {msg}");
+    assert!(msg.contains("foo"), "msg: {msg}");
+    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::METHOD_CALL_ERROR);
+}
+
+#[test]
+fn string_arity_mismatch_diagnostic() {
+    let src = "module m; string s; initial begin s.len(1); end endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(
+        diags.len(),
+        1,
+        "one diagnostic for arity mismatch: {diags:?}"
+    );
+    let msg = diag_message(&diags[0]);
+    assert!(msg.contains("wrong number"), "msg: {msg}");
+    assert!(msg.contains("len"), "msg: {msg}");
+    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::METHOD_CALL_ERROR);
+}
