@@ -57,22 +57,20 @@ fn modport_sem_resolves_members() {
     let gsym = def_symbol(&db, unit, modport_id.owner.global_def()).expect("interface symbol");
     let iface_scope = def.symbols.get(gsym.local).scope;
 
-    let req_sym = def
-        .scopes
+    def.scopes
         .resolve(&def.symbols, iface_scope, Namespace::Value, "req")
         .expect("req should resolve");
-    let gnt_sym = def
-        .scopes
+    def.scopes
         .resolve(&def.symbols, iface_scope, Namespace::Value, "gnt")
         .expect("gnt should resolve");
 
     assert_eq!(
-        sem.view.direction_of(req_sym),
+        sem.view.direction_of_port("req"),
         Some(PortDirection::Input),
         "req should be input"
     );
     assert_eq!(
-        sem.view.direction_of(gnt_sym),
+        sem.view.direction_of_port("gnt"),
         Some(PortDirection::Output),
         "gnt should be output"
     );

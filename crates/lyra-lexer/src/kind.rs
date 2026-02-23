@@ -454,6 +454,7 @@ pub enum SyntaxKind {
     ModportDecl,
     ModportItem,
     ModportPort,
+    ModportExprPort,
     DottedName,
     // Streaming operators (LRM 11.4.14)
     StreamExpr,

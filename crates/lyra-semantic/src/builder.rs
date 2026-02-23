@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use lyra_ast::{
     AstIdMap, AstNode, ConfigDecl, ExportDecl, ExportItem, FunctionDecl, InterfaceDecl,
-    ModportDecl, ModuleInstantiation, Port, PrimitiveDecl, ProgramDecl, TaskDecl, TfPortDecl,
-    TypeSpec,
+    ModportDecl, ModportPortKind, ModuleInstantiation, Port, PrimitiveDecl, ProgramDecl, TaskDecl,
+    TfPortDecl, TypeSpec,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
@@ -23,7 +23,7 @@ use crate::diagnostic::SemanticDiag;
 use crate::enum_def::EnumDef;
 use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
-use crate::modport_def::{ModportDef, ModportDefId, ModportEntry, PortDirection};
+use crate::modport_def::{ModportDef, ModportDefId, ModportEntry, ModportTarget, PortDirection};
 use crate::record::{RecordDef, SymbolOrigin};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
@@ -779,27 +779,57 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
         // Collect port entries with sticky direction
         let mut entries = Vec::new();
         let mut current_dir: Option<PortDirection> = None;
-        for port in item.ports() {
-            if let Some(dir_tok) = port.direction() {
-                current_dir = match dir_tok.kind() {
-                    SyntaxKind::InputKw => Some(PortDirection::Input),
-                    SyntaxKind::OutputKw => Some(PortDirection::Output),
-                    SyntaxKind::InoutKw => Some(PortDirection::Inout),
-                    SyntaxKind::RefKw => Some(PortDirection::Ref),
-                    _ => current_dir,
-                };
-            }
-            if let Some(dir) = current_dir
-                && let Some(port_name_tok) = port.name()
-            {
-                entries.push(ModportEntry {
-                    member_name: SmolStr::new(port_name_tok.text()),
-                    direction: dir,
-                    span: lyra_source::Span {
-                        file: ctx.file,
-                        range: port_name_tok.text_range(),
-                    },
-                });
+        for port_kind in item.port_items() {
+            match port_kind {
+                ModportPortKind::Bare(port) => {
+                    if let Some(dir_tok) = port.direction() {
+                        current_dir = parse_direction(dir_tok.kind(), current_dir);
+                    }
+                    if let Some(dir) = current_dir
+                        && let Some(port_name_tok) = port.name()
+                        && let Some(port_id) = ctx.ast_id_map.erased_ast_id(port.syntax())
+                    {
+                        let name = SmolStr::new(port_name_tok.text());
+                        entries.push(ModportEntry {
+                            port_name: name.clone(),
+                            direction: dir,
+                            target: ModportTarget::ImplicitMember { member_name: name },
+                            port_id,
+                            span: lyra_source::Span {
+                                file: ctx.file,
+                                range: port_name_tok.text_range(),
+                            },
+                        });
+                    }
+                }
+                ModportPortKind::Expr(port) => {
+                    if let Some(dir_tok) = port.direction() {
+                        current_dir = parse_direction(dir_tok.kind(), current_dir);
+                    }
+                    if let Some(dir) = current_dir
+                        && let Some(port_name_tok) = port.port_name()
+                        && let Some(port_id) = ctx.ast_id_map.erased_ast_id(port.syntax())
+                    {
+                        let target = if let Some(expr_node) = port.target_expr() {
+                            match ctx.ast_id_map.erased_ast_id(&expr_node) {
+                                Some(expr_id) => ModportTarget::Expr(expr_id),
+                                None => ModportTarget::Empty,
+                            }
+                        } else {
+                            ModportTarget::Empty
+                        };
+                        entries.push(ModportEntry {
+                            port_name: SmolStr::new(port_name_tok.text()),
+                            direction: dir,
+                            target,
+                            port_id,
+                            span: lyra_source::Span {
+                                file: ctx.file,
+                                range: port_name_tok.text_range(),
+                            },
+                        });
+                    }
+                }
             }
         }
 
@@ -821,6 +851,16 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
                 entries: entries.into_boxed_slice(),
             },
         });
+    }
+}
+
+fn parse_direction(kind: SyntaxKind, current: Option<PortDirection>) -> Option<PortDirection> {
+    match kind {
+        SyntaxKind::InputKw => Some(PortDirection::Input),
+        SyntaxKind::OutputKw => Some(PortDirection::Output),
+        SyntaxKind::InoutKw => Some(PortDirection::Inout),
+        SyntaxKind::RefKw => Some(PortDirection::Ref),
+        _ => current,
     }
 }
 

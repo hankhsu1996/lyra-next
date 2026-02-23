@@ -1,4 +1,3 @@
-use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 
 use crate::member::{
@@ -191,23 +190,4 @@ fn check_arg_assignable(expected: &Ty, actual: &Ty) -> bool {
     expected == actual
 }
 
-/// Recursive lvalue check for method ref-args.
-fn is_lvalue(node: &SyntaxNode) -> bool {
-    use lyra_ast::{AstNode, Expression, FieldExpr, IndexExpr, ParenExpr};
-    match node.kind() {
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName => true,
-        SyntaxKind::FieldExpr => FieldExpr::cast(node.clone())
-            .and_then(|f| f.base_expr())
-            .is_some_and(|base| is_lvalue(&base)),
-        SyntaxKind::IndexExpr => IndexExpr::cast(node.clone())
-            .and_then(|i| i.base_expr())
-            .is_some_and(|base| is_lvalue(&base)),
-        SyntaxKind::ParenExpr => ParenExpr::cast(node.clone())
-            .and_then(|p| p.syntax().first_child())
-            .is_some_and(|inner| is_lvalue(&inner)),
-        SyntaxKind::Expression => Expression::cast(node.clone())
-            .and_then(|e| e.syntax().first_child())
-            .is_some_and(|inner| is_lvalue(&inner)),
-        _ => false,
-    }
-}
+use crate::expr_lvalue::is_lvalue;

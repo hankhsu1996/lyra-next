@@ -202,14 +202,16 @@ ast_nodes! {
         items: [ModportItem],
     }
 
-    ModportItem(SyntaxKind::ModportItem) {
-        name: token([Ident, EscapedIdent]),
-        ports: [ModportPort],
-    }
+    ModportItem(SyntaxKind::ModportItem) { @custom }
 
     ModportPort(SyntaxKind::ModportPort) {
         direction: token([InputKw, OutputKw, InoutKw, RefKw]),
         name: token([Ident, EscapedIdent]),
+    }
+
+    ModportExprPort(SyntaxKind::ModportExprPort) {
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        port_name: token([Ident, EscapedIdent]),
     }
 
     ProgramDecl(SyntaxKind::ProgramDecl) {
@@ -294,6 +296,42 @@ impl BinExpr {
             }
         }
         None
+    }
+}
+
+/// Either a bare `ModportPort` or an expression `ModportExprPort`.
+pub enum ModportPortKind {
+    Bare(ModportPort),
+    Expr(ModportExprPort),
+}
+
+impl ModportItem {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
+    }
+
+    pub fn ports(&self) -> AstChildren<ModportPort> {
+        support::children(&self.syntax)
+    }
+
+    pub fn port_items(&self) -> impl Iterator<Item = ModportPortKind> + '_ {
+        self.syntax.children().filter_map(|child| {
+            if child.kind() == SyntaxKind::ModportPort {
+                ModportPort::cast(child).map(ModportPortKind::Bare)
+            } else if child.kind() == SyntaxKind::ModportExprPort {
+                ModportExprPort::cast(child).map(ModportPortKind::Expr)
+            } else {
+                None
+            }
+        })
+    }
+}
+
+impl ModportExprPort {
+    pub fn target_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|c| crate::node::is_expression_kind(c.kind()))
     }
 }
 

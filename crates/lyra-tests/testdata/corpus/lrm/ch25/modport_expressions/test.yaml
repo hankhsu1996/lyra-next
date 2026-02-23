@@ -1,0 +1,5 @@
+kind: lrm
+lrm:
+  chapter: 25
+  section: "25.5.4"
+  title: "Modport expressions"

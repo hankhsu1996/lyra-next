@@ -72,10 +72,6 @@ Typing (arity validation, return type) and const-eval for fixed packed/unpacked 
 
 Module ports declared with bare `interface` keyword as type (generic interface). Parser and semantic layer do not recognize this syntax. Test: `lrm/ch25/generic_interface`.
 
-### 25.5.4: Modport expressions
-
-`.port_identifier(expression)` syntax in modport declarations. Parser does not handle this form. Test: `lrm/ch25/modport_expressions`.
-
 ### 25.5.5: Clocking blocks in modports
 
 `modport_clocking_declaration` syntax. No clocking block support. Test: `lrm/ch25/modport_clocking`.

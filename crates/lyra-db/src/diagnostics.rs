@@ -215,7 +215,9 @@ fn lower_type_check_item(
             ));
         }
         TypeCheckItem::ModportDirectionViolation { .. }
-        | TypeCheckItem::ModportRefUnsupported { .. } => {
+        | TypeCheckItem::ModportRefUnsupported { .. }
+        | TypeCheckItem::ModportEmptyPortAccess { .. }
+        | TypeCheckItem::ModportExprNotAssignable { .. } => {
             lower_modport_item(item, source_map, diags);
         }
         TypeCheckItem::EnumCastOutOfRange { .. } => {
@@ -275,26 +277,58 @@ fn lower_modport_item(
             );
         }
         TypeCheckItem::ModportRefUnsupported { member_range } => {
-            let Some(member_span) = source_map.map_span(*member_range) else {
-                return;
-            };
-            diags.push(
-                lyra_diag::Diagnostic::new(
-                    lyra_diag::Severity::Warning,
-                    lyra_diag::DiagnosticCode::MODPORT_REF_UNSUPPORTED,
-                    lyra_diag::Message::simple(lyra_diag::MessageId::ModportRefUnsupported),
-                )
-                .with_label(lyra_diag::Label {
-                    kind: lyra_diag::LabelKind::Primary,
-                    span: member_span,
-                    message: lyra_diag::Message::simple(
-                        lyra_diag::MessageId::ModportRefUnsupported,
-                    ),
-                }),
+            emit_simple_modport_diag(
+                source_map,
+                diags,
+                *member_range,
+                lyra_diag::Severity::Warning,
+                lyra_diag::DiagnosticCode::MODPORT_REF_UNSUPPORTED,
+                lyra_diag::MessageId::ModportRefUnsupported,
+            );
+        }
+        TypeCheckItem::ModportEmptyPortAccess { member_range } => {
+            emit_simple_modport_diag(
+                source_map,
+                diags,
+                *member_range,
+                lyra_diag::Severity::Error,
+                lyra_diag::DiagnosticCode::MODPORT_EMPTY_PORT,
+                lyra_diag::MessageId::ModportEmptyPortAccess,
+            );
+        }
+        TypeCheckItem::ModportExprNotAssignable { member_range } => {
+            emit_simple_modport_diag(
+                source_map,
+                diags,
+                *member_range,
+                lyra_diag::Severity::Error,
+                lyra_diag::DiagnosticCode::MODPORT_EXPR_NOT_ASSIGNABLE,
+                lyra_diag::MessageId::ModportExprNotAssignable,
             );
         }
         _ => {}
     }
+}
+
+fn emit_simple_modport_diag(
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+    range: lyra_source::TextRange,
+    severity: lyra_diag::Severity,
+    code: lyra_diag::DiagnosticCode,
+    message_id: lyra_diag::MessageId,
+) {
+    let Some(span) = source_map.map_span(range) else {
+        return;
+    };
+    diags.push(
+        lyra_diag::Diagnostic::new(severity, code, lyra_diag::Message::simple(message_id))
+            .with_label(lyra_diag::Label {
+                kind: lyra_diag::LabelKind::Primary,
+                span,
+                message: lyra_diag::Message::simple(message_id),
+            }),
+    );
 }
 
 fn lower_enum_cast_item(
@@ -750,6 +784,28 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         let eref = EnumRef::new(self.db, self.unit, id.clone());
         crate::enum_queries::enum_known_value_set(self.db, eref)
     }
+
+    fn is_modport_target_lvalue(&self, expr_id: lyra_ast::ErasedAstId) -> bool {
+        let file_id = expr_id.file();
+        let Some(src) = source_file_by_id(self.db, self.unit, file_id) else {
+            return false;
+        };
+        expr_is_lvalue(self.db, src, expr_id)
+    }
+}
+
+/// Check whether a syntax node (by AST ID) is an lvalue.
+fn expr_is_lvalue(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    expr_id: lyra_ast::ErasedAstId,
+) -> bool {
+    let parse = parse_file(db, file);
+    let map = ast_id_map(db, file);
+    let Some(node) = map.get_node(&parse.syntax(), expr_id) else {
+        return false;
+    };
+    lyra_semantic::expr_lvalue::is_lvalue(&node)
 }
 
 /// Unit-level diagnostics: duplicate definitions in the definitions namespace.

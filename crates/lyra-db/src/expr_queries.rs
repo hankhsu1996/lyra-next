@@ -268,58 +268,20 @@ impl InferCtx for DbInferCtx<'_> {
                     None => Err(MemberLookupError::UnknownMember),
                 }
             }
-            Ty::Interface(iface_ty) => {
-                let gsym = def_symbol(self.db, self.unit, iface_ty.iface.global_def())
-                    .ok_or(MemberLookupError::NoMembersOnType)?;
-                let src = source_file_by_id(self.db, self.unit, gsym.file)
-                    .ok_or(MemberLookupError::NoMembersOnType)?;
-                let def = def_index_file(self.db, src);
-                let iface_scope = def.symbols.get(gsym.local).scope;
-                let member_sym = def.scopes.resolve(
-                    &def.symbols,
-                    iface_scope,
-                    lyra_semantic::symbols::Namespace::Value,
-                    member_name,
-                );
-                if let Some(member_sym) = member_sym {
-                    let global_member = lyra_semantic::symbols::GlobalSymbolId {
-                        file: gsym.file,
-                        local: member_sym,
-                    };
-                    let sym_ref = SymbolRef::new(self.db, self.unit, global_member);
-                    let ty = match type_of_symbol(self.db, sym_ref) {
-                        lyra_semantic::types::SymbolType::Value(ty) => ty,
-                        lyra_semantic::types::SymbolType::Net(net) => net.data.clone(),
-                        _ => return Err(MemberLookupError::UnknownMember),
-                    };
-                    if let Some(mp_id) = iface_ty.modport {
-                        let mref = ModportRef::new(self.db, self.unit, mp_id);
-                        let sem = modport_sem(self.db, mref);
-                        if sem.view.direction_of(member_sym).is_none() {
-                            return Err(MemberLookupError::NotInModport);
-                        }
-                    }
-                    return Ok(MemberInfo {
-                        ty,
-                        kind: MemberKind::InterfaceMember { member: member_sym },
-                        receiver: None,
-                    });
-                }
-                if iface_ty.modport.is_none()
-                    && let Some(mp_def) = def.modport_by_name(iface_ty.iface, member_name)
-                {
-                    let mp_ty = Ty::Interface(lyra_semantic::types::InterfaceType {
-                        iface: iface_ty.iface,
-                        modport: Some(mp_def.id),
-                    });
-                    return Ok(MemberInfo {
-                        ty: mp_ty,
-                        kind: MemberKind::Modport,
-                        receiver: None,
-                    });
-                }
-                Err(MemberLookupError::UnknownMember)
-            }
+            Ty::Interface(iface_ty) => interface_member_lookup(
+                self.db,
+                self.unit,
+                iface_ty,
+                member_name,
+                &|db, unit, gsym| {
+                    let sym_ref = SymbolRef::new(db, unit, gsym);
+                    type_of_symbol(db, sym_ref)
+                },
+                &|db, unit, expr_id| {
+                    let expr_ref = ExprRef::new(db, unit, expr_id);
+                    type_of_expr(db, expr_ref)
+                },
+            ),
             Ty::Enum(enum_id) => {
                 let method = EnumMethodKind::from_name(member_name)
                     .ok_or(MemberLookupError::UnknownMember)?;
@@ -506,60 +468,24 @@ fn interface_member_lookup_raw(
     iface_ty: &lyra_semantic::types::InterfaceType,
     member_name: &str,
 ) -> Result<MemberInfo, MemberLookupError> {
-    let gsym = def_symbol(db, unit, iface_ty.iface.global_def())
-        .ok_or(MemberLookupError::NoMembersOnType)?;
-    let src = source_file_by_id(db, unit, gsym.file).ok_or(MemberLookupError::NoMembersOnType)?;
-    let def = def_index_file(db, src);
-    let iface_scope = def.symbols.get(gsym.local).scope;
-    let member_sym = def.scopes.resolve(
-        &def.symbols,
-        iface_scope,
-        lyra_semantic::symbols::Namespace::Value,
+    interface_member_lookup(
+        db,
+        unit,
+        iface_ty,
         member_name,
-    );
-    if let Some(member_sym) = member_sym {
-        let global_member = lyra_semantic::symbols::GlobalSymbolId {
-            file: gsym.file,
-            local: member_sym,
-        };
-        let sym_ref = SymbolRef::new(db, unit, global_member);
-        let raw = type_of_symbol_raw(db, sym_ref);
-        let normalized = lyra_semantic::normalize_symbol_type(&raw, &|expr_ast_id| {
-            let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
-            eval_const_int(db, expr_ref)
-        });
-        let ty = match normalized {
-            lyra_semantic::types::SymbolType::Value(ty) => ty,
-            lyra_semantic::types::SymbolType::Net(net) => net.data.clone(),
-            _ => return Err(MemberLookupError::UnknownMember),
-        };
-        if let Some(mp_id) = iface_ty.modport {
-            let mref = ModportRef::new(db, unit, mp_id);
-            let sem = modport_sem(db, mref);
-            if sem.view.direction_of(member_sym).is_none() {
-                return Err(MemberLookupError::NotInModport);
-            }
-        }
-        return Ok(MemberInfo {
-            ty,
-            kind: MemberKind::InterfaceMember { member: member_sym },
-            receiver: None,
-        });
-    }
-    if iface_ty.modport.is_none()
-        && let Some(mp_def) = def.modport_by_name(iface_ty.iface, member_name)
-    {
-        let mp_ty = Ty::Interface(lyra_semantic::types::InterfaceType {
-            iface: iface_ty.iface,
-            modport: Some(mp_def.id),
-        });
-        return Ok(MemberInfo {
-            ty: mp_ty,
-            kind: MemberKind::Modport,
-            receiver: None,
-        });
-    }
-    Err(MemberLookupError::UnknownMember)
+        &|db, unit, gsym| {
+            let sym_ref = SymbolRef::new(db, unit, gsym);
+            let raw = type_of_symbol_raw(db, sym_ref);
+            lyra_semantic::normalize_symbol_type(&raw, &|expr_ast_id| {
+                let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
+                eval_const_int(db, expr_ref)
+            })
+        },
+        &|db, unit, expr_id| {
+            let expr_ref = ExprRef::new(db, unit, expr_id);
+            type_of_expr_raw(db, expr_ref)
+        },
+    )
 }
 
 fn type_of_name_impl(
@@ -589,6 +515,128 @@ fn type_of_name_impl(
             ExprType::from_ty(&Ty::Enum(target.enum_id.clone()))
         }
     }
+}
+
+fn interface_member_lookup(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    iface_ty: &lyra_semantic::types::InterfaceType,
+    member_name: &str,
+    resolve_sym_type: &dyn Fn(
+        &dyn salsa::Database,
+        CompilationUnit,
+        GlobalSymbolId,
+    ) -> lyra_semantic::types::SymbolType,
+    resolve_expr_type: &dyn Fn(
+        &dyn salsa::Database,
+        CompilationUnit,
+        lyra_ast::ErasedAstId,
+    ) -> ExprType,
+) -> Result<MemberInfo, MemberLookupError> {
+    let gsym = def_symbol(db, unit, iface_ty.iface.global_def())
+        .ok_or(MemberLookupError::NoMembersOnType)?;
+    let src = source_file_by_id(db, unit, gsym.file).ok_or(MemberLookupError::NoMembersOnType)?;
+    let def = def_index_file(db, src);
+    let iface_scope = def.symbols.get(gsym.local).scope;
+
+    if let Some(mp_id) = iface_ty.modport {
+        let mref = ModportRef::new(db, unit, mp_id);
+        let sem = modport_sem(db, mref);
+        if let Some(entry) = sem.view.lookup(member_name) {
+            let (ty, kind) = match &entry.target {
+                lyra_semantic::types::ModportViewTarget::Member(sym_id) => {
+                    let global_member = GlobalSymbolId {
+                        file: gsym.file,
+                        local: *sym_id,
+                    };
+                    let sym_type = resolve_sym_type(db, unit, global_member);
+                    let ty = match sym_type {
+                        lyra_semantic::types::SymbolType::Value(ty) => ty,
+                        lyra_semantic::types::SymbolType::Net(net) => net.data.clone(),
+                        _ => return Err(MemberLookupError::UnknownMember),
+                    };
+                    let kind = MemberKind::ModportPort {
+                        port_id: entry.port_id,
+                        target: lyra_semantic::member::ModportPortTarget::Member(*sym_id),
+                    };
+                    (ty, kind)
+                }
+                lyra_semantic::types::ModportViewTarget::Expr(expr_id) => {
+                    let expr_type = resolve_expr_type(db, unit, *expr_id);
+                    let kind = MemberKind::ModportPort {
+                        port_id: entry.port_id,
+                        target: lyra_semantic::member::ModportPortTarget::Expr(*expr_id),
+                    };
+                    (expr_type.ty, kind)
+                }
+                lyra_semantic::types::ModportViewTarget::Empty => {
+                    let kind = MemberKind::ModportPort {
+                        port_id: entry.port_id,
+                        target: lyra_semantic::member::ModportPortTarget::Empty,
+                    };
+                    (Ty::Error, kind)
+                }
+            };
+            return Ok(MemberInfo {
+                ty,
+                kind,
+                receiver: None,
+            });
+        }
+        // Name not in modport -- distinguish "exists in interface but hidden"
+        // from "does not exist at all".
+        let exists_in_iface = def
+            .scopes
+            .resolve(
+                &def.symbols,
+                iface_scope,
+                lyra_semantic::symbols::Namespace::Value,
+                member_name,
+            )
+            .is_some()
+            || def.modport_by_name(iface_ty.iface, member_name).is_some();
+        if exists_in_iface {
+            return Err(MemberLookupError::NotInModport);
+        }
+        return Err(MemberLookupError::UnknownMember);
+    }
+
+    // No modport: resolve directly in interface scope
+    let member_sym = def.scopes.resolve(
+        &def.symbols,
+        iface_scope,
+        lyra_semantic::symbols::Namespace::Value,
+        member_name,
+    );
+    if let Some(member_sym) = member_sym {
+        let global_member = GlobalSymbolId {
+            file: gsym.file,
+            local: member_sym,
+        };
+        let sym_type = resolve_sym_type(db, unit, global_member);
+        let ty = match sym_type {
+            lyra_semantic::types::SymbolType::Value(ty) => ty,
+            lyra_semantic::types::SymbolType::Net(net) => net.data.clone(),
+            _ => return Err(MemberLookupError::UnknownMember),
+        };
+        return Ok(MemberInfo {
+            ty,
+            kind: MemberKind::InterfaceMember { member: member_sym },
+            receiver: None,
+        });
+    }
+    if let Some(mp_def) = def.modport_by_name(iface_ty.iface, member_name) {
+        let mp_ty = Ty::Interface(lyra_semantic::types::InterfaceType {
+            iface: iface_ty.iface,
+            modport: Some(mp_def.id),
+        });
+        return Ok(MemberInfo {
+            ty: mp_ty,
+            kind: MemberKind::Modport,
+            receiver: None,
+        });
+    }
+    Err(MemberLookupError::UnknownMember)
 }
 
 fn const_eval_impl(
