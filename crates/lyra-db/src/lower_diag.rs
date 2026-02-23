@@ -1,4 +1,7 @@
-use lyra_diag::{Arg, Diagnostic, DiagnosticCode, Label, LabelKind, Message, MessageId, Severity};
+use lyra_diag::{
+    Arg, Diagnostic, DiagnosticCode, DiagnosticOrigin, Label, LabelKind, Message, MessageId,
+    Severity,
+};
 use lyra_preprocess::PreprocOutput;
 use lyra_semantic::def_index::DefIndex;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
@@ -55,6 +58,27 @@ pub(crate) fn lower_file_diagnostics(
     for diag in def.diagnostics.iter().chain(resolve.diagnostics.iter()) {
         let (primary_span, _) = map_span_or_fallback(file_id, &pp.source_map, diag.range);
         diags.push(lower_semantic_diag(diag, primary_span, &pp.source_map));
+    }
+
+    for (range, detail) in &*def.internal_errors {
+        let (span, extra) = map_span_or_fallback(file_id, &pp.source_map, *range);
+        let text = freeform_text(&format!("internal error: {detail}"), extra);
+        let code = DiagnosticCode {
+            namespace: "lyra.internal",
+            number: 0,
+        };
+        let mut d = Diagnostic::new(
+            Severity::Error,
+            code,
+            Message::new(MessageId::ParseError, vec![Arg::Name(text.clone())]),
+        )
+        .with_label(Label {
+            kind: LabelKind::Primary,
+            span,
+            message: Message::new(MessageId::ParseError, vec![Arg::Name(text)]),
+        });
+        d.origin = DiagnosticOrigin::Internal;
+        diags.push(d);
     }
 
     diags

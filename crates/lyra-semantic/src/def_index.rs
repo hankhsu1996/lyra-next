@@ -60,6 +60,7 @@ pub struct DefIndex {
     pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportDecl]>,
     pub diagnostics: Box<[SemanticDiag]>,
+    pub internal_errors: Box<[(TextRange, SmolStr)]>,
 }
 
 impl DefIndex {

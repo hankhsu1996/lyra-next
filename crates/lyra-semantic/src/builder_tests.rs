@@ -1,3 +1,4 @@
+use lyra_lexer::SyntaxKind;
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
@@ -179,5 +180,104 @@ fn same_namespace_typedef_duplicate() {
     assert!(
         !dup_diags.is_empty(),
         "two typedefs with same name should produce duplicate diagnostic"
+    );
+}
+
+#[test]
+fn def_ast_points_to_expected_node_kind() {
+    let src = "module m; logic x; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let module_sym = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name.as_str() == "m" && s.kind == SymbolKind::Module)
+        .map(|(_, s)| s);
+    assert!(module_sym.is_some());
+    assert_eq!(
+        module_sym.expect("checked").def_ast.kind(),
+        SyntaxKind::ModuleDecl,
+    );
+
+    let var_sym = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name.as_str() == "x" && s.kind == SymbolKind::Variable)
+        .map(|(_, s)| s);
+    assert!(var_sym.is_some());
+    assert_eq!(
+        var_sym.expect("checked").def_ast.kind(),
+        SyntaxKind::VarDecl,
+    );
+}
+
+#[test]
+fn def_ast_port_points_to_port_node() {
+    let src = "module m(input logic a, input logic b); endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let ports: Vec<_> = def
+        .symbols
+        .iter()
+        .filter(|(_, s)| s.kind == SymbolKind::Port)
+        .collect();
+    assert_eq!(ports.len(), 2);
+
+    // Each ANSI port has its own Port node, so def_ast should differ
+    assert_eq!(ports[0].1.def_ast.kind(), SyntaxKind::Port);
+    assert_eq!(ports[1].1.def_ast.kind(), SyntaxKind::Port);
+    assert_ne!(
+        ports[0].1.def_ast, ports[1].1.def_ast,
+        "separate Port nodes should have different def_ast"
+    );
+}
+
+#[test]
+fn def_ast_shared_for_multi_declarator() {
+    let src = "module m; logic x, y; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let x_sym = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name.as_str() == "x" && s.kind == SymbolKind::Variable)
+        .map(|(_, s)| s)
+        .expect("x");
+    let y_sym = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name.as_str() == "y" && s.kind == SymbolKind::Variable)
+        .map(|(_, s)| s)
+        .expect("y");
+
+    assert_eq!(
+        x_sym.def_ast, y_sym.def_ast,
+        "multi-declarator symbols should share the same def_ast"
+    );
+    assert_eq!(x_sym.def_ast.kind(), SyntaxKind::VarDecl);
+}
+
+#[test]
+fn def_ast_shared_for_multi_instance() {
+    let src = "module top; m u1(), u2(); endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let instances: Vec<_> = def
+        .symbols
+        .iter()
+        .filter(|(_, s)| s.kind == SymbolKind::Instance)
+        .collect();
+    assert_eq!(instances.len(), 2);
+    assert_eq!(
+        instances[0].1.def_ast, instances[1].1.def_ast,
+        "multi-instance symbols should share the same def_ast"
+    );
+    assert_eq!(
+        instances[0].1.def_ast.kind(),
+        SyntaxKind::ModuleInstantiation,
     );
 }

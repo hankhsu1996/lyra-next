@@ -161,12 +161,18 @@ impl SymbolKind {
 
 /// A resolved symbol entry.
 ///
+/// `def_ast` anchors this symbol to the declaration item node that
+/// introduces it (e.g. `VarDecl` for variables, `ModuleDecl` for modules).
+/// Multiple symbols may share the same `def_ast` when declared in the same
+/// declaration item (e.g. `logic x, y;`).
+///
 /// `def_range` is in expanded-text coordinate space within the owning
 /// file. The `FileId` lives on `DefIndex`, not duplicated here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub name: SmolStr,
     pub kind: SymbolKind,
+    pub def_ast: ErasedAstId,
     pub def_range: TextRange,
     pub scope: ScopeId,
     pub origin: SymbolOrigin,

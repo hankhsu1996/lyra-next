@@ -83,6 +83,11 @@ impl ErasedAstId {
         self.0.file
     }
 
+    /// The `SyntaxKind` of the AST node this id refers to.
+    pub fn kind(self) -> SyntaxKind {
+        self.0.kind
+    }
+
     /// The source range of this AST node, derived directly from the ID.
     ///
     /// This is a convenience accessor. For file-guarded + existence-checked

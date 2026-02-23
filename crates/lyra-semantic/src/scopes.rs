@@ -171,7 +171,8 @@ impl ScopeTree {
 
 #[cfg(test)]
 mod tests {
-    use lyra_source::{TextRange, TextSize};
+    use lyra_ast::ErasedAstId;
+    use lyra_source::{FileId, TextRange, TextSize};
     use smol_str::SmolStr;
 
     use super::*;
@@ -185,9 +186,11 @@ mod tests {
 
         let scope = scope_builder.push(ScopeKind::Module, None);
         let range = TextRange::new(TextSize::new(0), TextSize::new(1));
+        let placeholder = ErasedAstId::placeholder(FileId(0));
         let id = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
+            def_ast: placeholder,
             def_range: range,
             scope,
             origin: SymbolOrigin::TypeSpec,
@@ -212,9 +215,11 @@ mod tests {
         let parent = scope_builder.push(ScopeKind::Module, None);
         let child = scope_builder.push(ScopeKind::Block, Some(parent));
         let range = TextRange::new(TextSize::new(0), TextSize::new(1));
+        let placeholder = ErasedAstId::placeholder(FileId(0));
         let id = sym_builder.push(Symbol {
             name: SmolStr::new("a"),
             kind: SymbolKind::Port,
+            def_ast: placeholder,
             def_range: range,
             scope: parent,
             origin: SymbolOrigin::TypeSpec,
@@ -239,9 +244,11 @@ mod tests {
         let scope = scope_builder.push(ScopeKind::Module, None);
         let range1 = TextRange::new(TextSize::new(0), TextSize::new(1));
         let range2 = TextRange::new(TextSize::new(5), TextSize::new(6));
+        let placeholder = ErasedAstId::placeholder(FileId(0));
         let id1 = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
+            def_ast: placeholder,
             def_range: range1,
             scope,
             origin: SymbolOrigin::TypeSpec,
@@ -249,6 +256,7 @@ mod tests {
         let id2 = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
+            def_ast: placeholder,
             def_range: range2,
             scope,
             origin: SymbolOrigin::TypeSpec,
