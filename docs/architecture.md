@@ -125,7 +125,7 @@ Every semantic object is identified by a small, copyable, comparable ID. Semanti
 
 | Type          | Crate      | Definition                                                                 |
 | ------------- | ---------- | -------------------------------------------------------------------------- |
-| `AstId<N>`    | `lyra-ast` | Typed node identity: `FileId` + preorder index in the syntax tree.         |
+| `AstId<N>`    | `lyra-ast` | Typed node identity: `FileId` + `(kind, start, len, disamb)`.             |
 | `ErasedAstId` | `lyra-ast` | Type-erased form. Used as map keys across query boundaries.                |
 | `AstIdMap`    | `lyra-ast` | Per-file map from CST nodes to `AstId`. Built once per parse.              |
 
@@ -140,12 +140,13 @@ Every semantic object is identified by a small, copyable, comparable ID. Semanti
 | `EnumId`         | `lyra-semantic` | Enum definition identity: `file`, `owner` scope, `ordinal`.              |
 | `RecordId`       | `lyra-semantic` | Struct/union definition identity: `file`, `owner` scope, `ordinal`.      |
 
-Invariant: IDs survive incremental re-analysis for unchanged regions where
-the syntax tree shape is unchanged. `ErasedAstId` uses a preorder index, so
-edits that change tree shape before a node can shift its ID even if the range
-is unchanged. Downstream queries like `NameGraph` strip positional data,
-producing equal results on whitespace-only edits. Salsa backdates equal
-results, skipping re-execution of resolution and typing.
+Invariant: IDs are stable for nodes whose `(kind, start_offset, len)` is
+unchanged. Tree-shape changes (error recovery reshaping, wrapper node
+insertion) that do not move byte offsets no longer cause ID churn. Edits
+before a node that shift its byte offset will change its ID. Downstream
+queries like `NameGraph` strip positional data, producing equal results on
+whitespace-only edits. Salsa backdates equal results, skipping re-execution
+of resolution and typing.
 
 ## Query pipeline
 

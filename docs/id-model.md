@@ -28,23 +28,29 @@ for that file only.
 
 ### AstId and ErasedAstId
 `AstId<N>` is the typed identity for an AST node. It is backed by
-`ErasedAstId` which wraps `RawAstId { file: FileId, index: u32 }`.
+`ErasedAstId` which wraps `RawAstId { file, kind, start, len, disamb }`.
 
-`AstIdMap` assigns `index` by preorder traversal of the syntax tree.
-It stores a forward table of entries, each containing:
-- `SyntaxKind`
-- `TextRange`
-- `path` (child-index path from the root)
+`RawAstId` encodes the node's `SyntaxKind`, byte offset (`start`), span
+length (`len`), and a disambiguator (`disamb`) for the rare case where
+multiple nodes share the same `(kind, start, len)` triple (e.g.
+error-recovery).
 
-`AstIdMap::ast_id` looks up a node by `(kind, range)` and disambiguates
-collisions using `path`. This ensures nodes with identical ranges in
-error-recovery scenarios can still be distinguished.
+`AstIdMap` is built by preorder traversal. The forward table maps
+`(kind, start, len)` to a count of nodes with that triple. The reverse
+table maps each `RawAstId` to a `(path_hash, child-index path)` pair
+for exact node recovery.
+
+`AstIdMap::ast_id` performs an O(1) hash lookup in the common case
+(count == 1). For collisions, it computes the node's path from root and
+scans disambiguator values 0..count.
 
 ### Stability boundaries for AstId
-`AstId` stability is tied to the syntax tree shape. Any edit that changes
-the preorder traversal before a node can shift its `index`, even if the
-node's range is unchanged. This is acceptable for current usage but is a
-known quality gap tracked in `docs/quality-gaps.md`.
+IDs are stable for nodes whose `(kind, start_offset, len)` is unchanged.
+Edits before a node that shift its byte offset will change its ID. The
+key property: tree-shape changes (error recovery reshaping, wrapper node
+insertion) that do not move byte offsets no longer cause ID churn.
+Whitespace-only edits that do not change any node's start offset keep
+all IDs stable.
 
 ## Per-file Semantic Identity
 
