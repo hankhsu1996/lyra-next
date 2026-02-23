@@ -58,7 +58,7 @@ const MAX_ENUM_RANGE_COUNT: u64 = 65536;
 pub fn enum_variants<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> ExpandedEnum {
     let unit = eref.unit(db);
     let enum_id = eref.enum_id(db);
-    let file_id = enum_id.file;
+    let file_id = enum_id.file();
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
         return ExpandedEnum {
@@ -68,11 +68,7 @@ pub fn enum_variants<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> E
     };
 
     let def = def_index_file(db, source_file);
-    let enum_def = def
-        .enum_defs
-        .iter()
-        .find(|ed| ed.owner == enum_id.owner && ed.ordinal == enum_id.ordinal);
-    let Some(enum_def) = enum_def else {
+    let Some(enum_def) = def.enum_def_by_id(enum_id) else {
         return ExpandedEnum {
             variants: Box::new([]),
             diagnostics: Box::new([]),
@@ -215,7 +211,7 @@ pub fn enum_variant_index(
 
     for (def_idx, enum_def) in def.enum_defs.iter().enumerate() {
         let enum_id = def.enum_id(lyra_semantic::enum_def::EnumDefIdx(def_idx as u32));
-        let eref = EnumRef::new(db, unit, enum_id.clone());
+        let eref = EnumRef::new(db, unit, enum_id);
         let expanded = enum_variants(db, eref);
 
         // Collect diagnostics from expansion
@@ -259,7 +255,7 @@ pub fn enum_variant_index(
             scope_map.insert(
                 variant.name.clone(),
                 EnumVariantTarget {
-                    enum_id: enum_id.clone(),
+                    enum_id,
                     variant_ordinal: variant.variant_ordinal,
                     def_range: variant.def_range,
                 },
@@ -282,7 +278,7 @@ pub fn enum_variant_index(
 pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSem {
     let unit = eref.unit(db);
     let enum_id = eref.enum_id(db);
-    let file_id = enum_id.file;
+    let file_id = enum_id.file();
 
     let Some(source_file) = source_file_by_id(db, unit, file_id) else {
         return empty_enum_sem();
@@ -290,11 +286,7 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
 
     let def = def_index_file(db, source_file);
 
-    let enum_def = def
-        .enum_defs
-        .iter()
-        .find(|ed| ed.owner == enum_id.owner && ed.ordinal == enum_id.ordinal);
-    let Some(enum_def) = enum_def else {
+    let Some(enum_def) = def.enum_def_by_id(enum_id) else {
         return empty_enum_sem();
     };
 

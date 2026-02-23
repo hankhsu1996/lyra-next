@@ -485,8 +485,8 @@ fn check_assignment_compat(
                     assign_range,
                     lhs_range,
                     rhs_range,
-                    lhs_enum: lhs_id.clone(),
-                    rhs_enum: rhs_id.clone(),
+                    lhs_enum: *lhs_id,
+                    rhs_enum: *rhs_id,
                 });
             }
             _ => {
@@ -494,7 +494,7 @@ fn check_assignment_compat(
                     assign_range,
                     lhs_range,
                     rhs_range,
-                    lhs_enum: lhs_id.clone(),
+                    lhs_enum: *lhs_id,
                     rhs_ty: rhs.ty.clone(),
                 });
             }
@@ -531,7 +531,7 @@ fn check_cast_expr(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<Ty
     if value_set.binary_search(&value).is_err() {
         items.push(TypeCheckItem::EnumCastOutOfRange {
             cast_range: node.text_range(),
-            enum_id: enum_id.clone(),
+            enum_id: *enum_id,
             value,
         });
     }

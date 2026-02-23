@@ -16,19 +16,28 @@ use crate::types::{ConstInt, Ty};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EnumDefIdx(pub u32);
 
-// Global IDs (offset-independent, scope-owner-local ordinal)
+/// Stable identity for an enum type definition.
+///
+/// Anchored to the `EnumType` CST node's `ErasedAstId`. Invariants:
+/// - Anchor is always a `SyntaxKind::EnumType` node.
+/// - Builder collects exactly once per definition via `collect_enum_def`.
+/// - File identity derived via `ErasedAstId::file()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct EnumId(ErasedAstId);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumId {
-    pub file: FileId,
-    pub owner: Option<SmolStr>,
-    pub ordinal: u32,
-}
+impl EnumId {
+    pub fn new(def: ErasedAstId) -> Self {
+        Self(def)
+    }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumVariantId {
-    pub enum_id: EnumId,
-    pub variant_ordinal: u32,
+    pub fn file(self) -> FileId {
+        self.0.file()
+    }
+
+    pub fn as_erased(self) -> ErasedAstId {
+        self.0
+    }
 }
 
 /// Range specification on an enum member: `[N]` (count) or `[N:M]` (from-to).
@@ -70,8 +79,7 @@ pub struct EnumBase {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDef {
     pub name: Option<SmolStr>,
-    pub owner: Option<SmolStr>,
-    pub ordinal: u32,
+    pub ast_id: ErasedAstId,
     pub scope: ScopeId,
     pub base: EnumBase,
     pub members: Box<[EnumMemberDef]>,
@@ -123,6 +131,7 @@ pub struct EnumSem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumVariantTarget {
     pub enum_id: EnumId,
+    /// Per-enum ordering index for value assignment; not a stable identity key.
     pub variant_ordinal: u32,
     pub def_range: TextRange,
 }

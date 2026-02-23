@@ -213,18 +213,11 @@ impl<'db> TyFmt<'db> {
     }
 
     fn enum_name(&self, id: &lyra_semantic::enum_def::EnumId) -> String {
-        let Some(src) = source_file_by_id(self.db, self.unit, id.file) else {
+        let Some(src) = source_file_by_id(self.db, self.unit, id.file()) else {
             return "enum".to_string();
         };
         let def = def_index_file(self.db, src);
-        let name = def.enum_defs.iter().find_map(|d| {
-            if d.owner == id.owner && d.ordinal == id.ordinal {
-                d.name.clone()
-            } else {
-                None
-            }
-        });
-        match name {
+        match def.enum_def_by_id(*id).and_then(|d| d.name.clone()) {
             Some(n) => format!("enum {n}"),
             None => "enum".to_string(),
         }
@@ -256,14 +249,11 @@ impl<'db> TyFmt<'db> {
     fn record_name(&self, id: &lyra_semantic::record::RecordId) -> String {
         use lyra_semantic::record::{Packing, RecordKind};
 
-        let Some(src) = source_file_by_id(self.db, self.unit, id.file) else {
+        let Some(src) = source_file_by_id(self.db, self.unit, id.file()) else {
             return "struct".to_string();
         };
         let def = def_index_file(self.db, src);
-        let info = def
-            .record_defs
-            .iter()
-            .find(|d| d.owner == id.owner && d.ordinal == id.ordinal);
+        let info = def.record_def_by_id(*id);
         match info {
             Some(d) => {
                 let mut s = String::new();

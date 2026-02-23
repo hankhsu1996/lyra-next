@@ -5,7 +5,7 @@ use lyra_source::{FileId, TextRange};
 use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
-use crate::enum_def::{EnumDef, EnumDefIdx, EnumId, EnumVariantId};
+use crate::enum_def::{EnumDef, EnumDefIdx, EnumId};
 use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId};
@@ -52,7 +52,9 @@ pub struct DefIndex {
     /// Key absent = not a parameter declarator (not tracked).
     pub decl_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
     pub enum_defs: Box<[EnumDef]>,
+    pub enum_by_ast: HashMap<ErasedAstId, EnumDefIdx>,
     pub record_defs: Box<[RecordDef]>,
+    pub record_by_ast: HashMap<ErasedAstId, RecordDefIdx>,
     pub instance_decls: Box<[InstanceDecl]>,
     pub modport_defs: HashMap<ModportDefId, ModportDef>,
     pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
@@ -70,19 +72,17 @@ impl DefIndex {
     }
 
     pub fn enum_id(&self, idx: EnumDefIdx) -> EnumId {
-        let def = self.enum_def(idx);
-        EnumId {
-            file: self.file,
-            owner: def.owner.clone(),
-            ordinal: def.ordinal,
-        }
+        EnumId::new(self.enum_defs[idx.0 as usize].ast_id)
     }
 
-    pub fn enum_variant_id(&self, enum_idx: EnumDefIdx, variant_ordinal: u32) -> EnumVariantId {
-        EnumVariantId {
-            enum_id: self.enum_id(enum_idx),
-            variant_ordinal,
-        }
+    pub fn enum_def_by_id(&self, id: EnumId) -> Option<&EnumDef> {
+        let idx = self.enum_by_ast.get(&id.as_erased())?;
+        Some(&self.enum_defs[idx.0 as usize])
+    }
+
+    pub fn record_def_by_id(&self, id: RecordId) -> Option<&RecordDef> {
+        let idx = self.record_by_ast.get(&id.as_erased())?;
+        Some(&self.record_defs[idx.0 as usize])
     }
 
     pub fn instance_decl(&self, idx: InstanceDeclIdx) -> &InstanceDecl {
@@ -115,12 +115,7 @@ impl DefIndex {
     }
 
     pub fn record_id(&self, idx: RecordDefIdx) -> RecordId {
-        let def = self.record_def(idx);
-        RecordId {
-            file: self.file,
-            owner: def.owner.clone(),
-            ordinal: def.ordinal,
-        }
+        RecordId::new(self.record_defs[idx.0 as usize].ast_id)
     }
 }
 

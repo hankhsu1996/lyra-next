@@ -47,7 +47,7 @@ fn resolve_typespec_ty_with(
     let target = match &res.target {
         lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
-            return Ty::Enum(ev.enum_id.clone());
+            return Ty::Enum(ev.enum_id);
         }
     };
     let Some(target_file) = source_file_by_id(db, unit, target.file) else {

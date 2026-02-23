@@ -48,11 +48,7 @@ pub fn file_diagnostics(
     // Enum base type diagnostics
     let file_id = file.file_id(db);
     for enum_def in &*def.enum_defs {
-        let enum_id = lyra_semantic::enum_def::EnumId {
-            file: file_id,
-            owner: enum_def.owner.clone(),
-            ordinal: enum_def.ordinal,
-        };
+        let enum_id = lyra_semantic::enum_def::EnumId::new(enum_def.ast_id);
         let eref = EnumRef::new(db, unit, enum_id);
         let sem = enum_sem(db, eref);
         for diag in &*sem.diags {
@@ -88,11 +84,7 @@ pub fn file_diagnostics(
 
     // Record diagnostics (type resolution errors + packed union width)
     for record_def in &*def.record_defs {
-        let record_id = lyra_semantic::record::RecordId {
-            file: file_id,
-            owner: record_def.owner.clone(),
-            ordinal: record_def.ordinal,
-        };
+        let record_id = lyra_semantic::record::RecordId::new(record_def.ast_id);
         let rref = RecordRef::new(db, unit, record_id);
         diags.extend(record_diagnostics(db, rref).iter().cloned());
     }
@@ -425,19 +417,17 @@ fn enum_name(
     unit: CompilationUnit,
     id: &lyra_semantic::enum_def::EnumId,
 ) -> smol_str::SmolStr {
-    let Some(sf) = source_file_by_id(db, unit, id.file) else {
+    let Some(sf) = source_file_by_id(db, unit, id.file()) else {
         return smol_str::SmolStr::new_static("<anonymous enum>");
     };
     let def = def_index_file(db, sf);
-    for enum_def in &*def.enum_defs {
-        if enum_def.owner == id.owner && enum_def.ordinal == id.ordinal {
-            return enum_def
-                .name
-                .clone()
-                .unwrap_or_else(|| smol_str::SmolStr::new_static("<anonymous enum>"));
-        }
+    match def.enum_def_by_id(*id) {
+        Some(enum_def) => enum_def
+            .name
+            .clone()
+            .unwrap_or_else(|| smol_str::SmolStr::new_static("<anonymous enum>")),
+        None => smol_str::SmolStr::new_static("<anonymous enum>"),
     }
-    smol_str::SmolStr::new_static("<anonymous enum>")
 }
 
 fn truncation_diag(
@@ -828,7 +818,7 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         &self,
         id: &lyra_semantic::enum_def::EnumId,
     ) -> Option<std::sync::Arc<[i64]>> {
-        let eref = EnumRef::new(self.db, self.unit, id.clone());
+        let eref = EnumRef::new(self.db, self.unit, *id);
         crate::enum_queries::enum_known_value_set(self.db, eref)
     }
 
