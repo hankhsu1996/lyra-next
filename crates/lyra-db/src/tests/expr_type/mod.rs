@@ -3,6 +3,7 @@ mod indexing;
 mod literals;
 mod members;
 mod operators;
+mod string_methods;
 mod system_calls;
 
 use lyra_semantic::member::MethodInvalidReason;

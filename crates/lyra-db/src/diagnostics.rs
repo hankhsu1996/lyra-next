@@ -226,6 +226,9 @@ fn lower_type_check_item(
         TypeCheckItem::StreamWithNonArray { .. } => {
             lower_stream_with_non_array(item, source_map, diags);
         }
+        TypeCheckItem::MethodCallError { .. } => {
+            lower_method_call_error(item, source_map, diags);
+        }
     }
 }
 
@@ -515,6 +518,50 @@ fn enum_assign_diag(
             vec![lyra_diag::Arg::Name(lhs_name)],
         ),
     })
+}
+
+fn lower_method_call_error(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    use lyra_semantic::type_infer::ExprTypeErrorKind;
+
+    let TypeCheckItem::MethodCallError {
+        call_range,
+        method_name,
+        error_kind,
+    } = item
+    else {
+        return;
+    };
+    let Some(call_span) = source_map.map_span(*call_range) else {
+        return;
+    };
+    let msg_id = match error_kind {
+        ExprTypeErrorKind::UnknownMember => lyra_diag::MessageId::MethodUnknown,
+        ExprTypeErrorKind::NoMembersOnReceiver => lyra_diag::MessageId::MethodNoMethodsOnType,
+        ExprTypeErrorKind::MethodArityMismatch => lyra_diag::MessageId::MethodArityMismatch,
+        ExprTypeErrorKind::MethodArgTypeMismatch
+        | ExprTypeErrorKind::MethodArgNotIntegral
+        | ExprTypeErrorKind::MethodNotValidOnReceiver(_) => {
+            lyra_diag::MessageId::MethodArgTypeMismatch
+        }
+        _ => return,
+    };
+    let msg_args = vec![lyra_diag::Arg::Name(method_name.clone())];
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::DiagnosticCode::METHOD_CALL_ERROR,
+            lyra_diag::Message::new(msg_id, msg_args.clone()),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span: call_span,
+            message: lyra_diag::Message::new(msg_id, msg_args),
+        }),
+    );
 }
 
 fn lower_bits_non_data_type(

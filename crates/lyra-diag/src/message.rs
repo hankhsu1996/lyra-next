@@ -48,6 +48,10 @@ pub enum MessageId {
     EnumValueOverflow,
     EnumSizedLiteralWidthMismatch,
     EnumDuplicateOriginalHere,
+    MethodUnknown,
+    MethodNoMethodsOnType,
+    MethodArityMismatch,
+    MethodArgTypeMismatch,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -201,7 +205,11 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::EnumDuplicateValue
         | MessageId::EnumValueOverflow
         | MessageId::EnumSizedLiteralWidthMismatch
-        | MessageId::EnumDuplicateOriginalHere => render_type_message(msg),
+        | MessageId::EnumDuplicateOriginalHere
+        | MessageId::MethodUnknown
+        | MessageId::MethodNoMethodsOnType
+        | MessageId::MethodArityMismatch
+        | MessageId::MethodArgTypeMismatch => render_type_message(msg),
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -305,6 +313,55 @@ fn render_type_message(msg: &Message) -> String {
             format!("cast value {value} is not a member of enum `{enum_name}`")
         }
         MessageId::StreamWithNonArray => "`with` clause requires an array operand".into(),
+        MessageId::EnumDuplicateValue
+        | MessageId::EnumValueOverflow
+        | MessageId::EnumSizedLiteralWidthMismatch
+        | MessageId::EnumDuplicateOriginalHere => render_enum_value_message(msg),
+        MessageId::MethodUnknown
+        | MessageId::MethodNoMethodsOnType
+        | MessageId::MethodArityMismatch
+        | MessageId::MethodArgTypeMismatch => render_method_message(msg),
+        _ => String::new(),
+    }
+}
+
+fn render_conversion_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
+        MessageId::ConversionArgCategory => {
+            let expected = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("{} requires {expected} argument", name())
+        }
+        MessageId::ConversionWidthMismatch => {
+            let expected = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
+            let actual = msg.args.get(2).and_then(Arg::as_width).unwrap_or(0);
+            format!(
+                "{} requires {expected}-bit argument, got {actual}-bit",
+                name()
+            )
+        }
+        _ => String::new(),
+    }
+}
+
+fn render_method_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
+        MessageId::MethodUnknown => format!("unknown method `{}` on this type", name()),
+        MessageId::MethodNoMethodsOnType => "type has no methods".into(),
+        MessageId::MethodArityMismatch => {
+            format!("wrong number of arguments to method `{}`", name())
+        }
+        MessageId::MethodArgTypeMismatch => {
+            format!("argument type mismatch in call to method `{}`", name())
+        }
+        _ => String::new(),
+    }
+}
+
+fn render_enum_value_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
         MessageId::EnumDuplicateValue => {
             let value = name();
             let member = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -325,25 +382,6 @@ fn render_type_message(msg: &Message) -> String {
             format!("sized literal width {lit_w} does not match enum base width {base_w}")
         }
         MessageId::EnumDuplicateOriginalHere => "first defined with this value here".into(),
-        _ => String::new(),
-    }
-}
-
-fn render_conversion_message(msg: &Message) -> String {
-    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
-    match msg.id {
-        MessageId::ConversionArgCategory => {
-            let expected = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            format!("{} requires {expected} argument", name())
-        }
-        MessageId::ConversionWidthMismatch => {
-            let expected = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
-            let actual = msg.args.get(2).and_then(Arg::as_width).unwrap_or(0);
-            format!(
-                "{} requires {expected}-bit argument, got {actual}-bit",
-                name()
-            )
-        }
         _ => String::new(),
     }
 }

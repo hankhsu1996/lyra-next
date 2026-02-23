@@ -2,7 +2,7 @@ use lyra_parser::SyntaxNode;
 
 use crate::member::{
     ArrayMethodKind, ArrayReceiverInfo, ArrayReceiverKind, AssocKey, BuiltinMethodKind,
-    ReceiverInfo,
+    ReceiverInfo, StringMethodKind,
 };
 use crate::type_infer::{
     ExprType, ExprTypeErrorKind, ExprView, InferCtx, infer_expr_type, try_integral_view,
@@ -26,6 +26,7 @@ pub(crate) fn infer_builtin_method_call(
     let (min, max) = match bm {
         BuiltinMethodKind::Enum(ek) => ek.arity(),
         BuiltinMethodKind::Array(ak) => ak.arity(),
+        BuiltinMethodKind::String(sk) => sk.arity(),
     };
     if args.len() < min || args.len() > max {
         return ExprType::error(ExprTypeErrorKind::MethodArityMismatch);
@@ -52,6 +53,9 @@ pub(crate) fn infer_builtin_method_call(
             if ak.returns_void() {
                 return ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr);
             }
+        }
+        BuiltinMethodKind::String(sk) => {
+            return check_string_method(sk, &args, result_ty, ctx);
         }
     }
 
@@ -187,7 +191,34 @@ fn check_arg_assignable(expected: &Ty, actual: &Ty) -> bool {
     if matches!(expected, Ty::Error) || matches!(actual, Ty::Error) {
         return true;
     }
-    expected == actual
+    match (expected, actual) {
+        (Ty::Integral(_), Ty::Integral(_)) | (Ty::Real(_), Ty::Real(_)) => true,
+        _ => expected == actual,
+    }
+}
+
+fn check_string_method(
+    sk: StringMethodKind,
+    args: &[SyntaxNode],
+    result_ty: &Ty,
+    ctx: &dyn InferCtx,
+) -> ExprType {
+    let sig = sk.sig();
+    for (i, param_ty) in sig.params.iter().enumerate() {
+        if let Some(arg_node) = args.get(i) {
+            let arg_type = infer_expr_type(arg_node, ctx, None);
+            if let ExprView::Error(_) = &arg_type.view {
+                return arg_type;
+            }
+            if !matches!(arg_type.ty, Ty::Error) && !param_ty.accepts(&arg_type.ty) {
+                return ExprType::error(ExprTypeErrorKind::MethodArgTypeMismatch);
+            }
+        }
+    }
+    if sk.returns_void() {
+        return ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr);
+    }
+    ExprType::from_ty(result_ty)
 }
 
 use crate::expr_lvalue::is_lvalue;
