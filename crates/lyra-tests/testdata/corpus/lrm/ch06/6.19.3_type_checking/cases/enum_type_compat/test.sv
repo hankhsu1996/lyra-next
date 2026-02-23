@@ -37,5 +37,4 @@ module enum_type_compat;
     // ^ warning[lyra.type[12]]
   end
 
-// ALLOW-EXTRA-DIAGS
 endmodule

@@ -1,4 +1,3 @@
-// ALLOW-EXTRA-DIAGS
 module m;
   typedef enum { A, B, C } abc_t;
   abc_t x;
