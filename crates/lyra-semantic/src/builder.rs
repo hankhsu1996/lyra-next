@@ -350,15 +350,13 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
         let name = SmolStr::new(name_tok.text());
         let range = name_tok.text_range();
         let module_scope = ctx.scopes.push(ScopeKind::Module, None);
-        let sym_id = ctx.symbols.push(Symbol {
-            name: name.clone(),
-            kind: SymbolKind::Module,
+        let sym_id = ctx.add_symbol(
             def_ast,
-            def_range: range,
-            scope: module_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.symbol_to_decl.push(None);
+            name.clone(),
+            SymbolKind::Module,
+            range,
+            module_scope,
+        );
         ctx.export_definitions.push(sym_id);
 
         if let Some(module_decl) = lyra_ast::ModuleDecl::cast(node.clone())
@@ -407,15 +405,13 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
         let name = SmolStr::new(name_tok.text());
         let range = name_tok.text_range();
         let package_scope = ctx.scopes.push(ScopeKind::Package, None);
-        let sym_id = ctx.symbols.push(Symbol {
-            name: name.clone(),
-            kind: SymbolKind::Package,
+        let sym_id = ctx.add_symbol(
             def_ast,
-            def_range: range,
-            scope: package_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.symbol_to_decl.push(None);
+            name.clone(),
+            SymbolKind::Package,
+            range,
+            package_scope,
+        );
         ctx.export_packages.push(sym_id);
 
         if let Some(pkg_decl) = lyra_ast::PackageDecl::cast(node.clone())
@@ -448,15 +444,13 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         let name = SmolStr::new(name_tok.text());
         let range = name_tok.text_range();
         let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
-        let sym_id = ctx.symbols.push(Symbol {
-            name: name.clone(),
-            kind: SymbolKind::Interface,
+        let sym_id = ctx.add_symbol(
             def_ast,
-            def_range: range,
-            scope: iface_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.symbol_to_decl.push(None);
+            name.clone(),
+            SymbolKind::Interface,
+            range,
+            iface_scope,
+        );
         ctx.export_definitions.push(sym_id);
 
         let mut iface_def_id = None;
@@ -512,15 +506,13 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         let name = SmolStr::new(name_tok.text());
         let range = name_tok.text_range();
         let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
-        let sym_id = ctx.symbols.push(Symbol {
-            name: name.clone(),
-            kind: SymbolKind::Program,
+        let sym_id = ctx.add_symbol(
             def_ast,
-            def_range: range,
-            scope: prog_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.symbol_to_decl.push(None);
+            name.clone(),
+            SymbolKind::Program,
+            range,
+            prog_scope,
+        );
         ctx.export_definitions.push(sym_id);
 
         if let Some(prog_decl) = ProgramDecl::cast(node.clone())
@@ -569,15 +561,7 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         let name = SmolStr::new(name_tok.text());
         let range = name_tok.text_range();
         let prim_scope = ctx.scopes.push(ScopeKind::Module, None);
-        let sym_id = ctx.symbols.push(Symbol {
-            name,
-            kind: SymbolKind::Primitive,
-            def_ast,
-            def_range: range,
-            scope: prim_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.symbol_to_decl.push(None);
+        let sym_id = ctx.add_symbol(def_ast, name, SymbolKind::Primitive, range, prim_scope);
         ctx.export_definitions.push(sym_id);
 
         if let Some(prim_decl) = PrimitiveDecl::cast(node.clone())
@@ -604,15 +588,7 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         let name = SmolStr::new(name_tok.text());
         let range = name_tok.text_range();
         let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
-        let sym_id = ctx.symbols.push(Symbol {
-            name,
-            kind: SymbolKind::Config,
-            def_ast,
-            def_range: range,
-            scope: cfg_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.symbol_to_decl.push(None);
+        let sym_id = ctx.add_symbol(def_ast, name, SymbolKind::Config, range, cfg_scope);
         ctx.export_definitions.push(sym_id);
 
         if let Some(cfg_decl) = ConfigDecl::cast(node.clone())
@@ -711,7 +687,6 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                 && let Some(name_tok) = inst.module_name()
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(&inst)
             {
-                let def_ast = ctx.ast_id_map.erased_ast_id(node);
                 let type_use_site_idx = ctx.use_sites.len() as u32;
                 let type_name_range = name_tok.text_range();
                 ctx.use_sites.push(UseSite {
@@ -723,26 +698,35 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                     order_key: 0,
                 });
                 // Register each instance name as an Instance symbol
-                if let Some(def_ast) = def_ast {
-                    for (inst_name_tok, _port_list) in inst.instances() {
-                        let idx = InstanceDeclIdx(ctx.instance_decls.len() as u32);
-                        let sym_id = ctx.add_symbol_with_origin(
-                            def_ast,
-                            SmolStr::new(inst_name_tok.text()),
-                            SymbolKind::Instance,
-                            inst_name_tok.text_range(),
-                            scope,
-                            SymbolOrigin::Instance(idx),
-                        );
-                        ctx.instance_decls.push(InstanceDecl {
-                            type_use_site_idx,
-                            sym_id,
-                            name: SmolStr::new(inst_name_tok.text()),
-                            name_range: inst_name_tok.text_range(),
-                            type_name_range,
-                            scope,
-                        });
-                    }
+                let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+                    ctx.emit_internal_error(
+                        &format!(
+                            "erased_ast_id returned None for {:?} in collect_module_item instances",
+                            node.kind()
+                        ),
+                        node.text_range(),
+                    );
+                    collect_name_refs(ctx, node, scope);
+                    return;
+                };
+                for (inst_name_tok, _port_list) in inst.instances() {
+                    let idx = InstanceDeclIdx(ctx.instance_decls.len() as u32);
+                    let sym_id = ctx.add_symbol_with_origin(
+                        def_ast,
+                        SmolStr::new(inst_name_tok.text()),
+                        SymbolKind::Instance,
+                        inst_name_tok.text_range(),
+                        scope,
+                        SymbolOrigin::Instance(idx),
+                    );
+                    ctx.instance_decls.push(InstanceDecl {
+                        type_use_site_idx,
+                        sym_id,
+                        name: SmolStr::new(inst_name_tok.text()),
+                        name_range: inst_name_tok.text_range(),
+                        type_name_range,
+                        scope,
+                    });
                 }
             }
             // Still collect NameRefs in port connection expressions
@@ -850,6 +834,13 @@ fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Sco
             collect_type_spec_refs(ctx, &ts, callable_scope);
         }
         let Some(port_def_ast) = ctx.ast_id_map.erased_ast_id(port_decl.syntax()) else {
+            ctx.emit_internal_error(
+                &format!(
+                    "erased_ast_id returned None for {:?} in collect_callable_decl tf ports",
+                    port_decl.syntax().kind()
+                ),
+                port_decl.syntax().text_range(),
+            );
             continue;
         };
         // Collect each declarator as a port symbol
@@ -969,6 +960,13 @@ fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
 
         // Register symbol for navigation/diagnostics
         let Some(modport_def_ast) = ctx.ast_id_map.erased_ast_id(item.syntax()) else {
+            ctx.emit_internal_error(
+                &format!(
+                    "erased_ast_id returned None for {:?} in collect_modport_decl",
+                    item.syntax().kind()
+                ),
+                item.syntax().text_range(),
+            );
             continue;
         };
         ctx.add_symbol(
@@ -1012,6 +1010,13 @@ fn collect_import_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
 
 fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     let Some(ast_id) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error(
+            &format!(
+                "erased_ast_id returned None for {:?} in collect_import_item",
+                node.kind()
+            ),
+            node.text_range(),
+        );
         return;
     };
 

@@ -62,6 +62,12 @@ impl Diagnostic {
     }
 
     #[must_use]
+    pub fn with_origin(mut self, origin: DiagnosticOrigin) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    #[must_use]
     pub fn with_fixit(mut self, edit: TextEdit) -> Self {
         self.fixits.push(edit);
         self

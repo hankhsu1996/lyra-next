@@ -281,3 +281,15 @@ fn def_ast_shared_for_multi_instance() {
         SyntaxKind::ModuleInstantiation,
     );
 }
+
+#[test]
+fn no_internal_errors_for_valid_input() {
+    let src = "module m(input logic a); logic x, y; typedef int t; m u1(), u2(); endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+    assert!(
+        def.internal_errors.is_empty(),
+        "valid input should produce no internal errors: {:?}",
+        def.internal_errors
+    );
+}

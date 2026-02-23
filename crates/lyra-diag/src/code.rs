@@ -208,6 +208,11 @@ impl DiagnosticCode {
         number: 17,
     };
 
+    pub const INTERNAL_ERROR: Self = Self {
+        namespace: "lyra.internal",
+        number: 1,
+    };
+
     /// Format as `"namespace[number]"`, e.g. `"lyra.semantic[1]"`.
     pub fn as_str(&self) -> String {
         format!("{}[{}]", self.namespace, self.number)
