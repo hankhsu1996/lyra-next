@@ -9,6 +9,7 @@ pub mod def_index;
 pub mod diagnostic;
 pub mod enum_def;
 pub mod expr_helpers;
+pub mod expr_lvalue;
 pub mod global_index;
 pub mod instance_decl;
 pub mod interface_id;

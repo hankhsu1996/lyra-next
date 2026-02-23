@@ -220,13 +220,24 @@ fn modport_ports(p: &mut Parser) {
             break;
         }
 
-        // Parse one port: direction name
+        // Parse one port: [direction] name  OR  [direction] .name(expr?)
         let port = p.start();
         if ports::is_direction(p.current()) {
             p.bump(); // direction
         }
-        p.expect(SyntaxKind::Ident);
-        port.complete(p, SyntaxKind::ModportPort);
+        if p.at(SyntaxKind::Dot) {
+            p.bump(); // .
+            p.expect(SyntaxKind::Ident);
+            p.expect(SyntaxKind::LParen);
+            if !p.at(SyntaxKind::RParen) {
+                expressions::expr(p);
+            }
+            p.expect(SyntaxKind::RParen);
+            port.complete(p, SyntaxKind::ModportExprPort);
+        } else {
+            p.expect(SyntaxKind::Ident);
+            port.complete(p, SyntaxKind::ModportPort);
+        }
 
         if !p.eat(SyntaxKind::Comma) {
             break;

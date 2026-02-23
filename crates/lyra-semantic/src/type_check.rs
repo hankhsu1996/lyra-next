@@ -78,6 +78,12 @@ pub enum TypeCheckItem {
     StreamWithNonArray {
         with_range: TextRange,
     },
+    ModportEmptyPortAccess {
+        member_range: TextRange,
+    },
+    ModportExprNotAssignable {
+        member_range: TextRange,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -102,6 +108,8 @@ pub trait TypeCheckCtx {
     fn const_eval_int(&self, node: &SyntaxNode) -> Option<i64>;
     /// Get sorted set of known enum member values. None if any value unknown.
     fn enum_known_value_set(&self, id: &EnumId) -> Option<std::sync::Arc<[i64]>>;
+    /// Check whether a modport expression target is an lvalue.
+    fn is_modport_target_lvalue(&self, expr_id: ErasedAstId) -> bool;
 }
 
 /// Walk a file's AST and produce type-check items.
@@ -160,6 +168,8 @@ fn check_field_direction(
     access: AccessCtx,
     items: &mut Vec<TypeCheckItem>,
 ) {
+    use crate::modport_facts::FieldAccessTarget;
+
     let Some(ast_id) = ctx.node_id(node) else {
         return;
     };
@@ -172,6 +182,8 @@ fn check_field_direction(
         });
         return;
     }
+
+    // Direction check
     match access {
         AccessCtx::Read => {
             if !direction_permits(fact.direction, AccessKind::Read) {
@@ -207,6 +219,24 @@ fn check_field_direction(
                 });
             }
         }
+    }
+
+    // Target legality check
+    match &fact.target {
+        FieldAccessTarget::Empty => {
+            items.push(TypeCheckItem::ModportEmptyPortAccess {
+                member_range: fact.member_range,
+            });
+        }
+        FieldAccessTarget::Expr(expr_id) => {
+            let is_write = matches!(access, AccessCtx::Write | AccessCtx::ReadWrite);
+            if is_write && !ctx.is_modport_target_lvalue(*expr_id) {
+                items.push(TypeCheckItem::ModportExprNotAssignable {
+                    member_range: fact.member_range,
+                });
+            }
+        }
+        FieldAccessTarget::Member => {}
     }
 }
 

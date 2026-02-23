@@ -1,15 +1,12 @@
 use lyra_ast::{AstNode, FieldExpr};
 use lyra_lexer::SyntaxKind;
-use lyra_semantic::modport_def::PortDirection;
-use lyra_semantic::modport_facts::{FieldAccessFact, FieldAccessFacts};
-use lyra_semantic::symbols::Namespace;
-use lyra_semantic::types::{InterfaceType, Ty};
+use lyra_semantic::modport_facts::{FieldAccessFact, FieldAccessFacts, FieldAccessTarget};
+use lyra_semantic::types::{ModportViewTarget, Ty};
 
 use crate::expr_queries::{ExprRef, type_of_expr};
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::record_queries::{ModportRef, modport_sem};
-use crate::semantic::{def_index_file, def_symbol};
-use crate::{CompilationUnit, SourceFile, source_file_by_id};
+use crate::{CompilationUnit, SourceFile};
 
 /// Pre-compute modport direction facts for all `FieldExpr` nodes in a file.
 #[salsa::tracked(return_ref)]
@@ -63,32 +60,22 @@ fn compute_field_fact(
     let Ty::Interface(ref iface_ty) = base_type.ty else {
         return None;
     };
-    iface_ty.modport?;
-
-    let direction = modport_member_direction(db, unit, iface_ty, member_name)?;
-    Some(FieldAccessFact {
-        member_range: field_tok.text_range(),
-        direction,
-    })
-}
-
-/// Resolve the modport direction for a member of an interface.
-fn modport_member_direction(
-    db: &dyn salsa::Database,
-    unit: CompilationUnit,
-    iface_ty: &InterfaceType,
-    member_name: &str,
-) -> Option<PortDirection> {
-    let gsym = def_symbol(db, unit, iface_ty.iface.global_def())?;
-    let src = source_file_by_id(db, unit, gsym.file)?;
-    let def = def_index_file(db, src);
-    let iface_scope = def.symbols.get(gsym.local).scope;
-    let member_sym =
-        def.scopes
-            .resolve(&def.symbols, iface_scope, Namespace::Value, member_name)?;
-
     let mp_id = iface_ty.modport?;
+
     let mref = ModportRef::new(db, unit, mp_id);
     let sem = modport_sem(db, mref);
-    sem.view.direction_of(member_sym)
+    let entry = sem.view.lookup(member_name)?;
+
+    let target = match &entry.target {
+        ModportViewTarget::Member(_) => FieldAccessTarget::Member,
+        ModportViewTarget::Expr(expr_id) => FieldAccessTarget::Expr(*expr_id),
+        ModportViewTarget::Empty => FieldAccessTarget::Empty,
+    };
+
+    Some(FieldAccessFact {
+        member_range: field_tok.text_range(),
+        port_id: entry.port_id,
+        direction: entry.direction,
+        target,
+    })
 }

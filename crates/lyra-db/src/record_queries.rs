@@ -1,9 +1,10 @@
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
 use lyra_semantic::modport_def::ModportDefId;
+use lyra_semantic::modport_def::ModportTarget;
 use lyra_semantic::record::{FieldSem, Packing, RecordId, RecordKind, RecordSem, TypeRef};
 use lyra_semantic::symbols::Namespace;
-use lyra_semantic::types::{ConstInt, ModportView, Ty};
+use lyra_semantic::types::{ConstInt, ModportView, ModportViewEntry, ModportViewTarget, Ty};
 use smol_str::SmolStr;
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
@@ -446,36 +447,49 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
 
     let mut entries = Vec::new();
     let mut diags = Vec::new();
-    let mut seen = std::collections::HashMap::new();
+    let mut seen_ports: std::collections::HashMap<SmolStr, lyra_source::TextRange> =
+        std::collections::HashMap::new();
 
     for entry in &*modport_def.entries {
-        let resolved = def.scopes.resolve(
-            &def.symbols,
-            iface_scope,
-            Namespace::Value,
-            &entry.member_name,
-        );
-        let Some(member_sym) = resolved else {
-            diags.push(SemanticDiag {
-                kind: SemanticDiagKind::UnresolvedName {
-                    name: entry.member_name.clone(),
-                },
-                range: entry.span.range,
-            });
-            continue;
-        };
-        if let Some(&first_range) = seen.get(&member_sym) {
+        // Duplicate port name detection (source-order, before sorting)
+        if let Some(&first_range) = seen_ports.get(&entry.port_name) {
             diags.push(SemanticDiag {
                 kind: SemanticDiagKind::DuplicateDefinition {
-                    name: entry.member_name.clone(),
+                    name: entry.port_name.clone(),
                     original: first_range,
                 },
                 range: entry.span.range,
             });
             continue;
         }
-        seen.insert(member_sym, entry.span.range);
-        entries.push((member_sym, entry.direction));
+        seen_ports.insert(entry.port_name.clone(), entry.span.range);
+
+        let target = match &entry.target {
+            ModportTarget::ImplicitMember { member_name } => {
+                let resolved =
+                    def.scopes
+                        .resolve(&def.symbols, iface_scope, Namespace::Value, member_name);
+                let Some(member_sym) = resolved else {
+                    diags.push(SemanticDiag {
+                        kind: SemanticDiagKind::UnresolvedName {
+                            name: member_name.clone(),
+                        },
+                        range: entry.span.range,
+                    });
+                    continue;
+                };
+                ModportViewTarget::Member(member_sym)
+            }
+            ModportTarget::Expr(expr_id) => ModportViewTarget::Expr(*expr_id),
+            ModportTarget::Empty => ModportViewTarget::Empty,
+        };
+
+        entries.push(ModportViewEntry {
+            port_name: entry.port_name.clone(),
+            direction: entry.direction,
+            port_id: entry.port_id,
+            target,
+        });
     }
 
     ModportSem {

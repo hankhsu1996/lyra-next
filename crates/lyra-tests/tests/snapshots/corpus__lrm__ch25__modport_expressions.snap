@@ -1,0 +1,11 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (4 diagnostics)
+  error[lyra.type[10]] 38:16..38:16: modport member declared 'input' cannot be used in write context
+  error[lyra.type[10]] 45:20..45:20: modport member declared 'output' cannot be used in read context
+  error[lyra.type[14]] 52:20..52:20: modport port has no connection (empty parens)
+  error[lyra.type[15]] 58:16..58:16: modport expression target is not assignable
+---
+unit (0 diagnostics)

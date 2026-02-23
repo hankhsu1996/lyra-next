@@ -9,7 +9,20 @@ use crate::modport_def::PortDirection;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldAccessFact {
     pub member_range: TextRange,
+    pub port_id: ErasedAstId,
     pub direction: PortDirection,
+    pub target: FieldAccessTarget,
+}
+
+/// What the modport port target is, for access checking.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldAccessTarget {
+    /// Bare ident: standard direction rules.
+    Member,
+    /// Expression port: carries expr AST ID for lvalue query.
+    Expr(ErasedAstId),
+    /// `.P()`: reject all access.
+    Empty,
 }
 
 /// Map of pre-computed facts keyed by `FieldExpr` AST node identity.

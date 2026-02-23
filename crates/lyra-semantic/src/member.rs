@@ -1,3 +1,5 @@
+use lyra_ast::ErasedAstId;
+
 use crate::enum_def::EnumId;
 use crate::symbols::SymbolId;
 use crate::types::{AssocIndex, Ty, UnpackedDim};
@@ -13,10 +15,26 @@ pub struct MemberInfo {
 /// What kind of member was accessed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemberKind {
-    Field { index: u32 },
-    InterfaceMember { member: SymbolId },
+    Field {
+        index: u32,
+    },
+    InterfaceMember {
+        member: SymbolId,
+    },
     Modport,
+    ModportPort {
+        port_id: ErasedAstId,
+        target: ModportPortTarget,
+    },
     BuiltinMethod(BuiltinMethodKind),
+}
+
+/// What a modport port resolves to (for member lookup).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModportPortTarget {
+    Member(SymbolId),
+    Expr(ErasedAstId),
+    Empty,
 }
 
 /// Receiver info carried on `MemberInfo` for builtin method checking.

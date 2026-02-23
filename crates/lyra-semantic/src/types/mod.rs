@@ -332,28 +332,56 @@ pub struct InterfaceType {
     pub modport: Option<ModportDefId>,
 }
 
-/// Derived fact: which members a modport exposes and their directions.
+/// Derived fact: which ports a modport exposes, their directions, and targets.
 ///
-/// Entries are sorted by `SymbolId` for deterministic binary search.
+/// Entries are sorted by `port_name` for deterministic binary search.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModportView {
-    dir_by_member: Box<[(SymbolId, PortDirection)]>,
+    entries: Box<[ModportViewEntry]>,
+}
+
+/// A resolved modport port entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModportViewEntry {
+    pub port_name: SmolStr,
+    pub direction: PortDirection,
+    pub port_id: ErasedAstId,
+    pub target: ModportViewTarget,
+}
+
+/// What the modport port resolves to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModportViewTarget {
+    /// Bare ident, resolved to interface member symbol.
+    Member(SymbolId),
+    /// Expression port: carries the expr AST ID.
+    Expr(ErasedAstId),
+    /// `.P()`: no connection.
+    Empty,
 }
 
 impl ModportView {
-    pub fn new(mut entries: Vec<(SymbolId, PortDirection)>) -> Self {
-        entries.sort_by_key(|(s, _)| *s);
+    pub fn new(mut entries: Vec<ModportViewEntry>) -> Self {
+        entries.sort_by(|a, b| a.port_name.cmp(&b.port_name));
         Self {
-            dir_by_member: entries.into_boxed_slice(),
+            entries: entries.into_boxed_slice(),
         }
     }
 
-    pub fn direction_of(&self, sym: SymbolId) -> Option<PortDirection> {
+    pub fn lookup(&self, port_name: &str) -> Option<&ModportViewEntry> {
         let idx = self
-            .dir_by_member
-            .binary_search_by_key(&sym, |(s, _)| *s)
+            .entries
+            .binary_search_by(|e| e.port_name.as_str().cmp(port_name))
             .ok()?;
-        Some(self.dir_by_member[idx].1)
+        Some(&self.entries[idx])
+    }
+
+    pub fn has_port(&self, port_name: &str) -> bool {
+        self.lookup(port_name).is_some()
+    }
+
+    pub fn direction_of_port(&self, port_name: &str) -> Option<PortDirection> {
+        self.lookup(port_name).map(|e| e.direction)
     }
 }
 

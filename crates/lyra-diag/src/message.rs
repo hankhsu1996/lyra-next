@@ -40,6 +40,8 @@ pub enum MessageId {
     ExpectedMemberWidth,
     ModportDirectionViolation,
     ModportRefUnsupported,
+    ModportEmptyPortAccess,
+    ModportExprNotAssignable,
     EnumCastOutOfRange,
     StreamWithNonArray,
     EnumDuplicateValue,
@@ -192,6 +194,8 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::ExpectedMemberWidth
         | MessageId::ModportDirectionViolation
         | MessageId::ModportRefUnsupported
+        | MessageId::ModportEmptyPortAccess
+        | MessageId::ModportExprNotAssignable
         | MessageId::EnumCastOutOfRange
         | MessageId::StreamWithNonArray
         | MessageId::EnumDuplicateValue
@@ -293,6 +297,8 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::ModportRefUnsupported => {
             "direction enforcement for 'ref' modport members is not yet supported".into()
         }
+        MessageId::ModportEmptyPortAccess => "modport port has no connection (empty parens)".into(),
+        MessageId::ModportExprNotAssignable => "modport expression target is not assignable".into(),
         MessageId::EnumCastOutOfRange => {
             let value = name();
             let enum_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");

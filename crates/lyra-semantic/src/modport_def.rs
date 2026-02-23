@@ -1,3 +1,4 @@
+use lyra_ast::ErasedAstId;
 use lyra_source::Span;
 use smol_str::SmolStr;
 
@@ -25,9 +26,22 @@ pub struct ModportDef {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModportEntry {
-    pub member_name: SmolStr,
+    pub port_name: SmolStr,
     pub direction: PortDirection,
+    pub target: ModportTarget,
+    pub port_id: ErasedAstId,
     pub span: Span,
+}
+
+/// What a modport port maps to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModportTarget {
+    /// Bare identifier: the port name equals the member name.
+    ImplicitMember { member_name: SmolStr },
+    /// `.P(expr)`: the expression AST node id.
+    Expr(ErasedAstId),
+    /// `.P()`: no connection.
+    Empty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
