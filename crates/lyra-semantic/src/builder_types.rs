@@ -15,7 +15,7 @@ use crate::record::{
     extract_typeref_from_typespec,
 };
 use crate::scopes::ScopeId;
-use crate::symbols::{Namespace, SymbolKind};
+use crate::symbols::{Namespace, Symbol, SymbolKind};
 use crate::types::Ty;
 
 pub(crate) fn collect_type_spec_refs(ctx: &mut DefContext<'_>, ts: &TypeSpec, scope: ScopeId) {
@@ -110,17 +110,20 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
             | SymbolOrigin::EnumVariant(_)
             | SymbolOrigin::Instance(_) => {}
         }
-        let sym_id = ctx.add_symbol_with_origin(
+        let typedef_type_ast = td
+            .type_spec()
+            .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
+        let sym_id = ctx.push_symbol(Symbol {
+            name: typedef_name,
+            kind: SymbolKind::Typedef,
             def_ast,
-            typedef_name,
-            SymbolKind::Typedef,
-            name_tok.text_range(),
+            name_ast: def_ast,
+            type_ast: typedef_type_ast,
+            def_range: name_tok.text_range(),
             scope,
             origin,
-        );
-        if let Some(ast_id) = ctx.ast_id_map.ast_id(&td) {
-            ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
-        }
+        });
+        ctx.register_binding(sym_id);
     }
 }
 
@@ -232,15 +235,17 @@ fn collect_enum_def(
             // so we don't advance variant_ordinal here.
         } else {
             // Plain members: inject real symbol with decl binding.
-            let sym_id = ctx.add_symbol_with_origin(
-                erased_ast_id,
+            let sym_id = ctx.push_symbol(Symbol {
                 name,
-                SymbolKind::EnumMember,
-                name_tok.text_range(),
+                kind: SymbolKind::EnumMember,
+                def_ast: erased_ast_id,
+                name_ast: erased_ast_id,
+                type_ast: None,
+                def_range: name_tok.text_range(),
                 scope,
-                SymbolOrigin::EnumVariant(idx),
-            );
-            ctx.register_binding(sym_id, scope, erased_ast_id, name_tok.text_range());
+                origin: SymbolOrigin::EnumVariant(idx),
+            });
+            ctx.register_binding(sym_id);
         }
     }
 

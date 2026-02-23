@@ -100,9 +100,9 @@ fn enum_ness_preserved_in_expr_type() {
         .iter()
         .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Parameter)
         .expect("should have a parameter");
-    let decl_ast_id = def.symbol_to_decl[sym_id.index()].expect("param should have decl");
+    let decl_ast_id = def.symbols.get(sym_id).name_ast;
     let init_ast_id = def
-        .decl_to_init_expr
+        .name_ast_to_init_expr
         .get(&decl_ast_id)
         .expect("param should be tracked")
         .expect("param should have init");

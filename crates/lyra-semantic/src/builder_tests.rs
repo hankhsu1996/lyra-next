@@ -221,7 +221,7 @@ fn def_ast_port_points_to_port_node() {
     let ports: Vec<_> = def
         .symbols
         .iter()
-        .filter(|(_, s)| s.kind == SymbolKind::Port)
+        .filter(|(_, s)| s.kind == SymbolKind::PortAnsi)
         .collect();
     assert_eq!(ports.len(), 2);
 
@@ -292,4 +292,233 @@ fn no_internal_errors_for_valid_input() {
         "valid input should produce no internal errors: {:?}",
         def.internal_errors
     );
+}
+
+#[test]
+fn name_ast_unique_for_multi_declarator() {
+    let src = "module m; logic x, y; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let x = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name == "x")
+        .map(|(_, s)| s)
+        .expect("x");
+    let y = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name == "y")
+        .map(|(_, s)| s)
+        .expect("y");
+
+    assert_eq!(x.def_ast, y.def_ast, "should share def_ast (VarDecl)");
+    assert_ne!(
+        x.name_ast, y.name_ast,
+        "should have distinct name_ast (Declarator)"
+    );
+    assert_eq!(x.name_ast.kind(), SyntaxKind::Declarator);
+    assert_eq!(y.name_ast.kind(), SyntaxKind::Declarator);
+}
+
+#[test]
+fn name_ast_unique_for_multi_instance() {
+    let src = "module top; m u1(), u2(); endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let insts: Vec<_> = def
+        .symbols
+        .iter()
+        .filter(|(_, s)| s.kind == SymbolKind::Instance)
+        .collect();
+    assert_eq!(insts.len(), 2);
+    assert_eq!(
+        insts[0].1.def_ast, insts[1].1.def_ast,
+        "should share def_ast"
+    );
+    assert_ne!(
+        insts[0].1.name_ast, insts[1].1.name_ast,
+        "should have distinct name_ast (HierarchicalInstance)"
+    );
+    assert_eq!(insts[0].1.name_ast.kind(), SyntaxKind::HierarchicalInstance);
+    assert_eq!(insts[1].1.name_ast.kind(), SyntaxKind::HierarchicalInstance);
+}
+
+#[test]
+fn name_ast_equals_def_ast_for_single_name() {
+    let src = "module m(input logic a); typedef int t; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let module = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::Module)
+        .map(|(_, s)| s);
+    assert_eq!(
+        module.expect("module").name_ast,
+        module.expect("module").def_ast
+    );
+
+    let port = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::PortAnsi)
+        .map(|(_, s)| s);
+    assert_eq!(port.expect("port").name_ast, port.expect("port").def_ast);
+
+    let td = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::Typedef)
+        .map(|(_, s)| s);
+    assert_eq!(td.expect("typedef").name_ast, td.expect("typedef").def_ast);
+}
+
+#[test]
+fn type_ast_present_for_typed_declarations() {
+    let src = "module m(input logic a); logic x; wire [7:0] w; typedef int t; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let var = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name == "x")
+        .map(|(_, s)| s)
+        .expect("x");
+    assert!(var.type_ast.is_some(), "Variable should have type_ast");
+    assert_eq!(var.type_ast.expect("checked").kind(), SyntaxKind::TypeSpec);
+
+    let net = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name == "w")
+        .map(|(_, s)| s)
+        .expect("w");
+    assert!(net.type_ast.is_some(), "Net should have type_ast");
+    assert_eq!(net.type_ast.expect("checked").kind(), SyntaxKind::TypeSpec);
+
+    let port = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::PortAnsi)
+        .map(|(_, s)| s);
+    assert!(
+        port.expect("port").type_ast.is_some(),
+        "PortAnsi with explicit type should have type_ast"
+    );
+
+    let td = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::Typedef)
+        .map(|(_, s)| s);
+    assert!(
+        td.expect("typedef").type_ast.is_some(),
+        "Typedef should have type_ast"
+    );
+}
+
+#[test]
+fn type_ast_none_for_untyped() {
+    let src = "module m; m u1(); endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let module = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::Module)
+        .map(|(_, s)| s);
+    assert!(
+        module.expect("module").type_ast.is_none(),
+        "Module should have no type_ast"
+    );
+
+    let inst = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::Instance)
+        .map(|(_, s)| s);
+    assert!(
+        inst.expect("instance").type_ast.is_none(),
+        "Instance should have no type_ast"
+    );
+}
+
+#[test]
+fn type_ast_present_for_net() {
+    let src = "module m; wire [7:0] w; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let net = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name == "w")
+        .map(|(_, s)| s)
+        .expect("w");
+    assert!(
+        net.type_ast.is_some(),
+        "net should have type_ast after A2 TypeSpec wrapping"
+    );
+    assert_eq!(net.type_ast.expect("checked").kind(), SyntaxKind::TypeSpec);
+}
+
+#[test]
+fn type_ast_for_signed_net_with_packed_dims() {
+    let src = "module m; wire signed [15:0] s; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let net = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.name == "s")
+        .map(|(_, s)| s)
+        .expect("s");
+    let ts_id = net.type_ast.expect("signed net should have type_ast");
+    assert_eq!(ts_id.kind(), SyntaxKind::TypeSpec);
+}
+
+#[test]
+fn type_ast_for_function_is_return_type() {
+    let src = "module m; function logic [3:0] f(); endfunction endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let func = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::Function)
+        .map(|(_, s)| s);
+    assert!(func.is_some(), "should find function symbol");
+    let func = func.expect("checked");
+    assert!(
+        func.type_ast.is_some(),
+        "Function should have return type_ast"
+    );
+    assert_eq!(func.type_ast.expect("checked").kind(), SyntaxKind::TypeSpec);
+    assert_eq!(func.name_ast, func.def_ast);
+}
+
+#[test]
+fn type_ast_none_for_task() {
+    let src = "module m; task t(); endtask endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let task = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::Task)
+        .map(|(_, s)| s);
+    assert!(
+        task.expect("task").type_ast.is_none(),
+        "Task should have no type_ast"
+    );
+    assert_eq!(task.expect("task").name_ast, task.expect("task").def_ast);
 }

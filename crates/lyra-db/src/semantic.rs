@@ -52,22 +52,18 @@ pub fn global_def_index(db: &dyn salsa::Database, unit: CompilationUnit) -> Glob
         // Collect all definition-namespace constructs (module, interface, program, primitive, config)
         for &sym_id in &*def.exports.definitions {
             let sym = def.symbols.get(sym_id);
-            if let Some(def_kind) = DefinitionKind::from_symbol_kind(sym.kind)
-                && let Some(&Some(ast_id)) = def.symbol_to_decl.get(sym_id.index())
-            {
-                entries.push((sym.name.clone(), GlobalDefId::new(ast_id), def_kind));
+            if let Some(def_kind) = DefinitionKind::from_symbol_kind(sym.kind) {
+                entries.push((sym.name.clone(), GlobalDefId::new(sym.def_ast), def_kind));
             }
         }
         // Collect packages (separate namespace per LRM 3.13(b))
         for &sym_id in &*def.exports.packages {
             let sym = def.symbols.get(sym_id);
-            if let Some(&Some(ast_id)) = def.symbol_to_decl.get(sym_id.index()) {
-                entries.push((
-                    sym.name.clone(),
-                    GlobalDefId::new(ast_id),
-                    DefinitionKind::Package,
-                ));
-            }
+            entries.push((
+                sym.name.clone(),
+                GlobalDefId::new(sym.def_ast),
+                DefinitionKind::Package,
+            ));
         }
     }
     lyra_semantic::global_index::build_global_def_index(&entries)
@@ -97,16 +93,12 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
 
             for &child_sym_id in &*scope_data.value_ns {
                 let child_sym = def.symbols.get(child_sym_id);
-                if let Some(&Some(ast_id)) = def.symbol_to_decl.get(child_sym_id.index()) {
-                    value_ns.push((child_sym.name.clone(), GlobalDefId::new(ast_id)));
-                }
+                value_ns.push((child_sym.name.clone(), GlobalDefId::new(child_sym.name_ast)));
             }
 
             for &child_sym_id in &*scope_data.type_ns {
                 let child_sym = def.symbols.get(child_sym_id);
-                if let Some(&Some(ast_id)) = def.symbol_to_decl.get(child_sym_id.index()) {
-                    type_ns.push((child_sym.name.clone(), GlobalDefId::new(ast_id)));
-                }
+                type_ns.push((child_sym.name.clone(), GlobalDefId::new(child_sym.name_ast)));
             }
 
             value_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
@@ -286,7 +278,7 @@ pub fn base_resolve_index(
         let target_file_id = def_id.file();
         let target_file = source_file_by_id(db, unit, target_file_id)?;
         let target_def = def_index_file(db, target_file);
-        target_def.decl_to_symbol.get(&def_id.ast_id()).copied()
+        target_def.name_ast_to_symbol.get(&def_id.ast_id()).copied()
     };
     let instance_filter =
         |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
@@ -310,7 +302,7 @@ pub fn resolve_index_file(
         let target_file_id = def_id.file();
         let target_file = source_file_by_id(db, unit, target_file_id)?;
         let target_def = def_index_file(db, target_file);
-        target_def.decl_to_symbol.get(&def_id.ast_id()).copied()
+        target_def.name_ast_to_symbol.get(&def_id.ast_id()).copied()
     };
     let instance_filter =
         |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
@@ -356,7 +348,7 @@ pub fn def_symbol(
     let file_id = def_id.file();
     let source_file = source_file_by_id(db, unit, file_id)?;
     let def = def_index_file(db, source_file);
-    let local = def.decl_to_symbol.get(&def_id.ast_id()).copied()?;
+    let local = def.name_ast_to_symbol.get(&def_id.ast_id()).copied()?;
     Some(GlobalSymbolId {
         file: file_id,
         local,

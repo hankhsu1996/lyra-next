@@ -170,8 +170,7 @@ pub fn type_of_symbol_raw<'db>(
             let ty = Ty::Enum(id);
             let parse = parse_file(db, source_file);
             let map = ast_id_map(db, source_file);
-            let decl_ast_id = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o);
-            let decl_node = decl_ast_id.and_then(|id| map.get_node(&parse.syntax(), id));
+            let decl_node = map.get_node(&parse.syntax(), sym.name_ast);
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
@@ -180,8 +179,7 @@ pub fn type_of_symbol_raw<'db>(
             let ty = Ty::Record(id);
             let parse = parse_file(db, source_file);
             let map = ast_id_map(db, source_file);
-            let decl_ast_id = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o);
-            let decl_node = decl_ast_id.and_then(|id| map.get_node(&parse.syntax(), id));
+            let decl_node = map.get_node(&parse.syntax(), sym.name_ast);
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
@@ -198,9 +196,7 @@ pub fn type_of_symbol_raw<'db>(
         SymbolOrigin::TypeSpec => {}
     }
 
-    let Some(decl_ast_id) = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o) else {
-        return SymbolType::Error(SymbolTypeError::MissingDecl);
-    };
+    let decl_ast_id = sym.name_ast;
 
     let parse = parse_file(db, source_file);
     let map = ast_id_map(db, source_file);

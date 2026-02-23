@@ -34,6 +34,7 @@ fn param_declarator(p: &mut Parser) {
 // Net declaration: `wire [7:0] a, b ;`
 pub(crate) fn net_decl(p: &mut Parser) {
     let m = p.start();
+    let ts = p.start();
     p.bump(); // net type keyword (wire, tri, etc.)
     // Optional signing
     if p.at(SyntaxKind::SignedKw) || p.at(SyntaxKind::UnsignedKw) {
@@ -43,6 +44,7 @@ pub(crate) fn net_decl(p: &mut Parser) {
     while p.at(SyntaxKind::LBracket) {
         packed_dimension(p);
     }
+    ts.complete(p, SyntaxKind::TypeSpec);
     // Declarators
     net_declarator(p);
     while p.eat(SyntaxKind::Comma) {

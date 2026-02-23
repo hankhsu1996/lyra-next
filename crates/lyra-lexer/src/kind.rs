@@ -475,6 +475,9 @@ pub enum SyntaxKind {
     StreamWithClause,
     StreamRange,
 
+    // Per-instance wrapper in module instantiation (LRM 23.3.2)
+    HierarchicalInstance,
+
     #[doc(hidden)]
     __Last,
 }

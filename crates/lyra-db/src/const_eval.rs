@@ -105,14 +105,10 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
             return Err(ConstEvalError::NonConstant);
         }
 
-        let decl_ast_id = target_def
-            .symbol_to_decl
-            .get(target_local.index())
-            .and_then(|opt| *opt)
-            .ok_or(ConstEvalError::Unresolved)?;
+        let decl_ast_id = target_sym.name_ast;
 
         let init_ast_id = target_def
-            .decl_to_init_expr
+            .name_ast_to_init_expr
             .get(&decl_ast_id)
             .ok_or(ConstEvalError::Unresolved)?
             .ok_or(ConstEvalError::Unresolved)?;

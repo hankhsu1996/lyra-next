@@ -83,9 +83,13 @@ pub struct GlobalSymbolId {
 
 /// Cross-file definition identity.
 ///
-/// Wraps `ErasedAstId` to make the "this is a global definition reference"
-/// intent explicit. All cross-file references use this instead of bare
-/// `ErasedAstId`.
+/// Cross-file identity for definition-namespace constructs (module, package,
+/// interface, program, primitive, config). Wraps `ErasedAstId` with
+/// `def_ast` semantics. `symbol_global_def()` enforces the restriction.
+///
+/// NOTE: `PackageScope` still stores `GlobalDefId` for value/type-namespace
+/// members (not just definition-namespace). A follow-up PR will change
+/// `PackageScope` to use `ErasedAstId` directly for member anchors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlobalDefId(ErasedAstId);
 
@@ -107,7 +111,10 @@ impl GlobalDefId {
 pub enum SymbolKind {
     Module,
     Package,
-    Port,
+    /// ANSI port from module/interface/program `PortList`.
+    PortAnsi,
+    /// Task/function port from `TfPortDecl`.
+    PortTf,
     Net,
     Variable,
     Parameter,
@@ -145,7 +152,8 @@ impl SymbolKind {
             | Self::Program
             | Self::Primitive
             | Self::Config => Namespace::Definition,
-            Self::Port
+            Self::PortAnsi
+            | Self::PortTf
             | Self::Net
             | Self::Variable
             | Self::Parameter
@@ -166,6 +174,12 @@ impl SymbolKind {
 /// Multiple symbols may share the same `def_ast` when declared in the same
 /// declaration item (e.g. `logic x, y;`).
 ///
+/// `name_ast` is the unique name-introducing site (1:1 with the symbol).
+/// For multi-declarator items this is the `Declarator` node; for single-name
+/// declarations it equals `def_ast`.
+///
+/// `type_ast` is the `TypeSpec` node spelling the type, when present.
+///
 /// `def_range` is in expanded-text coordinate space within the owning
 /// file. The `FileId` lives on `DefIndex`, not duplicated here.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,6 +187,8 @@ pub struct Symbol {
     pub name: SmolStr,
     pub kind: SymbolKind,
     pub def_ast: ErasedAstId,
+    pub name_ast: ErasedAstId,
+    pub type_ast: Option<ErasedAstId>,
     pub def_range: TextRange,
     pub scope: ScopeId,
     pub origin: SymbolOrigin,

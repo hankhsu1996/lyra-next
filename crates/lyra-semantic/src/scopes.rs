@@ -191,6 +191,8 @@ mod tests {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
             def_ast: placeholder,
+            name_ast: placeholder,
+            type_ast: None,
             def_range: range,
             scope,
             origin: SymbolOrigin::TypeSpec,
@@ -218,13 +220,15 @@ mod tests {
         let placeholder = ErasedAstId::placeholder(FileId(0));
         let id = sym_builder.push(Symbol {
             name: SmolStr::new("a"),
-            kind: SymbolKind::Port,
+            kind: SymbolKind::PortAnsi,
             def_ast: placeholder,
+            name_ast: placeholder,
+            type_ast: None,
             def_range: range,
             scope: parent,
             origin: SymbolOrigin::TypeSpec,
         });
-        scope_builder.add_binding(parent, id, SymbolKind::Port);
+        scope_builder.add_binding(parent, id, SymbolKind::PortAnsi);
 
         let symbols = sym_builder.freeze();
         let scopes = scope_builder.freeze(&symbols);
@@ -249,6 +253,8 @@ mod tests {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
             def_ast: placeholder,
+            name_ast: placeholder,
+            type_ast: None,
             def_range: range1,
             scope,
             origin: SymbolOrigin::TypeSpec,
@@ -257,6 +263,8 @@ mod tests {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
             def_ast: placeholder,
+            name_ast: placeholder,
+            type_ast: None,
             def_range: range2,
             scope,
             origin: SymbolOrigin::TypeSpec,

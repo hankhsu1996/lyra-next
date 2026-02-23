@@ -181,9 +181,7 @@ fn extract_callable_sig_impl(
         }
     };
 
-    let Some(decl_ast_id) = def.symbol_to_decl.get(gsym.local.index()).and_then(|o| *o) else {
-        return CallableSig::new(sym.name.clone(), kind, Ty::Error, vec![]);
-    };
+    let decl_ast_id = sym.name_ast;
 
     let parse = parse_file(db, source_file);
     let map = ast_id_map(db, source_file);
