@@ -289,7 +289,7 @@ pub fn record_diagnostics<'db>(
         && record_def.kind == RecordKind::Union
         && record_def.packing == Packing::Packed
     {
-        check_packed_union_widths(db, unit, &sem, record_def, file_id, pp, &mut diags);
+        check_packed_union_widths(db, unit, source_file, &sem, record_def, pp, &mut diags);
     }
 
     diags.into_boxed_slice()
@@ -298,12 +298,13 @@ pub fn record_diagnostics<'db>(
 fn check_packed_union_widths(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
+    source_file: crate::SourceFile,
     sem: &RecordSem,
     record_def: &lyra_semantic::record::RecordDef,
-    file_id: lyra_source::FileId,
     pp: &lyra_preprocess::PreprocOutput,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
+    let file_id = source_file.file_id(db);
     let widths: Vec<Option<u32>> = sem
         .fields
         .iter()
@@ -340,8 +341,12 @@ fn check_packed_union_widths(
         }
 
         let field_name = &sem.fields[i].name;
-        let mismatch_range = record_def.fields[i].name_range;
-        let ref_range = record_def.fields[ref_idx].name_range;
+        let mismatch_range = record_def.fields[i]
+            .name_span
+            .map_or(lyra_source::TextRange::default(), |ns| ns.text_range());
+        let ref_range = record_def.fields[ref_idx]
+            .name_span
+            .map_or(lyra_source::TextRange::default(), |ns| ns.text_range());
 
         let mismatch_span = pp
             .source_map

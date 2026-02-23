@@ -149,7 +149,10 @@ fn pkg_member_resolves_to_pkg_variant() {
 
     let result = &core.resolutions[x_use_idx];
     match result {
-        CoreResolveResult::Resolved(CoreResolution::Pkg { ast, namespace }) => {
+        CoreResolveResult::Resolved(CoreResolution::Pkg {
+            name_ast,
+            namespace,
+        }) => {
             assert_eq!(
                 *namespace,
                 Namespace::Value,
@@ -157,7 +160,7 @@ fn pkg_member_resolves_to_pkg_variant() {
             );
             // The anchor should be in file_a (the package file)
             assert_eq!(
-                ast.file(),
+                name_ast.file(),
                 lyra_source::FileId(0),
                 "anchor should point to the package file"
             );
@@ -165,12 +168,12 @@ fn pkg_member_resolves_to_pkg_variant() {
             let def_a = def_index_file(&db, file_a);
             let local = def_a
                 .name_ast_to_symbol
-                .get(ast)
+                .get(name_ast)
                 .expect("name_ast_to_symbol should find the anchor");
             let sym = def_a.symbols.get(*local);
             assert_eq!(sym.name.as_str(), "x");
             // Verify symbol_at_name_ast also works
-            let gsym = symbol_at_name_ast(&db, unit, *ast).expect("should resolve via query");
+            let gsym = symbol_at_name_ast(&db, unit, *name_ast).expect("should resolve via query");
             assert_eq!(gsym.file, lyra_source::FileId(0));
             assert_eq!(gsym.local, *local);
         }

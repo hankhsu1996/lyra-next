@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use lyra_ast::ErasedAstId;
-use lyra_source::{FileId, TextRange};
+use lyra_source::{FileId, NameSpan, TextRange};
 use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
@@ -70,7 +70,7 @@ impl DefIndex {
     }
 
     pub fn enum_id(&self, idx: EnumDefIdx) -> EnumId {
-        EnumId::new(self.enum_defs[idx.0 as usize].ast_id)
+        EnumId::new(self.enum_defs[idx.0 as usize].enum_type_ast)
     }
 
     pub fn enum_def_by_id(&self, id: EnumId) -> Option<&EnumDef> {
@@ -118,7 +118,7 @@ impl DefIndex {
     }
 
     pub fn record_id(&self, idx: RecordDefIdx) -> RecordId {
-        RecordId::new(self.record_defs[idx.0 as usize].ast_id)
+        RecordId::new(self.record_defs[idx.0 as usize].record_type_ast)
     }
 }
 
@@ -161,7 +161,7 @@ pub struct UseSite {
     pub expected_ns: ExpectedNs,
     pub range: TextRange,
     pub scope: ScopeId,
-    pub ast_id: ErasedAstId,
+    pub name_ref_ast: ErasedAstId,
     /// File-local monotonic rank from preorder syntax traversal.
     /// Used by the resolver for LRM 26.3 positional visibility.
     pub order_key: u32,
@@ -177,7 +177,8 @@ pub struct LocalDecl {
     pub symbol_id: SymbolId,
     pub name: SmolStr,
     pub namespace: Namespace,
-    pub ast_id: ErasedAstId,
+    pub decl_ast: ErasedAstId,
+    pub name_span: Option<NameSpan>,
     /// File-local monotonic rank from preorder syntax traversal.
     pub order_key: u32,
 }
@@ -194,8 +195,7 @@ pub struct Import {
     pub package: SmolStr,
     pub name: ImportName,
     pub scope: ScopeId,
-    pub range: TextRange,
-    pub ast_id: ErasedAstId,
+    pub import_stmt_ast: ErasedAstId,
     /// File-local monotonic rank from preorder syntax traversal.
     /// Used by the resolver for LRM 26.3 positional visibility.
     pub order_key: u32,
@@ -243,12 +243,12 @@ pub enum ExportKey {
     AllWildcard,
 }
 
-/// A single export declaration with identity and source range.
+/// A single export declaration with identity and AST anchor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportDecl {
     pub id: ExportDeclId,
     pub key: ExportKey,
-    pub range: TextRange,
+    pub export_stmt_ast: ErasedAstId,
 }
 
 /// Compilation-unit-level environment: implicit imports visible in all files.

@@ -219,7 +219,9 @@ pub(crate) fn lower_wildcard_local_conflicts(
             .ok()
             .map(|idx| &def.imports[idx]);
 
-        let local_range = def.symbols.get(local.symbol_id).def_range;
+        let local_range = local
+            .name_span
+            .map_or(TextRange::default(), |ns| ns.text_range());
         let (primary_span, _) = map_span_or_fallback(file_id, &pp.source_map, local_range);
         let name = local.name.clone();
         let pkg = import.map_or_else(|| SmolStr::new("?"), |i| i.package.clone());
@@ -251,7 +253,7 @@ pub(crate) fn lower_wildcard_local_conflicts(
 
         // Secondary label: "wildcard import here"
         if let Some(imp) = import
-            && let Some(imp_span) = pp.source_map.map_span(imp.range)
+            && let Some(imp_span) = pp.source_map.map_span(imp.import_stmt_ast.text_range())
         {
             d = d.with_label(Label {
                 kind: LabelKind::Secondary,
@@ -283,7 +285,11 @@ fn find_import_range(def: &DefIndex, conflict: &ImportConflict) -> Option<TextRa
             ) => member.as_str() == conflict.name.as_str() && imp.package == *explicit_package,
             _ => false,
         };
-        if matches { Some(imp.range) } else { None }
+        if matches {
+            Some(imp.import_stmt_ast.text_range())
+        } else {
+            None
+        }
     })
 }
 
@@ -301,7 +307,7 @@ fn lower_single_import_conflict(
                 (e.id.scope, e.id.ordinal)
             })
             .ok()
-            .map(|idx| def.export_decls[idx].range)?
+            .map(|idx| def.export_decls[idx].export_stmt_ast.text_range())?
     } else {
         find_import_range(def, conflict)?
     };

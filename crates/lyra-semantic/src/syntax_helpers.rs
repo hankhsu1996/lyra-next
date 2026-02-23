@@ -30,25 +30,3 @@ pub(crate) fn system_tf_args(node: &SyntaxNode) -> Option<SyntaxNode> {
         _ => None,
     }
 }
-
-pub(crate) fn first_ident_token(node: &SyntaxNode) -> Option<SyntaxToken> {
-    node.children_with_tokens()
-        .filter_map(lyra_parser::SyntaxElement::into_token)
-        .find(|tok| tok.kind() == SyntaxKind::Ident)
-}
-
-pub(crate) fn port_name_ident(port_node: &SyntaxNode) -> Option<SyntaxToken> {
-    // In an ANSI port declaration, the port name is the Ident token
-    // that is a direct child of the Port node (not inside TypeSpec).
-    // If there's a TypeSpec, the port name follows it.
-    let mut last_ident = None;
-    for el in port_node.children_with_tokens() {
-        match el {
-            lyra_parser::SyntaxElement::Token(tok) if tok.kind() == SyntaxKind::Ident => {
-                last_ident = Some(tok);
-            }
-            _ => {}
-        }
-    }
-    last_ident
-}

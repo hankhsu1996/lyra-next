@@ -107,7 +107,7 @@ pub fn build_resolve_core(
 /// wildcard promotion.
 pub(crate) struct RealizedBinding {
     pub name: SmolStr,
-    pub target: lyra_ast::ErasedAstId,
+    pub target_name_ast: lyra_ast::ErasedAstId,
     pub ns: Namespace,
     pub origins: SmallVec<[ImportOrigin; 1]>,
 }
@@ -166,7 +166,7 @@ pub(crate) fn build_effective_imports(
                 if let Some(target) = pkg_scope.resolve(&imp.package, member, ns) {
                     realized.push(RealizedBinding {
                         name: member.clone(),
-                        target,
+                        target_name_ast: target,
                         ns,
                         origins: smallvec![ImportOrigin::Explicit {
                             package: imp.package.clone(),
@@ -221,7 +221,7 @@ pub(crate) fn build_effective_imports(
                     if in_candidates {
                         realized.push(RealizedBinding {
                             name: name.clone(),
-                            target,
+                            target_name_ast: target,
                             ns: *ns,
                             origins: smallvec![ImportOrigin::ExportTriggered {
                                 id: export.id,
@@ -235,9 +235,11 @@ pub(crate) fn build_effective_imports(
     }
 
     // Step 4: dedup by (name, ns, target), merging origins on collision
-    realized.sort_by(|a, b| (&a.name, &a.ns, &a.target).cmp(&(&b.name, &b.ns, &b.target)));
+    realized.sort_by(|a, b| {
+        (&a.name, &a.ns, &a.target_name_ast).cmp(&(&b.name, &b.ns, &b.target_name_ast))
+    });
     realized.dedup_by(|b, a| {
-        a.name == b.name && a.ns == b.ns && a.target == b.target && {
+        a.name == b.name && a.ns == b.ns && a.target_name_ast == b.target_name_ast && {
             a.origins.extend(b.origins.drain(..));
             true
         }
@@ -346,7 +348,7 @@ fn detect_wildcard_conflicts(
                 continue;
             }
             if let Some(wid) = pkg_scope.resolve(wc_pkg, &binding.name, binding.ns)
-                && wid != binding.target
+                && wid != binding.target_name_ast
             {
                 entries.push(WcConflictEntry {
                     name: binding.name.clone(),
@@ -992,7 +994,7 @@ pub fn build_resolve_index(
                     continue;
                 }
                 resolutions.insert(
-                    use_site.ast_id,
+                    use_site.name_ref_ast,
                     Resolution {
                         target: ResolvedTarget::Symbol(GlobalSymbolId {
                             file: def.file,
@@ -1020,17 +1022,24 @@ pub fn build_resolve_index(
                     &mut diagnostics,
                 );
             }
-            CoreResolveResult::Resolved(CoreResolution::Pkg { ast, namespace }) => {
+            CoreResolveResult::Resolved(CoreResolution::Pkg {
+                name_ast,
+                namespace,
+            }) => {
                 if *namespace == Namespace::Definition {
                     diagnostics.push(SemanticDiag {
                         kind: SemanticDiagKind::InternalError {
-                            detail: SmolStr::new("Pkg resolution carries Definition namespace"),
+                            detail: SmolStr::new(format!(
+                                "Pkg resolution carries Definition namespace \
+                                 (actual={namespace:?}, path={}, anchor={name_ast:?})",
+                                use_site.path.display_name(),
+                            )),
                         },
                         range: use_site.range,
                     });
                 } else {
                     resolve_cross_file(
-                        *ast,
+                        *name_ast,
                         *namespace,
                         use_site,
                         lookup_decl,
@@ -1041,7 +1050,7 @@ pub fn build_resolve_index(
             }
             CoreResolveResult::Resolved(CoreResolution::EnumVariant(target)) => {
                 resolutions.insert(
-                    use_site.ast_id,
+                    use_site.name_ref_ast,
                     Resolution {
                         target: ResolvedTarget::EnumVariant(target.clone()),
                         namespace: Namespace::Value,
@@ -1086,7 +1095,7 @@ fn map_import_errors(
             &err.reason,
             ExpectedNs::Exact(Namespace::Value),
             &path,
-            imp.range,
+            imp.import_stmt_ast.text_range(),
         );
         diagnostics.push(diag);
     }
@@ -1102,7 +1111,7 @@ fn resolve_cross_file(
 ) {
     if let Some(local) = lookup_decl(anchor) {
         resolutions.insert(
-            use_site.ast_id,
+            use_site.name_ref_ast,
             Resolution {
                 target: ResolvedTarget::Symbol(GlobalSymbolId {
                     file: anchor.file(),

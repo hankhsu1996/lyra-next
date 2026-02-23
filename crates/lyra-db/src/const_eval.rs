@@ -324,7 +324,7 @@ fn find_use_site_scope(
     let ast_id = map.erased_ast_id(node)?;
     def.use_sites
         .iter()
-        .find(|us| us.ast_id == ast_id)
+        .find(|us| us.name_ref_ast == ast_id)
         .map(|us| us.scope)
 }
 
@@ -356,8 +356,8 @@ fn core_resolution_to_ty(
                 _ => None,
             }
         }
-        CoreResolveResult::Resolved(CoreResolution::Pkg { ast, .. }) => {
-            let sym_id = crate::semantic::symbol_at_name_ast(db, unit, *ast)?;
+        CoreResolveResult::Resolved(CoreResolution::Pkg { name_ast, .. }) => {
+            let sym_id = crate::semantic::symbol_at_name_ast(db, unit, *name_ast)?;
             let sym_ref = SymbolRef::new(db, unit, sym_id);
             match type_of_symbol_raw(db, sym_ref) {
                 SymbolType::TypeAlias(ty) => Some(ty),

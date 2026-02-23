@@ -11,7 +11,7 @@ fn enum_sem_for_first_enum(
 ) -> lyra_semantic::enum_def::EnumSem {
     let def = def_index_file(db, file);
     let first_enum = &def.enum_defs[0];
-    let enum_id = EnumId::new(first_enum.ast_id);
+    let enum_id = EnumId::new(first_enum.enum_type_ast);
     let eref = EnumRef::new(db, unit, enum_id);
     enum_sem(db, eref)
 }

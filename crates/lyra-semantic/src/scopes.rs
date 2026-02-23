@@ -172,7 +172,7 @@ impl ScopeTree {
 #[cfg(test)]
 mod tests {
     use lyra_ast::ErasedAstId;
-    use lyra_source::{FileId, TextRange, TextSize};
+    use lyra_source::FileId;
     use smol_str::SmolStr;
 
     use super::*;
@@ -185,7 +185,6 @@ mod tests {
         let mut scope_builder = ScopeTreeBuilder::new();
 
         let scope = scope_builder.push(ScopeKind::Module, None);
-        let range = TextRange::new(TextSize::new(0), TextSize::new(1));
         let placeholder = ErasedAstId::placeholder(FileId(0));
         let id = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
@@ -193,7 +192,7 @@ mod tests {
             def_ast: placeholder,
             name_ast: placeholder,
             type_ast: None,
-            def_range: range,
+            name_span: None,
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -216,7 +215,6 @@ mod tests {
 
         let parent = scope_builder.push(ScopeKind::Module, None);
         let child = scope_builder.push(ScopeKind::Block, Some(parent));
-        let range = TextRange::new(TextSize::new(0), TextSize::new(1));
         let placeholder = ErasedAstId::placeholder(FileId(0));
         let id = sym_builder.push(Symbol {
             name: SmolStr::new("a"),
@@ -224,7 +222,7 @@ mod tests {
             def_ast: placeholder,
             name_ast: placeholder,
             type_ast: None,
-            def_range: range,
+            name_span: None,
             scope: parent,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -246,8 +244,6 @@ mod tests {
         let mut scope_builder = ScopeTreeBuilder::new();
 
         let scope = scope_builder.push(ScopeKind::Module, None);
-        let range1 = TextRange::new(TextSize::new(0), TextSize::new(1));
-        let range2 = TextRange::new(TextSize::new(5), TextSize::new(6));
         let placeholder = ErasedAstId::placeholder(FileId(0));
         let id1 = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
@@ -255,7 +251,7 @@ mod tests {
             def_ast: placeholder,
             name_ast: placeholder,
             type_ast: None,
-            def_range: range1,
+            name_span: None,
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -265,7 +261,7 @@ mod tests {
             def_ast: placeholder,
             name_ast: placeholder,
             type_ast: None,
-            def_range: range2,
+            name_span: None,
             scope,
             origin: SymbolOrigin::TypeSpec,
         });

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use lyra_ast::AstIdMap;
 use lyra_parser::SyntaxNode;
+use lyra_source::TextRange;
 use smallvec::SmallVec;
 
 use crate::builder::DefContext;
@@ -25,18 +26,18 @@ pub(crate) fn assign_order_keys(ctx: &mut DefContext<'_>, root: &SyntaxNode) {
         HashMap::new();
     for (i, site) in ctx.use_sites.iter().enumerate() {
         items_by_ast_id
-            .entry(site.ast_id)
+            .entry(site.name_ref_ast)
             .or_default()
             .push(OrderItem::UseSite(i));
     }
     for (i, imp) in ctx.imports.iter().enumerate() {
         items_by_ast_id
-            .entry(imp.ast_id)
+            .entry(imp.import_stmt_ast)
             .or_default()
             .push(OrderItem::Import(i));
     }
     for (i, decl) in ctx.local_decls.iter().enumerate() {
-        let entry = items_by_ast_id.entry(decl.ast_id).or_default();
+        let entry = items_by_ast_id.entry(decl.decl_ast).or_default();
         debug_assert!(
             !entry
                 .iter()
@@ -102,9 +103,13 @@ pub(crate) fn detect_duplicates(
             diagnostics.push(SemanticDiag {
                 kind: SemanticDiagKind::DuplicateDefinition {
                     name: curr.name.clone(),
-                    original: prev.def_range,
+                    original: prev
+                        .name_span
+                        .map_or(TextRange::default(), |ns| ns.text_range()),
                 },
-                range: curr.def_range,
+                range: curr
+                    .name_span
+                    .map_or(TextRange::default(), |ns| ns.text_range()),
             });
         }
     }

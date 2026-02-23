@@ -33,7 +33,7 @@ pub enum CoreResolution {
     /// The anchor is a `name_ast` site. Namespace is `Value` or `Type`
     /// (never `Definition`).
     Pkg {
-        ast: ErasedAstId,
+        name_ast: ErasedAstId,
         namespace: Namespace,
     },
     /// Resolved as a range-generated enum variant name.
@@ -48,8 +48,15 @@ impl CoreResolution {
     /// `None` for `Definition`, and `resolve_qualified` remapping `Definition`
     /// to `Value` before querying package scope. Validated at the consumer
     /// in `build_resolve_index` via `SemanticDiagKind::InternalError`.
-    pub(crate) fn pkg(ast: ErasedAstId, namespace: Namespace) -> Self {
-        Self::Pkg { ast, namespace }
+    pub(crate) fn pkg(name_ast: ErasedAstId, namespace: Namespace) -> Self {
+        debug_assert!(
+            namespace != Namespace::Definition,
+            "Pkg resolution must not carry Definition namespace (got {namespace:?} for anchor {name_ast:?})",
+        );
+        Self::Pkg {
+            name_ast,
+            namespace,
+        }
     }
 }
 
