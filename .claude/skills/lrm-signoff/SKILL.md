@@ -9,9 +9,10 @@ Audit and sign off an LRM chapter. Argument: chapter number (e.g., `5`, `23`).
 
 ## Context
 
-- **Existing corpus:** !`ls crates/lyra-tests/testdata/corpus/ | grep lrm_ch`
-- **Current tracker:** !`cat docs/lrm/progress.md`
+- **Section index:** !`cat docs/lrm/sections.json`
+- **Existing corpus:** !`find crates/lyra-tests/testdata/corpus/lrm/ -name test.yaml -printf '%h\n' 2>/dev/null | sort`
 - **Current gaps:** !`cat docs/lrm/gaps.md`
+- **Current tracker:** !`cat docs/lrm/progress.md`
 
 ## Instructions
 
@@ -19,30 +20,26 @@ Given a chapter number (from the user's argument):
 
 ### 1. Check gaps.md first
 
-If `docs/lrm/gaps.md` has entries for this chapter, the chapter CANNOT be signed off. Report the remaining gaps and stop. The gaps must be fixed first.
+If `docs/lrm/gaps.md` has entries for this chapter, the chapter CANNOT be signed off. Report the remaining gaps and stop.
 
-### 2. Read the LRM chapter
+### 2. Load sections.json
 
-Read the relevant pages from the IEEE 1800 LRM PDF. Identify:
-- Key syntax forms and semantics rules
-- Examples given in the LRM text
-- Edge cases and boundary conditions
-- Error conditions (things that must be rejected)
+Find all ownable (leaf) sections for this chapter. This is the complete checklist -- no LRM reading needed for structure.
 
-### 3. Inventory existing tests
+### 3. Inventory existing owner dirs
 
-List all `lrm_chXX_*` directories in `crates/lyra-tests/testdata/corpus/` for this chapter. Read each `.sv` file and its annotations to understand what is already covered.
+List all dirs under `lrm/chXX/`. Each dir's section prefix identifies which leaf section it owns.
 
-### 4. Identify gaps
+### 4. Identify uncovered sections
 
-Compare the LRM requirements against existing test coverage. For each gap:
+Ownable sections without owner dirs are uncovered. For each:
 - If the engine can handle it today: create the test (must pass).
-- If the engine cannot handle it: add an entry to `docs/lrm/gaps.md` and report it. The chapter cannot be signed off with open gaps.
+- If the engine cannot handle it: add an entry to `docs/lrm/gaps.md`. The chapter cannot be signed off with open gaps.
 
 ### 5. Run the corpus
 
 ```bash
-cargo test -p lyra-tests corpus_snapshots
+cargo test -p lyra-tests --test corpus
 ```
 
 Fix any annotation mismatches. Update snapshots if needed:
@@ -53,14 +50,15 @@ cargo insta accept
 
 ### 6. Sign off (only if no gaps remain)
 
+A chapter is signable when: all ownable (leaf) sections have owner dirs, all tests pass, and no gaps.md entries remain for this chapter.
+
 Edit `docs/lrm/progress.md`:
 - Set the chapter status to **Signed off**
-- Fill in the test path column with the glob pattern (e.g., `lrm_ch05_*`)
+- Fill in the test path column with the glob pattern (e.g., `lrm/ch05/*`)
 
 ### 7. Report
 
 Tell the user:
+- Leaf section coverage table from sections.json (owned/total)
 - How many test cases existed vs how many were added
-- What the chapter covers
 - Any gaps that prevent signoff (if applicable)
-- Any LRM ambiguities encountered (create `docs/lrm/chXX.md` if needed)

@@ -1,5 +1,0 @@
-kind: lrm
-lrm:
-  chapter: 26
-  section: "26.5"
-  title: "Explicit import conflicts with local declaration"
