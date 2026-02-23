@@ -291,3 +291,147 @@ fn expr_type_system_call_unsupported() {
         ExprType::error(ExprTypeErrorKind::UnsupportedSystemCall)
     );
 }
+
+// LRM 7.4.6: Unpacked array slicing
+
+#[test]
+fn expr_type_array_slice_fixed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] arr [7:0]; parameter P = arr[7:6]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        array_et(bv_u4(8).ty, 2)
+    );
+}
+
+#[test]
+fn expr_type_array_slice_indexed_plus() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int arr [9:0]; parameter P = arr[0+:3]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        array_et(Ty::int(), 3)
+    );
+}
+
+#[test]
+fn expr_type_array_slice_indexed_minus() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int arr [9:0]; parameter P = arr[9-:4]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        array_et(Ty::int(), 4)
+    );
+}
+
+#[test]
+fn expr_type_array_slice_multidim_preserves_inner() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int arr [7:0][3:0]; parameter P = arr[7:6]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let inner = Ty::Array {
+        elem: Box::new(Ty::int()),
+        dim: UnpackedDim::Range {
+            msb: ConstInt::Known(3),
+            lsb: ConstInt::Known(0),
+        },
+    };
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        array_et(inner, 2)
+    );
+}
+
+#[test]
+fn expr_type_array_slice_width_one() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int arr [3:0]; parameter P = arr[2:2]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        array_et(Ty::int(), 1)
+    );
+}
+
+#[test]
+fn expr_type_array_slice_dynamic_error() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int arr []; parameter P = arr[1:0]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::SliceNonSliceableArray)
+    );
+}
+
+#[test]
+fn expr_type_array_slice_queue_error() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int arr [$]; parameter P = arr[1:0]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::SliceNonSliceableArray)
+    );
+}
+
+#[test]
+fn expr_type_array_slice_zero_width_error() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int arr [9:0]; parameter P = arr[0+:0]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::SliceWidthInvalid)
+    );
+}
+
+#[test]
+fn expr_type_array_slice_non_sliceable_base() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; string s; parameter P = s[3:0]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::PartSelectNonIntegral)
+    );
+}

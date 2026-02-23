@@ -65,6 +65,12 @@ pub enum UnpackedDim {
 }
 
 impl UnpackedDim {
+    /// Whether this dim has a known fixed length.
+    /// Returns `Some(n)` for `Range` and `Size` dims, `None` for dynamic/queue/assoc/unsized.
+    pub fn fixed_len(&self) -> Option<u32> {
+        self.try_size()
+    }
+
     pub fn try_size(&self) -> Option<u32> {
         match self {
             UnpackedDim::Range { msb, lsb } => match (msb, lsb) {
@@ -246,6 +252,31 @@ impl Integral {
             width = width.checked_mul(dim.try_width()?)?;
         }
         Some(width)
+    }
+
+    /// Construct the result type of a packed part-select of given width.
+    ///
+    /// LRM 11.8.1: result is unsigned. Preserves 2-state vs 4-state.
+    pub fn part_select_result(&self, width: u32) -> Ty {
+        debug_assert!(width > 0, "part_select_result called with width 0");
+        let kw = if self.keyword.four_state() {
+            IntegralKw::Logic
+        } else {
+            IntegralKw::Bit
+        };
+        let packed = if width > 1 {
+            PackedDims::from(vec![PackedDim {
+                msb: ConstInt::Known(i64::from(width) - 1),
+                lsb: ConstInt::Known(0),
+            }])
+        } else {
+            PackedDims::empty()
+        };
+        Ty::Integral(Integral {
+            keyword: kw,
+            signed: false,
+            packed,
+        })
     }
 
     fn pretty(&self) -> SmolStr {
