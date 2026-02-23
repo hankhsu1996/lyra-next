@@ -19,4 +19,5 @@ lyra-diag.workspace = true
 insta = { workspace = true }
 walkdir = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_yaml = "0.9"

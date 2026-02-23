@@ -1,5 +1,0 @@
-kind: lrm
-lrm:
-  chapter: 7
-  section: "7.3.1"
-  title: "Packed union width constraints"

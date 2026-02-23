@@ -1,5 +1,0 @@
-kind: lrm
-lrm:
-  chapter: 6
-  section: "6.19"
-  title: "Enum value overflow detection"

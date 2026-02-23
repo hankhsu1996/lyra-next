@@ -1,5 +1,0 @@
-kind: lrm
-lrm:
-  chapter: 26
-  section: "26.6"
-  title: "Same declaration via two wildcard import paths"

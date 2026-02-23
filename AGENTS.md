@@ -234,13 +234,32 @@ python3 tools/policy/check_lines.py --staged    # staged files only
 
 Full methodology is in `docs/lrm-signoff.md`. This section covers operational instructions.
 
+### Section-Keyed Test Corpus
+
+The test corpus is keyed by LRM section IDs. `docs/lrm/sections.json` is the canonical index of all sections. Every ownable (leaf) section can have exactly one owner directory.
+
+**Directory naming:** `lrm/chXX/{section}_{snake_case_label}/` (e.g., `lrm/ch05/5.3_white_space/`, `lrm/ch05/5.7.1_integer_literals/`). The section prefix must match the section in `test.yaml`. Regression tests go in `regression/short_name/`.
+
+**Ownable = leaf only.** A section is ownable iff it has no children in sections.json. Parent sections are never ownable. When a parent has content beyond its children, a synthetic `.0` child captures it (e.g., `5.6.0` for simple identifier rules under `5.6`).
+
+**cases/ nesting.** When a leaf section has multiple independent tests needing separate compilation units, use `cases/`:
+
+```
+ch26/26.3_referencing_data/
+  cases/
+    explicit_import/
+      test.yaml    # section: "26.3"
+      main.sv
+    wildcard_import/
+      test.yaml    # section: "26.3"
+      main.sv
+```
+
+No `test.yaml` directly under the owner dir when `cases/` exists (no mixed mode).
+
 ### Creating an LRM Test Case
 
-LRM test cases go in `crates/lyra-tests/testdata/corpus/lrm/chXX/` as subdirectories. The corpus runner discovers test cases by finding `test.yaml` marker files via `walkdir`. Everything in the corpus must pass on main.
-
-**Directory structure:** `lrm/chXX/short_name/` (e.g., `lrm/ch05/literals/`, `lrm/ch06/integer_types/`, `lrm/ch23/port_connections/`). Use the LRM chapter number and a short snake_case description. Multiple test directories per chapter are expected. Regression tests go in `regression/short_name/`.
-
-**Each directory contains:**
+**Each test directory contains:**
 - A `test.yaml` marker file with metadata (required for discovery).
 - One or more `.sv` files with inline annotations encoding expected diagnostics.
 - A passing test has no annotations (runner asserts zero diagnostics).
@@ -251,10 +270,10 @@ LRM test cases go in `crates/lyra-tests/testdata/corpus/lrm/chXX/` as subdirecto
 ```yaml
 kind: lrm
 lrm:
-  chapter: 5
-  section: "5.7"
-  title: "Numbers"
+  section: "5.7.1"
 ```
+
+Only `section` is required. No `chapter` or `title` fields -- those come from sections.json.
 
 **test.yaml for regression tests:**
 ```yaml
@@ -280,12 +299,7 @@ When fixing a gap: add the now-passing test to the corpus AND remove the entry f
 
 ### Signing Off a Chapter
 
-1. Skim the LRM chapter section headings (use `pdftotext` on the IEEE 1800-2023 PDF).
-2. For each rule/example/edge case, create a test directory in `testdata/corpus/lrm/chXX/*/`.
-3. Include at least one cross-feature interaction test per chapter.
-4. Verify `docs/lrm/gaps.md` has no remaining entries for this chapter.
-5. Run `cargo test -p lyra-tests` and verify all annotations match.
-6. Update `docs/lrm/progress.md` -- set the chapter status to "Signed off" and fill in the test path column.
+A chapter is signed off when all ownable (leaf) sections in sections.json have owner directories, all tests pass, and no entries remain in `docs/lrm/gaps.md` for the chapter. Use `/lrm-signoff <chapter>` to audit.
 
 ## What Not To Do
 
