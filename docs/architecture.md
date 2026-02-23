@@ -11,6 +11,62 @@ For Salsa query mechanics and caching behavior, see `docs/incremental.md`. For t
 - Deterministic results: same inputs produce identical IDs, diagnostics, and types.
 - A stable semantic API usable by simulators, synthesizers, and language servers.
 
+## North Star Principles
+
+These principles define the long-term architectural shape. When a mismatch is
+found, record it in `docs/quality-gaps.md` and fix it in a follow-up PR.
+
+### 1. IDs must be stable, structural, and cheap
+
+Everything downstream depends on ID stability. For "only nodes after edit
+point change", prefer offset-based IDs (or an equivalent scheme).
+
+Target shape:
+- CST is lossless and roundtrippable.
+- AST IDs are position-based, robust to recovery reshapes.
+- Baseline identity: (file, kind, start_offset, end_offset)
+- Disambiguator for collisions (same range/kind), e.g. child ordinal among
+  same-kind-at-same-range or a stable path hash.
+- Contract: IDs change iff the node's source range or disambiguator changes.
+
+### 2. Separate surface syntax from semantic meaning
+
+Formatter and refactors need provenance. Semantics must stay uniform.
+
+Guideline:
+- Semantic data stores meaning.
+- Provenance metadata stores "how it was written".
+- Provenance is used by formatter and refactors, ignored by sim/synth.
+
+### 3. Partition queries for incrementality and parallelism
+
+Target pipeline:
+- Per-file: lex/preprocess/parse -> ast_id_map -> def_index -> name_graph
+- Per-unit summaries: global_def_index / package_scope_index / unit_env
+- Per-file resolution uses only summaries
+- Per-file typing uses per-file resolve + per-file def_index
+- Diagnostics is aggregation
+
+Cross-file aggregation is the only join point. Everything else is per-file.
+
+### 4. Owned, immutable semantic results
+
+Queries return owned data (Arc, SmolStr, copy IDs). No borrowed semantics
+cross query boundaries. View wrappers are ephemeral at the edge.
+
+### 5. Determinism is a first-class contract
+
+- Stable iteration order everywhere
+- Sort before output when order matters
+- Hash maps only for lookup, never output order
+- Diagnostics deterministically ordered and anchored
+
+### 6. Error tolerance everywhere
+
+- Parse always returns a CST
+- Downstream produces "unknown/error" values, not panics
+- All failures become diagnostics, not control flow
+
 ## Non-goals
 
 - Code generation or simulation execution.
@@ -67,11 +123,11 @@ Every semantic object is identified by a small, copyable, comparable ID. Semanti
 
 ### AST identity
 
-| Type          | Crate      | Definition                                                     |
-| ------------- | ---------- | -------------------------------------------------------------- |
-| `AstId<N>`    | `lyra-ast` | Typed stable node identity: `FileId` + `(SyntaxKind, offset)`. |
-| `ErasedAstId` | `lyra-ast` | Type-erased form. Used as map keys across query boundaries.    |
-| `AstIdMap`    | `lyra-ast` | Per-file map from CST nodes to `AstId`. Built once per parse.  |
+| Type          | Crate      | Definition                                                                 |
+| ------------- | ---------- | -------------------------------------------------------------------------- |
+| `AstId<N>`    | `lyra-ast` | Typed node identity: `FileId` + preorder index in the syntax tree.         |
+| `ErasedAstId` | `lyra-ast` | Type-erased form. Used as map keys across query boundaries.                |
+| `AstIdMap`    | `lyra-ast` | Per-file map from CST nodes to `AstId`. Built once per parse.              |
 
 ### Semantic identity
 
@@ -84,7 +140,12 @@ Every semantic object is identified by a small, copyable, comparable ID. Semanti
 | `EnumId`         | `lyra-semantic` | Enum definition identity: `file`, `owner` scope, `ordinal`.              |
 | `RecordId`       | `lyra-semantic` | Struct/union definition identity: `file`, `owner` scope, `ordinal`.      |
 
-Invariant: IDs survive incremental re-analysis for unchanged regions. `ErasedAstId` encodes `(kind, offset)`, so edits only shift IDs for nodes after the edit point. Downstream queries like `NameGraph` strip positional data, producing equal results on whitespace-only edits. Salsa backdates equal results, skipping re-execution of resolution and typing.
+Invariant: IDs survive incremental re-analysis for unchanged regions where
+the syntax tree shape is unchanged. `ErasedAstId` uses a preorder index, so
+edits that change tree shape before a node can shift its ID even if the range
+is unchanged. Downstream queries like `NameGraph` strip positional data,
+producing equal results on whitespace-only edits. Salsa backdates equal
+results, skipping re-execution of resolution and typing.
 
 ## Query pipeline
 
