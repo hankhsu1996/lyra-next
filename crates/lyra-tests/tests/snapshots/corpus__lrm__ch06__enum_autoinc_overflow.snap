@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.semantic[11]] 5:32..5:32: enum member `c` value 2 is outside the representable range of 1-bit unsigned base type
+  error[lyra.semantic[11]] 9:31..9:31: enum member `q` value 4 is outside the representable range of 2-bit unsigned base type
+---
+unit (0 diagnostics)

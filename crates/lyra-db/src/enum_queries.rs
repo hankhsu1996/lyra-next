@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
+use lyra_ast::ErasedAstId;
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
 use lyra_semantic::enum_def::{
-    EnumId, EnumMemberRangeKind, EnumSem, EnumVariantIndex, EnumVariantTarget,
+    EnumId, EnumMemberRangeKind, EnumSem, EnumValueDiag, EnumVariantIndex, EnumVariantTarget,
 };
 use lyra_semantic::record::TypeRef;
 use lyra_semantic::type_infer::{BitVecType, BitWidth, Signedness};
@@ -367,14 +368,15 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
         }
     };
 
-    // Compute per-member values
-    let member_values = compute_member_values(db, unit, enum_def);
+    // Compute per-member values with validation
+    let mv_output = compute_member_values(db, unit, enum_def, base_int.as_ref());
 
     EnumSem {
         base_ty,
         base_int,
-        member_values,
+        member_values: mv_output.values,
         diags: diags.into_boxed_slice(),
+        value_diags: mv_output.diags.into_boxed_slice(),
     }
 }
 
@@ -407,35 +409,200 @@ fn classify_enum_base(ty: &Ty) -> Result<BitVecType, EnumBaseError> {
     }
 }
 
-/// Compute member values: const-eval explicit inits, auto-increment implicit ones.
+struct MemberValueOutput {
+    values: std::sync::Arc<[ConstInt]>,
+    diags: Vec<EnumValueDiag>,
+}
+
+/// Pure: compute variant count from evaluated bounds.
+fn range_count_from_bounds(from: i64, to: i64) -> u64 {
+    (i128::from(from) - i128::from(to)).unsigned_abs() as u64 + 1
+}
+
+/// DB: evaluate range bounds via const-eval, return (from, to) or None.
+fn range_bounds_const(
+    member: &lyra_semantic::enum_def::EnumMemberDef,
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+) -> Option<(i64, i64)> {
+    match member.range.as_ref()? {
+        EnumMemberRangeKind::Count(expr_id) => {
+            let result = eval_const_int(db, ConstExprRef::new(db, unit, *expr_id));
+            match result {
+                ConstInt::Known(n) if n >= 0 => Some((0, n - 1)),
+                _ => None,
+            }
+        }
+        EnumMemberRangeKind::FromTo(from_id, to_id) => {
+            let from_val = eval_const_int(db, ConstExprRef::new(db, unit, *from_id));
+            let to_val = eval_const_int(db, ConstExprRef::new(db, unit, *to_id));
+            match (from_val, to_val) {
+                (ConstInt::Known(f), ConstInt::Known(t)) => Some((f, t)),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// Check if a value fits in the given base type's representable range.
+fn fits_in_base(value: i128, width: u32, signed: bool) -> bool {
+    if width == 0 {
+        return false;
+    }
+    if signed {
+        let lo = -(1i128 << (width - 1));
+        let hi = (1i128 << (width - 1)) - 1;
+        value >= lo && value <= hi
+    } else {
+        let hi = (1i128 << width) - 1;
+        value >= 0 && value <= hi
+    }
+}
+
+/// Downcast an i128 value to `ConstInt`, recording Overflow if it doesn't fit in i64.
+fn store_member_value(values: &mut Vec<ConstInt>, raw: i128) {
+    use lyra_semantic::types::ConstEvalError;
+    if let Ok(v) = i64::try_from(raw) {
+        values.push(ConstInt::Known(v));
+    } else {
+        values.push(ConstInt::Error(ConstEvalError::Overflow));
+    }
+}
+
+/// Compute member values with full validation: overflow, duplicate, sized literal width.
 fn compute_member_values(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     enum_def: &lyra_semantic::enum_def::EnumDef,
-) -> std::sync::Arc<[ConstInt]> {
+    base_int: Option<&BitVecType>,
+) -> MemberValueOutput {
     use lyra_semantic::types::ConstEvalError;
 
     let mut values = Vec::with_capacity(enum_def.members.len());
-    let mut next_val: ConstInt = ConstInt::Known(0);
+    let mut diags = Vec::new();
 
-    for member in &*enum_def.members {
-        if let Some(expr_id) = member.init {
-            let result = eval_const_int(db, ConstExprRef::new(db, unit, expr_id));
-            values.push(result.clone());
-            next_val = match result {
-                ConstInt::Known(v) => ConstInt::Known(v + 1),
-                _ => ConstInt::Error(ConstEvalError::AutoIncrementAfterUnknown),
-            };
-        } else {
-            values.push(next_val.clone());
-            next_val = match next_val {
-                ConstInt::Known(v) => ConstInt::Known(v + 1),
-                _ => ConstInt::Error(ConstEvalError::AutoIncrementAfterUnknown),
-            };
+    // Pre-pass: sized literal width check
+    if let Some(bv) = base_int
+        && let BitWidth::Known(base_w) = bv.width
+    {
+        for member in &*enum_def.members {
+            if let Some(lit_w) = member.init_literal_width
+                && lit_w != base_w
+            {
+                diags.push(EnumValueDiag::SizedLiteralWidth {
+                    anchor: member.ast_id,
+                    literal_width: lit_w,
+                    base_width: base_w,
+                });
+            }
         }
     }
 
-    std::sync::Arc::from(values)
+    // Track all produced variants for overflow + duplicate detection.
+    // (anchor, value, member_name) -- one per produced variant.
+    let mut produced: Vec<(ErasedAstId, i128, SmolStr)> = Vec::new();
+
+    let mut next_raw: i128 = 0;
+    let mut next_raw_valid = true;
+
+    for member in &*enum_def.members {
+        let raw: i128;
+        let raw_valid: bool;
+
+        if let Some(expr_id) = member.init {
+            let result = eval_const_int(db, ConstExprRef::new(db, unit, expr_id));
+            if let ConstInt::Known(v) = result {
+                raw = i128::from(v);
+                raw_valid = true;
+            } else {
+                values.push(result);
+                continue;
+            }
+        } else if next_raw_valid {
+            raw = next_raw;
+            raw_valid = true;
+        } else {
+            values.push(ConstInt::Error(ConstEvalError::AutoIncrementAfterUnknown));
+            continue;
+        }
+
+        if member.range.is_some() {
+            // Range member: compute variant count and produce N variants
+            if let Some((from, to)) = range_bounds_const(member, db, unit) {
+                let count = range_count_from_bounds(from, to);
+                store_member_value(&mut values, raw);
+                let step: i64 = if from <= to { 1 } else { -1 };
+                let mut label_val = from;
+                for i in 0..count {
+                    let variant_value = raw + i128::from(i);
+                    let variant_name = SmolStr::new(format!("{}{label_val}", member.name));
+                    produced.push((member.ast_id, variant_value, variant_name));
+                    label_val += step;
+                }
+                next_raw = raw + i128::from(count);
+                next_raw_valid = true;
+            } else {
+                values.push(ConstInt::Error(ConstEvalError::NonConstant));
+                next_raw_valid = false;
+            }
+        } else {
+            // Plain member: produce 1 variant
+            store_member_value(&mut values, raw);
+            produced.push((member.ast_id, raw, member.name.clone()));
+            next_raw = raw + 1;
+            next_raw_valid = raw_valid;
+        }
+    }
+
+    check_overflow_and_duplicates(&produced, base_int, &mut diags);
+
+    MemberValueOutput {
+        values: std::sync::Arc::from(values),
+        diags,
+    }
+}
+
+/// Post-pass: check overflow against base type and detect duplicate values.
+fn check_overflow_and_duplicates(
+    produced: &[(ErasedAstId, i128, SmolStr)],
+    base_int: Option<&BitVecType>,
+    diags: &mut Vec<EnumValueDiag>,
+) {
+    let mut overflow_set: HashSet<usize> = HashSet::new();
+    if let Some(bv) = base_int
+        && let BitWidth::Known(w) = bv.width
+    {
+        let signed = bv.signed == Signedness::Signed;
+        for (i, (anchor, value, name)) in produced.iter().enumerate() {
+            if !fits_in_base(*value, w, signed) {
+                diags.push(EnumValueDiag::Overflow {
+                    anchor: *anchor,
+                    value: *value,
+                    width: w,
+                    signed,
+                    member_name: name.clone(),
+                });
+                overflow_set.insert(i);
+            }
+        }
+    }
+
+    let mut seen: HashMap<i128, (ErasedAstId, SmolStr)> = HashMap::new();
+    for (i, (anchor, value, name)) in produced.iter().enumerate() {
+        if overflow_set.contains(&i) {
+            continue;
+        }
+        if let Some((original, _orig_name)) = seen.get(value) {
+            diags.push(EnumValueDiag::DuplicateValue {
+                anchor: *anchor,
+                original: *original,
+                value: *value,
+                member_name: name.clone(),
+            });
+        } else {
+            seen.insert(*value, (*anchor, name.clone()));
+        }
+    }
 }
 
 /// Sorted set of known enum member values. Returns None if any member value is not Known.
@@ -463,5 +630,6 @@ fn empty_enum_sem() -> EnumSem {
         base_int: None,
         member_values: std::sync::Arc::from(Vec::<ConstInt>::new()),
         diags: Box::new([]),
+        value_diags: Box::new([]),
     }
 }

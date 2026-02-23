@@ -42,6 +42,10 @@ pub enum MessageId {
     ModportRefUnsupported,
     EnumCastOutOfRange,
     StreamWithNonArray,
+    EnumDuplicateValue,
+    EnumValueOverflow,
+    EnumSizedLiteralWidthMismatch,
+    EnumDuplicateOriginalHere,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -188,7 +192,11 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::ModportDirectionViolation
         | MessageId::ModportRefUnsupported
         | MessageId::EnumCastOutOfRange
-        | MessageId::StreamWithNonArray => render_type_message(msg),
+        | MessageId::StreamWithNonArray
+        | MessageId::EnumDuplicateValue
+        | MessageId::EnumValueOverflow
+        | MessageId::EnumSizedLiteralWidthMismatch
+        | MessageId::EnumDuplicateOriginalHere => render_type_message(msg),
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -290,6 +298,26 @@ fn render_type_message(msg: &Message) -> String {
             format!("cast value {value} is not a member of enum `{enum_name}`")
         }
         MessageId::StreamWithNonArray => "`with` clause requires an array operand".into(),
+        MessageId::EnumDuplicateValue => {
+            let value = name();
+            let member = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("enum member `{member}` has value {value} which duplicates an earlier member")
+        }
+        MessageId::EnumValueOverflow => {
+            let value = name();
+            let member = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            let width = msg.args.get(2).and_then(Arg::as_width).unwrap_or(0);
+            let sign = msg.args.get(3).and_then(Arg::as_name).unwrap_or("unsigned");
+            format!(
+                "enum member `{member}` value {value} is outside the representable range of {width}-bit {sign} base type"
+            )
+        }
+        MessageId::EnumSizedLiteralWidthMismatch => {
+            let lit_w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
+            let base_w = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
+            format!("sized literal width {lit_w} does not match enum base width {base_w}")
+        }
+        MessageId::EnumDuplicateOriginalHere => "first defined with this value here".into(),
         _ => String::new(),
     }
 }

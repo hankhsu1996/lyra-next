@@ -7,6 +7,7 @@ use lyra_semantic::types::SymbolType;
 use crate::enum_queries::{EnumRef, enum_sem, enum_variant_index};
 use crate::expr_queries::{ExprRef, IntegralCtxKey};
 use crate::facts::modport::field_access_facts;
+use crate::pipeline::ast_id_map as query_ast_id_map;
 use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
 use crate::record_queries::{RecordRef, record_diagnostics};
 use crate::semantic::{
@@ -62,6 +63,14 @@ pub fn file_diagnostics(
                 primary_span,
                 &pp.source_map,
             ));
+        }
+        if !sem.value_diags.is_empty() {
+            let ast_map = query_ast_id_map(db, file);
+            for vd in &*sem.value_diags {
+                if let Some(d) = lower_enum_value_diag(vd, file_id, ast_map, &pp.source_map) {
+                    diags.push(d);
+                }
+            }
         }
     }
 
@@ -544,6 +553,116 @@ fn conversion_diag(
         span: arg_span,
         message: lyra_diag::Message::new(msg_id, msg_args),
     })
+}
+
+fn anchor_span(
+    anchor: lyra_ast::ErasedAstId,
+    file_id: lyra_source::FileId,
+    ast_id_map: &lyra_ast::AstIdMap,
+    source_map: &lyra_preprocess::SourceMap,
+) -> Option<lyra_source::Span> {
+    let range = ast_id_map.range_of(anchor)?;
+    let (span, _) = crate::lower_diag::map_span_or_fallback(file_id, source_map, range);
+    Some(span)
+}
+
+fn error_with_primary(
+    code: lyra_diag::DiagnosticCode,
+    msg_id: lyra_diag::MessageId,
+    msg_args: Vec<lyra_diag::Arg>,
+    span: lyra_source::Span,
+) -> lyra_diag::Diagnostic {
+    lyra_diag::Diagnostic::new(
+        lyra_diag::Severity::Error,
+        code,
+        lyra_diag::Message::new(msg_id, msg_args.clone()),
+    )
+    .with_label(lyra_diag::Label {
+        kind: lyra_diag::LabelKind::Primary,
+        span,
+        message: lyra_diag::Message::new(msg_id, msg_args),
+    })
+}
+
+fn lower_enum_value_diag(
+    vd: &lyra_semantic::enum_def::EnumValueDiag,
+    file_id: lyra_source::FileId,
+    ast_id_map: &lyra_ast::AstIdMap,
+    source_map: &lyra_preprocess::SourceMap,
+) -> Option<lyra_diag::Diagnostic> {
+    use lyra_semantic::enum_def::EnumValueDiag;
+
+    match vd {
+        EnumValueDiag::DuplicateValue {
+            anchor,
+            original,
+            value,
+            member_name,
+        } => {
+            let span = anchor_span(*anchor, file_id, ast_id_map, source_map)?;
+            let msg_args = vec![
+                lyra_diag::Arg::Name(smol_str::SmolStr::new(value.to_string())),
+                lyra_diag::Arg::Name(member_name.clone()),
+            ];
+            let mut d = error_with_primary(
+                lyra_diag::DiagnosticCode::ENUM_DUPLICATE_VALUE,
+                lyra_diag::MessageId::EnumDuplicateValue,
+                msg_args,
+                span,
+            );
+            if let Some(orig_range) = ast_id_map.range_of(*original)
+                && let Some(orig_span) = source_map.map_span(orig_range)
+            {
+                d = d.with_label(lyra_diag::Label {
+                    kind: lyra_diag::LabelKind::Secondary,
+                    span: orig_span,
+                    message: lyra_diag::Message::simple(
+                        lyra_diag::MessageId::EnumDuplicateOriginalHere,
+                    ),
+                });
+            }
+            Some(d)
+        }
+        EnumValueDiag::Overflow {
+            anchor,
+            value,
+            width,
+            signed,
+            member_name,
+        } => {
+            let span = anchor_span(*anchor, file_id, ast_id_map, source_map)?;
+            let sign_str = if *signed { "signed" } else { "unsigned" };
+            let msg_args = vec![
+                lyra_diag::Arg::Name(smol_str::SmolStr::new(value.to_string())),
+                lyra_diag::Arg::Name(member_name.clone()),
+                lyra_diag::Arg::Width(*width),
+                lyra_diag::Arg::Name(smol_str::SmolStr::new(sign_str)),
+            ];
+            Some(error_with_primary(
+                lyra_diag::DiagnosticCode::ENUM_VALUE_OVERFLOW,
+                lyra_diag::MessageId::EnumValueOverflow,
+                msg_args,
+                span,
+            ))
+        }
+        EnumValueDiag::SizedLiteralWidth {
+            anchor,
+            literal_width,
+            base_width,
+        } => {
+            let span = anchor_span(*anchor, file_id, ast_id_map, source_map)?;
+            let msg_args = vec![
+                lyra_diag::Arg::Width(*literal_width),
+                lyra_diag::Arg::Width(*base_width),
+            ];
+            Some(error_with_primary(
+                lyra_diag::DiagnosticCode::ENUM_SIZED_LITERAL_WIDTH,
+                lyra_diag::MessageId::EnumSizedLiteralWidthMismatch,
+                msg_args,
+                span,
+            ))
+        }
+    }
 }
 
 struct DbTypeCheckCtx<'a> {

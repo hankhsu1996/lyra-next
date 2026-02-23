@@ -107,6 +107,18 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 13,
     };
+    pub const ENUM_DUPLICATE_VALUE: Self = Self {
+        namespace: "lyra.semantic",
+        number: 10,
+    };
+    pub const ENUM_VALUE_OVERFLOW: Self = Self {
+        namespace: "lyra.semantic",
+        number: 11,
+    };
+    pub const ENUM_SIZED_LITERAL_WIDTH: Self = Self {
+        namespace: "lyra.semantic",
+        number: 12,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,

@@ -221,6 +221,18 @@ impl AstIdMap {
         Some(current)
     }
 
+    /// Look up the `TextRange` stored for an `ErasedAstId`. O(1).
+    ///
+    /// Returns the original text range recorded during map construction,
+    /// without walking the tree. Returns `None` if the id is from a
+    /// different file or has an out-of-bounds index.
+    pub fn range_of(&self, id: ErasedAstId) -> Option<TextRange> {
+        if id.0.file != self.file {
+            return None;
+        }
+        self.entries.get(id.0.index as usize).map(|e| e.range)
+    }
+
     /// File this map belongs to.
     pub fn file(&self) -> FileId {
         self.file

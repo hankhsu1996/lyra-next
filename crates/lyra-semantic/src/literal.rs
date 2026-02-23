@@ -29,6 +29,46 @@ pub(crate) struct LiteralShape {
     pub has_xz: bool,
 }
 
+/// Extract the bit width of a sized literal from an expression node.
+///
+/// Strips `Expression` and `ParenExpr` wrappers recursively to find a
+/// `Literal` node, then checks if it is sized. Returns `Some(width)` for
+/// sized literals, `None` for unsized, non-literal, or malformed expressions.
+pub(crate) fn extract_sized_literal_width(expr_node: &SyntaxNode) -> Option<u32> {
+    let inner = unwrap_parens(expr_node);
+    if inner.kind() != SyntaxKind::Literal {
+        return None;
+    }
+    let shape = parse_literal_shape(&inner)?;
+    if shape.is_unsized {
+        None
+    } else {
+        Some(shape.width)
+    }
+}
+
+/// Strip `Expression` and `ParenExpr` wrappers to find the inner node.
+fn unwrap_parens(node: &SyntaxNode) -> SyntaxNode {
+    let mut current = node.clone();
+    loop {
+        match current.kind() {
+            SyntaxKind::Expression | SyntaxKind::ParenExpr => {
+                let child = current.children().find(|c| {
+                    !matches!(
+                        c.kind(),
+                        SyntaxKind::Whitespace | SyntaxKind::BlockComment | SyntaxKind::LineComment
+                    )
+                });
+                match child {
+                    Some(c) => current = c,
+                    None => return current,
+                }
+            }
+            _ => return current,
+        }
+    }
+}
+
 /// Parse a Literal syntax node into its shape.
 ///
 /// Accepts the Literal AST node directly (inspects child tokens `IntLiteral`,

@@ -47,9 +47,13 @@ pub enum EnumMemberRangeKind {
 pub struct EnumMemberDef {
     pub name: SmolStr,
     pub name_range: TextRange,
+    pub ast_id: ErasedAstId,
     pub range: Option<EnumMemberRangeKind>,
     pub range_text_range: Option<TextRange>,
     pub init: Option<ErasedAstId>,
+    /// Bit width of a sized literal initializer (e.g., `4'h5` -> `Some(4)`).
+    /// `None` if no init, init is not a literal, or literal is unsized.
+    pub init_literal_width: Option<u32>,
 }
 
 /// Wrapper for enum base type that always carries the source range.
@@ -73,6 +77,32 @@ pub struct EnumDef {
     pub members: Box<[EnumMemberDef]>,
 }
 
+/// Diagnostic for enum member value legality (duplicate, overflow, width mismatch).
+///
+/// Uses `ErasedAstId` anchors; conversion to `TextRange` happens in the
+/// diagnostic lowering layer only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnumValueDiag {
+    DuplicateValue {
+        anchor: ErasedAstId,
+        original: ErasedAstId,
+        value: i128,
+        member_name: SmolStr,
+    },
+    Overflow {
+        anchor: ErasedAstId,
+        value: i128,
+        width: u32,
+        signed: bool,
+        member_name: SmolStr,
+    },
+    SizedLiteralWidth {
+        anchor: ErasedAstId,
+        literal_width: u32,
+        base_width: u32,
+    },
+}
+
 /// Resolved enum type information.
 ///
 /// `base_ty` is the resolved `Ty` (for diagnostics/printing).
@@ -84,6 +114,7 @@ pub struct EnumSem {
     pub base_int: Option<BitVecType>,
     pub member_values: Arc<[ConstInt]>,
     pub diags: Box<[SemanticDiag]>,
+    pub value_diags: Box<[EnumValueDiag]>,
 }
 
 /// A range-generated enum variant resolved via `EnumVariantIndex`.

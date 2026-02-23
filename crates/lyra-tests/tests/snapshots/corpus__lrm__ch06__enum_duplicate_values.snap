@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.semantic[10]] 5:29..5:29: enum member `d` has value 8 which duplicates an earlier member
+  error[lyra.semantic[10]] 9:21..9:21: enum member `y` has value 1 which duplicates an earlier member
+---
+unit (0 diagnostics)
