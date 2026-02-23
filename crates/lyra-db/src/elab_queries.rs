@@ -559,12 +559,22 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         );
 
         if let Some(ref pl) = port_list {
-            crate::elab_lower::resolve_port_connections(
+            let mut bindings = crate::elab_lower::resolve_port_connections(
                 pl,
                 target_sig,
                 &inst_module_name,
                 env.file_id,
                 inst_name_tok.text_range(),
+                id_map,
+                ctx.diags,
+            );
+            add_implicit_port_bindings(pl, target_sig, env, &mut bindings);
+            crate::elab_lower::check_modport_conflicts(
+                ctx.db,
+                ctx.unit,
+                &bindings,
+                target_sig,
+                target_def_id,
                 ctx.diags,
             );
         }
@@ -584,6 +594,74 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
             .add_child(env.parent_scope, ElabNodeId::Inst(child_id));
 
         elaborate_module(ctx, target_def_id, child_id, ElabNodeId::Inst(child_id));
+    }
+}
+
+fn add_implicit_port_bindings(
+    port_list: &lyra_ast::InstancePortList,
+    target_sig: &DesignUnitSig,
+    env: &ScopeEnv<'_>,
+    bindings: &mut Vec<crate::elab_lower::PortBinding>,
+) {
+    use crate::elab_lower::{PortActual, PortBinding};
+
+    let mut has_wildcard = false;
+    for port in port_list.ports() {
+        if port.is_wildcard() {
+            has_wildcard = true;
+            continue;
+        }
+        if !port.is_named() || port.actual_expr().is_some() {
+            continue;
+        }
+        let has_parens = port
+            .syntax()
+            .children_with_tokens()
+            .any(|c| c.kind() == SyntaxKind::LParen);
+        if has_parens {
+            continue;
+        }
+        let Some(name_tok) = port.port_name() else {
+            continue;
+        };
+        let name = name_tok.text();
+        let Some((formal_idx, _)) = target_sig.port_by_name(name) else {
+            continue;
+        };
+        let Some(enclosing_port) = env.sig.ports.iter().find(|p| p.name == name) else {
+            continue;
+        };
+        bindings.push(PortBinding {
+            formal_idx,
+            actual: PortActual::Resolved(enclosing_port.ty.clone()),
+            conn_span: Span {
+                file: env.file_id,
+                range: port.text_range(),
+            },
+        });
+    }
+
+    if !has_wildcard {
+        return;
+    }
+    let bound: std::collections::HashSet<u32> = bindings.iter().map(|b| b.formal_idx).collect();
+    let wildcard_span = Span {
+        file: env.file_id,
+        range: port_list.text_range(),
+    };
+    for (idx, formal) in target_sig.ports.iter().enumerate() {
+        let idx = idx as u32;
+        if bound.contains(&idx) {
+            continue;
+        }
+        let Some(enclosing_port) = env.sig.ports.iter().find(|p| p.name == formal.name) else {
+            continue;
+        };
+        bindings.push(PortBinding {
+            formal_idx: idx,
+            actual: PortActual::Resolved(enclosing_port.ty.clone()),
+            conn_span: wildcard_span,
+        });
     }
 }
 

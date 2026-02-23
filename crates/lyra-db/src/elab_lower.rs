@@ -1,16 +1,30 @@
 use std::collections::HashSet;
 
-use lyra_ast::AstNode;
+use lyra_ast::{AstNode, ErasedAstId};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxElement, SyntaxNode};
+use lyra_semantic::symbols::GlobalDefId;
+use lyra_semantic::types::{InterfaceType, Ty};
 use lyra_source::{FileId, Span, TextRange};
 use smol_str::SmolStr;
 
 use crate::elab_queries::{TopModule, elaborate_top};
 use crate::elaboration::ElabDiag;
+use crate::expr_queries::{ExprRef, type_of_expr};
 use crate::module_sig::DesignUnitSig;
 use crate::pipeline::preprocess_file;
 use crate::{CompilationUnit, source_file_by_id};
+
+pub(crate) enum PortActual {
+    Expr(ErasedAstId),
+    Resolved(Ty),
+}
+
+pub(crate) struct PortBinding {
+    pub formal_idx: u32,
+    pub actual: PortActual,
+    pub conn_span: Span,
+}
 
 pub(crate) fn resolve_port_connections(
     port_list: &lyra_ast::InstancePortList,
@@ -18,11 +32,12 @@ pub(crate) fn resolve_port_connections(
     module_name: &SmolStr,
     file_id: FileId,
     inst_range: TextRange,
+    id_map: Option<&lyra_ast::AstIdMap>,
     diags: &mut Vec<ElabDiag>,
-) {
+) -> Vec<PortBinding> {
     let ports: Vec<_> = port_list.ports().collect();
     if ports.is_empty() {
-        return;
+        return Vec::new();
     }
 
     let inst_span = Span {
@@ -38,13 +53,13 @@ pub(crate) fn resolve_port_connections(
             &ports,
             sig,
             module_name,
-            file_id,
             inst_span,
             has_wildcard,
+            id_map,
             diags,
-        );
+        )
     } else {
-        resolve_positional_ports(&ports, sig, module_name, inst_span, diags);
+        resolve_positional_ports(&ports, sig, module_name, inst_span, id_map, diags)
     }
 }
 
@@ -52,11 +67,13 @@ fn resolve_named_ports(
     ports: &[lyra_ast::InstancePort],
     sig: &DesignUnitSig,
     module_name: &SmolStr,
-    file_id: FileId,
     inst_span: Span,
     has_wildcard: bool,
+    id_map: Option<&lyra_ast::AstIdMap>,
     diags: &mut Vec<ElabDiag>,
-) {
+) -> Vec<PortBinding> {
+    let file_id = inst_span.file;
+    let mut bindings = Vec::new();
     let mut connected: HashSet<u32> = HashSet::new();
     for port in ports {
         if port.is_wildcard() {
@@ -77,6 +94,14 @@ fn resolve_named_ports(
                     diags.push(ElabDiag::DuplicatePortConn {
                         port: SmolStr::new(port_name_str),
                         span: conn_span,
+                    });
+                } else if let Some(actual_node) = port.actual_expr()
+                    && let Some(ast_id) = id_map.and_then(|m| m.erased_ast_id(&actual_node))
+                {
+                    bindings.push(PortBinding {
+                        formal_idx: idx,
+                        actual: PortActual::Expr(ast_id),
+                        conn_span,
                     });
                 }
             }
@@ -99,6 +124,7 @@ fn resolve_named_ports(
             });
         }
     }
+    bindings
 }
 
 fn resolve_positional_ports(
@@ -106,10 +132,12 @@ fn resolve_positional_ports(
     sig: &DesignUnitSig,
     module_name: &SmolStr,
     inst_span: Span,
+    id_map: Option<&lyra_ast::AstIdMap>,
     diags: &mut Vec<ElabDiag>,
-) {
+) -> Vec<PortBinding> {
     let actual_count = ports.len();
     let formal_count = sig.ports.len();
+    let mut bindings = Vec::new();
 
     if actual_count > formal_count {
         diags.push(ElabDiag::TooManyPositionalPorts {
@@ -119,12 +147,78 @@ fn resolve_positional_ports(
         });
     }
 
+    let matched = actual_count.min(formal_count);
+    for (idx, port) in ports.iter().take(matched).enumerate() {
+        if let Some(actual_node) = port.actual_expr()
+            && let Some(ast_id) = id_map.and_then(|m| m.erased_ast_id(&actual_node))
+        {
+            bindings.push(PortBinding {
+                formal_idx: idx as u32,
+                actual: PortActual::Expr(ast_id),
+                conn_span: Span {
+                    file: inst_span.file,
+                    range: port.text_range(),
+                },
+            });
+        }
+    }
+
     if actual_count < formal_count {
         for port_sig in &sig.ports[actual_count..] {
             diags.push(ElabDiag::MissingPortConn {
                 port: port_sig.name.clone(),
                 module: module_name.clone(),
                 span: inst_span,
+            });
+        }
+    }
+    bindings
+}
+
+pub(crate) fn check_modport_conflicts(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    bindings: &[PortBinding],
+    sig: &DesignUnitSig,
+    target_def: GlobalDefId,
+    diags: &mut Vec<ElabDiag>,
+) {
+    for binding in bindings {
+        let Some(formal) = sig.ports.get(binding.formal_idx as usize) else {
+            continue;
+        };
+        let (formal_iface, formal_mp) = match &formal.ty {
+            Ty::Interface(InterfaceType {
+                iface,
+                modport: Some(mp),
+            }) => (*iface, *mp),
+            _ => continue,
+        };
+
+        let actual_ty = match &binding.actual {
+            PortActual::Expr(ast_id) => type_of_expr(db, ExprRef::new(db, unit, *ast_id)).ty,
+            PortActual::Resolved(ty) => ty.clone(),
+        };
+        if matches!(actual_ty, Ty::Error) {
+            continue;
+        }
+        let (actual_iface, actual_mp) = match &actual_ty {
+            Ty::Interface(InterfaceType {
+                iface,
+                modport: Some(mp),
+            }) => (*iface, *mp),
+            _ => continue,
+        };
+        if actual_iface != formal_iface {
+            continue;
+        }
+        if actual_mp != formal_mp {
+            diags.push(ElabDiag::ModportConflict {
+                target_def,
+                formal_port_ordinal: binding.formal_idx,
+                formal_mp,
+                actual_mp,
+                span: binding.conn_span,
             });
         }
     }
@@ -152,10 +246,49 @@ fn lower_elab_diag(
     unit: CompilationUnit,
     diag: &ElabDiag,
 ) -> lyra_diag::Diagnostic {
-    use lyra_diag::{Diagnostic, Label, LabelKind};
+    use lyra_diag::{
+        Arg, Diagnostic, DiagnosticCode as C, Label, LabelKind, Message, MessageId as M, Severity,
+    };
+
+    let span = map_elab_span(db, unit, *diag.span());
+
+    if let ElabDiag::ModportConflict {
+        target_def,
+        formal_port_ordinal,
+        formal_mp,
+        actual_mp,
+        ..
+    } = diag
+    {
+        let sig = crate::elab_queries::design_unit_signature(
+            db,
+            crate::elab_queries::DesignUnitRef::new(db, unit, *target_def),
+        );
+        let port_name = sig
+            .ports
+            .get(*formal_port_ordinal as usize)
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
+        let formal_name = crate::semantic::modport_name(db, unit, *formal_mp);
+        let actual_name = crate::semantic::modport_name(db, unit, *actual_mp);
+        let msg = Message::new(
+            M::ModportConflict,
+            vec![
+                Arg::Name(port_name),
+                Arg::Name(formal_name),
+                Arg::Name(actual_name),
+            ],
+        );
+        return Diagnostic::new(Severity::Error, C::MODPORT_CONFLICT, msg.clone()).with_label(
+            Label {
+                kind: LabelKind::Primary,
+                span,
+                message: msg,
+            },
+        );
+    }
 
     let (severity, code, msg) = elab_diag_code_msg(diag);
-    let span = map_elab_span(db, unit, *diag.span());
 
     Diagnostic::new(severity, code, msg.clone()).with_label(Label {
         kind: LabelKind::Primary,
@@ -266,6 +399,9 @@ fn elab_diag_code_msg(
             C::GENERATE_ITERATION_LIMIT,
             Message::new(M::GenerateIterationLimit, vec![Arg::Count(*limit)]),
         ),
+        ElabDiag::ModportConflict { .. } => {
+            (e, C::MODPORT_CONFLICT, Message::simple(M::ModportConflict))
+        }
     }
 }
 
