@@ -52,6 +52,8 @@ pub enum MessageId {
     MethodNoMethodsOnType,
     MethodArityMismatch,
     MethodArgTypeMismatch,
+    UnsupportedLhsForm,
+    InvalidAssignmentLhs,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -209,7 +211,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::MethodUnknown
         | MessageId::MethodNoMethodsOnType
         | MessageId::MethodArityMismatch
-        | MessageId::MethodArgTypeMismatch => render_type_message(msg),
+        | MessageId::MethodArgTypeMismatch
+        | MessageId::UnsupportedLhsForm
+        | MessageId::InvalidAssignmentLhs => render_type_message(msg),
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -321,6 +325,8 @@ fn render_type_message(msg: &Message) -> String {
         | MessageId::MethodNoMethodsOnType
         | MessageId::MethodArityMismatch
         | MessageId::MethodArgTypeMismatch => render_method_message(msg),
+        MessageId::UnsupportedLhsForm => "assignment target form is not yet type-checked".into(),
+        MessageId::InvalidAssignmentLhs => "expression is not a valid assignment target".into(),
         _ => String::new(),
     }
 }

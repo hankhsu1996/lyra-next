@@ -93,10 +93,10 @@ ast_nodes! {
     EventItem(SyntaxKind::EventItem) {}
 
     // Expressions
-    Expression(SyntaxKind::Expression) {}
+    Expression(SyntaxKind::Expression) { @custom }
     BinExpr(SyntaxKind::BinExpr) { @custom }
     PrefixExpr(SyntaxKind::PrefixExpr) { @custom }
-    ParenExpr(SyntaxKind::ParenExpr) {}
+    ParenExpr(SyntaxKind::ParenExpr) { @custom }
     CondExpr(SyntaxKind::CondExpr) {}
     ConcatExpr(SyntaxKind::ConcatExpr) {}
     ReplicExpr(SyntaxKind::ReplicExpr) {}
@@ -253,6 +253,24 @@ ast_nodes! {
 }
 
 // Custom accessors
+
+impl Expression {
+    /// The single wrapped expression child.
+    pub fn inner(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|c| crate::node::is_expression_kind(c.kind()))
+    }
+}
+
+impl ParenExpr {
+    /// The expression inside the parentheses.
+    pub fn inner(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.syntax
+            .children()
+            .find(|c| crate::node::is_expression_kind(c.kind()))
+    }
+}
 
 impl SourceFile {
     pub fn packages(&self) -> AstChildren<PackageDecl> {

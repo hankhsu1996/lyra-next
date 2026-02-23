@@ -89,6 +89,12 @@ pub enum TypeCheckItem {
         method_name: smol_str::SmolStr,
         error_kind: crate::type_infer::ExprTypeErrorKind,
     },
+    UnsupportedLhsForm {
+        lhs_range: TextRange,
+    },
+    InvalidLhs {
+        lhs_range: TextRange,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -412,37 +418,29 @@ fn check_assignment_pair(
     ctx: &dyn TypeCheckCtx,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(simple) = simple_lvalue(lhs) else {
-        return;
-    };
-    let lhs_type = ctx.expr_type(&simple);
-    let rhs_type = ctx.expr_type(rhs);
-
-    check_assignment_compat(
-        &lhs_type,
-        &rhs_type,
-        stmt_node.text_range(),
-        lhs.text_range(),
-        rhs.text_range(),
-        items,
-    );
-}
-
-/// Return the inner node if `lhs` is a simple lvalue (name, qualified name,
-/// field expression, index expression, or parenthesized simple lvalue).
-/// Concat and other compound forms return `None` -- we skip assignment
-/// checks for those.
-fn simple_lvalue(lhs: &SyntaxNode) -> Option<SyntaxNode> {
-    match lhs.kind() {
-        SyntaxKind::NameRef
-        | SyntaxKind::QualifiedName
-        | SyntaxKind::IndexExpr
-        | SyntaxKind::FieldExpr => Some(lhs.clone()),
-        SyntaxKind::Expression | SyntaxKind::ParenExpr => {
-            let inner = lhs.children().find(|c| is_expression_kind(c.kind()))?;
-            simple_lvalue(&inner)
+    match crate::lhs::classify_lhs(lhs) {
+        crate::lhs::LhsClass::Assignable(lhs_node) => {
+            let lhs_type = ctx.expr_type(&lhs_node);
+            let rhs_type = ctx.expr_type(rhs);
+            check_assignment_compat(
+                &lhs_type,
+                &rhs_type,
+                stmt_node.text_range(),
+                lhs.text_range(),
+                rhs.text_range(),
+                items,
+            );
         }
-        _ => None,
+        crate::lhs::LhsClass::Unsupported => {
+            items.push(TypeCheckItem::UnsupportedLhsForm {
+                lhs_range: lhs.text_range(),
+            });
+        }
+        crate::lhs::LhsClass::NotAssignable => {
+            items.push(TypeCheckItem::InvalidLhs {
+                lhs_range: lhs.text_range(),
+            });
+        }
     }
 }
 

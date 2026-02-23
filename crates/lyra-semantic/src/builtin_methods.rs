@@ -128,7 +128,7 @@ fn check_assoc_key_arg(
         if let Some(err) = check_typed_key_arg(arg_node, key_ty, ctx) {
             return Some(err);
         }
-        if require_lvalue && !is_lvalue(arg_node) {
+        if require_lvalue && !is_assignable_ref(arg_node) {
             return Some(ExprType::error(ExprTypeErrorKind::MethodArgNotLvalue));
         }
     }
@@ -221,4 +221,4 @@ fn check_string_method(
     ExprType::from_ty(result_ty)
 }
 
-use crate::expr_lvalue::is_lvalue;
+use crate::lhs::is_assignable_ref;

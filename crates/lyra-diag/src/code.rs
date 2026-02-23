@@ -119,6 +119,14 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 16,
     };
+    pub const UNSUPPORTED_LHS_FORM: Self = Self {
+        namespace: "lyra.type",
+        number: 17,
+    };
+    pub const INVALID_ASSIGNMENT_LHS: Self = Self {
+        namespace: "lyra.type",
+        number: 18,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,
