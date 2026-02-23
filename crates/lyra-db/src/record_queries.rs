@@ -10,8 +10,8 @@ use smol_str::SmolStr;
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::pipeline::preprocess_file;
 use crate::semantic::{
-    compilation_unit_env, def_index_file, def_symbol, global_def_index, name_graph_file,
-    package_scope_index,
+    compilation_unit_env, def_index_file, global_def_index, name_graph_file, package_scope_index,
+    symbol_at_name_ast,
 };
 use crate::ty_resolve::{FieldTyError, FieldTyErrorKind, classify_for_record_field};
 use crate::type_queries::{TyRef, bit_width_total};
@@ -415,7 +415,7 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
     let unit = mref.unit(db);
     let modport_id = mref.modport_id(db);
 
-    let Some(gsym) = def_symbol(db, unit, modport_id.owner.global_def()) else {
+    let Some(gsym) = symbol_at_name_ast(db, unit, modport_id.owner.global_def().ast_id()) else {
         return empty_modport_sem();
     };
 

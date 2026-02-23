@@ -23,5 +23,4 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
    - Remaining:
      1. TextRange migration in semantic structs -- replace remaining `TextRange` fields with `ErasedAstId` anchors, compute ranges only in diagnostics lowering / presentation.
      2. Extract definition-namespace entries from `SymbolTable` into their own first-class def structure with non-optional anchors.
-     3. `GlobalDefId` is still used as a generic cross-file anchor in `PackageScope` value/type-namespace members. Follow-up PR will change `PackageScope` to use `ErasedAstId` directly for member anchors, restricting `GlobalDefId` to definition-namespace constructs only.
    - Outcome: Enables future `TypeSpelling` / provenance queries derived purely from CST/AST without heuristics, preserving incrementality and determinism.

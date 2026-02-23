@@ -348,8 +348,16 @@ fn core_resolution_to_ty(
                 _ => None,
             }
         }
-        CoreResolveResult::Resolved(CoreResolution::Global { decl, .. }) => {
-            let sym_id = crate::semantic::def_symbol(db, unit, *decl)?;
+        CoreResolveResult::Resolved(CoreResolution::Def { def }) => {
+            let sym_id = crate::semantic::symbol_at_name_ast(db, unit, def.ast_id())?;
+            let sym_ref = SymbolRef::new(db, unit, sym_id);
+            match type_of_symbol_raw(db, sym_ref) {
+                SymbolType::TypeAlias(ty) => Some(ty),
+                _ => None,
+            }
+        }
+        CoreResolveResult::Resolved(CoreResolution::Pkg { ast, .. }) => {
+            let sym_id = crate::semantic::symbol_at_name_ast(db, unit, *ast)?;
             let sym_ref = SymbolRef::new(db, unit, sym_id);
             match type_of_symbol_raw(db, sym_ref) {
                 SymbolType::TypeAlias(ty) => Some(ty),

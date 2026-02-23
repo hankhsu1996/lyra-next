@@ -86,10 +86,8 @@ pub struct GlobalSymbolId {
 /// Cross-file identity for definition-namespace constructs (module, package,
 /// interface, program, primitive, config). Wraps `ErasedAstId` with
 /// `def_ast` semantics. `symbol_global_def()` enforces the restriction.
-///
-/// NOTE: `PackageScope` still stores `GlobalDefId` for value/type-namespace
-/// members (not just definition-namespace). A follow-up PR will change
-/// `PackageScope` to use `ErasedAstId` directly for member anchors.
+/// `PackageScope` uses `ErasedAstId` directly for value/type-namespace
+/// member anchors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlobalDefId(ErasedAstId);
 

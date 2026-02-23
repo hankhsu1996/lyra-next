@@ -35,13 +35,28 @@ fn classify_resolve_result(
                     file: defining_file,
                     local: *symbol,
                 },
-                CoreResolution::Global { decl, .. } => {
-                    let target_file_id = decl.file();
+                CoreResolution::Def { def } => {
+                    let anchor = def.ast_id();
+                    let target_file_id = anchor.file();
                     let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
                         return TypeResolveOutcome::Ok(Ty::Error);
                     };
                     let target_def = def_index_file(db, target_file);
-                    let Some(&sym_id) = target_def.name_ast_to_symbol.get(&decl.ast_id()) else {
+                    let Some(&sym_id) = target_def.name_ast_to_symbol.get(&anchor) else {
+                        return TypeResolveOutcome::Ok(Ty::Error);
+                    };
+                    GlobalSymbolId {
+                        file: target_file_id,
+                        local: sym_id,
+                    }
+                }
+                CoreResolution::Pkg { ast, .. } => {
+                    let target_file_id = ast.file();
+                    let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
+                        return TypeResolveOutcome::Ok(Ty::Error);
+                    };
+                    let target_def = def_index_file(db, target_file);
+                    let Some(&sym_id) = target_def.name_ast_to_symbol.get(ast) else {
                         return TypeResolveOutcome::Ok(Ty::Error);
                     };
                     GlobalSymbolId {

@@ -110,23 +110,7 @@ pub(crate) fn lower_semantic_diag(
             primary_span,
         ),
         SemanticDiagKind::AmbiguousWildcardImport { name, candidates } => {
-            let pkgs = candidates.join("`, `");
-            Diagnostic::new(
-                Severity::Error,
-                DiagnosticCode::AMBIGUOUS_IMPORT,
-                Message::new(
-                    MessageId::AmbiguousWildcardImport,
-                    vec![
-                        Arg::Name(name.clone()),
-                        Arg::Name(SmolStr::new(format!("`{pkgs}`"))),
-                    ],
-                ),
-            )
-            .with_label(Label {
-                kind: LabelKind::Primary,
-                span: primary_span,
-                message: Message::simple(MessageId::AmbiguousWildcardImport),
-            })
+            lower_ambiguous_wildcard(name, candidates, primary_span)
         }
         SemanticDiagKind::UnsupportedQualifiedPath { path } => lower_args_diag(
             DiagnosticCode::UNSUPPORTED_QUALIFIED_PATH,
@@ -185,6 +169,7 @@ pub(crate) fn lower_semantic_diag(
             vec![Arg::Name(SmolStr::new(format!("{count}")))],
             primary_span,
         ),
+        SemanticDiagKind::InternalError { detail } => lower_internal_error(detail, primary_span),
     }
 }
 
@@ -374,6 +359,41 @@ fn lower_duplicate_def(
         });
     }
     d
+}
+
+fn lower_ambiguous_wildcard(name: &SmolStr, candidates: &[SmolStr], span: Span) -> Diagnostic {
+    let pkgs = candidates.join("`, `");
+    Diagnostic::new(
+        Severity::Error,
+        DiagnosticCode::AMBIGUOUS_IMPORT,
+        Message::new(
+            MessageId::AmbiguousWildcardImport,
+            vec![
+                Arg::Name(name.clone()),
+                Arg::Name(SmolStr::new(format!("`{pkgs}`"))),
+            ],
+        ),
+    )
+    .with_label(Label {
+        kind: LabelKind::Primary,
+        span,
+        message: Message::simple(MessageId::AmbiguousWildcardImport),
+    })
+}
+
+fn lower_internal_error(detail: &SmolStr, span: Span) -> Diagnostic {
+    let text = SmolStr::new(format!("internal error: {detail}"));
+    Diagnostic::new(
+        Severity::Error,
+        DiagnosticCode::INTERNAL_ERROR,
+        Message::new(MessageId::InternalError, vec![Arg::Name(text.clone())]),
+    )
+    .with_label(Label {
+        kind: LabelKind::Primary,
+        span,
+        message: Message::new(MessageId::InternalError, vec![Arg::Name(text)]),
+    })
+    .with_origin(DiagnosticOrigin::Internal)
 }
 
 fn lower_name_diag(

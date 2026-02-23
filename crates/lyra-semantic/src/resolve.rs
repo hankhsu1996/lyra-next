@@ -17,7 +17,7 @@ use crate::resolve_index::{
     ImportError, Resolution, ResolveIndex, ResolvedTarget, UnresolvedReason, WildcardLocalConflict,
 };
 use crate::scopes::{ScopeId, SymbolNameLookup};
-use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
+use crate::symbols::{GlobalSymbolId, Namespace, NsMask, SymbolId};
 
 /// Shared resolution context for `resolve_simple` and related functions.
 struct ResolveCtx<'a> {
@@ -107,7 +107,7 @@ pub fn build_resolve_core(
 /// wildcard promotion.
 pub(crate) struct RealizedBinding {
     pub name: SmolStr,
-    pub target: GlobalDefId,
+    pub target: lyra_ast::ErasedAstId,
     pub ns: Namespace,
     pub origins: SmallVec<[ImportOrigin; 1]>,
 }
@@ -178,8 +178,8 @@ pub(crate) fn build_effective_imports(
     }
 
     // Step 2: build wildcard candidate maps (split by namespace)
-    let mut value_candidates: HashMap<SmolStr, Vec<GlobalDefId>> = HashMap::new();
-    let mut type_candidates: HashMap<SmolStr, Vec<GlobalDefId>> = HashMap::new();
+    let mut value_candidates: HashMap<SmolStr, Vec<lyra_ast::ErasedAstId>> = HashMap::new();
+    let mut type_candidates: HashMap<SmolStr, Vec<lyra_ast::ErasedAstId>> = HashMap::new();
     for imp in graph.imports_for_scope(scope_id) {
         if imp.name == ImportName::Wildcard
             && let Some(surface) = pkg_scope.public_surface(&imp.package)
@@ -452,10 +452,7 @@ fn resolve_simple(
 ) -> CoreResolveResult {
     if let ExpectedNs::Exact(Namespace::Definition) = expected {
         return if let Some((def_id, _)) = ctx.global.resolve_definition(name) {
-            CoreResolveResult::Resolved(CoreResolution::Global {
-                decl: def_id,
-                namespace: Namespace::Definition,
-            })
+            CoreResolveResult::Resolved(CoreResolution::Def { def: def_id })
         } else {
             CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
         };
@@ -525,10 +522,7 @@ fn resolve_simple(
     if matches!(expected, ExpectedNs::TypeThenValue)
         && let Some((def_id, _)) = ctx.global.resolve_definition(name)
     {
-        return CoreResolveResult::Resolved(CoreResolution::Global {
-            decl: def_id,
-            namespace: Namespace::Definition,
-        });
+        return CoreResolveResult::Resolved(CoreResolution::Def { def: def_id });
     }
 
     CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
@@ -562,11 +556,8 @@ fn resolve_qualified(
         other => other,
     });
     for &ns in &nss[..len] {
-        if let Some(def_id) = pkg_scope.resolve(pkg_name, member_name, ns) {
-            return CoreResolveResult::Resolved(CoreResolution::Global {
-                decl: def_id,
-                namespace: ns,
-            });
+        if let Some(ast_id) = pkg_scope.resolve(pkg_name, member_name, ns) {
+            return CoreResolveResult::Resolved(CoreResolution::pkg(ast_id, ns));
         }
     }
     CoreResolveResult::Unresolved(UnresolvedReason::MemberNotFound {
@@ -590,12 +581,9 @@ fn resolve_via_explicit_import(
             if let ImportName::Explicit(ref member) = imp.name
                 && member.as_str() == name
                 && imp.order_key < use_order_key
-                && let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns)
+                && let Some(ast_id) = pkg_scope.resolve(&imp.package, name, ns)
             {
-                return Some(CoreResolution::Global {
-                    decl: def_id,
-                    namespace: ns,
-                });
+                return Some(CoreResolution::pkg(ast_id, ns));
             }
         }
         current = graph.scopes.get(sid).parent;
@@ -611,7 +599,7 @@ enum WildcardResult {
 
 /// Result from wildcard import resolution: symbol, enum variant, or not found.
 enum WildcardFound {
-    Symbol(GlobalDefId, SmolStr),
+    Symbol(lyra_ast::ErasedAstId, SmolStr),
     EnumVariant(crate::enum_def::EnumVariantTarget, SmolStr),
 }
 
@@ -679,11 +667,8 @@ fn resolve_via_wildcard_import(
             return WildcardResult::Ambiguous(ambiguous_pkgs.into_boxed_slice());
         }
         match found {
-            Some(WildcardFound::Symbol(def_id, _)) => {
-                return WildcardResult::Found(CoreResolution::Global {
-                    decl: def_id,
-                    namespace: ns,
-                });
+            Some(WildcardFound::Symbol(ast_id, _)) => {
+                return WildcardResult::Found(CoreResolution::pkg(ast_id, ns));
             }
             Some(WildcardFound::EnumVariant(target, _)) => {
                 return WildcardResult::Found(CoreResolution::EnumVariant(target));
@@ -711,14 +696,14 @@ fn resolve_via_implicit_import(
     name: &str,
     ns: Namespace,
 ) -> WildcardResult {
-    let mut found: Option<(GlobalDefId, SmolStr)> = None;
+    let mut found: Option<(lyra_ast::ErasedAstId, SmolStr)> = None;
     let mut ambiguous_pkgs: Vec<SmolStr> = Vec::new();
 
     for imp in &*cu_env.implicit_imports {
         if imp.name == ImportName::Wildcard {
-            if let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns) {
+            if let Some(ast_id) = pkg_scope.resolve(&imp.package, name, ns) {
                 if let Some((existing_id, _)) = &found {
-                    if *existing_id != def_id {
+                    if *existing_id != ast_id {
                         if ambiguous_pkgs.is_empty() {
                             ambiguous_pkgs
                                 .push(found.as_ref().map(|(_, p)| p.clone()).unwrap_or_default());
@@ -726,28 +711,22 @@ fn resolve_via_implicit_import(
                         ambiguous_pkgs.push(imp.package.clone());
                     }
                 } else {
-                    found = Some((def_id, imp.package.clone()));
+                    found = Some((ast_id, imp.package.clone()));
                 }
             }
         } else if let ImportName::Explicit(ref member) = imp.name
             && member.as_str() == name
-            && let Some(def_id) = pkg_scope.resolve(&imp.package, name, ns)
+            && let Some(ast_id) = pkg_scope.resolve(&imp.package, name, ns)
         {
-            return WildcardResult::Found(CoreResolution::Global {
-                decl: def_id,
-                namespace: ns,
-            });
+            return WildcardResult::Found(CoreResolution::pkg(ast_id, ns));
         }
     }
 
     if !ambiguous_pkgs.is_empty() {
         return WildcardResult::Ambiguous(ambiguous_pkgs.into_boxed_slice());
     }
-    if let Some((def_id, _)) = found {
-        return WildcardResult::Found(CoreResolution::Global {
-            decl: def_id,
-            namespace: ns,
-        });
+    if let Some((ast_id, _)) = found {
+        return WildcardResult::Found(CoreResolution::pkg(ast_id, ns));
     }
     WildcardResult::NotFound
 }
@@ -977,8 +956,9 @@ fn has_higher_precedence_binding(
 /// Zips `def.use_sites` with `core.resolutions`, builds the `HashMap`
 /// and diagnostics. Import errors are also mapped to diagnostics.
 ///
-/// `lookup_decl` maps a `GlobalDefId` (from `CoreResolution::Global`)
-/// to a `SymbolId` in the target file.
+/// `lookup_decl` maps an `ErasedAstId` (`name_ast` anchor from
+/// `CoreResolution::Def` or `CoreResolution::Pkg`) to a `SymbolId`
+/// in the target file.
 ///
 /// `instance_filter` is called when core resolution resolves a use-site
 /// to an `Instance` symbol. Returns `true` if the instance should be
@@ -988,7 +968,7 @@ fn has_higher_precedence_binding(
 pub fn build_resolve_index(
     def: &DefIndex,
     core: &CoreResolveOutput,
-    lookup_decl: &dyn Fn(GlobalDefId) -> Option<SymbolId>,
+    lookup_decl: &dyn Fn(lyra_ast::ErasedAstId) -> Option<SymbolId>,
     instance_filter: &dyn Fn(crate::instance_decl::InstanceDeclIdx) -> bool,
 ) -> ResolveIndex {
     let mut resolutions = HashMap::new();
@@ -1030,26 +1010,33 @@ pub fn build_resolve_index(
                     diagnostics.push(diag);
                 }
             }
-            CoreResolveResult::Resolved(CoreResolution::Global { decl, namespace }) => {
-                if let Some(local) = lookup_decl(*decl) {
-                    resolutions.insert(
-                        use_site.ast_id,
-                        Resolution {
-                            target: ResolvedTarget::Symbol(GlobalSymbolId {
-                                file: decl.file(),
-                                local,
-                            }),
-                            namespace: *namespace,
+            CoreResolveResult::Resolved(CoreResolution::Def { def }) => {
+                resolve_cross_file(
+                    def.ast_id(),
+                    Namespace::Definition,
+                    use_site,
+                    lookup_decl,
+                    &mut resolutions,
+                    &mut diagnostics,
+                );
+            }
+            CoreResolveResult::Resolved(CoreResolution::Pkg { ast, namespace }) => {
+                if *namespace == Namespace::Definition {
+                    diagnostics.push(SemanticDiag {
+                        kind: SemanticDiagKind::InternalError {
+                            detail: SmolStr::new("Pkg resolution carries Definition namespace"),
                         },
-                    );
-                    if let Some(diag) = check_type_mismatch(
-                        use_site.expected_ns,
+                        range: use_site.range,
+                    });
+                } else {
+                    resolve_cross_file(
+                        *ast,
                         *namespace,
-                        &use_site.path,
-                        use_site.range,
-                    ) {
-                        diagnostics.push(diag);
-                    }
+                        use_site,
+                        lookup_decl,
+                        &mut resolutions,
+                        &mut diagnostics,
+                    );
                 }
             }
             CoreResolveResult::Resolved(CoreResolution::EnumVariant(target)) => {
@@ -1073,7 +1060,20 @@ pub fn build_resolve_index(
         }
     }
 
-    // Map import errors to diagnostics
+    map_import_errors(def, core, &mut diagnostics);
+
+    ResolveIndex {
+        file: def.file,
+        resolutions,
+        diagnostics: diagnostics.into_boxed_slice(),
+    }
+}
+
+fn map_import_errors(
+    def: &DefIndex,
+    core: &CoreResolveOutput,
+    diagnostics: &mut Vec<SemanticDiag>,
+) {
     for err in &core.import_errors {
         let imp = &def.imports[err.import_idx as usize];
         let path = match &imp.name {
@@ -1090,11 +1090,35 @@ pub fn build_resolve_index(
         );
         diagnostics.push(diag);
     }
+}
 
-    ResolveIndex {
-        file: def.file,
-        resolutions,
-        diagnostics: diagnostics.into_boxed_slice(),
+fn resolve_cross_file(
+    anchor: lyra_ast::ErasedAstId,
+    namespace: Namespace,
+    use_site: &crate::def_index::UseSite,
+    lookup_decl: &dyn Fn(lyra_ast::ErasedAstId) -> Option<SymbolId>,
+    resolutions: &mut HashMap<lyra_ast::ErasedAstId, Resolution>,
+    diagnostics: &mut Vec<SemanticDiag>,
+) {
+    if let Some(local) = lookup_decl(anchor) {
+        resolutions.insert(
+            use_site.ast_id,
+            Resolution {
+                target: ResolvedTarget::Symbol(GlobalSymbolId {
+                    file: anchor.file(),
+                    local,
+                }),
+                namespace,
+            },
+        );
+        if let Some(diag) = check_type_mismatch(
+            use_site.expected_ns,
+            namespace,
+            &use_site.path,
+            use_site.range,
+        ) {
+            diagnostics.push(diag);
+        }
     }
 }
 

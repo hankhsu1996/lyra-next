@@ -52,6 +52,9 @@ pub enum SemanticDiagKind {
     EnumRangeTooLarge {
         count: u64,
     },
+    InternalError {
+        detail: SmolStr,
+    },
 }
 
 impl SemanticDiag {
@@ -100,6 +103,9 @@ impl SemanticDiag {
             }
             SemanticDiagKind::EnumRangeTooLarge { count } => {
                 format!("enum member range count is too large ({count})")
+            }
+            SemanticDiagKind::InternalError { detail } => {
+                format!("internal error: {detail}")
             }
         }
     }

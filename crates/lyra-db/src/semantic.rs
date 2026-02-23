@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use lyra_ast::ErasedAstId;
 use lyra_semantic::def_index::{CompilationUnitEnv, DefIndex, ImplicitImport, ImportName};
 use lyra_semantic::enum_def::PkgEnumVariantIndex;
 use lyra_semantic::global_index::{
@@ -88,17 +89,17 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
                 continue;
             }
 
-            let mut value_ns: Vec<(SmolStr, GlobalDefId)> = Vec::new();
-            let mut type_ns: Vec<(SmolStr, GlobalDefId)> = Vec::new();
+            let mut value_ns: Vec<(SmolStr, ErasedAstId)> = Vec::new();
+            let mut type_ns: Vec<(SmolStr, ErasedAstId)> = Vec::new();
 
             for &child_sym_id in &*scope_data.value_ns {
                 let child_sym = def.symbols.get(child_sym_id);
-                value_ns.push((child_sym.name.clone(), GlobalDefId::new(child_sym.name_ast)));
+                value_ns.push((child_sym.name.clone(), child_sym.name_ast));
             }
 
             for &child_sym_id in &*scope_data.type_ns {
                 let child_sym = def.symbols.get(child_sym_id);
-                type_ns.push((child_sym.name.clone(), GlobalDefId::new(child_sym.name_ast)));
+                type_ns.push((child_sym.name.clone(), child_sym.name_ast));
             }
 
             value_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
@@ -274,11 +275,11 @@ pub fn base_resolve_index(
     let def = def_index_file(db, file);
     let core = resolve_core_file(db, file, unit);
     let global = global_def_index(db, unit);
-    let lookup_decl = |def_id: GlobalDefId| -> Option<lyra_semantic::symbols::SymbolId> {
-        let target_file_id = def_id.file();
+    let lookup_decl = |ast_id: ErasedAstId| -> Option<lyra_semantic::symbols::SymbolId> {
+        let target_file_id = ast_id.file();
         let target_file = source_file_by_id(db, unit, target_file_id)?;
         let target_def = def_index_file(db, target_file);
-        target_def.name_ast_to_symbol.get(&def_id.ast_id()).copied()
+        target_def.name_ast_to_symbol.get(&ast_id).copied()
     };
     let instance_filter =
         |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
@@ -298,11 +299,11 @@ pub fn resolve_index_file(
     let def = def_index_file(db, file);
     let core = enriched_resolve_core(db, file, unit);
     let global = global_def_index(db, unit);
-    let lookup_decl = |def_id: GlobalDefId| -> Option<lyra_semantic::symbols::SymbolId> {
-        let target_file_id = def_id.file();
+    let lookup_decl = |ast_id: ErasedAstId| -> Option<lyra_semantic::symbols::SymbolId> {
+        let target_file_id = ast_id.file();
         let target_file = source_file_by_id(db, unit, target_file_id)?;
         let target_def = def_index_file(db, target_file);
-        target_def.name_ast_to_symbol.get(&def_id.ast_id()).copied()
+        target_def.name_ast_to_symbol.get(&ast_id).copied()
     };
     let instance_filter =
         |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
@@ -324,9 +325,8 @@ fn instance_decl_is_interface(
     let Some(result) = core.resolutions.get(decl.type_use_site_idx as usize) else {
         return false;
     };
-    if let CoreResolveResult::Resolved(lyra_semantic::resolve_index::CoreResolution::Global {
-        decl: def_id,
-        ..
+    if let CoreResolveResult::Resolved(lyra_semantic::resolve_index::CoreResolution::Def {
+        def: def_id,
     }) = result
     {
         matches!(global.def_kind(*def_id), Some(DefinitionKind::Interface))
@@ -335,20 +335,21 @@ fn instance_decl_is_interface(
     }
 }
 
-/// Canonical `GlobalDefId` -> `GlobalSymbolId` resolution (Salsa-tracked).
+/// Canonical cross-file `name_ast` anchor -> `GlobalSymbolId` resolution
+/// (Salsa-tracked).
 ///
-/// Single path from a cross-file definition identity to the symbol that
-/// declares it. Both `modport_sem` and `member_lookup` use this.
+/// Resolves a cross-file `name_ast` anchor to the symbol declared at
+/// that site. Used by `modport_sem`, `member_lookup`, and other consumers.
 #[salsa::tracked]
-pub fn def_symbol(
+pub fn symbol_at_name_ast(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
-    def_id: GlobalDefId,
+    name_ast: ErasedAstId,
 ) -> Option<GlobalSymbolId> {
-    let file_id = def_id.file();
+    let file_id = name_ast.file();
     let source_file = source_file_by_id(db, unit, file_id)?;
     let def = def_index_file(db, source_file);
-    let local = def.name_ast_to_symbol.get(&def_id.ast_id()).copied()?;
+    let local = def.name_ast_to_symbol.get(&name_ast).copied()?;
     Some(GlobalSymbolId {
         file: file_id,
         local,
