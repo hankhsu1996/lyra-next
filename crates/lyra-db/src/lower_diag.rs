@@ -1,4 +1,7 @@
-use lyra_diag::{Arg, Diagnostic, DiagnosticCode, Label, LabelKind, Message, MessageId, Severity};
+use lyra_diag::{
+    Arg, Diagnostic, DiagnosticCode, DiagnosticOrigin, Label, LabelKind, Message, MessageId,
+    Severity,
+};
 use lyra_preprocess::PreprocOutput;
 use lyra_semantic::def_index::DefIndex;
 use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
@@ -55,6 +58,24 @@ pub(crate) fn lower_file_diagnostics(
     for diag in def.diagnostics.iter().chain(resolve.diagnostics.iter()) {
         let (primary_span, _) = map_span_or_fallback(file_id, &pp.source_map, diag.range);
         diags.push(lower_semantic_diag(diag, primary_span, &pp.source_map));
+    }
+
+    for (range, detail) in &*def.internal_errors {
+        let (span, extra) = map_span_or_fallback(file_id, &pp.source_map, *range);
+        let text = freeform_text(&format!("internal error: {detail}"), extra);
+        diags.push(
+            Diagnostic::new(
+                Severity::Error,
+                DiagnosticCode::INTERNAL_ERROR,
+                Message::new(MessageId::InternalError, vec![Arg::Name(text.clone())]),
+            )
+            .with_label(Label {
+                kind: LabelKind::Primary,
+                span,
+                message: Message::new(MessageId::InternalError, vec![Arg::Name(text)]),
+            })
+            .with_origin(DiagnosticOrigin::Internal),
+        );
     }
 
     diags
@@ -411,5 +432,53 @@ fn freeform_text(message: &str, extra: Option<&str>) -> SmolStr {
     match extra {
         Some(suffix) => SmolStr::new(format!("{message}{suffix}")),
         None => SmolStr::new(message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lyra_diag::{DiagnosticCode, DiagnosticOrigin, MessageId};
+
+    #[test]
+    fn internal_errors_lowered_end_to_end() {
+        let src = "module m; endmodule";
+        let tokens = lyra_lexer::lex(src);
+        let pp = lyra_preprocess::preprocess_identity(FileId(0), &tokens, src);
+        let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
+        let map = lyra_ast::AstIdMap::from_root(FileId(0), &parse.syntax());
+        let mut def = lyra_semantic::build_def_index(FileId(0), &parse, &map);
+        // Inject a synthetic internal error to test the lowering path
+        let mut errors = def.internal_errors.to_vec();
+        errors.push((
+            TextRange::new(TextSize::new(0), TextSize::new(6)),
+            SmolStr::new("test invariant violation"),
+        ));
+        def.internal_errors = errors.into_boxed_slice();
+
+        let resolve = lyra_semantic::resolve_index::ResolveIndex {
+            file: FileId(0),
+            resolutions: std::collections::HashMap::new(),
+            diagnostics: Box::new([]),
+        };
+        let diags = lower_file_diagnostics(FileId(0), &pp, &parse, &def, &resolve);
+
+        let internal: Vec<_> = diags
+            .iter()
+            .filter(|d| d.origin == DiagnosticOrigin::Internal)
+            .collect();
+        assert_eq!(internal.len(), 1, "should have exactly one internal diag");
+        let d = &internal[0];
+        assert_eq!(d.code, DiagnosticCode::INTERNAL_ERROR);
+        assert_eq!(d.message.id, MessageId::InternalError);
+        let rendered = d.render_message();
+        assert!(
+            rendered.contains("internal error:"),
+            "message should contain 'internal error:': {rendered}"
+        );
+        assert!(
+            rendered.contains("test invariant violation"),
+            "message should contain detail text: {rendered}"
+        );
     }
 }

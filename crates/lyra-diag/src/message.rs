@@ -81,6 +81,7 @@ pub enum MessageId {
     ValueNotType,
     RedefinedHere,
     FirstDefinedHere,
+    InternalError,
 }
 
 /// A typed argument that fills a placeholder in a message template.
@@ -231,7 +232,7 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::ValueNotType => "this is a value, not a type".into(),
         MessageId::RedefinedHere => "redefined here".into(),
         MessageId::FirstDefinedHere => "first defined here".into(),
-        MessageId::ParseError | MessageId::PreprocessError => msg
+        MessageId::ParseError | MessageId::PreprocessError | MessageId::InternalError => msg
             .args
             .first()
             .and_then(Arg::as_name)

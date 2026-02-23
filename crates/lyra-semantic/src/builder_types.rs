@@ -76,6 +76,16 @@ fn register_type_use_site(
 }
 
 pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error(
+            &format!(
+                "erased_ast_id returned None for {:?} in collect_typedef",
+                node.kind()
+            ),
+            node.text_range(),
+        );
+        return;
+    };
     // Detect enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
     for child in node.children() {
@@ -101,6 +111,7 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
             | SymbolOrigin::Instance(_) => {}
         }
         let sym_id = ctx.add_symbol_with_origin(
+            def_ast,
             typedef_name,
             SymbolKind::Typedef,
             name_tok.text_range(),
@@ -222,6 +233,7 @@ fn collect_enum_def(
         } else {
             // Plain members: inject real symbol with decl binding.
             let sym_id = ctx.add_symbol_with_origin(
+                erased_ast_id,
                 name,
                 SymbolKind::EnumMember,
                 name_tok.text_range(),

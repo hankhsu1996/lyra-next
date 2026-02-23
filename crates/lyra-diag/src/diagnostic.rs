@@ -12,12 +12,22 @@ pub enum Severity {
     Info,
 }
 
+/// Whether a diagnostic originates from user-visible analysis or from an
+/// internal invariant violation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiagnosticOrigin {
+    #[default]
+    User,
+    Internal,
+}
+
 /// A structured diagnostic with code identity, labels, notes, and fixits.
 ///
 /// The primary span is derived from the first `Primary` label -- there is
 /// no redundant stored `span` field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
+    pub origin: DiagnosticOrigin,
     pub severity: Severity,
     pub code: DiagnosticCode,
     pub message: Message,
@@ -29,6 +39,7 @@ pub struct Diagnostic {
 impl Diagnostic {
     pub fn new(severity: Severity, code: DiagnosticCode, message: Message) -> Self {
         Self {
+            origin: DiagnosticOrigin::User,
             severity,
             code,
             message,
@@ -47,6 +58,12 @@ impl Diagnostic {
     #[must_use]
     pub fn with_note(mut self, note: Message) -> Self {
         self.notes.push(note);
+        self
+    }
+
+    #[must_use]
+    pub fn with_origin(mut self, origin: DiagnosticOrigin) -> Self {
+        self.origin = origin;
         self
     }
 
