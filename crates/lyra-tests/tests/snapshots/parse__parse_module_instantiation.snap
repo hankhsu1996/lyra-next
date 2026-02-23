@@ -3,13 +3,13 @@ source: crates/lyra-tests/tests/parse.rs
 expression: ws.dump_parse()
 ---
 // file: main.sv
-SourceFile@0..102
-  ModuleDecl@0..101
+SourceFile@0..122
+  ModuleDecl@0..121
     ModuleKw@0..6 "module"
     Whitespace@6..7 " "
     Ident@7..10 "top"
     Semicolon@10..11 ";"
-    ModuleBody@11..91
+    ModuleBody@11..111
       ModuleInstantiation@11..91
         Whitespace@11..14 "\n  "
         Ident@14..19 "adder"
@@ -25,42 +25,62 @@ SourceFile@0..102
               IntLiteral@29..31 "16"
             RParen@31..32 ")"
           RParen@32..33 ")"
-        Whitespace@33..34 " "
-        Ident@34..39 "u_add"
-        InstancePortList@39..90
-          Whitespace@39..40 " "
-          LParen@40..41 "("
-          InstancePort@41..54
-            Whitespace@41..46 "\n    "
-            Dot@46..47 "."
-            Ident@47..48 "a"
-            LParen@48..49 "("
-            NameRef@49..53
-              Ident@49..53 "in_a"
-            RParen@53..54 ")"
-          Comma@54..55 ","
-          InstancePort@55..68
-            Whitespace@55..60 "\n    "
-            Dot@60..61 "."
-            Ident@61..62 "b"
-            LParen@62..63 "("
-            NameRef@63..67
-              Ident@63..67 "in_b"
-            RParen@67..68 ")"
-          Comma@68..69 ","
-          InstancePort@69..86
-            Whitespace@69..74 "\n    "
-            Dot@74..75 "."
-            Ident@75..78 "sum"
-            LParen@78..79 "("
-            NameRef@79..85
-              Ident@79..85 "result"
-            RParen@85..86 ")"
-          Whitespace@86..89 "\n  "
-          RParen@89..90 ")"
+        HierarchicalInstance@33..90
+          Whitespace@33..34 " "
+          Ident@34..39 "u_add"
+          InstancePortList@39..90
+            Whitespace@39..40 " "
+            LParen@40..41 "("
+            InstancePort@41..54
+              Whitespace@41..46 "\n    "
+              Dot@46..47 "."
+              Ident@47..48 "a"
+              LParen@48..49 "("
+              NameRef@49..53
+                Ident@49..53 "in_a"
+              RParen@53..54 ")"
+            Comma@54..55 ","
+            InstancePort@55..68
+              Whitespace@55..60 "\n    "
+              Dot@60..61 "."
+              Ident@61..62 "b"
+              LParen@62..63 "("
+              NameRef@63..67
+                Ident@63..67 "in_b"
+              RParen@67..68 ")"
+            Comma@68..69 ","
+            InstancePort@69..86
+              Whitespace@69..74 "\n    "
+              Dot@74..75 "."
+              Ident@75..78 "sum"
+              LParen@78..79 "("
+              NameRef@79..85
+                Ident@79..85 "result"
+              RParen@85..86 ")"
+            Whitespace@86..89 "\n  "
+            RParen@89..90 ")"
         Semicolon@90..91 ";"
-    Whitespace@91..92 "\n"
-    EndmoduleKw@92..101 "endmodule"
-  Whitespace@101..102 "\n"
+      ModuleInstantiation@91..111
+        Whitespace@91..94 "\n  "
+        Ident@94..97 "mux"
+        HierarchicalInstance@97..104
+          Whitespace@97..98 " "
+          Ident@98..100 "u1"
+          InstancePortList@100..104
+            LParen@100..101 "("
+            InstancePort@101..103
+              DotStar@101..103 ".*"
+            RParen@103..104 ")"
+        Comma@104..105 ","
+        HierarchicalInstance@105..110
+          Whitespace@105..106 " "
+          Ident@106..108 "u2"
+          InstancePortList@108..110
+            LParen@108..109 "("
+            RParen@109..110 ")"
+        Semicolon@110..111 ";"
+    Whitespace@111..112 "\n"
+    EndmoduleKw@112..121 "endmodule"
+  Whitespace@121..122 "\n"
 ---
 no diagnostics

@@ -11,7 +11,7 @@ fn resolve_at_port() {
     let sym =
         symbol_global(&db, unit, result.expect("checked above")).expect("symbol should exist");
     assert_eq!(sym.name.as_str(), "a");
-    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Port);
+    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::PortAnsi);
 }
 
 #[test]

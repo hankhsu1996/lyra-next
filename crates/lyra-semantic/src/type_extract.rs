@@ -200,52 +200,27 @@ fn extract_net_decl(
         return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
     };
 
-    // Net declarations: implicit logic data type.
-    // Check for optional signing and packed dims as direct children.
-    let mut signed_override: Option<bool> = None;
-    let mut packed = Vec::new();
-
-    // Check for TypeSpec child (some net declarations have one)
-    if let Some(typespec) = find_child(container, SyntaxKind::TypeSpec) {
-        if typespec_name_ref(&typespec).is_some() {
-            return SymbolType::Net(NetType {
-                kind: net_kind,
-                data: Ty::Error,
-            });
-        }
-        let (base, so) = extract_typespec_base(&typespec);
-        signed_override = so;
-        packed = extract_packed_dims(&typespec, ast_id_map);
-        let unpacked = declarator
-            .map(|d| extract_unpacked_dims(d, ast_id_map))
-            .unwrap_or_default();
-        let ty = build_base_ty(base, signed_override, packed);
+    // The TypeSpec child contains the net type keyword + optional signing + packed dims.
+    let typespec = find_child(container, SyntaxKind::TypeSpec);
+    let Some(typespec) = typespec else {
+        // Fallback: bare net type with no TypeSpec (should not happen after parser change)
         return SymbolType::Net(NetType {
             kind: net_kind,
-            data: wrap_unpacked(ty, &unpacked),
+            data: Ty::simple_logic(),
+        });
+    };
+    if typespec_name_ref(&typespec).is_some() {
+        return SymbolType::Net(NetType {
+            kind: net_kind,
+            data: Ty::Error,
         });
     }
-
-    // No TypeSpec -- check for signing/packed dims as direct children
-    for el in container.children_with_tokens() {
-        match el {
-            SyntaxElement::Token(tok) => match tok.kind() {
-                SyntaxKind::SignedKw => signed_override = Some(true),
-                SyntaxKind::UnsignedKw => signed_override = Some(false),
-                _ => {}
-            },
-            SyntaxElement::Node(node) => {
-                if node.kind() == SyntaxKind::PackedDimension {
-                    packed.push(extract_single_packed_dim(&node, ast_id_map));
-                }
-            }
-        }
-    }
-
+    let (_base, signed_override) = extract_typespec_base(&typespec);
+    let packed = extract_packed_dims(&typespec, ast_id_map);
     let unpacked = declarator
         .map(|d| extract_unpacked_dims(d, ast_id_map))
         .unwrap_or_default();
-
+    // Net declarations have an implicit logic data type
     let signed = signed_override.unwrap_or(IntegralKw::Logic.default_signed());
     let ty = Ty::Integral(Integral {
         keyword: IntegralKw::Logic,
@@ -544,7 +519,9 @@ fn keyword_to_integral_kw(kind: SyntaxKind) -> Option<IntegralKw> {
 }
 
 fn net_keyword(node: &SyntaxNode) -> Option<NetKind> {
-    for el in node.children_with_tokens() {
+    // The net type keyword lives inside the TypeSpec child.
+    let typespec = find_child(node, SyntaxKind::TypeSpec)?;
+    for el in typespec.children_with_tokens() {
         if let SyntaxElement::Token(tok) = el {
             let nk = match tok.kind() {
                 SyntaxKind::WireKw => Some(NetKind::Wire),

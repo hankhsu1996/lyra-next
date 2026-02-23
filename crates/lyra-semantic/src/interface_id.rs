@@ -15,7 +15,7 @@ pub struct InterfaceDefId(GlobalDefId);
 impl InterfaceDefId {
     /// Construct from a `DefIndex` (per-file, used after symbol table freeze).
     pub fn try_from_def_index(def_index: &DefIndex, def: GlobalDefId) -> Option<Self> {
-        let sym_id = def_index.decl_to_symbol.get(&def.ast_id())?;
+        let sym_id = def_index.name_ast_to_symbol.get(&def.ast_id())?;
         let kind = DefinitionKind::from_symbol_kind(def_index.symbols.get(*sym_id).kind)?;
         match kind {
             DefinitionKind::Interface => Some(Self(def)),

@@ -62,10 +62,7 @@ ast_nodes! {
     }
 
     NetDecl(SyntaxKind::NetDecl) {
-        net_type: token([
-            WireKw, TriKw, WandKw, WorKw, Tri0Kw,
-            Tri1Kw, TriregKw, Supply0Kw, Supply1Kw, UwireKw,
-        ]),
+        type_spec: TypeSpec,
         declarators: [Declarator],
     }
 
@@ -139,6 +136,11 @@ ast_nodes! {
 
     ModuleInstantiation(SyntaxKind::ModuleInstantiation) {
         module_name: token([Ident, EscapedIdent]),
+        instances: [HierarchicalInstance],
+    }
+
+    HierarchicalInstance(SyntaxKind::HierarchicalInstance) {
+        name: token([Ident, EscapedIdent]),
         port_list: InstancePortList,
     }
 
@@ -844,61 +846,6 @@ impl ModuleInstantiation {
     /// The parameter override list `#(...)` if present.
     pub fn param_overrides(&self) -> Option<ParamPortList> {
         support::child(&self.syntax)
-    }
-
-    /// Iterate over all instance entries in this statement.
-    ///
-    /// A single `ModuleInstantiation` statement can declare multiple instances:
-    /// `adder u1(.a(x)), u2(.a(y));`
-    ///
-    /// Each entry yields the instance name token and optional port list.
-    pub fn instances(&self) -> impl Iterator<Item = (SyntaxToken, Option<InstancePortList>)> + '_ {
-        InstanceIter {
-            children: self.syntax.children_with_tokens(),
-            past_module_name: false,
-        }
-    }
-}
-
-struct InstanceIter<I> {
-    children: I,
-    past_module_name: bool,
-}
-
-impl<I: Iterator<Item = rowan::NodeOrToken<lyra_parser::SyntaxNode, SyntaxToken>>> Iterator
-    for InstanceIter<I>
-{
-    type Item = (SyntaxToken, Option<InstancePortList>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut name_token: Option<SyntaxToken> = None;
-        for el in self.children.by_ref() {
-            match el {
-                rowan::NodeOrToken::Token(tok) => {
-                    if matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent) {
-                        if self.past_module_name {
-                            name_token = Some(tok);
-                        } else {
-                            // First ident is the module type name -- skip it
-                            self.past_module_name = true;
-                        }
-                    }
-                }
-                rowan::NodeOrToken::Node(node) => {
-                    if node.kind() == SyntaxKind::InstancePortList
-                        && let Some(name) = name_token.take()
-                    {
-                        let port_list = InstancePortList::cast(node);
-                        return Some((name, port_list));
-                    }
-                }
-            }
-        }
-        // Instance without port list
-        if let Some(name) = name_token {
-            return Some((name, None));
-        }
-        None
     }
 }
 

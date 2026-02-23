@@ -620,7 +620,7 @@ impl SymbolType {
 /// Reasons a symbol's type could not be extracted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolTypeError {
-    /// `symbol_to_decl` returned None (index bug or unsupported node).
+    /// Declaration AST node not found (index bug or unsupported node).
     MissingDecl,
     /// Module, package, interface, etc. -- no meaningful type.
     UnsupportedSymbolKind,

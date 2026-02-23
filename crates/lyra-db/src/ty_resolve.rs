@@ -41,7 +41,7 @@ fn classify_resolve_result(
                         return TypeResolveOutcome::Ok(Ty::Error);
                     };
                     let target_def = def_index_file(db, target_file);
-                    let Some(&sym_id) = target_def.decl_to_symbol.get(&decl.ast_id()) else {
+                    let Some(&sym_id) = target_def.name_ast_to_symbol.get(&decl.ast_id()) else {
                         return TypeResolveOutcome::Ok(Ty::Error);
                     };
                     GlobalSymbolId {

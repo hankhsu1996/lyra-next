@@ -4,4 +4,5 @@ module top;
     .b(in_b),
     .sum(result)
   );
+  mux u1(.*), u2();
 endmodule

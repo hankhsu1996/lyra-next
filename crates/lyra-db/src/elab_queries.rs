@@ -149,7 +149,7 @@ fn extract_port_sigs(
         let port_ast_id = id_map.erased_ast_id(port.syntax());
         let ty = port_ast_id
             .and_then(|ast_id| {
-                let sym_id = def.decl_to_symbol.get(&ast_id).copied()?;
+                let sym_id = def.name_ast_to_symbol.get(&ast_id).copied()?;
                 let gsym = lyra_semantic::symbols::GlobalSymbolId {
                     file: file_id,
                     local: sym_id,
@@ -503,7 +503,6 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         });
         return;
     };
-
     if !target_kind.is_instantiable() {
         ctx.diags.push(ElabDiag::NotInstantiable {
             name: inst_module_name,
@@ -514,28 +513,25 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
 
     let target_sig =
         design_unit_signature(ctx.db, DesignUnitRef::new(ctx.db, ctx.unit, target_def_id));
-
     let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
     let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
-
     let inst_stmt_ast = id_map
         .as_ref()
         .and_then(|m| m.erased_ast_id(node))
         .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
-
     let eval_env = make_eval_env(ctx, env);
     let overrides = extract_param_overrides(&inst_node, ctx.db, ctx.unit, &eval_env);
-
     #[cfg(debug_assertions)]
     let mut debug_origins = std::collections::HashSet::new();
-
-    for (idx, (inst_name_tok, port_list)) in inst_node.instances().enumerate() {
+    for (idx, hier_inst) in inst_node.instances().enumerate() {
+        let Some(inst_name_tok) = hier_inst.name() else {
+            continue;
+        };
         let origin = InstOrigin {
             parent_inst: Some(env.enclosing_inst),
             inst_stmt_ast,
             inst_ordinal: idx as u32,
         };
-
         #[cfg(debug_assertions)]
         {
             assert!(
@@ -545,37 +541,29 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
             );
         }
 
+        let inst_span = Span {
+            file: env.file_id,
+            range: inst_name_tok.text_range(),
+        };
         let child_param_env = build_param_env(
             ctx.db,
             ctx.unit,
             target_sig,
             &overrides,
-            Span {
-                file: env.file_id,
-                range: inst_name_tok.text_range(),
-            },
+            inst_span,
             ctx.diags,
             &mut ctx.tree.envs,
         );
 
-        if let Some(ref pl) = port_list {
-            let mut bindings = crate::elab_lower::resolve_port_connections(
-                pl,
-                target_sig,
-                &inst_module_name,
-                env.file_id,
-                inst_name_tok.text_range(),
-                id_map,
-                ctx.diags,
-            );
-            add_implicit_port_bindings(pl, target_sig, env, &mut bindings);
-            crate::elab_lower::check_modport_conflicts(
-                ctx.db,
-                ctx.unit,
-                &bindings,
+        if let Some(pl) = hier_inst.port_list() {
+            resolve_instance_ports(
+                ctx,
+                env,
+                &pl,
                 target_sig,
                 target_def_id,
-                ctx.diags,
+                (&inst_module_name, inst_name_tok.text_range()),
+                id_map,
             );
         }
 
@@ -589,12 +577,39 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
             source_file: env.file_id,
             name_range: inst_name_tok.text_range(),
         });
-
         ctx.tree
             .add_child(env.parent_scope, ElabNodeId::Inst(child_id));
-
         elaborate_module(ctx, target_def_id, child_id, ElabNodeId::Inst(child_id));
     }
+}
+
+fn resolve_instance_ports(
+    ctx: &mut ElabCtx<'_>,
+    env: &ScopeEnv<'_>,
+    pl: &lyra_ast::InstancePortList,
+    target_sig: &DesignUnitSig,
+    target_def_id: GlobalDefId,
+    inst_site: (&SmolStr, TextRange),
+    id_map: Option<&lyra_ast::AstIdMap>,
+) {
+    let mut bindings = crate::elab_lower::resolve_port_connections(
+        pl,
+        target_sig,
+        inst_site.0,
+        env.file_id,
+        inst_site.1,
+        id_map,
+        ctx.diags,
+    );
+    add_implicit_port_bindings(pl, target_sig, env, &mut bindings);
+    crate::elab_lower::check_modport_conflicts(
+        ctx.db,
+        ctx.unit,
+        &bindings,
+        target_sig,
+        target_def_id,
+        ctx.diags,
+    );
 }
 
 fn add_implicit_port_bindings(

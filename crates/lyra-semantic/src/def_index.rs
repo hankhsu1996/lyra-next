@@ -40,17 +40,14 @@ pub struct DefIndex {
     pub use_sites: Box<[UseSite]>,
     pub imports: Box<[Import]>,
     pub local_decls: Box<[LocalDecl]>,
-    /// Reverse map from exported declaration `ErasedAstId` to `SymbolId`.
+    /// Reverse map from name-site `ErasedAstId` to `SymbolId`.
     /// Used by cross-file resolution to convert `ErasedAstId` (from
     /// `GlobalDefIndex`) back to a `SymbolId` in this file.
-    pub decl_to_symbol: HashMap<ErasedAstId, SymbolId>,
-    /// Dense reverse map from `SymbolId` index to its `Declarator` `ErasedAstId`.
-    /// `None` for symbols without a `Declarator` node (e.g. module/package names).
-    pub symbol_to_decl: Box<[Option<ErasedAstId>]>,
-    /// Maps parameter `Declarator` `ErasedAstId` to its initializer `Expression`
+    pub name_ast_to_symbol: HashMap<ErasedAstId, SymbolId>,
+    /// Maps parameter name-site `ErasedAstId` to its initializer `Expression`
     /// `ErasedAstId`. Key present with `None` = parameter with no default value.
-    /// Key absent = not a parameter declarator (not tracked).
-    pub decl_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
+    /// Key absent = not a parameter (not tracked).
+    pub name_ast_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
     pub enum_defs: Box<[EnumDef]>,
     pub enum_by_ast: HashMap<ErasedAstId, EnumDefIdx>,
     pub record_defs: Box<[RecordDef]>,
@@ -96,10 +93,15 @@ impl DefIndex {
     }
 
     /// Map a local symbol to its cross-file definition identity.
+    ///
+    /// Only definition-namespace symbols (module, package, interface, etc.)
+    /// have a `GlobalDefId`. For these, `name_ast == def_ast`.
     pub fn symbol_global_def(&self, sym: SymbolId) -> Option<GlobalDefId> {
-        debug_assert!(sym.index() < self.symbol_to_decl.len());
-        let ast_id = self.symbol_to_decl.get(sym.index()).and_then(|o| *o)?;
-        Some(GlobalDefId::new(ast_id))
+        let symbol = self.symbols.get(sym);
+        if symbol.kind.namespace() != Namespace::Definition {
+            return None;
+        }
+        Some(GlobalDefId::new(symbol.def_ast))
     }
 
     pub fn package_scope(&self, name: &str) -> Option<ScopeId> {
@@ -178,7 +180,6 @@ pub struct LocalDecl {
     pub ast_id: ErasedAstId,
     /// File-local monotonic rank from preorder syntax traversal.
     pub order_key: u32,
-    pub range: TextRange,
 }
 
 /// An import declaration record.

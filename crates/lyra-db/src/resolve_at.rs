@@ -103,7 +103,10 @@ fn find_qualified_name_at(
         let def_id = global.resolve_package(pkg_name.as_ref())?;
         let target_file = source_file_by_id(db, unit, def_id.file())?;
         let target_def = def_index_file(db, target_file);
-        let local = target_def.decl_to_symbol.get(&def_id.ast_id()).copied()?;
+        let local = target_def
+            .name_ast_to_symbol
+            .get(&def_id.ast_id())
+            .copied()?;
         Some(GlobalSymbolId {
             file: def_id.file(),
             local,

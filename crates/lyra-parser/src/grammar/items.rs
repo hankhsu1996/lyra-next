@@ -361,24 +361,25 @@ fn module_instantiation(p: &mut Parser) {
         param_override_list(p);
     }
 
-    // Instance name
-    p.expect(SyntaxKind::Ident);
-
-    // Port connections (...)
-    if p.at(SyntaxKind::LParen) {
-        instance_port_list(p);
-    }
+    // First instance
+    hierarchical_instance(p);
 
     // Additional instances: `, name (...)`
     while p.eat(SyntaxKind::Comma) {
-        p.expect(SyntaxKind::Ident);
-        if p.at(SyntaxKind::LParen) {
-            instance_port_list(p);
-        }
+        hierarchical_instance(p);
     }
 
     p.expect(SyntaxKind::Semicolon);
     m.complete(p, SyntaxKind::ModuleInstantiation);
+}
+
+fn hierarchical_instance(p: &mut Parser) {
+    let m = p.start();
+    p.expect(SyntaxKind::Ident);
+    if p.at(SyntaxKind::LParen) {
+        instance_port_list(p);
+    }
+    m.complete(p, SyntaxKind::HierarchicalInstance);
 }
 
 fn instance_port_list(p: &mut Parser) {
