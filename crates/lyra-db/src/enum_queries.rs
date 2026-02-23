@@ -449,6 +449,9 @@ fn fits_in_base(value: i128, width: u32, signed: bool) -> bool {
     if width == 0 {
         return false;
     }
+    if width >= 128 {
+        return true;
+    }
     if signed {
         let lo = -(1i128 << (width - 1));
         let hi = (1i128 << (width - 1)) - 1;
