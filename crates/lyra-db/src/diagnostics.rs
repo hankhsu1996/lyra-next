@@ -221,6 +221,9 @@ fn lower_type_check_item(
         TypeCheckItem::MethodCallError { .. } => {
             lower_method_call_error(item, source_map, diags);
         }
+        TypeCheckItem::UnsupportedLhsForm { .. } | TypeCheckItem::InvalidLhs { .. } => {
+            lower_lhs_item(item, source_map, diags);
+        }
     }
 }
 
@@ -323,6 +326,41 @@ fn emit_simple_modport_diag(
                 span,
                 message: lyra_diag::Message::simple(message_id),
             }),
+    );
+}
+
+fn lower_lhs_item(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let (range, code, msg_id) = match item {
+        TypeCheckItem::UnsupportedLhsForm { lhs_range } => (
+            *lhs_range,
+            lyra_diag::DiagnosticCode::UNSUPPORTED_LHS_FORM,
+            lyra_diag::MessageId::UnsupportedLhsForm,
+        ),
+        TypeCheckItem::InvalidLhs { lhs_range } => (
+            *lhs_range,
+            lyra_diag::DiagnosticCode::INVALID_ASSIGNMENT_LHS,
+            lyra_diag::MessageId::InvalidAssignmentLhs,
+        ),
+        _ => return,
+    };
+    let Some(span) = source_map.map_span(range) else {
+        return;
+    };
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Warning,
+            code,
+            lyra_diag::Message::simple(msg_id),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span,
+            message: lyra_diag::Message::simple(msg_id),
+        }),
     );
 }
 
@@ -827,12 +865,13 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         let Some(src) = source_file_by_id(self.db, self.unit, file_id) else {
             return false;
         };
-        expr_is_lvalue(self.db, src, expr_id)
+        expr_is_assignable_ref(self.db, src, expr_id)
     }
 }
 
-/// Check whether a syntax node (by AST ID) is an lvalue.
-fn expr_is_lvalue(
+/// Check whether a modport expression target is an assignable reference.
+/// Modport ports require a concrete variable, not a concat or stream.
+fn expr_is_assignable_ref(
     db: &dyn salsa::Database,
     file: SourceFile,
     expr_id: lyra_ast::ErasedAstId,
@@ -842,7 +881,7 @@ fn expr_is_lvalue(
     let Some(node) = map.get_node(&parse.syntax(), expr_id) else {
         return false;
     };
-    lyra_semantic::expr_lvalue::is_lvalue(&node)
+    lyra_semantic::lhs::is_assignable_ref(&node)
 }
 
 /// Unit-level diagnostics: duplicate definitions in the definitions namespace.

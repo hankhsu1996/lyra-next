@@ -83,19 +83,28 @@ fn non_bit_assign_no_diag() {
 }
 
 #[test]
-fn concat_lhs_no_diag() {
+fn concat_lhs_unsupported_warning() {
     let src = "module m; logic [3:0] a; logic [3:0] b; logic [7:0] c; assign {a, b} = c; endmodule";
     let diags = type_diag_warnings(src);
-    assert!(diags.is_empty(), "no diagnostic for concat LHS");
+    assert_eq!(diags.len(), 1, "concat LHS emits unsupported warning");
+    assert_eq!(
+        diags[0].code,
+        lyra_diag::DiagnosticCode::UNSUPPORTED_LHS_FORM
+    );
 }
 
 #[test]
-fn concat_lhs_wider_rhs_no_diag() {
+fn concat_lhs_wider_rhs_unsupported_warning() {
     let src = "module m; logic [3:0] a, b; logic [15:0] c; assign {a, b} = c; endmodule";
     let diags = type_diag_warnings(src);
-    assert!(
-        diags.is_empty(),
-        "no truncation warning for concat LHS even when RHS is wider"
+    assert_eq!(
+        diags.len(),
+        1,
+        "concat LHS emits unsupported warning, not truncation"
+    );
+    assert_eq!(
+        diags[0].code,
+        lyra_diag::DiagnosticCode::UNSUPPORTED_LHS_FORM
     );
 }
 
