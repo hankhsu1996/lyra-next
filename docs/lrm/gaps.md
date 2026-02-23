@@ -20,9 +20,9 @@ Enum member names are injected into the enclosing scope unconditionally. The LRM
 
 Type representation handles all unpacked dimension forms (dynamic `[]`, queue `[$]`/`[$:N]`, associative `[*]`/`[string]`). Built-in array methods (`.size()`, `.delete()`, `.push_back()`, `.pop_front()`, `.exists()`, `.first()`, `.last()`, `.next()`, `.prev()`, `.insert()`, `.num()`, `.push_front()`, `.pop_back()`) are implemented with receiver classification, arity/arg-type checking, and void-in-expression detection. Remaining gaps: assignment compatibility between array types, `new[]` constructor, and `foreach` iteration. Tests: `crates/lyra-db/src/tests/expr_type/members.rs`, `lrm/ch07/array_methods`.
 
-### 7.4.6: Array slicing
+### 7.4.6: Array slice as lvalue
 
-`a[i:j]` on unpacked arrays is not handled. Part-select currently applies only to packed integral types. Blocked by: unpacked array slice semantics. Test: `lrm/ch07/array_slice`.
+Unpacked array slice type inference (RHS) is supported for fixed-size arrays with all range forms (`[hi:lo]`, `[base+:width]`, `[base-:width]`). LHS slice in assignments (`a[3:2] = rhs;`) is not supported: `simple_lvalue` in `type_check.rs` does not accept `SyntaxKind::RangeExpr`. Blocked by: lvalue analysis extension. Test: `lrm/ch07/array_slice_lvalue`.
 
 ## Chapter 7 -- Structures and Unions
 

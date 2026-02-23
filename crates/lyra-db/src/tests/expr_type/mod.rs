@@ -9,7 +9,7 @@ use lyra_semantic::member::MethodInvalidReason;
 use lyra_semantic::type_infer::{
     BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView, Signedness,
 };
-use lyra_semantic::types::{ConstEvalError, RealKw, Ty};
+use lyra_semantic::types::{ConstEvalError, ConstInt, RealKw, Ty, UnpackedDim};
 
 use super::*;
 
@@ -94,4 +94,14 @@ pub(super) fn one_bit() -> ExprType {
 
 pub(super) fn one_bit_4() -> ExprType {
     bv_u4(1)
+}
+
+pub(super) fn array_et(elem: Ty, size: u32) -> ExprType {
+    ExprType {
+        ty: Ty::Array {
+            elem: Box::new(elem),
+            dim: UnpackedDim::Size(ConstInt::Known(i64::from(size))),
+        },
+        view: ExprView::Plain,
+    }
 }

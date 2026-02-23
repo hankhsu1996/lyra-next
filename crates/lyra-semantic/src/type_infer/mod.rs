@@ -1,3 +1,5 @@
+mod range;
+
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
@@ -9,9 +11,7 @@ use crate::coerce::{
 use crate::enum_def::EnumId;
 use crate::expr_helpers::{find_binary_op, find_operator_token, is_expression_kind};
 use crate::literal::parse_literal_shape;
-use crate::member::{
-    BuiltinMethodKind, MemberInfo, MemberKind, MemberLookupError, MethodInvalidReason, ReceiverInfo,
-};
+use crate::member::{MemberInfo, MemberKind, MemberLookupError, MethodInvalidReason};
 use crate::symbols::{GlobalSymbolId, SymbolKind};
 use crate::syntax_helpers::system_tf_name;
 use crate::types::{
@@ -102,8 +102,8 @@ pub enum ExprTypeErrorKind {
     ReplicationConstEvalFailed(ConstEvalError),
     IndexNonIndexable,
     PartSelectNonIntegral,
-    PartSelectBoundsNonConst,
-    PartSelectWidthNonConst,
+    SliceWidthInvalid,
+    SliceNonSliceableArray,
     NoMembersOnReceiver,
     UnknownMember,
     MemberNotInModport,
@@ -362,7 +362,7 @@ pub fn infer_expr_type(
         SyntaxKind::ConcatExpr => infer_concat(expr, ctx),
         SyntaxKind::ReplicExpr => infer_replic(expr, ctx),
         SyntaxKind::IndexExpr => infer_index(expr, ctx),
-        SyntaxKind::RangeExpr => infer_range(expr, ctx),
+        SyntaxKind::RangeExpr => range::infer_range(expr, ctx),
         SyntaxKind::FieldExpr => infer_field_access(expr, ctx),
         SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => infer_call(expr, ctx),
         SyntaxKind::StreamExpr => infer_stream(expr, ctx),
@@ -982,106 +982,6 @@ fn apply_index(base: &ExprType) -> ExprType {
     }
 }
 
-fn infer_range(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    use lyra_ast::{AstNode, RangeExpr, RangeKind};
-
-    let range_expr = RangeExpr::cast(node.clone());
-    let range_kind = range_expr
-        .as_ref()
-        .map_or(RangeKind::Fixed, |r| r.range_kind());
-
-    let children: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if children.len() < 2 {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    }
-
-    // Infer base expression
-    let base = infer_expr_type(&children[0], ctx, None);
-    if matches!(base.view, ExprView::Error(_)) {
-        return base;
-    }
-
-    // Part-select valid only on integral types
-    let four_state = match &base.ty {
-        Ty::Integral(i) => i.keyword.four_state(),
-        _ => return ExprType::error(ExprTypeErrorKind::PartSelectNonIntegral),
-    };
-
-    let width: u32 = match range_kind {
-        RangeKind::IndexedPlus | RangeKind::IndexedMinus => {
-            // Infer base index expr -- propagate errors
-            let base_idx = infer_expr_type(&children[1], ctx, None);
-            if matches!(base_idx.view, ExprView::Error(_)) {
-                return base_idx;
-            }
-            // Width expr: infer for error propagation, then const-eval
-            let width_node = &children[children.len() - 1];
-            let width_et = infer_expr_type(width_node, ctx, None);
-            if matches!(width_et.view, ExprView::Error(_)) {
-                return width_et;
-            }
-            match ctx.const_eval(width_node) {
-                ConstInt::Known(w) if w > 0 => match u32::try_from(w) {
-                    Ok(v) => v,
-                    Err(_) => return ExprType::error(ExprTypeErrorKind::PartSelectWidthNonConst),
-                },
-                _ => return ExprType::error(ExprTypeErrorKind::PartSelectWidthNonConst),
-            }
-        }
-        RangeKind::Fixed => {
-            if children.len() < 3 {
-                return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-            }
-            // Infer hi and lo exprs for error propagation, then const-eval
-            let hi_et = infer_expr_type(&children[1], ctx, None);
-            if matches!(hi_et.view, ExprView::Error(_)) {
-                return hi_et;
-            }
-            let lo_et = infer_expr_type(&children[2], ctx, None);
-            if matches!(lo_et.view, ExprView::Error(_)) {
-                return lo_et;
-            }
-            let hi = ctx.const_eval(&children[1]);
-            let lo = ctx.const_eval(&children[2]);
-            match (hi, lo) {
-                (ConstInt::Known(h), ConstInt::Known(l)) => {
-                    let diff = (i128::from(h) - i128::from(l)).unsigned_abs() + 1;
-                    match u32::try_from(diff) {
-                        Ok(v) => v,
-                        Err(_) => {
-                            return ExprType::error(ExprTypeErrorKind::PartSelectBoundsNonConst);
-                        }
-                    }
-                }
-                _ => return ExprType::error(ExprTypeErrorKind::PartSelectBoundsNonConst),
-            }
-        }
-    };
-
-    // Result: unsigned integral with computed width
-    let kw = if four_state {
-        IntegralKw::Logic
-    } else {
-        IntegralKw::Bit
-    };
-    let packed = if width > 1 {
-        PackedDims::from(vec![PackedDim {
-            msb: ConstInt::Known(i64::from(width) - 1),
-            lsb: ConstInt::Known(0),
-        }])
-    } else {
-        PackedDims::empty()
-    };
-    ExprType::from_ty(&Ty::Integral(Integral {
-        keyword: kw,
-        signed: false,
-        packed,
-    }))
-}
-
 fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     use lyra_ast::{AstNode, FieldExpr};
 
@@ -1171,10 +1071,6 @@ fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 }
 
 /// Check call arguments against the callable signature.
-///
-/// For now, infers each argument's type (for context-determined sizing)
-/// but does not emit diagnostics for type mismatches. Arity and named-arg
-/// validation is performed.
 fn check_call_args(call_node: &SyntaxNode, sig: &CallableSigRef, ctx: &dyn InferCtx) {
     // Find ArgList child
     let arg_list = call_node
@@ -1231,7 +1127,13 @@ fn infer_method_call(
             kind: MemberKind::BuiltinMethod(bm),
             ty,
             receiver,
-        }) => infer_builtin_method_call(call_node, bm, &ty, receiver.as_ref(), ctx),
+        }) => crate::builtin_methods::infer_builtin_method_call(
+            call_node,
+            bm,
+            &ty,
+            receiver.as_ref(),
+            ctx,
+        ),
         Ok(_) | Err(MemberLookupError::NoMembersOnType) => ExprType::error(
             ExprTypeErrorKind::UnsupportedCalleeForm(CalleeFormKind::MethodCall),
         ),
@@ -1243,16 +1145,6 @@ fn infer_method_call(
             ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(reason))
         }
     }
-}
-
-fn infer_builtin_method_call(
-    call_node: &SyntaxNode,
-    bm: BuiltinMethodKind,
-    result_ty: &Ty,
-    receiver: Option<&ReceiverInfo>,
-    ctx: &dyn InferCtx,
-) -> ExprType {
-    crate::builtin_methods::infer_builtin_method_call(call_node, bm, result_ty, receiver, ctx)
 }
 
 fn infer_cast(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {

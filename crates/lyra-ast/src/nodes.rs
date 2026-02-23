@@ -386,6 +386,30 @@ impl RangeExpr {
             RangeKind::Fixed
         }
     }
+
+    /// Filtered iterator over expression children (deterministic order).
+    fn expr_children(&self) -> impl Iterator<Item = lyra_parser::SyntaxNode> + '_ {
+        self.syntax
+            .children()
+            .filter(|c| crate::node::is_expression_kind(c.kind()))
+    }
+
+    /// The base object expression (before the brackets).
+    /// For `a[hi:lo]` or `a[idx+:w]`, returns `a`.
+    pub fn base_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+        self.expr_children().next()
+    }
+
+    /// The two operand expressions inside the brackets.
+    /// Fixed `[hi:lo]`: returns (hi, lo).
+    /// Indexed `[idx+:w]` / `[idx-:w]`: returns (idx, w).
+    pub fn operand_exprs(&self) -> Option<(lyra_parser::SyntaxNode, lyra_parser::SyntaxNode)> {
+        let mut iter = self.expr_children();
+        let _base = iter.next()?;
+        let first = iter.next()?;
+        let second = iter.next()?;
+        Some((first, second))
+    }
 }
 
 impl EnumMember {
