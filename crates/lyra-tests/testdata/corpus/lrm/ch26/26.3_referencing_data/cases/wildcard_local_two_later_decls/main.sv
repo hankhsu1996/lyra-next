@@ -9,6 +9,6 @@ module top;
   int x;
   //  ^ error[lyra.semantic[7]]: local declaration of `x` conflicts with wildcard import from package `p`
   wire x;
+  //   ^ error[lyra.semantic[2]]: duplicate definition of `x`
   //   ^ error[lyra.semantic[7]]: local declaration of `x` conflicts with wildcard import from package `p`
 endmodule
-// ALLOW-EXTRA-DIAGS

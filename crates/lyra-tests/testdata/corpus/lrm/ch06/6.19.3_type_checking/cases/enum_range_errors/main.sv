@@ -10,5 +10,4 @@ module enum_range_errors;
   typedef enum { P[3], P1 } collision_t;
   //             ^ error[lyra.semantic[2]]
 
-// ALLOW-EXTRA-DIAGS
 endmodule
