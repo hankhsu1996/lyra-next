@@ -1,4 +1,7 @@
-use lyra_ast::{AstNode, EnumType, NameRef, QualifiedName, StructType, TypeSpec, TypedefDecl};
+use lyra_ast::{
+    AstIdMap, AstNode, EnumMember, EnumType, NameRef, QualifiedName, StructType, TypeSpec,
+    TypedefDecl,
+};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
@@ -173,42 +176,38 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
             continue;
         };
         let name = SmolStr::new(name_tok.text());
-        let init = member
-            .init_expr()
-            .and_then(|expr| ctx.ast_id_map.erased_ast_id(expr.syntax()));
 
-        // Check for range specification
-        let (range_kind, range_text_range) = if let Some(range_spec) = member.range_spec() {
-            let rtr = range_spec.text_range();
-            if let Some(first) = range_spec.first_expr() {
-                let first_id = ctx.ast_id_map.erased_ast_id(first.syntax());
-                if let Some(second) = range_spec.second_expr() {
-                    let second_id = ctx.ast_id_map.erased_ast_id(second.syntax());
-                    match (first_id, second_id) {
-                        (Some(f), Some(s)) => (Some(EnumMemberRangeKind::FromTo(f, s)), Some(rtr)),
-                        _ => (None, Some(rtr)),
-                    }
-                } else {
-                    match first_id {
-                        Some(f) => (Some(EnumMemberRangeKind::Count(f)), Some(rtr)),
-                        None => (None, Some(rtr)),
-                    }
-                }
-            } else {
-                (None, Some(rtr))
-            }
-        } else {
-            (None, None)
+        // Capture ast_id for every member (used by value diagnostics)
+        let member_ast_id = ctx.ast_id_map.ast_id(&member);
+        debug_assert!(
+            member_ast_id.is_some(),
+            "EnumMember node must have an AstId"
+        );
+        let Some(member_ast_id) = member_ast_id else {
+            continue;
         };
+        let erased_ast_id = member_ast_id.erase();
+
+        let init_expr = member.init_expr();
+        let init = init_expr
+            .as_ref()
+            .and_then(|expr| ctx.ast_id_map.erased_ast_id(expr.syntax()));
+        let init_literal_width = init_expr
+            .as_ref()
+            .and_then(|expr| crate::literal::extract_sized_literal_width(expr.syntax()));
+
+        let (range_kind, range_text_range) = extract_enum_range_spec(&member, ctx.ast_id_map);
 
         let has_range = range_kind.is_some();
 
         members.push(EnumMemberDef {
             name: name.clone(),
             name_range: name_tok.text_range(),
+            ast_id: erased_ast_id,
             range: range_kind,
             range_text_range,
             init,
+            init_literal_width,
         });
 
         if has_range {
@@ -228,11 +227,7 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
                     variant_ordinal,
                 },
             );
-            let ast_id = ctx.ast_id_map.ast_id(&member);
-            debug_assert!(ast_id.is_some(), "EnumMember node must have an AstId");
-            if let Some(ast_id) = ast_id {
-                ctx.register_binding(sym_id, scope, ast_id.erase(), name_tok.text_range());
-            }
+            ctx.register_binding(sym_id, scope, erased_ast_id, name_tok.text_range());
             variant_ordinal += 1;
         }
     }
@@ -246,6 +241,32 @@ fn collect_enum_def(ctx: &mut DefContext<'_>, enum_type: &EnumType, scope: Scope
         members: members.into_boxed_slice(),
     });
     idx
+}
+
+fn extract_enum_range_spec(
+    member: &EnumMember,
+    ast_id_map: &AstIdMap,
+) -> (Option<EnumMemberRangeKind>, Option<lyra_source::TextRange>) {
+    let Some(range_spec) = member.range_spec() else {
+        return (None, None);
+    };
+    let rtr = range_spec.text_range();
+    let Some(first) = range_spec.first_expr() else {
+        return (None, Some(rtr));
+    };
+    let first_id = ast_id_map.erased_ast_id(first.syntax());
+    if let Some(second) = range_spec.second_expr() {
+        let second_id = ast_id_map.erased_ast_id(second.syntax());
+        match (first_id, second_id) {
+            (Some(f), Some(s)) => (Some(EnumMemberRangeKind::FromTo(f, s)), Some(rtr)),
+            _ => (None, Some(rtr)),
+        }
+    } else {
+        match first_id {
+            Some(f) => (Some(EnumMemberRangeKind::Count(f)), Some(rtr)),
+            None => (None, Some(rtr)),
+        }
+    }
 }
 
 fn collect_record_def(
