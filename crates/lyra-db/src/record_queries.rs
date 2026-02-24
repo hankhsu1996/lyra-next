@@ -1,3 +1,4 @@
+use lyra_semantic::Site;
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use lyra_semantic::modport_def::ModportDefId;
@@ -5,6 +6,7 @@ use lyra_semantic::modport_def::ModportTarget;
 use lyra_semantic::record::{FieldSem, Packing, RecordId, RecordKind, RecordSem, TypeRef};
 use lyra_semantic::symbols::Namespace;
 use lyra_semantic::types::{ConstInt, ModportView, ModportViewEntry, ModportViewTarget, Ty};
+use lyra_source::NameSpan;
 use smol_str::SmolStr;
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
@@ -438,26 +440,26 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
 
     let mut entries = Vec::new();
     let mut diags = Vec::new();
-    // TODO(gap-1.modport): no NameSpan on ModportEntry; using port_id Site only
-    let mut seen_ports: std::collections::HashMap<SmolStr, DiagSpan> =
+    let mut seen_ports: std::collections::HashMap<SmolStr, (Site, NameSpan)> =
         std::collections::HashMap::new();
 
     for entry in &*modport_def.entries {
         let entry_primary = DiagSpan::Site(entry.port_id);
+        let entry_label = DiagSpan::Name(entry.name_span);
         // Duplicate port name detection (source-order, before sorting)
-        if let Some(&first_primary) = seen_ports.get(&entry.port_name) {
+        if let Some(&(prev_site, prev_name_span)) = seen_ports.get(&entry.port_name) {
             diags.push(SemanticDiag {
                 kind: SemanticDiagKind::DuplicateDefinition {
                     name: entry.port_name.clone(),
-                    original_primary: first_primary,
-                    original_label: None,
+                    original_primary: DiagSpan::Site(prev_site),
+                    original_label: Some(DiagSpan::Name(prev_name_span)),
                 },
                 primary: entry_primary,
-                label: None,
+                label: Some(entry_label),
             });
             continue;
         }
-        seen_ports.insert(entry.port_name.clone(), entry_primary);
+        seen_ports.insert(entry.port_name.clone(), (entry.port_id, entry.name_span));
 
         let target = match &entry.target {
             ModportTarget::ImplicitMember { member_name } => {
@@ -470,7 +472,7 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
                             name: member_name.clone(),
                         },
                         primary: entry_primary,
-                        label: None,
+                        label: Some(entry_label),
                     });
                     continue;
                 };
