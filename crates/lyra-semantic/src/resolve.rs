@@ -7,7 +7,7 @@ use crate::def_index::{
     CompilationUnitEnv, DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, LocalDeclId,
     NamePath,
 };
-use crate::diagnostic::SemanticDiag;
+use crate::diagnostic::{DiagSpan, SemanticDiag};
 use crate::enum_def::{EnumVariantIndex, PkgEnumVariantIndex};
 use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
 use crate::name_graph::NameGraph;
@@ -1011,7 +1011,7 @@ pub fn build_resolve_index(
                         &UnresolvedReason::NotFound,
                         use_site.expected_ns,
                         &use_site.path,
-                        use_site.range,
+                        DiagSpan::Site(use_site.name_ref_site),
                     );
                     diagnostics.push(diag);
                     continue;
@@ -1030,7 +1030,7 @@ pub fn build_resolve_index(
                     use_site.expected_ns,
                     *namespace,
                     &use_site.path,
-                    use_site.range,
+                    DiagSpan::Site(use_site.name_ref_site),
                 ) {
                     diagnostics.push(diag);
                 }
@@ -1072,7 +1072,7 @@ pub fn build_resolve_index(
                     reason,
                     use_site.expected_ns,
                     &use_site.path,
-                    use_site.range,
+                    DiagSpan::Site(use_site.name_ref_site),
                 );
                 diagnostics.push(diag);
             }
@@ -1105,7 +1105,7 @@ fn map_import_errors(
             &err.reason,
             ExpectedNs::Exact(Namespace::Value),
             &path,
-            imp.import_stmt_site.text_range(),
+            DiagSpan::Site(imp.import_stmt_site),
         );
         diagnostics.push(diag);
     }
@@ -1134,7 +1134,7 @@ fn resolve_cross_file(
             use_site.expected_ns,
             namespace,
             &use_site.path,
-            use_site.range,
+            DiagSpan::Site(use_site.name_ref_site),
         ) {
             diagnostics.push(diag);
         }

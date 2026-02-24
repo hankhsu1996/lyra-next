@@ -52,8 +52,9 @@ pub fn file_diagnostics(
         let eref = EnumRef::new(db, unit, enum_id);
         let sem = enum_sem(db, eref);
         for diag in &*sem.diags {
+            let chosen = crate::lower_diag::choose_best_diag_span(diag.primary, diag.label);
             let (primary_span, _) =
-                crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, diag.range);
+                crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, chosen);
             diags.push(crate::lower_diag::lower_semantic_diag(
                 diag,
                 primary_span,
@@ -73,8 +74,9 @@ pub fn file_diagnostics(
     // Enum variant expansion diagnostics (range bounds, collisions)
     let ev_idx = enum_variant_index(db, file, unit);
     for diag in &*ev_idx.diagnostics {
+        let chosen = crate::lower_diag::choose_best_diag_span(diag.primary, diag.label);
         let (primary_span, _) =
-            crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, diag.range);
+            crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, chosen);
         diags.push(crate::lower_diag::lower_semantic_diag(
             diag,
             primary_span,

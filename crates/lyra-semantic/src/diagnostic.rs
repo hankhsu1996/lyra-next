@@ -1,14 +1,32 @@
-use lyra_source::TextRange;
+use lyra_source::{NameSpan, TokenSpan};
 use smol_str::SmolStr;
+
+use crate::Site;
+
+/// Anchor for a diagnostic span in expanded-text space.
+///
+/// Pure data with no methods. The lowering layer (`lyra-db`) is
+/// responsible for converting anchors to source ranges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagSpan {
+    /// CST node anchor.
+    Site(Site),
+    /// Identifier token span. May be INVALID (parse recovery).
+    Name(NameSpan),
+    /// Non-identifier token span (keyword, operator, punctuation).
+    Token(TokenSpan),
+}
 
 /// Structured semantic diagnostic.
 ///
-/// `range` is in expanded-text space within the owning file.
+/// `primary` is a construct-level anchor (usually `Site`).
+/// `label` is a precise highlight span (usually `Name` or `Token`).
 /// The DB layer converts to `Span` via `source_map.map_span()`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticDiag {
     pub kind: SemanticDiagKind,
-    pub range: TextRange,
+    pub primary: DiagSpan,
+    pub label: Option<DiagSpan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,7 +36,8 @@ pub enum SemanticDiagKind {
     },
     DuplicateDefinition {
         name: SmolStr,
-        original: TextRange,
+        original_primary: DiagSpan,
+        original_label: Option<DiagSpan>,
     },
     PackageNotFound {
         package: SmolStr,

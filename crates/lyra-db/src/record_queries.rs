@@ -1,5 +1,5 @@
 use lyra_semantic::def_index::ExpectedNs;
-use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
+use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use lyra_semantic::modport_def::ModportDefId;
 use lyra_semantic::modport_def::ModportTarget;
 use lyra_semantic::record::{FieldSem, Packing, RecordId, RecordKind, RecordSem, TypeRef};
@@ -189,11 +189,9 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
         let ty = lyra_semantic::normalize_ty(&lowered.ty, &eval);
 
         // Convert field type errors to SemanticDiag using spans from RecordDef
+        // TODO(gap-1.typeref): type reference vs declarator precision lost; using field name_site
         if let Some(err) = &lowered.err {
-            let range = match &field.ty {
-                TypeRef::Named { span, .. } | TypeRef::Qualified { span, .. } => span.range,
-                TypeRef::Resolved(_) => lyra_source::TextRange::default(),
-            };
+            let primary = DiagSpan::Site(field.name_site);
             let display_name = err.path.join("::");
             match err.kind {
                 FieldTyErrorKind::UndeclaredType => {
@@ -201,7 +199,8 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
                         kind: SemanticDiagKind::UndeclaredType {
                             name: SmolStr::new(&display_name),
                         },
-                        range,
+                        primary,
+                        label: None,
                     });
                 }
                 FieldTyErrorKind::NotAType => {
@@ -209,7 +208,8 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
                         kind: SemanticDiagKind::NotAType {
                             name: SmolStr::new(&display_name),
                         },
-                        range,
+                        primary,
+                        label: None,
                     });
                 }
             }
@@ -273,8 +273,9 @@ pub fn record_diagnostics<'db>(
     // Lower record_sem.diags
     let mut diags = Vec::new();
     for diag in &*sem.diags {
+        let chosen = crate::lower_diag::choose_best_diag_span(diag.primary, diag.label);
         let (primary_span, _) =
-            crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, diag.range);
+            crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, chosen);
         diags.push(crate::lower_diag::lower_semantic_diag(
             diag,
             primary_span,
@@ -437,22 +438,26 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
 
     let mut entries = Vec::new();
     let mut diags = Vec::new();
-    let mut seen_ports: std::collections::HashMap<SmolStr, lyra_source::TextRange> =
+    // TODO(gap-1.modport): no NameSpan on ModportEntry; using port_id Site only
+    let mut seen_ports: std::collections::HashMap<SmolStr, DiagSpan> =
         std::collections::HashMap::new();
 
     for entry in &*modport_def.entries {
+        let entry_primary = DiagSpan::Site(entry.port_id);
         // Duplicate port name detection (source-order, before sorting)
-        if let Some(&first_range) = seen_ports.get(&entry.port_name) {
+        if let Some(&first_primary) = seen_ports.get(&entry.port_name) {
             diags.push(SemanticDiag {
                 kind: SemanticDiagKind::DuplicateDefinition {
                     name: entry.port_name.clone(),
-                    original: first_range,
+                    original_primary: first_primary,
+                    original_label: None,
                 },
-                range: entry.span.range,
+                primary: entry_primary,
+                label: None,
             });
             continue;
         }
-        seen_ports.insert(entry.port_name.clone(), entry.span.range);
+        seen_ports.insert(entry.port_name.clone(), entry_primary);
 
         let target = match &entry.target {
             ModportTarget::ImplicitMember { member_name } => {
@@ -464,7 +469,8 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
                         kind: SemanticDiagKind::UnresolvedName {
                             name: member_name.clone(),
                         },
-                        range: entry.span.range,
+                        primary: entry_primary,
+                        label: None,
                     });
                     continue;
                 };

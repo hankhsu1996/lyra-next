@@ -3,7 +3,7 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (2 diagnostics)
-  error[lyra.semantic[9]] 5:18..5:18: enum member range count is negative (-1)
+  error[lyra.semantic[9]] 5:17..5:17: enum member range count is negative (-1)
   error[lyra.semantic[2]] 9:17..9:17: duplicate definition of `P1`
 ---
 unit (0 diagnostics)

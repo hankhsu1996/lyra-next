@@ -1,4 +1,4 @@
-use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
+use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::types::Ty;
@@ -82,6 +82,13 @@ fn classify_resolve_result(
     }
 }
 
+/// Anchor for type resolution diagnostics.
+#[derive(Clone, Copy)]
+pub(crate) struct TypeResolveDiagAnchor {
+    pub primary: DiagSpan,
+    pub label: Option<DiagSpan>,
+}
+
 /// Resolve a `CoreResolveResult` to a `Ty`, emitting diagnostics for failures.
 ///
 /// Shared by record and enum queries that need to resolve named type references.
@@ -91,7 +98,7 @@ pub(crate) fn resolve_result_to_ty(
     defining_file: FileId,
     result: &CoreResolveResult,
     name: &str,
-    range: lyra_source::TextRange,
+    anchor: TypeResolveDiagAnchor,
     diags: &mut Vec<SemanticDiag>,
 ) -> Ty {
     match classify_resolve_result(db, unit, defining_file, result) {
@@ -101,7 +108,8 @@ pub(crate) fn resolve_result_to_ty(
                 kind: SemanticDiagKind::NotAType {
                     name: SmolStr::new(name),
                 },
-                range,
+                primary: anchor.primary,
+                label: anchor.label,
             });
             Ty::Error
         }
@@ -110,7 +118,8 @@ pub(crate) fn resolve_result_to_ty(
                 kind: SemanticDiagKind::UndeclaredType {
                     name: SmolStr::new(name),
                 },
-                range,
+                primary: anchor.primary,
+                label: anchor.label,
             });
             Ty::Error
         }
