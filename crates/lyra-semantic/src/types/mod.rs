@@ -1,6 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
-use lyra_ast::ErasedAstId;
+use crate::Site;
 use smallvec::SmallVec;
 use smol_str::SmolStr;
 
@@ -14,7 +14,7 @@ use crate::symbols::SymbolId;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ConstInt {
     Known(i64),
-    Unevaluated(ErasedAstId),
+    Unevaluated(Site),
     Error(ConstEvalError),
 }
 
@@ -345,7 +345,7 @@ pub struct ModportView {
 pub struct ModportViewEntry {
     pub port_name: SmolStr,
     pub direction: PortDirection,
-    pub port_id: ErasedAstId,
+    pub port_id: Site,
     pub target: ModportViewTarget,
 }
 
@@ -355,7 +355,7 @@ pub enum ModportViewTarget {
     /// Bare ident, resolved to interface member symbol.
     Member(SymbolId),
     /// Expression port: carries the expr AST ID.
-    Expr(ErasedAstId),
+    Expr(Site),
     /// `.P()`: no connection.
     Empty,
 }

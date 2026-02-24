@@ -17,26 +17,25 @@ enum OrderItem {
 /// Assign monotonic order keys to imports and use-sites via preorder syntax walk.
 ///
 /// Walks the file's syntax tree in preorder. When encountering a node whose
-/// `ErasedAstId` matches a collected import or use-site, assigns the next
+/// `Site` matches a collected import or use-site, assigns the next
 /// sequential order key. This establishes LRM 26.3 positional visibility:
 /// an import is only a candidate when `import.order_key < use_site.order_key`.
 pub(crate) fn assign_order_keys(ctx: &mut DefContext<'_>, root: &SyntaxNode) {
-    let mut items_by_ast_id: HashMap<lyra_ast::ErasedAstId, SmallVec<[OrderItem; 1]>> =
-        HashMap::new();
+    let mut items_by_ast_id: HashMap<crate::Site, SmallVec<[OrderItem; 1]>> = HashMap::new();
     for (i, site) in ctx.use_sites.iter().enumerate() {
         items_by_ast_id
-            .entry(site.name_ref_ast)
+            .entry(site.name_ref_site)
             .or_default()
             .push(OrderItem::UseSite(i));
     }
     for (i, imp) in ctx.imports.iter().enumerate() {
         items_by_ast_id
-            .entry(imp.import_stmt_ast)
+            .entry(imp.import_stmt_site)
             .or_default()
             .push(OrderItem::Import(i));
     }
     for (i, decl) in ctx.local_decls.iter().enumerate() {
-        let entry = items_by_ast_id.entry(decl.decl_ast).or_default();
+        let entry = items_by_ast_id.entry(decl.decl_site).or_default();
         debug_assert!(
             !entry
                 .iter()
@@ -73,7 +72,7 @@ pub(crate) fn assign_order_keys(ctx: &mut DefContext<'_>, root: &SyntaxNode) {
 fn preorder_collect(
     ast_id_map: &AstIdMap,
     node: &SyntaxNode,
-    items_by_ast_id: &mut HashMap<lyra_ast::ErasedAstId, SmallVec<[OrderItem; 1]>>,
+    items_by_ast_id: &mut HashMap<crate::Site, SmallVec<[OrderItem; 1]>>,
     order_key: &mut u32,
     out: &mut Vec<(OrderItem, u32)>,
 ) {
@@ -102,13 +101,9 @@ pub(crate) fn detect_duplicates(
             diagnostics.push(SemanticDiag {
                 kind: SemanticDiagKind::DuplicateDefinition {
                     name: curr.name.clone(),
-                    original: prev
-                        .name_span
-                        .map_or_else(|| prev.name_ast.text_range(), |ns| ns.text_range()),
+                    original: prev.name_span.text_range_or(prev.name_site.text_range()),
                 },
-                range: curr
-                    .name_span
-                    .map_or_else(|| curr.name_ast.text_range(), |ns| ns.text_range()),
+                range: curr.name_span.text_range_or(curr.name_site.text_range()),
             });
         }
     }

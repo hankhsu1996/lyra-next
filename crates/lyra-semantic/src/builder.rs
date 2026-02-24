@@ -55,13 +55,13 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
     ctx.local_decls
         .sort_by(|a, b| (a.id.scope, a.id.ordinal).cmp(&(b.id.scope, b.id.ordinal)));
 
-    let mut enum_by_ast = HashMap::with_capacity(ctx.enum_defs.len());
+    let mut enum_by_site = HashMap::with_capacity(ctx.enum_defs.len());
     for (i, def) in ctx.enum_defs.iter().enumerate() {
-        enum_by_ast.insert(def.enum_type_ast, crate::enum_def::EnumDefIdx(i as u32));
+        enum_by_site.insert(def.enum_type_site, crate::enum_def::EnumDefIdx(i as u32));
     }
-    let mut record_by_ast = HashMap::with_capacity(ctx.record_defs.len());
+    let mut record_by_site = HashMap::with_capacity(ctx.record_defs.len());
     for (i, def) in ctx.record_defs.iter().enumerate() {
-        record_by_ast.insert(def.record_type_ast, crate::record::RecordDefIdx(i as u32));
+        record_by_site.insert(def.record_type_site, crate::record::RecordDefIdx(i as u32));
     }
 
     // Finalize modport defs: convert raw GlobalDefId owners to InterfaceDefId
@@ -78,12 +78,12 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         use_sites: ctx.use_sites.into_boxed_slice(),
         imports: ctx.imports.into_boxed_slice(),
         local_decls: ctx.local_decls.into_boxed_slice(),
-        name_ast_to_symbol: ctx.name_ast_to_symbol,
-        name_ast_to_init_expr: ctx.name_ast_to_init_expr,
+        name_site_to_symbol: ctx.name_site_to_symbol,
+        name_site_to_init_expr: ctx.name_site_to_init_expr,
         enum_defs: ctx.enum_defs.into_boxed_slice(),
-        enum_by_ast,
+        enum_by_site,
         record_defs: ctx.record_defs.into_boxed_slice(),
-        record_by_ast,
+        record_by_site,
         instance_decls: ctx.instance_decls.into_boxed_slice(),
         modport_defs: HashMap::new(),
         modport_name_map: HashMap::new(),
@@ -133,8 +133,8 @@ pub(crate) struct DefContext<'a> {
     pub(crate) scopes: ScopeTreeBuilder,
     pub(crate) export_definitions: Vec<SymbolId>,
     pub(crate) export_packages: Vec<SymbolId>,
-    pub(crate) name_ast_to_symbol: HashMap<lyra_ast::ErasedAstId, SymbolId>,
-    pub(crate) name_ast_to_init_expr: HashMap<lyra_ast::ErasedAstId, Option<lyra_ast::ErasedAstId>>,
+    pub(crate) name_site_to_symbol: HashMap<crate::Site, SymbolId>,
+    pub(crate) name_site_to_init_expr: HashMap<crate::Site, Option<crate::Site>>,
     pub(crate) use_sites: Vec<UseSite>,
     pub(crate) imports: Vec<Import>,
     pub(crate) enum_defs: Vec<EnumDef>,
@@ -161,8 +161,8 @@ impl<'a> DefContext<'a> {
             scopes: ScopeTreeBuilder::new(),
             export_definitions: Vec::new(),
             export_packages: Vec::new(),
-            name_ast_to_symbol: HashMap::new(),
-            name_ast_to_init_expr: HashMap::new(),
+            name_site_to_symbol: HashMap::new(),
+            name_site_to_init_expr: HashMap::new(),
             use_sites: Vec::new(),
             imports: Vec::new(),
             enum_defs: Vec::new(),
@@ -187,7 +187,7 @@ impl<'a> DefContext<'a> {
 
     pub(crate) fn register_binding(&mut self, sym_id: SymbolId) {
         let sym = self.symbols.get(sym_id);
-        self.name_ast_to_symbol.insert(sym.name_ast, sym_id);
+        self.name_site_to_symbol.insert(sym.name_site, sym_id);
         let ns = sym.kind.namespace();
         if ns == Namespace::Definition {
             return;
@@ -206,7 +206,7 @@ impl<'a> DefContext<'a> {
             symbol_id: sym_id,
             name,
             namespace: ns,
-            decl_ast: sym.name_ast,
+            decl_site: sym.name_site,
             name_span,
             order_key: 0,
         });
@@ -215,33 +215,33 @@ impl<'a> DefContext<'a> {
     pub(crate) fn push_symbol(&mut self, sym: Symbol) -> SymbolId {
         debug_assert!(
             match sym.kind {
-                SymbolKind::Module => sym.def_ast.kind() == SyntaxKind::ModuleDecl,
-                SymbolKind::Package => sym.def_ast.kind() == SyntaxKind::PackageDecl,
-                SymbolKind::Interface => sym.def_ast.kind() == SyntaxKind::InterfaceDecl,
-                SymbolKind::Program => sym.def_ast.kind() == SyntaxKind::ProgramDecl,
-                SymbolKind::Primitive => sym.def_ast.kind() == SyntaxKind::PrimitiveDecl,
-                SymbolKind::Config => sym.def_ast.kind() == SyntaxKind::ConfigDecl,
-                SymbolKind::Function => sym.def_ast.kind() == SyntaxKind::FunctionDecl,
-                SymbolKind::Task => sym.def_ast.kind() == SyntaxKind::TaskDecl,
-                SymbolKind::Variable => sym.def_ast.kind() == SyntaxKind::VarDecl,
-                SymbolKind::Net => sym.def_ast.kind() == SyntaxKind::NetDecl,
-                SymbolKind::Parameter => sym.def_ast.kind() == SyntaxKind::ParamDecl,
-                SymbolKind::PortAnsi => sym.def_ast.kind() == SyntaxKind::Port,
-                SymbolKind::PortTf => sym.def_ast.kind() == SyntaxKind::TfPortDecl,
-                SymbolKind::Typedef => sym.def_ast.kind() == SyntaxKind::TypedefDecl,
-                SymbolKind::EnumMember => sym.def_ast.kind() == SyntaxKind::EnumMember,
-                SymbolKind::Modport => sym.def_ast.kind() == SyntaxKind::ModportItem,
-                SymbolKind::Instance => sym.def_ast.kind() == SyntaxKind::ModuleInstantiation,
+                SymbolKind::Module => sym.decl_site.kind() == SyntaxKind::ModuleDecl,
+                SymbolKind::Package => sym.decl_site.kind() == SyntaxKind::PackageDecl,
+                SymbolKind::Interface => sym.decl_site.kind() == SyntaxKind::InterfaceDecl,
+                SymbolKind::Program => sym.decl_site.kind() == SyntaxKind::ProgramDecl,
+                SymbolKind::Primitive => sym.decl_site.kind() == SyntaxKind::PrimitiveDecl,
+                SymbolKind::Config => sym.decl_site.kind() == SyntaxKind::ConfigDecl,
+                SymbolKind::Function => sym.decl_site.kind() == SyntaxKind::FunctionDecl,
+                SymbolKind::Task => sym.decl_site.kind() == SyntaxKind::TaskDecl,
+                SymbolKind::Variable => sym.decl_site.kind() == SyntaxKind::VarDecl,
+                SymbolKind::Net => sym.decl_site.kind() == SyntaxKind::NetDecl,
+                SymbolKind::Parameter => sym.decl_site.kind() == SyntaxKind::ParamDecl,
+                SymbolKind::PortAnsi => sym.decl_site.kind() == SyntaxKind::Port,
+                SymbolKind::PortTf => sym.decl_site.kind() == SyntaxKind::TfPortDecl,
+                SymbolKind::Typedef => sym.decl_site.kind() == SyntaxKind::TypedefDecl,
+                SymbolKind::EnumMember => sym.decl_site.kind() == SyntaxKind::EnumMember,
+                SymbolKind::Modport => sym.decl_site.kind() == SyntaxKind::ModportItem,
+                SymbolKind::Instance => sym.decl_site.kind() == SyntaxKind::ModuleInstantiation,
             },
-            "def_ast kind {:?} does not match SymbolKind::{:?}",
-            sym.def_ast.kind(),
+            "decl_site kind {:?} does not match SymbolKind::{:?}",
+            sym.decl_site.kind(),
             sym.kind,
         );
-        self.check_name_ast_invariants(
+        self.check_name_site_invariants(
             sym.kind,
-            sym.name_ast,
-            sym.def_ast,
-            sym.type_ast,
+            sym.name_site,
+            sym.decl_site,
+            sym.type_site,
             &sym.name,
         );
         let scope = sym.scope;
@@ -251,12 +251,12 @@ impl<'a> DefContext<'a> {
         id
     }
 
-    fn check_name_ast_invariants(
+    fn check_name_site_invariants(
         &mut self,
         kind: SymbolKind,
-        name_ast: lyra_ast::ErasedAstId,
-        def_ast: lyra_ast::ErasedAstId,
-        type_ast: Option<lyra_ast::ErasedAstId>,
+        name_site: crate::Site,
+        decl_site: crate::Site,
+        type_site: Option<crate::Site>,
         name: &str,
     ) {
         let expected_name_kind = match kind {
@@ -277,33 +277,33 @@ impl<'a> DefContext<'a> {
             SymbolKind::EnumMember => SyntaxKind::EnumMember,
             SymbolKind::Modport => SyntaxKind::ModportItem,
         };
-        if name_ast.kind() != expected_name_kind {
+        if name_site.kind() != expected_name_kind {
             self.emit_internal_error(
                 &format!(
-                    "name_ast kind {:?} (expected {:?}) for {:?} '{}'",
-                    name_ast.kind(),
+                    "name_site kind {:?} (expected {:?}) for {:?} '{}'",
+                    name_site.kind(),
                     expected_name_kind,
                     kind,
                     name,
                 ),
-                name_ast.text_range(),
+                name_site.text_range(),
             );
         }
-        if kind.namespace() == Namespace::Definition && name_ast != def_ast {
+        if kind.namespace() == Namespace::Definition && name_site != decl_site {
             self.emit_internal_error(
-                &format!("name_ast != def_ast for definition-namespace {kind:?} '{name}'",),
-                name_ast.text_range(),
+                &format!("name_site != decl_site for definition-namespace {kind:?} '{name}'",),
+                name_site.text_range(),
             );
         }
-        if let Some(ta) = type_ast
+        if let Some(ta) = type_site
             && ta.kind() != SyntaxKind::TypeSpec
         {
             self.emit_internal_error(
                 &format!(
-                    "type_ast kind {:?} (expected TypeSpec) for {kind:?} '{name}'",
+                    "type_site kind {:?} (expected TypeSpec) for {kind:?} '{name}'",
                     ta.kind(),
                 ),
-                name_ast.text_range(),
+                name_site.text_range(),
             );
         }
     }
@@ -339,7 +339,7 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
     let Some(name_tok) = lyra_ast::ModuleDecl::cast(node.clone()).and_then(|m| m.name()) else {
         return;
     };
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_module",
@@ -350,14 +350,14 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let name_span = NameSpan::new(name_tok.text_range());
     let module_scope = ctx.scopes.push(ScopeKind::Module, None);
     let sym_id = ctx.push_symbol(Symbol {
         name: name.clone(),
         kind: SymbolKind::Module,
-        def_ast,
-        name_ast: def_ast,
-        type_ast: None,
+        decl_site,
+        name_site: decl_site,
+        type_site: None,
         name_span,
         scope: module_scope,
         origin: SymbolOrigin::TypeSpec,
@@ -393,7 +393,7 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
     let Some(name_tok) = lyra_ast::PackageDecl::cast(node.clone()).and_then(|p| p.name()) else {
         return;
     };
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_package",
@@ -404,14 +404,14 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let name_span = NameSpan::new(name_tok.text_range());
     let package_scope = ctx.scopes.push(ScopeKind::Package, None);
     let sym_id = ctx.push_symbol(Symbol {
         name: name.clone(),
         kind: SymbolKind::Package,
-        def_ast,
-        name_ast: def_ast,
-        type_ast: None,
+        decl_site,
+        name_site: decl_site,
+        type_site: None,
         name_span,
         scope: package_scope,
         origin: SymbolOrigin::TypeSpec,
@@ -431,7 +431,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let Some(name_tok) = lyra_ast::InterfaceDecl::cast(node.clone()).and_then(|i| i.name()) else {
         return;
     };
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_interface",
@@ -442,14 +442,14 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let name_span = NameSpan::new(name_tok.text_range());
     let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
     let sym_id = ctx.push_symbol(Symbol {
         name: name.clone(),
         kind: SymbolKind::Interface,
-        def_ast,
-        name_ast: def_ast,
-        type_ast: None,
+        decl_site,
+        name_site: decl_site,
+        type_site: None,
         name_span,
         scope: iface_scope,
         origin: SymbolOrigin::TypeSpec,
@@ -457,7 +457,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     ctx.export_definitions.push(sym_id);
 
     ctx.register_binding(sym_id);
-    let iface_def_id = Some(crate::symbols::GlobalDefId::new(def_ast));
+    let iface_def_id = Some(crate::symbols::GlobalDefId::new(decl_site));
 
     let prev_iface = ctx.current_iface_def_id.take();
     ctx.current_iface_def_id = iface_def_id;
@@ -490,7 +490,7 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let Some(name_tok) = lyra_ast::ProgramDecl::cast(node.clone()).and_then(|p| p.name()) else {
         return;
     };
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_program",
@@ -501,14 +501,14 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let name_span = NameSpan::new(name_tok.text_range());
     let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
     let sym_id = ctx.push_symbol(Symbol {
         name: name.clone(),
         kind: SymbolKind::Program,
-        def_ast,
-        name_ast: def_ast,
-        type_ast: None,
+        decl_site,
+        name_site: decl_site,
+        type_site: None,
         name_span,
         scope: prog_scope,
         origin: SymbolOrigin::TypeSpec,
@@ -544,7 +544,7 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let Some(name_tok) = lyra_ast::PrimitiveDecl::cast(node.clone()).and_then(|p| p.name()) else {
         return;
     };
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_primitive",
@@ -555,14 +555,14 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let name_span = NameSpan::new(name_tok.text_range());
     let prim_scope = ctx.scopes.push(ScopeKind::Module, None);
     let sym_id = ctx.push_symbol(Symbol {
         name,
         kind: SymbolKind::Primitive,
-        def_ast,
-        name_ast: def_ast,
-        type_ast: None,
+        decl_site,
+        name_site: decl_site,
+        type_site: None,
         name_span,
         scope: prim_scope,
         origin: SymbolOrigin::TypeSpec,
@@ -576,7 +576,7 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let Some(name_tok) = lyra_ast::ConfigDecl::cast(node.clone()).and_then(|c| c.name()) else {
         return;
     };
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_config",
@@ -587,14 +587,14 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let name_span = NameSpan::new(name_tok.text_range());
     let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
     let sym_id = ctx.push_symbol(Symbol {
         name,
         kind: SymbolKind::Config,
-        def_ast,
-        name_ast: def_ast,
-        type_ast: None,
+        decl_site,
+        name_site: decl_site,
+        type_site: None,
         name_span,
         scope: cfg_scope,
         origin: SymbolOrigin::TypeSpec,
@@ -631,7 +631,7 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
             let Some(name_tok) = port.name() else {
                 continue;
             };
-            let Some(def_ast) = ctx.ast_id_map.erased_ast_id(&child) else {
+            let Some(decl_site) = ctx.ast_id_map.erased_ast_id(&child) else {
                 ctx.emit_internal_error(
                     &format!(
                         "erased_ast_id returned None for {:?} in collect_port_list",
@@ -641,16 +641,16 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 );
                 continue;
             };
-            let name_span = Some(NameSpan::new(name_tok.text_range()));
-            let port_type_ast = port
+            let name_span = NameSpan::new(name_tok.text_range());
+            let port_type_site = port
                 .type_spec()
                 .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
             let sym_id = ctx.push_symbol(Symbol {
                 name: SmolStr::new(name_tok.text()),
                 kind: SymbolKind::PortAnsi,
-                def_ast,
-                name_ast: def_ast,
-                type_ast: port_type_ast,
+                decl_site,
+                name_site: decl_site,
+                type_site: port_type_site,
                 name_span,
                 scope,
                 origin: SymbolOrigin::TypeSpec,

@@ -24,6 +24,7 @@ pub mod record;
 mod resolve;
 pub mod resolve_index;
 pub mod scopes;
+pub mod site;
 pub mod symbols;
 pub(crate) mod syntax_helpers;
 pub mod system_call_view;
@@ -32,6 +33,8 @@ pub mod type_check;
 mod type_extract;
 pub mod type_infer;
 pub mod types;
+
+pub use site::Site;
 
 pub use builder::build_def_index;
 pub use resolve::{

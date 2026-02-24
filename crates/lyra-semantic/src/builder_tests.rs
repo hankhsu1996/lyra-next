@@ -184,7 +184,7 @@ fn same_namespace_typedef_duplicate() {
 }
 
 #[test]
-fn def_ast_points_to_expected_node_kind() {
+fn decl_site_points_to_expected_node_kind() {
     let src = "module m; logic x; endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -196,7 +196,7 @@ fn def_ast_points_to_expected_node_kind() {
         .map(|(_, s)| s);
     assert!(module_sym.is_some());
     assert_eq!(
-        module_sym.expect("checked").def_ast.kind(),
+        module_sym.expect("checked").decl_site.kind(),
         SyntaxKind::ModuleDecl,
     );
 
@@ -207,13 +207,13 @@ fn def_ast_points_to_expected_node_kind() {
         .map(|(_, s)| s);
     assert!(var_sym.is_some());
     assert_eq!(
-        var_sym.expect("checked").def_ast.kind(),
+        var_sym.expect("checked").decl_site.kind(),
         SyntaxKind::VarDecl,
     );
 }
 
 #[test]
-fn def_ast_port_points_to_port_node() {
+fn decl_site_port_points_to_port_node() {
     let src = "module m(input logic a, input logic b); endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -225,17 +225,17 @@ fn def_ast_port_points_to_port_node() {
         .collect();
     assert_eq!(ports.len(), 2);
 
-    // Each ANSI port has its own Port node, so def_ast should differ
-    assert_eq!(ports[0].1.def_ast.kind(), SyntaxKind::Port);
-    assert_eq!(ports[1].1.def_ast.kind(), SyntaxKind::Port);
+    // Each ANSI port has its own Port node, so decl_site should differ
+    assert_eq!(ports[0].1.decl_site.kind(), SyntaxKind::Port);
+    assert_eq!(ports[1].1.decl_site.kind(), SyntaxKind::Port);
     assert_ne!(
-        ports[0].1.def_ast, ports[1].1.def_ast,
-        "separate Port nodes should have different def_ast"
+        ports[0].1.decl_site, ports[1].1.decl_site,
+        "separate Port nodes should have different decl_site"
     );
 }
 
 #[test]
-fn def_ast_shared_for_multi_declarator() {
+fn decl_site_shared_for_multi_declarator() {
     let src = "module m; logic x, y; endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -254,14 +254,14 @@ fn def_ast_shared_for_multi_declarator() {
         .expect("y");
 
     assert_eq!(
-        x_sym.def_ast, y_sym.def_ast,
-        "multi-declarator symbols should share the same def_ast"
+        x_sym.decl_site, y_sym.decl_site,
+        "multi-declarator symbols should share the same decl_site"
     );
-    assert_eq!(x_sym.def_ast.kind(), SyntaxKind::VarDecl);
+    assert_eq!(x_sym.decl_site.kind(), SyntaxKind::VarDecl);
 }
 
 #[test]
-fn def_ast_shared_for_multi_instance() {
+fn decl_site_shared_for_multi_instance() {
     let src = "module top; m u1(), u2(); endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -273,11 +273,11 @@ fn def_ast_shared_for_multi_instance() {
         .collect();
     assert_eq!(instances.len(), 2);
     assert_eq!(
-        instances[0].1.def_ast, instances[1].1.def_ast,
-        "multi-instance symbols should share the same def_ast"
+        instances[0].1.decl_site, instances[1].1.decl_site,
+        "multi-instance symbols should share the same decl_site"
     );
     assert_eq!(
-        instances[0].1.def_ast.kind(),
+        instances[0].1.decl_site.kind(),
         SyntaxKind::ModuleInstantiation,
     );
 }
@@ -295,7 +295,7 @@ fn no_internal_errors_for_valid_input() {
 }
 
 #[test]
-fn name_ast_unique_for_multi_declarator() {
+fn name_site_unique_for_multi_declarator() {
     let src = "module m; logic x, y; endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -313,17 +313,17 @@ fn name_ast_unique_for_multi_declarator() {
         .map(|(_, s)| s)
         .expect("y");
 
-    assert_eq!(x.def_ast, y.def_ast, "should share def_ast (VarDecl)");
+    assert_eq!(x.decl_site, y.decl_site, "should share decl_site (VarDecl)");
     assert_ne!(
-        x.name_ast, y.name_ast,
-        "should have distinct name_ast (Declarator)"
+        x.name_site, y.name_site,
+        "should have distinct name_site (Declarator)"
     );
-    assert_eq!(x.name_ast.kind(), SyntaxKind::Declarator);
-    assert_eq!(y.name_ast.kind(), SyntaxKind::Declarator);
+    assert_eq!(x.name_site.kind(), SyntaxKind::Declarator);
+    assert_eq!(y.name_site.kind(), SyntaxKind::Declarator);
 }
 
 #[test]
-fn name_ast_unique_for_multi_instance() {
+fn name_site_unique_for_multi_instance() {
     let src = "module top; m u1(), u2(); endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -335,19 +335,25 @@ fn name_ast_unique_for_multi_instance() {
         .collect();
     assert_eq!(insts.len(), 2);
     assert_eq!(
-        insts[0].1.def_ast, insts[1].1.def_ast,
-        "should share def_ast"
+        insts[0].1.decl_site, insts[1].1.decl_site,
+        "should share decl_site"
     );
     assert_ne!(
-        insts[0].1.name_ast, insts[1].1.name_ast,
-        "should have distinct name_ast (HierarchicalInstance)"
+        insts[0].1.name_site, insts[1].1.name_site,
+        "should have distinct name_site (HierarchicalInstance)"
     );
-    assert_eq!(insts[0].1.name_ast.kind(), SyntaxKind::HierarchicalInstance);
-    assert_eq!(insts[1].1.name_ast.kind(), SyntaxKind::HierarchicalInstance);
+    assert_eq!(
+        insts[0].1.name_site.kind(),
+        SyntaxKind::HierarchicalInstance
+    );
+    assert_eq!(
+        insts[1].1.name_site.kind(),
+        SyntaxKind::HierarchicalInstance
+    );
 }
 
 #[test]
-fn name_ast_equals_def_ast_for_single_name() {
+fn name_site_equals_decl_site_for_single_name() {
     let src = "module m(input logic a); typedef int t; endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -358,8 +364,8 @@ fn name_ast_equals_def_ast_for_single_name() {
         .find(|(_, s)| s.kind == SymbolKind::Module)
         .map(|(_, s)| s);
     assert_eq!(
-        module.expect("module").name_ast,
-        module.expect("module").def_ast
+        module.expect("module").name_site,
+        module.expect("module").decl_site
     );
 
     let port = def
@@ -367,18 +373,21 @@ fn name_ast_equals_def_ast_for_single_name() {
         .iter()
         .find(|(_, s)| s.kind == SymbolKind::PortAnsi)
         .map(|(_, s)| s);
-    assert_eq!(port.expect("port").name_ast, port.expect("port").def_ast);
+    assert_eq!(port.expect("port").name_site, port.expect("port").decl_site);
 
     let td = def
         .symbols
         .iter()
         .find(|(_, s)| s.kind == SymbolKind::Typedef)
         .map(|(_, s)| s);
-    assert_eq!(td.expect("typedef").name_ast, td.expect("typedef").def_ast);
+    assert_eq!(
+        td.expect("typedef").name_site,
+        td.expect("typedef").decl_site
+    );
 }
 
 #[test]
-fn type_ast_present_for_typed_declarations() {
+fn type_site_present_for_typed_declarations() {
     let src = "module m(input logic a); logic x; wire [7:0] w; typedef int t; endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -389,8 +398,8 @@ fn type_ast_present_for_typed_declarations() {
         .find(|(_, s)| s.name == "x")
         .map(|(_, s)| s)
         .expect("x");
-    assert!(var.type_ast.is_some(), "Variable should have type_ast");
-    assert_eq!(var.type_ast.expect("checked").kind(), SyntaxKind::TypeSpec);
+    assert!(var.type_site.is_some(), "Variable should have type_site");
+    assert_eq!(var.type_site.expect("checked").kind(), SyntaxKind::TypeSpec);
 
     let net = def
         .symbols
@@ -398,8 +407,8 @@ fn type_ast_present_for_typed_declarations() {
         .find(|(_, s)| s.name == "w")
         .map(|(_, s)| s)
         .expect("w");
-    assert!(net.type_ast.is_some(), "Net should have type_ast");
-    assert_eq!(net.type_ast.expect("checked").kind(), SyntaxKind::TypeSpec);
+    assert!(net.type_site.is_some(), "Net should have type_site");
+    assert_eq!(net.type_site.expect("checked").kind(), SyntaxKind::TypeSpec);
 
     let port = def
         .symbols
@@ -407,8 +416,8 @@ fn type_ast_present_for_typed_declarations() {
         .find(|(_, s)| s.kind == SymbolKind::PortAnsi)
         .map(|(_, s)| s);
     assert!(
-        port.expect("port").type_ast.is_some(),
-        "PortAnsi with explicit type should have type_ast"
+        port.expect("port").type_site.is_some(),
+        "PortAnsi with explicit type should have type_site"
     );
 
     let td = def
@@ -417,13 +426,13 @@ fn type_ast_present_for_typed_declarations() {
         .find(|(_, s)| s.kind == SymbolKind::Typedef)
         .map(|(_, s)| s);
     assert!(
-        td.expect("typedef").type_ast.is_some(),
-        "Typedef should have type_ast"
+        td.expect("typedef").type_site.is_some(),
+        "Typedef should have type_site"
     );
 }
 
 #[test]
-fn type_ast_none_for_untyped() {
+fn type_site_none_for_untyped() {
     let src = "module m; m u1(); endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -434,8 +443,8 @@ fn type_ast_none_for_untyped() {
         .find(|(_, s)| s.kind == SymbolKind::Module)
         .map(|(_, s)| s);
     assert!(
-        module.expect("module").type_ast.is_none(),
-        "Module should have no type_ast"
+        module.expect("module").type_site.is_none(),
+        "Module should have no type_site"
     );
 
     let inst = def
@@ -444,13 +453,13 @@ fn type_ast_none_for_untyped() {
         .find(|(_, s)| s.kind == SymbolKind::Instance)
         .map(|(_, s)| s);
     assert!(
-        inst.expect("instance").type_ast.is_none(),
-        "Instance should have no type_ast"
+        inst.expect("instance").type_site.is_none(),
+        "Instance should have no type_site"
     );
 }
 
 #[test]
-fn type_ast_present_for_net() {
+fn type_site_present_for_net() {
     let src = "module m; wire [7:0] w; endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -462,14 +471,14 @@ fn type_ast_present_for_net() {
         .map(|(_, s)| s)
         .expect("w");
     assert!(
-        net.type_ast.is_some(),
-        "net should have type_ast after A2 TypeSpec wrapping"
+        net.type_site.is_some(),
+        "net should have type_site after A2 TypeSpec wrapping"
     );
-    assert_eq!(net.type_ast.expect("checked").kind(), SyntaxKind::TypeSpec);
+    assert_eq!(net.type_site.expect("checked").kind(), SyntaxKind::TypeSpec);
 }
 
 #[test]
-fn type_ast_for_signed_net_with_packed_dims() {
+fn type_site_for_signed_net_with_packed_dims() {
     let src = "module m; wire signed [15:0] s; endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -480,12 +489,12 @@ fn type_ast_for_signed_net_with_packed_dims() {
         .find(|(_, s)| s.name == "s")
         .map(|(_, s)| s)
         .expect("s");
-    let ts_id = net.type_ast.expect("signed net should have type_ast");
+    let ts_id = net.type_site.expect("signed net should have type_site");
     assert_eq!(ts_id.kind(), SyntaxKind::TypeSpec);
 }
 
 #[test]
-fn type_ast_for_function_is_return_type() {
+fn type_site_for_function_is_return_type() {
     let src = "module m; function logic [3:0] f(); endfunction endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -498,15 +507,18 @@ fn type_ast_for_function_is_return_type() {
     assert!(func.is_some(), "should find function symbol");
     let func = func.expect("checked");
     assert!(
-        func.type_ast.is_some(),
-        "Function should have return type_ast"
+        func.type_site.is_some(),
+        "Function should have return type_site"
     );
-    assert_eq!(func.type_ast.expect("checked").kind(), SyntaxKind::TypeSpec);
-    assert_eq!(func.name_ast, func.def_ast);
+    assert_eq!(
+        func.type_site.expect("checked").kind(),
+        SyntaxKind::TypeSpec
+    );
+    assert_eq!(func.name_site, func.decl_site);
 }
 
 #[test]
-fn type_ast_none_for_task() {
+fn type_site_none_for_task() {
     let src = "module m; task t(); endtask endmodule";
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
@@ -517,8 +529,8 @@ fn type_ast_none_for_task() {
         .find(|(_, s)| s.kind == SymbolKind::Task)
         .map(|(_, s)| s);
     assert!(
-        task.expect("task").type_ast.is_none(),
-        "Task should have no type_ast"
+        task.expect("task").type_site.is_none(),
+        "Task should have no type_site"
     );
-    assert_eq!(task.expect("task").name_ast, task.expect("task").def_ast);
+    assert_eq!(task.expect("task").name_site, task.expect("task").decl_site);
 }

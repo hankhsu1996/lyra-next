@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use lyra_source::TextRange;
 use smallvec::{SmallVec, smallvec};
 use smol_str::SmolStr;
 
@@ -8,12 +7,12 @@ use crate::def_index::{
     CompilationUnitEnv, DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, LocalDeclId,
     NamePath,
 };
-use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::diagnostic::SemanticDiag;
 use crate::enum_def::{EnumVariantIndex, PkgEnumVariantIndex};
 use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
 use crate::name_graph::NameGraph;
 use crate::resolve_index::{
-    CoreResolution, CoreResolveOutput, CoreResolveResult, ImportConflict, ImportConflictKind,
+    self, CoreResolution, CoreResolveOutput, CoreResolveResult, ImportConflict, ImportConflictKind,
     ImportError, Resolution, ResolveIndex, ResolvedTarget, UnresolvedReason, WildcardLocalConflict,
 };
 use crate::scopes::{ScopeId, SymbolNameLookup};
@@ -107,7 +106,7 @@ pub fn build_resolve_core(
 /// wildcard promotion.
 pub(crate) struct RealizedBinding {
     pub name: SmolStr,
-    pub target_name_ast: lyra_ast::ErasedAstId,
+    pub target_name_site: crate::Site,
     pub ns: Namespace,
     pub origins: SmallVec<[ImportOrigin; 1]>,
 }
@@ -166,7 +165,7 @@ pub(crate) fn build_effective_imports(
                 if let Some(target) = pkg_scope.resolve(&imp.package, member, ns) {
                     realized.push(RealizedBinding {
                         name: member.clone(),
-                        target_name_ast: target,
+                        target_name_site: target,
                         ns,
                         origins: smallvec![ImportOrigin::Explicit {
                             package: imp.package.clone(),
@@ -178,8 +177,8 @@ pub(crate) fn build_effective_imports(
     }
 
     // Step 2: build wildcard candidate maps (split by namespace)
-    let mut value_candidates: HashMap<SmolStr, Vec<lyra_ast::ErasedAstId>> = HashMap::new();
-    let mut type_candidates: HashMap<SmolStr, Vec<lyra_ast::ErasedAstId>> = HashMap::new();
+    let mut value_candidates: HashMap<SmolStr, Vec<crate::Site>> = HashMap::new();
+    let mut type_candidates: HashMap<SmolStr, Vec<crate::Site>> = HashMap::new();
     for imp in graph.imports_for_scope(scope_id) {
         if imp.name == ImportName::Wildcard
             && let Some(surface) = pkg_scope.public_surface(&imp.package)
@@ -221,7 +220,7 @@ pub(crate) fn build_effective_imports(
                     if in_candidates {
                         realized.push(RealizedBinding {
                             name: name.clone(),
-                            target_name_ast: target,
+                            target_name_site: target,
                             ns: *ns,
                             origins: smallvec![ImportOrigin::ExportTriggered {
                                 id: export.id,
@@ -236,10 +235,10 @@ pub(crate) fn build_effective_imports(
 
     // Step 4: dedup by (name, ns, target), merging origins on collision
     realized.sort_by(|a, b| {
-        (&a.name, &a.ns, &a.target_name_ast).cmp(&(&b.name, &b.ns, &b.target_name_ast))
+        (&a.name, &a.ns, &a.target_name_site).cmp(&(&b.name, &b.ns, &b.target_name_site))
     });
     realized.dedup_by(|b, a| {
-        a.name == b.name && a.ns == b.ns && a.target_name_ast == b.target_name_ast && {
+        a.name == b.name && a.ns == b.ns && a.target_name_site == b.target_name_site && {
             a.origins.extend(b.origins.drain(..));
             true
         }
@@ -348,7 +347,7 @@ fn detect_wildcard_conflicts(
                 continue;
             }
             if let Some(wid) = pkg_scope.resolve(wc_pkg, &binding.name, binding.ns)
-                && wid != binding.target_name_ast
+                && wid != binding.target_name_site
             {
                 entries.push(WcConflictEntry {
                     name: binding.name.clone(),
@@ -616,7 +615,7 @@ enum WildcardResult {
 
 /// Result from wildcard import resolution: symbol, enum variant, or not found.
 enum WildcardFound {
-    Symbol(lyra_ast::ErasedAstId, SmolStr),
+    Symbol(crate::Site, SmolStr),
     EnumVariant(crate::enum_def::EnumVariantTarget, SmolStr),
 }
 
@@ -716,7 +715,7 @@ fn resolve_via_implicit_import(
     name: &str,
     ns: Namespace,
 ) -> WildcardResult {
-    let mut found: Option<(lyra_ast::ErasedAstId, SmolStr)> = None;
+    let mut found: Option<(crate::Site, SmolStr)> = None;
     let mut ambiguous_pkgs: Vec<SmolStr> = Vec::new();
 
     for imp in &*cu_env.implicit_imports {
@@ -982,7 +981,7 @@ fn has_higher_precedence_binding(
 /// Zips `def.use_sites` with `core.resolutions`, builds the `HashMap`
 /// and diagnostics. Import errors are also mapped to diagnostics.
 ///
-/// `lookup_decl` maps an `ErasedAstId` (`name_ast` anchor from
+/// `lookup_decl` maps a `Site` (`name_site` anchor from
 /// `CoreResolution::Def` or `CoreResolution::Pkg`) to a `SymbolId`
 /// in the target file.
 ///
@@ -994,7 +993,7 @@ fn has_higher_precedence_binding(
 pub fn build_resolve_index(
     def: &DefIndex,
     core: &CoreResolveOutput,
-    lookup_decl: &dyn Fn(lyra_ast::ErasedAstId) -> Option<SymbolId>,
+    lookup_decl: &dyn Fn(crate::Site) -> Option<SymbolId>,
     instance_filter: &dyn Fn(crate::instance_decl::InstanceDeclIdx) -> bool,
 ) -> ResolveIndex {
     let mut resolutions = HashMap::new();
@@ -1008,7 +1007,7 @@ pub fn build_resolve_index(
                 if let crate::record::SymbolOrigin::Instance(idx) = def.symbols.get(*symbol).origin
                     && !instance_filter(idx)
                 {
-                    let diag = reason_to_diagnostic(
+                    let diag = resolve_index::reason_to_diagnostic(
                         &UnresolvedReason::NotFound,
                         use_site.expected_ns,
                         &use_site.path,
@@ -1018,7 +1017,7 @@ pub fn build_resolve_index(
                     continue;
                 }
                 resolutions.insert(
-                    use_site.name_ref_ast,
+                    use_site.name_ref_site,
                     Resolution {
                         target: ResolvedTarget::Symbol(GlobalSymbolId {
                             file: def.file,
@@ -1027,7 +1026,7 @@ pub fn build_resolve_index(
                         namespace: *namespace,
                     },
                 );
-                if let Some(diag) = check_type_mismatch(
+                if let Some(diag) = resolve_index::check_type_mismatch(
                     use_site.expected_ns,
                     *namespace,
                     &use_site.path,
@@ -1047,11 +1046,11 @@ pub fn build_resolve_index(
                 );
             }
             CoreResolveResult::Resolved(CoreResolution::Pkg {
-                name_ast,
+                name_site,
                 namespace,
             }) => {
                 resolve_cross_file(
-                    *name_ast,
+                    *name_site,
                     *namespace,
                     use_site,
                     lookup_decl,
@@ -1061,7 +1060,7 @@ pub fn build_resolve_index(
             }
             CoreResolveResult::Resolved(CoreResolution::EnumVariant(target)) => {
                 resolutions.insert(
-                    use_site.name_ref_ast,
+                    use_site.name_ref_site,
                     Resolution {
                         target: ResolvedTarget::EnumVariant(target.clone()),
                         namespace: Namespace::Value,
@@ -1069,7 +1068,7 @@ pub fn build_resolve_index(
                 );
             }
             CoreResolveResult::Unresolved(reason) => {
-                let diag = reason_to_diagnostic(
+                let diag = resolve_index::reason_to_diagnostic(
                     reason,
                     use_site.expected_ns,
                     &use_site.path,
@@ -1102,27 +1101,27 @@ fn map_import_errors(
             },
             ImportName::Wildcard => NamePath::Simple(SmolStr::new(format!("{}::*", imp.package))),
         };
-        let diag = reason_to_diagnostic(
+        let diag = resolve_index::reason_to_diagnostic(
             &err.reason,
             ExpectedNs::Exact(Namespace::Value),
             &path,
-            imp.import_stmt_ast.text_range(),
+            imp.import_stmt_site.text_range(),
         );
         diagnostics.push(diag);
     }
 }
 
 fn resolve_cross_file(
-    anchor: lyra_ast::ErasedAstId,
+    anchor: crate::Site,
     namespace: Namespace,
     use_site: &crate::def_index::UseSite,
-    lookup_decl: &dyn Fn(lyra_ast::ErasedAstId) -> Option<SymbolId>,
-    resolutions: &mut HashMap<lyra_ast::ErasedAstId, Resolution>,
+    lookup_decl: &dyn Fn(crate::Site) -> Option<SymbolId>,
+    resolutions: &mut HashMap<crate::Site, Resolution>,
     diagnostics: &mut Vec<SemanticDiag>,
 ) {
     if let Some(local) = lookup_decl(anchor) {
         resolutions.insert(
-            use_site.name_ref_ast,
+            use_site.name_ref_site,
             Resolution {
                 target: ResolvedTarget::Symbol(GlobalSymbolId {
                     file: anchor.file(),
@@ -1131,7 +1130,7 @@ fn resolve_cross_file(
                 namespace,
             },
         );
-        if let Some(diag) = check_type_mismatch(
+        if let Some(diag) = resolve_index::check_type_mismatch(
             use_site.expected_ns,
             namespace,
             &use_site.path,
@@ -1139,77 +1138,5 @@ fn resolve_cross_file(
         ) {
             diagnostics.push(diag);
         }
-    }
-}
-
-fn reason_to_diagnostic(
-    reason: &UnresolvedReason,
-    expected_ns: ExpectedNs,
-    path: &NamePath,
-    range: TextRange,
-) -> SemanticDiag {
-    match reason {
-        UnresolvedReason::NotFound => {
-            let name = SmolStr::new(path.display_name());
-            let kind = if matches!(
-                expected_ns,
-                ExpectedNs::TypeThenValue | ExpectedNs::Exact(Namespace::Type)
-            ) {
-                SemanticDiagKind::UndeclaredType { name }
-            } else {
-                SemanticDiagKind::UnresolvedName { name }
-            };
-            SemanticDiag { kind, range }
-        }
-        UnresolvedReason::PackageNotFound { package } => SemanticDiag {
-            kind: SemanticDiagKind::PackageNotFound {
-                package: package.clone(),
-            },
-            range,
-        },
-        UnresolvedReason::MemberNotFound { package, member } => SemanticDiag {
-            kind: SemanticDiagKind::MemberNotFound {
-                package: package.clone(),
-                member: member.clone(),
-            },
-            range,
-        },
-        UnresolvedReason::AmbiguousWildcardImport { candidates } => SemanticDiag {
-            kind: SemanticDiagKind::AmbiguousWildcardImport {
-                name: SmolStr::new(path.display_name()),
-                candidates: candidates.clone(),
-            },
-            range,
-        },
-        UnresolvedReason::UnsupportedQualifiedPath { .. } => SemanticDiag {
-            kind: SemanticDiagKind::UnsupportedQualifiedPath {
-                path: SmolStr::new(path.display_name()),
-            },
-            range,
-        },
-        UnresolvedReason::InternalError { detail } => SemanticDiag {
-            kind: SemanticDiagKind::InternalError {
-                detail: detail.clone(),
-            },
-            range,
-        },
-    }
-}
-
-fn check_type_mismatch(
-    expected_ns: ExpectedNs,
-    actual_ns: Namespace,
-    path: &NamePath,
-    range: TextRange,
-) -> Option<SemanticDiag> {
-    if matches!(expected_ns, ExpectedNs::TypeThenValue) && actual_ns == Namespace::Value {
-        Some(SemanticDiag {
-            kind: SemanticDiagKind::NotAType {
-                name: SmolStr::new(path.display_name()),
-            },
-            range,
-        })
-    } else {
-        None
     }
 }

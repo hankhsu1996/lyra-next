@@ -48,7 +48,7 @@ pub fn file_diagnostics(
     // Enum base type diagnostics
     let file_id = file.file_id(db);
     for enum_def in &*def.enum_defs {
-        let enum_id = lyra_semantic::enum_def::EnumId::new(enum_def.enum_type_ast);
+        let enum_id = lyra_semantic::enum_def::EnumId::new(enum_def.enum_type_site);
         let eref = EnumRef::new(db, unit, enum_id);
         let sem = enum_sem(db, eref);
         for diag in &*sem.diags {
@@ -84,7 +84,7 @@ pub fn file_diagnostics(
 
     // Record diagnostics (type resolution errors + packed union width)
     for record_def in &*def.record_defs {
-        let record_id = lyra_semantic::record::RecordId::new(record_def.record_type_ast);
+        let record_id = lyra_semantic::record::RecordId::new(record_def.record_type_site);
         let rref = RecordRef::new(db, unit, record_id);
         diags.extend(record_diagnostics(db, rref).iter().cloned());
     }
@@ -817,7 +817,7 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
     ) -> Option<SymbolType> {
         let ast_id = self.ast_id_map.erased_ast_id(declarator)?;
         let def = def_index_file(self.db, self.source_file);
-        let sym_id = def.name_ast_to_symbol.get(&ast_id).copied()?;
+        let sym_id = def.name_site_to_symbol.get(&ast_id).copied()?;
         let gsym = lyra_semantic::symbols::GlobalSymbolId {
             file: self.source_file.file_id(self.db),
             local: sym_id,
@@ -911,12 +911,10 @@ pub fn unit_diagnostics(
                 let dup_file_id = dup_def_id.file();
                 if let Some(dup_file) = source_file_by_id(db, unit, dup_file_id) {
                     let dup_def = def_index_file(db, dup_file);
-                    if let Some(&sym_id) = dup_def.name_ast_to_symbol.get(&dup_def_id.ast_id()) {
+                    if let Some(&sym_id) = dup_def.name_site_to_symbol.get(&dup_def_id.ast_id()) {
                         let sym = dup_def.symbols.get(sym_id);
                         let pp = preprocess_file(db, dup_file);
-                        let label_range = sym
-                            .name_span
-                            .map_or_else(|| sym.name_ast.text_range(), |ns| ns.text_range());
+                        let label_range = sym.name_span.text_range_or(sym.name_site.text_range());
                         if let Some(span) = pp.source_map.map_span(label_range) {
                             diags.push(
                                 lyra_diag::Diagnostic::new(

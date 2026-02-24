@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lyra_ast::ErasedAstId;
+use crate::Site;
 use lyra_source::TextRange;
 
 use crate::modport_def::PortDirection;
@@ -9,7 +9,7 @@ use crate::modport_def::PortDirection;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldAccessFact {
     pub member_range: TextRange,
-    pub port_id: ErasedAstId,
+    pub port_id: Site,
     pub direction: PortDirection,
     pub target: FieldAccessTarget,
 }
@@ -20,10 +20,10 @@ pub enum FieldAccessTarget {
     /// Bare ident: standard direction rules.
     Member,
     /// Expression port: carries expr AST ID for lvalue query.
-    Expr(ErasedAstId),
+    Expr(Site),
     /// `.P()`: reject all access.
     Empty,
 }
 
 /// Map of pre-computed facts keyed by `FieldExpr` AST node identity.
-pub type FieldAccessFacts = HashMap<ErasedAstId, FieldAccessFact>;
+pub type FieldAccessFacts = HashMap<Site, FieldAccessFact>;

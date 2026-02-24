@@ -78,14 +78,14 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
     };
 
     let resolve_name = |name_node: &lyra_parser::SyntaxNode| -> Result<i64, ConstEvalError> {
-        let name_ast_id = map
+        let name_site_id = map
             .erased_ast_id(name_node)
             .ok_or(ConstEvalError::Unresolved)?;
 
         let resolve = base_resolve_index(db, source_file, unit);
         let resolution = resolve
             .resolutions
-            .get(&name_ast_id)
+            .get(&name_site_id)
             .ok_or(ConstEvalError::Unresolved)?;
 
         let sym = match &resolution.target {
@@ -105,11 +105,11 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
             return Err(ConstEvalError::NonConstant);
         }
 
-        let decl_ast_id = target_sym.name_ast;
+        let decl_site_id = target_sym.name_site;
 
         let init_ast_id = target_def
-            .name_ast_to_init_expr
-            .get(&decl_ast_id)
+            .name_site_to_init_expr
+            .get(&decl_site_id)
             .ok_or(ConstEvalError::Unresolved)?
             .ok_or(ConstEvalError::Unresolved)?;
 
@@ -225,9 +225,9 @@ fn resolve_type_from_typespec(
     typespec: &lyra_parser::SyntaxNode,
 ) -> Option<Ty> {
     let utr = lyra_semantic::user_type_ref(typespec)?;
-    let name_ast_id = map.erased_ast_id(utr.resolve_node())?;
+    let name_site_id = map.erased_ast_id(utr.resolve_node())?;
     let resolve = base_resolve_index(db, source_file, unit);
-    let res = resolve.resolutions.get(&name_ast_id)?;
+    let res = resolve.resolutions.get(&name_site_id)?;
     let sym_id = match &res.target {
         lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
@@ -324,7 +324,7 @@ fn find_use_site_scope(
     let ast_id = map.erased_ast_id(node)?;
     def.use_sites
         .iter()
-        .find(|us| us.name_ref_ast == ast_id)
+        .find(|us| us.name_ref_site == ast_id)
         .map(|us| us.scope)
 }
 
@@ -349,15 +349,15 @@ fn core_resolution_to_ty(
             }
         }
         CoreResolveResult::Resolved(CoreResolution::Def { def }) => {
-            let sym_id = crate::semantic::symbol_at_name_ast(db, unit, def.ast_id())?;
+            let sym_id = crate::semantic::symbol_at_name_site(db, unit, def.ast_id())?;
             let sym_ref = SymbolRef::new(db, unit, sym_id);
             match type_of_symbol_raw(db, sym_ref) {
                 SymbolType::TypeAlias(ty) => Some(ty),
                 _ => None,
             }
         }
-        CoreResolveResult::Resolved(CoreResolution::Pkg { name_ast, .. }) => {
-            let sym_id = crate::semantic::symbol_at_name_ast(db, unit, *name_ast)?;
+        CoreResolveResult::Resolved(CoreResolution::Pkg { name_site, .. }) => {
+            let sym_id = crate::semantic::symbol_at_name_site(db, unit, *name_site)?;
             let sym_ref = SymbolRef::new(db, unit, sym_id);
             match type_of_symbol_raw(db, sym_ref) {
                 SymbolType::TypeAlias(ty) => Some(ty),

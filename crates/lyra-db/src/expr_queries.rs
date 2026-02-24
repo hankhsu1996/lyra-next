@@ -16,7 +16,9 @@ use crate::enum_queries::{EnumRef, enum_sem};
 use crate::module_sig::CallableKind as DbCallableKind;
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::record_queries::{ModportRef, RecordRef, modport_sem, record_fields_raw, record_sem};
-use crate::semantic::{base_resolve_index, def_index_file, resolve_index_file, symbol_at_name_ast};
+use crate::semantic::{
+    base_resolve_index, def_index_file, resolve_index_file, symbol_at_name_site,
+};
 use crate::type_queries::{SymbolRef, type_of_symbol, type_of_symbol_raw};
 use crate::{CompilationUnit, source_file_by_id};
 
@@ -507,10 +509,10 @@ fn type_of_name_impl(
         GlobalSymbolId,
     ) -> lyra_semantic::types::SymbolType,
 ) -> ExprType {
-    let Some(name_ast_id) = ast_id_map.erased_ast_id(name_node) else {
+    let Some(name_site_id) = ast_id_map.erased_ast_id(name_node) else {
         return ExprType::error(ExprTypeErrorKind::Unresolved);
     };
-    let Some(resolution) = resolve.resolutions.get(&name_ast_id) else {
+    let Some(resolution) = resolve.resolutions.get(&name_site_id) else {
         return ExprType::error(ExprTypeErrorKind::Unresolved);
     };
     match &resolution.target {
@@ -540,7 +542,7 @@ fn interface_member_lookup(
         lyra_ast::ErasedAstId,
     ) -> ExprType,
 ) -> Result<MemberInfo, MemberLookupError> {
-    let gsym = symbol_at_name_ast(db, unit, iface_ty.iface.global_def().ast_id())
+    let gsym = symbol_at_name_site(db, unit, iface_ty.iface.global_def().ast_id())
         .ok_or(MemberLookupError::NoMembersOnType)?;
     let src = source_file_by_id(db, unit, gsym.file).ok_or(MemberLookupError::NoMembersOnType)?;
     let def = def_index_file(db, src);

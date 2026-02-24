@@ -1,4 +1,4 @@
-use lyra_ast::ErasedAstId;
+use crate::Site;
 use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
@@ -84,15 +84,15 @@ pub struct GlobalSymbolId {
 /// Cross-file definition identity.
 ///
 /// Cross-file identity for definition-namespace constructs (module, package,
-/// interface, program, primitive, config). Wraps `ErasedAstId` with
-/// `def_ast` semantics. `symbol_global_def()` enforces the restriction.
-/// `PackageScope` uses `ErasedAstId` directly for value/type-namespace
+/// interface, program, primitive, config). Wraps `Site` with
+/// `decl_site` semantics. `symbol_global_def()` enforces the restriction.
+/// `PackageScope` uses `Site` directly for value/type-namespace
 /// member anchors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct GlobalDefId(ErasedAstId);
+pub struct GlobalDefId(Site);
 
 impl GlobalDefId {
-    pub fn new(ast_id: ErasedAstId) -> Self {
+    pub fn new(ast_id: Site) -> Self {
         Self(ast_id)
     }
 
@@ -100,7 +100,7 @@ impl GlobalDefId {
         self.0.file()
     }
 
-    pub fn ast_id(self) -> ErasedAstId {
+    pub fn ast_id(self) -> Site {
         self.0
     }
 }
@@ -167,29 +167,29 @@ impl SymbolKind {
 
 /// A resolved symbol entry.
 ///
-/// `def_ast` anchors this symbol to the declaration item node that
+/// `decl_site` anchors this symbol to the declaration item node that
 /// introduces it (e.g. `VarDecl` for variables, `ModuleDecl` for modules).
-/// Multiple symbols may share the same `def_ast` when declared in the same
+/// Multiple symbols may share the same `decl_site` when declared in the same
 /// declaration item (e.g. `logic x, y;`).
 ///
-/// `name_ast` is the unique name-introducing site (1:1 with the symbol).
+/// `name_site` is the unique name-introducing site (1:1 with the symbol).
 /// For multi-declarator items this is the `Declarator` node; for single-name
-/// declarations it equals `def_ast`.
+/// declarations it equals `decl_site`.
 ///
-/// `type_ast` is the `TypeSpec` node spelling the type, when present.
+/// `type_site` is the `TypeSpec` node spelling the type, when present.
 ///
 /// `name_span` is the precise identifier token range captured at builder
-/// time. `None` only on parse error recovery (name token missing).
+/// time. `NameSpan::INVALID` on parse error recovery (name token missing).
 /// Diagnostic lowering uses `name_span.text_range()` directly -- no CST
 /// traversal needed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub name: SmolStr,
     pub kind: SymbolKind,
-    pub def_ast: ErasedAstId,
-    pub name_ast: ErasedAstId,
-    pub type_ast: Option<ErasedAstId>,
-    pub name_span: Option<NameSpan>,
+    pub decl_site: Site,
+    pub name_site: Site,
+    pub type_site: Option<Site>,
+    pub name_span: NameSpan,
     pub scope: ScopeId,
     pub origin: SymbolOrigin,
 }

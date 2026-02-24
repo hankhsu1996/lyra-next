@@ -162,10 +162,10 @@ fn enum_id_churn_contained() {
     );
     let def = def_index_file(&db, file);
     assert_eq!(def.enum_defs.len(), 3);
-    // Each enum gets a distinct enum_type_ast anchored to its EnumType node
-    let id0 = def.enum_defs[0].enum_type_ast;
-    let id1 = def.enum_defs[1].enum_type_ast;
-    let id2 = def.enum_defs[2].enum_type_ast;
+    // Each enum gets a distinct enum_type_site anchored to its EnumType node
+    let id0 = def.enum_defs[0].enum_type_site;
+    let id1 = def.enum_defs[1].enum_type_site;
+    let id2 = def.enum_defs[2].enum_type_site;
     assert_ne!(id0, id1, "enums in same module must have distinct IDs");
     assert_ne!(
         id0, id2,
@@ -369,8 +369,8 @@ fn enum_id_anchored_to_ast_node() {
     for (i, node) in enum_types.iter().enumerate() {
         let expected = id_map.erased_ast_id(node).unwrap();
         assert_eq!(
-            def.enum_defs[i].enum_type_ast, expected,
-            "EnumDef[{i}].enum_type_ast must match the EnumType node's ErasedAstId"
+            def.enum_defs[i].enum_type_site, expected,
+            "EnumDef[{i}].enum_type_site must match the EnumType node's ErasedAstId"
         );
     }
 }
@@ -395,14 +395,14 @@ fn record_id_anchored_to_ast_node() {
     for (i, node) in struct_types.iter().enumerate() {
         let expected = id_map.erased_ast_id(node).unwrap();
         assert_eq!(
-            def.record_defs[i].record_type_ast, expected,
-            "RecordDef[{i}].record_type_ast must match the StructType node's ErasedAstId"
+            def.record_defs[i].record_type_site, expected,
+            "RecordDef[{i}].record_type_site must match the StructType node's ErasedAstId"
         );
     }
     // Distinct records get distinct IDs
     assert_ne!(
-        def.record_defs[0].record_type_ast,
-        def.record_defs[1].record_type_ast
+        def.record_defs[0].record_type_site,
+        def.record_defs[1].record_type_site
     );
 }
 

@@ -150,7 +150,7 @@ fn pkg_member_resolves_to_pkg_variant() {
     let result = &core.resolutions[x_use_idx];
     match result {
         CoreResolveResult::Resolved(CoreResolution::Pkg {
-            name_ast,
+            name_site,
             namespace,
         }) => {
             assert_eq!(
@@ -160,20 +160,21 @@ fn pkg_member_resolves_to_pkg_variant() {
             );
             // The anchor should be in file_a (the package file)
             assert_eq!(
-                name_ast.file(),
+                name_site.file(),
                 lyra_source::FileId(0),
                 "anchor should point to the package file"
             );
-            // Verify name_ast_to_symbol lookup works for this anchor
+            // Verify name_site_to_symbol lookup works for this anchor
             let def_a = def_index_file(&db, file_a);
             let local = def_a
-                .name_ast_to_symbol
-                .get(name_ast)
-                .expect("name_ast_to_symbol should find the anchor");
+                .name_site_to_symbol
+                .get(name_site)
+                .expect("name_site_to_symbol should find the anchor");
             let sym = def_a.symbols.get(*local);
             assert_eq!(sym.name.as_str(), "x");
-            // Verify symbol_at_name_ast also works
-            let gsym = symbol_at_name_ast(&db, unit, *name_ast).expect("should resolve via query");
+            // Verify symbol_at_name_site also works
+            let gsym =
+                symbol_at_name_site(&db, unit, *name_site).expect("should resolve via query");
             assert_eq!(gsym.file, lyra_source::FileId(0));
             assert_eq!(gsym.local, *local);
         }
@@ -208,8 +209,8 @@ fn def_resolves_to_def_variant() {
                 lyra_source::FileId(0),
                 "def anchor should point to file_a"
             );
-            // Verify symbol_at_name_ast resolves this
-            let gsym = symbol_at_name_ast(&db, unit, anchor).expect("should resolve def anchor");
+            // Verify symbol_at_name_site resolves this
+            let gsym = symbol_at_name_site(&db, unit, anchor).expect("should resolve def anchor");
             assert_eq!(gsym.file, lyra_source::FileId(0));
             let def_a = def_index_file(&db, file_a);
             let sym = def_a.symbols.get(gsym.local);

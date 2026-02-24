@@ -1,4 +1,4 @@
-use lyra_ast::ErasedAstId;
+use crate::Site;
 
 use crate::enum_def::EnumId;
 use crate::symbols::SymbolId;
@@ -23,7 +23,7 @@ pub enum MemberKind {
     },
     Modport,
     ModportPort {
-        port_id: ErasedAstId,
+        port_id: Site,
         target: ModportPortTarget,
     },
     BuiltinMethod(BuiltinMethodKind),
@@ -33,7 +33,7 @@ pub enum MemberKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModportPortTarget {
     Member(SymbolId),
-    Expr(ErasedAstId),
+    Expr(Site),
     Empty,
 }
 

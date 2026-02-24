@@ -38,11 +38,11 @@ pub(crate) fn collect_module_instantiation(
             expected_ns: ExpectedNs::Exact(Namespace::Definition),
             range: type_name_range,
             scope,
-            name_ref_ast: ast_id.erase(),
+            name_ref_site: ast_id.erase(),
             order_key: 0,
         });
         // Register each instance name as an Instance symbol
-        let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+        let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
             ctx.emit_internal_error(
                 &format!(
                     "erased_ast_id returned None for {:?} in collect_module_instantiation",
@@ -57,7 +57,7 @@ pub(crate) fn collect_module_instantiation(
             let Some(inst_name_tok) = hier_inst.name() else {
                 continue;
             };
-            let Some(inst_name_ast) = ctx.ast_id_map.erased_ast_id(hier_inst.syntax()) else {
+            let Some(inst_name_site) = ctx.ast_id_map.erased_ast_id(hier_inst.syntax()) else {
                 ctx.emit_internal_error(
                     &format!(
                         "erased_ast_id returned None for {:?} in collect_module_instantiation hier_inst",
@@ -71,10 +71,10 @@ pub(crate) fn collect_module_instantiation(
             let sym_id = ctx.push_symbol(Symbol {
                 name: SmolStr::new(inst_name_tok.text()),
                 kind: SymbolKind::Instance,
-                def_ast,
-                name_ast: inst_name_ast,
-                type_ast: None,
-                name_span: Some(NameSpan::new(inst_name_tok.text_range())),
+                decl_site,
+                name_site: inst_name_site,
+                type_site: None,
+                name_span: NameSpan::new(inst_name_tok.text_range()),
                 scope,
                 origin: SymbolOrigin::Instance(idx),
             });
@@ -108,7 +108,7 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
     };
 
     let Some(name_tok) = name_tok else { return };
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_callable_decl",
@@ -125,7 +125,7 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
         ScopeKind::Task
     };
     let callable_scope = ctx.scopes.push(scope_kind, Some(scope));
-    let callable_type_ast = if is_function {
+    let callable_type_site = if is_function {
         FunctionDecl::cast(node.clone())
             .and_then(|f| f.type_spec())
             .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()))
@@ -135,10 +135,10 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
     let sym_id = ctx.push_symbol(Symbol {
         name: name.clone(),
         kind,
-        def_ast,
-        name_ast: def_ast,
-        type_ast: callable_type_ast,
-        name_span: Some(NameSpan::new(name_tok.text_range())),
+        decl_site,
+        name_site: decl_site,
+        type_site: callable_type_site,
+        name_span: NameSpan::new(name_tok.text_range()),
         scope,
         origin: SymbolOrigin::TypeSpec,
     });
@@ -172,7 +172,7 @@ fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: 
         if let Some(ts) = port_decl.type_spec() {
             collect_type_spec_refs(ctx, &ts, scope);
         }
-        let Some(port_def_ast) = ctx.ast_id_map.erased_ast_id(port_decl.syntax()) else {
+        let Some(port_decl_site) = ctx.ast_id_map.erased_ast_id(port_decl.syntax()) else {
             ctx.emit_internal_error(
                 &format!(
                     "erased_ast_id returned None for {:?} in collect_tf_ports",
@@ -182,12 +182,12 @@ fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: 
             );
             continue;
         };
-        let port_type_ast = port_decl
+        let port_type_site = port_decl
             .type_spec()
             .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
         for decl in port_decl.declarators() {
             if let Some(name_tok) = decl.name() {
-                let Some(decl_name_ast) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
+                let Some(decl_name_site) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
                     ctx.emit_internal_error(
                         &format!(
                             "erased_ast_id returned None for {:?} in collect_tf_ports declarator",
@@ -200,10 +200,10 @@ fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: 
                 let port_sym = ctx.push_symbol(Symbol {
                     name: SmolStr::new(name_tok.text()),
                     kind: SymbolKind::PortTf,
-                    def_ast: port_def_ast,
-                    name_ast: decl_name_ast,
-                    type_ast: port_type_ast,
-                    name_span: Some(NameSpan::new(name_tok.text_range())),
+                    decl_site: port_decl_site,
+                    name_site: decl_name_site,
+                    type_site: port_type_site,
+                    name_span: NameSpan::new(name_tok.text_range()),
                     scope,
                     origin: SymbolOrigin::TypeSpec,
                 });
@@ -242,7 +242,7 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, 
         let entries = collect_modport_entries(ctx, &item);
 
         // Register symbol for navigation/diagnostics
-        let Some(modport_def_ast) = ctx.ast_id_map.erased_ast_id(item.syntax()) else {
+        let Some(modport_decl_site) = ctx.ast_id_map.erased_ast_id(item.syntax()) else {
             ctx.emit_internal_error(
                 &format!(
                     "erased_ast_id returned None for {:?} in collect_modport_decl",
@@ -255,10 +255,10 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, 
         ctx.push_symbol(Symbol {
             name: name.clone(),
             kind: SymbolKind::Modport,
-            def_ast: modport_def_ast,
-            name_ast: modport_def_ast,
-            type_ast: None,
-            name_span: Some(NameSpan::new(name_tok.text_range())),
+            decl_site: modport_decl_site,
+            name_site: modport_decl_site,
+            type_site: None,
+            name_span: NameSpan::new(name_tok.text_range()),
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -390,7 +390,7 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                 package: SmolStr::new(pkg_tok.text()),
                 name: ImportName::Wildcard,
                 scope,
-                import_stmt_ast: ast_id,
+                import_stmt_site: ast_id,
                 order_key: 0,
             });
         }
@@ -410,7 +410,7 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                 package: SmolStr::new(idents[0].text()),
                 name: ImportName::Explicit(SmolStr::new(idents[1].text())),
                 scope,
-                import_stmt_ast: ast_id,
+                import_stmt_site: ast_id,
                 order_key: 0,
             });
         }
@@ -444,7 +444,7 @@ fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem, scope: Scope
     } else {
         return;
     };
-    let Some(export_ast) = ctx.ast_id_map.erased_ast_id(item.syntax()) else {
+    let Some(export_site) = ctx.ast_id_map.erased_ast_id(item.syntax()) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_export_item",
@@ -463,12 +463,12 @@ fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem, scope: Scope
             ordinal: ord,
         },
         key,
-        export_stmt_ast: export_ast,
+        export_stmt_site: export_site,
     });
 }
 
 pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_param_decl",
@@ -478,7 +478,7 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
         );
         return;
     };
-    let param_type_ast = lyra_ast::ParamDecl::cast(node.clone())
+    let param_type_site = lyra_ast::ParamDecl::cast(node.clone())
         .and_then(|pd| pd.type_spec())
         .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
     for child in node.children() {
@@ -486,7 +486,7 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
             collect_type_spec_refs(ctx, &ts, scope);
         } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = Declarator::cast(child.clone()).and_then(|d| d.name()) {
-                let Some(decl_name_ast) = ctx.ast_id_map.erased_ast_id(&child) else {
+                let Some(decl_name_site) = ctx.ast_id_map.erased_ast_id(&child) else {
                     ctx.emit_internal_error(
                         &format!(
                             "erased_ast_id returned None for {:?} in collect_param_decl declarator",
@@ -499,10 +499,10 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
                 let sym_id = ctx.push_symbol(Symbol {
                     name: SmolStr::new(name_tok.text()),
                     kind: SymbolKind::Parameter,
-                    def_ast,
-                    name_ast: decl_name_ast,
-                    type_ast: param_type_ast,
-                    name_span: Some(NameSpan::new(name_tok.text_range())),
+                    decl_site,
+                    name_site: decl_name_site,
+                    type_site: param_type_site,
+                    name_span: NameSpan::new(name_tok.text_range()),
                     scope,
                     origin: SymbolOrigin::TypeSpec,
                 });
@@ -513,7 +513,7 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
                     .children()
                     .find(|c| is_expression_kind(c.kind()))
                     .and_then(|expr| ctx.ast_id_map.erased_ast_id(&expr));
-                ctx.name_ast_to_init_expr.insert(decl_name_ast, init_id);
+                ctx.name_site_to_init_expr.insert(decl_name_site, init_id);
             }
             // Collect name refs in default value expressions
             collect_name_refs(ctx, &child, scope);
@@ -527,7 +527,7 @@ pub(crate) fn collect_declarators(
     kind: SymbolKind,
     scope: ScopeId,
 ) {
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_declarators",
@@ -539,7 +539,7 @@ pub(crate) fn collect_declarators(
     };
     // Detect inline enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
-    let decl_type_ast = match node.kind() {
+    let decl_type_site = match node.kind() {
         SyntaxKind::VarDecl => lyra_ast::VarDecl::cast(node.clone())
             .and_then(|vd| vd.type_spec())
             .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax())),
@@ -553,7 +553,7 @@ pub(crate) fn collect_declarators(
             collect_type_spec_refs(ctx, &ts, scope);
         } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = Declarator::cast(child.clone()).and_then(|d| d.name()) {
-                let Some(decl_name_ast) = ctx.ast_id_map.erased_ast_id(&child) else {
+                let Some(decl_name_site) = ctx.ast_id_map.erased_ast_id(&child) else {
                     ctx.emit_internal_error(
                         &format!(
                             "erased_ast_id returned None for {:?} in collect_declarators declarator",
@@ -566,10 +566,10 @@ pub(crate) fn collect_declarators(
                 let sym_id = ctx.push_symbol(Symbol {
                     name: SmolStr::new(name_tok.text()),
                     kind,
-                    def_ast,
-                    name_ast: decl_name_ast,
-                    type_ast: decl_type_ast,
-                    name_span: Some(NameSpan::new(name_tok.text_range())),
+                    decl_site,
+                    name_site: decl_name_site,
+                    type_site: decl_type_site,
+                    name_span: NameSpan::new(name_tok.text_range()),
                     scope,
                     origin,
                 });

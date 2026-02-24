@@ -171,8 +171,8 @@ impl ScopeTree {
 
 #[cfg(test)]
 mod tests {
-    use lyra_ast::ErasedAstId;
-    use lyra_source::FileId;
+    use crate::Site;
+    use lyra_source::{FileId, NameSpan};
     use smol_str::SmolStr;
 
     use super::*;
@@ -185,14 +185,14 @@ mod tests {
         let mut scope_builder = ScopeTreeBuilder::new();
 
         let scope = scope_builder.push(ScopeKind::Module, None);
-        let placeholder = ErasedAstId::placeholder(FileId(0));
+        let placeholder = Site::placeholder(FileId(0));
         let id = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
-            def_ast: placeholder,
-            name_ast: placeholder,
-            type_ast: None,
-            name_span: None,
+            decl_site: placeholder,
+            name_site: placeholder,
+            type_site: None,
+            name_span: NameSpan::INVALID,
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -215,14 +215,14 @@ mod tests {
 
         let parent = scope_builder.push(ScopeKind::Module, None);
         let child = scope_builder.push(ScopeKind::Block, Some(parent));
-        let placeholder = ErasedAstId::placeholder(FileId(0));
+        let placeholder = Site::placeholder(FileId(0));
         let id = sym_builder.push(Symbol {
             name: SmolStr::new("a"),
             kind: SymbolKind::PortAnsi,
-            def_ast: placeholder,
-            name_ast: placeholder,
-            type_ast: None,
-            name_span: None,
+            decl_site: placeholder,
+            name_site: placeholder,
+            type_site: None,
+            name_span: NameSpan::INVALID,
             scope: parent,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -244,24 +244,24 @@ mod tests {
         let mut scope_builder = ScopeTreeBuilder::new();
 
         let scope = scope_builder.push(ScopeKind::Module, None);
-        let placeholder = ErasedAstId::placeholder(FileId(0));
+        let placeholder = Site::placeholder(FileId(0));
         let id1 = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
-            def_ast: placeholder,
-            name_ast: placeholder,
-            type_ast: None,
-            name_span: None,
+            decl_site: placeholder,
+            name_site: placeholder,
+            type_site: None,
+            name_span: NameSpan::INVALID,
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
         let id2 = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
-            def_ast: placeholder,
-            name_ast: placeholder,
-            type_ast: None,
-            name_span: None,
+            decl_site: placeholder,
+            name_site: placeholder,
+            type_site: None,
+            name_span: NameSpan::INVALID,
             scope,
             origin: SymbolOrigin::TypeSpec,
         });

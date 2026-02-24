@@ -170,7 +170,7 @@ pub fn type_of_symbol_raw<'db>(
             let ty = Ty::Enum(id);
             let parse = parse_file(db, source_file);
             let map = ast_id_map(db, source_file);
-            let decl_node = map.get_node(&parse.syntax(), sym.name_ast);
+            let decl_node = map.get_node(&parse.syntax(), sym.name_site);
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
@@ -179,7 +179,7 @@ pub fn type_of_symbol_raw<'db>(
             let ty = Ty::Record(id);
             let parse = parse_file(db, source_file);
             let map = ast_id_map(db, source_file);
-            let decl_node = map.get_node(&parse.syntax(), sym.name_ast);
+            let decl_node = map.get_node(&parse.syntax(), sym.name_site);
             let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
             return classify(ty, sym.kind);
         }
@@ -196,16 +196,16 @@ pub fn type_of_symbol_raw<'db>(
         SymbolOrigin::TypeSpec => {}
     }
 
-    let decl_ast_id = sym.name_ast;
+    let decl_site_id = sym.name_site;
 
     let parse = parse_file(db, source_file);
     let map = ast_id_map(db, source_file);
 
-    let Some(decl_node) = map.get_node(&parse.syntax(), decl_ast_id) else {
+    let Some(decl_node) = map.get_node(&parse.syntax(), decl_site_id) else {
         return SymbolType::Error(SymbolTypeError::MissingDecl);
     };
 
-    // For Port and TypedefDecl, the decl_ast_id points directly to the node.
+    // For Port and TypedefDecl, the decl_site_id points directly to the node.
     // For Variable/Net/Parameter, it points to a Declarator -- find the container.
     let (container, declarator) = match decl_node.kind() {
         SyntaxKind::Port | SyntaxKind::TypedefDecl => (decl_node.clone(), None),
@@ -305,10 +305,10 @@ fn expand_typedef(
 
     // Look up the name in the resolve index
     let resolve = resolve_index_file(db, source_file, unit);
-    let Some(name_ast_id) = id_map.erased_ast_id(resolve_node) else {
+    let Some(name_site_id) = id_map.erased_ast_id(resolve_node) else {
         return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
     };
-    let Some(resolution) = resolve.resolutions.get(&name_ast_id) else {
+    let Some(resolution) = resolve.resolutions.get(&name_site_id) else {
         return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
     };
 

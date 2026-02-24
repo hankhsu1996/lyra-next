@@ -99,7 +99,7 @@ fn collect_name_refs_from_expr(
                 expected_ns: ExpectedNs::Exact(Namespace::Value),
                 range: name_ref.text_range(),
                 scope,
-                name_ref_ast: ast_id.erase(),
+                name_ref_site: ast_id.erase(),
                 order_key: 0,
             });
         }
@@ -119,7 +119,7 @@ fn collect_name_refs_from_expr(
                     expected_ns: ExpectedNs::Exact(Namespace::Value),
                     range: qn.text_range(),
                     scope,
-                    name_ref_ast: ast_id.erase(),
+                    name_ref_site: ast_id.erase(),
                     order_key: 0,
                 });
             }
