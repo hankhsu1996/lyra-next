@@ -219,6 +219,19 @@ python3 tools/policy/check_ascii.py
 python3 tools/policy/check_ascii.py --staged    # staged files only
 ```
 
+## CST Layering Policy
+
+`lyra-semantic` must not perform raw CST traversal (rowan `.children()`, `.descendants()`, etc.) except in allowlisted modules. The semantic layer consumes typed AST accessors; CST walking belongs in the builder phase or thin extraction helpers.
+
+Allowlisted modules are listed in the script. When adding CST access to a new module, add it to the allowlist with a comment explaining why. Prefer adding a typed AST accessor in `lyra-ast` instead.
+
+Run the checker:
+
+```bash
+python3 tools/policy/check_cst_layering.py
+python3 tools/policy/check_cst_layering.py --staged    # staged files only
+```
+
 ## File Size Policy
 
 Rust source files under `crates/` must stay under 800 lines (soft limit). 1200 lines is the hard limit. When a file grows past 800, split it into focused modules.

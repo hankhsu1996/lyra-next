@@ -10,8 +10,8 @@ use smol_str::SmolStr;
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::pipeline::preprocess_file;
 use crate::semantic::{
-    compilation_unit_env, def_index_file, def_symbol, global_def_index, name_graph_file,
-    package_scope_index,
+    compilation_unit_env, def_index_file, global_def_index, name_graph_file, package_scope_index,
+    symbol_at_name_ast,
 };
 use crate::ty_resolve::{FieldTyError, FieldTyErrorKind, classify_for_record_field};
 use crate::type_queries::{TyRef, bit_width_total};
@@ -289,7 +289,7 @@ pub fn record_diagnostics<'db>(
         && record_def.kind == RecordKind::Union
         && record_def.packing == Packing::Packed
     {
-        check_packed_union_widths(db, unit, &sem, record_def, file_id, pp, &mut diags);
+        check_packed_union_widths(db, unit, source_file, &sem, record_def, pp, &mut diags);
     }
 
     diags.into_boxed_slice()
@@ -298,12 +298,13 @@ pub fn record_diagnostics<'db>(
 fn check_packed_union_widths(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
+    source_file: crate::SourceFile,
     sem: &RecordSem,
     record_def: &lyra_semantic::record::RecordDef,
-    file_id: lyra_source::FileId,
     pp: &lyra_preprocess::PreprocOutput,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
+    let file_id = source_file.file_id(db);
     let widths: Vec<Option<u32>> = sem
         .fields
         .iter()
@@ -340,8 +341,14 @@ fn check_packed_union_widths(
         }
 
         let field_name = &sem.fields[i].name;
-        let mismatch_range = record_def.fields[i].name_range;
-        let ref_range = record_def.fields[ref_idx].name_range;
+        let mismatch_range = record_def.fields[i].name_span.map_or_else(
+            || record_def.fields[i].name_ast.text_range(),
+            |ns| ns.text_range(),
+        );
+        let ref_range = record_def.fields[ref_idx].name_span.map_or_else(
+            || record_def.fields[ref_idx].name_ast.text_range(),
+            |ns| ns.text_range(),
+        );
 
         let mismatch_span = pp
             .source_map
@@ -415,7 +422,7 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
     let unit = mref.unit(db);
     let modport_id = mref.modport_id(db);
 
-    let Some(gsym) = def_symbol(db, unit, modport_id.owner.global_def()) else {
+    let Some(gsym) = symbol_at_name_ast(db, unit, modport_id.owner.global_def().ast_id()) else {
         return empty_modport_sem();
     };
 

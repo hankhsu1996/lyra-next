@@ -27,8 +27,8 @@ pub use pipeline::{
 
 // Re-export semantic queries
 pub use semantic::{
-    def_index_file, def_symbol, global_def_index, name_graph_file, package_scope_index,
-    resolve_core_file, resolve_index_file,
+    def_index_file, global_def_index, name_graph_file, package_scope_index, resolve_core_file,
+    resolve_index_file, symbol_at_name_ast,
 };
 
 // Re-export const-eval

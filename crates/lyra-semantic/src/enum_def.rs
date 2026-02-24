@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lyra_ast::ErasedAstId;
-use lyra_source::{FileId, TextRange};
+use lyra_source::{FileId, NameSpan, TextRange};
 use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
@@ -55,8 +55,8 @@ pub enum EnumMemberRangeKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumMemberDef {
     pub name: SmolStr,
-    pub name_range: TextRange,
-    pub ast_id: ErasedAstId,
+    pub name_ast: ErasedAstId,
+    pub name_span: Option<NameSpan>,
     pub range: Option<EnumMemberRangeKind>,
     pub range_text_range: Option<TextRange>,
     pub init: Option<ErasedAstId>,
@@ -79,7 +79,7 @@ pub struct EnumBase {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDef {
     pub name: Option<SmolStr>,
-    pub ast_id: ErasedAstId,
+    pub enum_type_ast: ErasedAstId,
     pub scope: ScopeId,
     pub base: EnumBase,
     pub members: Box<[EnumMemberDef]>,

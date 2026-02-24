@@ -1,7 +1,7 @@
 use lyra_ast::{AstIdMap, AstNode, ErasedAstId, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
-use lyra_source::{FileId, Span};
+use lyra_source::{FileId, NameSpan, Span};
 use smol_str::SmolStr;
 
 use crate::enum_def::EnumDefIdx;
@@ -75,7 +75,7 @@ pub enum TypeRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordDef {
     pub name: Option<SmolStr>,
-    pub ast_id: ErasedAstId,
+    pub record_type_ast: ErasedAstId,
     pub kind: RecordKind,
     pub packing: Packing,
     pub scope: ScopeId,
@@ -85,7 +85,8 @@ pub struct RecordDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordField {
     pub name: SmolStr,
-    pub name_range: lyra_source::TextRange,
+    pub name_ast: lyra_ast::ErasedAstId,
+    pub name_span: Option<NameSpan>,
     pub ty: TypeRef,
 }
 

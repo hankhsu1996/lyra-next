@@ -1,9 +1,10 @@
 use lyra_ast::{
-    AstNode, ExportDecl, ExportItem, FunctionDecl, ModportDecl, ModportPortKind,
-    ModuleInstantiation, TaskDecl, TfPortDecl, TypeSpec,
+    AstNode, Declarator, ExportDecl, ExportItem, FunctionDecl, ImportItem, ModportDecl,
+    ModportPortKind, ModuleInstantiation, TaskDecl, TfPortDecl, TypeSpec,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
+use lyra_source::NameSpan;
 use smol_str::SmolStr;
 
 use crate::builder::DefContext;
@@ -17,7 +18,6 @@ use crate::modport_def::{ModportDef, ModportDefId, ModportEntry, ModportTarget, 
 use crate::record::SymbolOrigin;
 use crate::scopes::{ScopeId, ScopeKind};
 use crate::symbols::{Namespace, Symbol, SymbolKind};
-use crate::syntax_helpers::first_ident_token;
 
 use crate::builder::RawModportEntry;
 
@@ -38,7 +38,7 @@ pub(crate) fn collect_module_instantiation(
             expected_ns: ExpectedNs::Exact(Namespace::Definition),
             range: type_name_range,
             scope,
-            ast_id: ast_id.erase(),
+            name_ref_ast: ast_id.erase(),
             order_key: 0,
         });
         // Register each instance name as an Instance symbol
@@ -74,7 +74,7 @@ pub(crate) fn collect_module_instantiation(
                 def_ast,
                 name_ast: inst_name_ast,
                 type_ast: None,
-                def_range: inst_name_tok.text_range(),
+                name_span: Some(NameSpan::new(inst_name_tok.text_range())),
                 scope,
                 origin: SymbolOrigin::Instance(idx),
             });
@@ -138,7 +138,7 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
         def_ast,
         name_ast: def_ast,
         type_ast: callable_type_ast,
-        def_range: name_tok.text_range(),
+        name_span: Some(NameSpan::new(name_tok.text_range())),
         scope,
         origin: SymbolOrigin::TypeSpec,
     });
@@ -203,7 +203,7 @@ fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: 
                     def_ast: port_def_ast,
                     name_ast: decl_name_ast,
                     type_ast: port_type_ast,
-                    def_range: name_tok.text_range(),
+                    name_span: Some(NameSpan::new(name_tok.text_range())),
                     scope,
                     origin: SymbolOrigin::TypeSpec,
                 });
@@ -258,7 +258,7 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, 
             def_ast: modport_def_ast,
             name_ast: modport_def_ast,
             type_ast: None,
-            def_range: name_tok.text_range(),
+            name_span: Some(NameSpan::new(name_tok.text_range())),
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -383,15 +383,14 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
     };
 
     if has_star {
-        // Wildcard: first Ident is the package name
-        if let Some(pkg_tok) = first_ident_token(node) {
+        // Wildcard: use typed accessor for package name
+        if let Some(pkg_tok) = ImportItem::cast(node.clone()).and_then(|i| i.package_name()) {
             ctx.imports.push(Import {
                 id,
                 package: SmolStr::new(pkg_tok.text()),
                 name: ImportName::Wildcard,
                 scope,
-                range: node.text_range(),
-                ast_id,
+                import_stmt_ast: ast_id,
                 order_key: 0,
             });
         }
@@ -411,8 +410,7 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                 package: SmolStr::new(idents[0].text()),
                 name: ImportName::Explicit(SmolStr::new(idents[1].text())),
                 scope,
-                range: node.text_range(),
-                ast_id,
+                import_stmt_ast: ast_id,
                 order_key: 0,
             });
         }
@@ -446,6 +444,16 @@ fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem, scope: Scope
     } else {
         return;
     };
+    let Some(export_ast) = ctx.ast_id_map.erased_ast_id(item.syntax()) else {
+        ctx.emit_internal_error(
+            &format!(
+                "erased_ast_id returned None for {:?} in collect_export_item",
+                item.syntax().kind()
+            ),
+            item.syntax().text_range(),
+        );
+        return;
+    };
     let ordinal = ctx.export_ordinals.entry(scope).or_insert(0);
     let ord = *ordinal;
     *ordinal += 1;
@@ -455,7 +463,7 @@ fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem, scope: Scope
             ordinal: ord,
         },
         key,
-        range: item.syntax().text_range(),
+        export_stmt_ast: export_ast,
     });
 }
 
@@ -477,7 +485,7 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
         if let Some(ts) = TypeSpec::cast(child.clone()) {
             collect_type_spec_refs(ctx, &ts, scope);
         } else if child.kind() == SyntaxKind::Declarator {
-            if let Some(name_tok) = first_ident_token(&child) {
+            if let Some(name_tok) = Declarator::cast(child.clone()).and_then(|d| d.name()) {
                 let Some(decl_name_ast) = ctx.ast_id_map.erased_ast_id(&child) else {
                     ctx.emit_internal_error(
                         &format!(
@@ -494,7 +502,7 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
                     def_ast,
                     name_ast: decl_name_ast,
                     type_ast: param_type_ast,
-                    def_range: name_tok.text_range(),
+                    name_span: Some(NameSpan::new(name_tok.text_range())),
                     scope,
                     origin: SymbolOrigin::TypeSpec,
                 });
@@ -544,7 +552,7 @@ pub(crate) fn collect_declarators(
         if let Some(ts) = TypeSpec::cast(child.clone()) {
             collect_type_spec_refs(ctx, &ts, scope);
         } else if child.kind() == SyntaxKind::Declarator {
-            if let Some(name_tok) = first_ident_token(&child) {
+            if let Some(name_tok) = Declarator::cast(child.clone()).and_then(|d| d.name()) {
                 let Some(decl_name_ast) = ctx.ast_id_map.erased_ast_id(&child) else {
                     ctx.emit_internal_error(
                         &format!(
@@ -561,7 +569,7 @@ pub(crate) fn collect_declarators(
                     def_ast,
                     name_ast: decl_name_ast,
                     type_ast: decl_type_ast,
-                    def_range: name_tok.text_range(),
+                    name_span: Some(NameSpan::new(name_tok.text_range())),
                     scope,
                     origin,
                 });

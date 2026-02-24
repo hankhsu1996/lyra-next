@@ -262,7 +262,7 @@ fn type_of_instance(
         return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
     };
 
-    let CoreResolveResult::Resolved(CoreResolution::Global { decl: def_id, .. }) = result else {
+    let CoreResolveResult::Resolved(CoreResolution::Def { def: def_id }) = result else {
         return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
     };
 

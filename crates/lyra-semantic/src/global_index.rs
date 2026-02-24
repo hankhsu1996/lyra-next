@@ -1,3 +1,4 @@
+use lyra_ast::ErasedAstId;
 use smol_str::SmolStr;
 
 use crate::symbols::{GlobalDefId, Namespace};
@@ -123,18 +124,21 @@ pub struct PackageScopeIndex {
 }
 
 /// Exported symbols from a single package, split by namespace.
+///
+/// Maps exported names to their `name_ast` anchors (the unique
+/// name-introducing AST node for each symbol).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageScope {
     pub(crate) name: SmolStr,
-    pub(crate) value_ns: Box<[(SmolStr, GlobalDefId)]>,
-    pub(crate) type_ns: Box<[(SmolStr, GlobalDefId)]>,
+    pub(crate) value_ns: Box<[(SmolStr, ErasedAstId)]>,
+    pub(crate) type_ns: Box<[(SmolStr, ErasedAstId)]>,
 }
 
 impl PackageScope {
     pub fn new(
         name: SmolStr,
-        value_ns: Box<[(SmolStr, GlobalDefId)]>,
-        type_ns: Box<[(SmolStr, GlobalDefId)]>,
+        value_ns: Box<[(SmolStr, ErasedAstId)]>,
+        type_ns: Box<[(SmolStr, ErasedAstId)]>,
     ) -> Self {
         Self {
             name,
@@ -147,18 +151,18 @@ impl PackageScope {
         &self.name
     }
 
-    pub fn value_iter(&self) -> &[(SmolStr, GlobalDefId)] {
+    pub fn value_iter(&self) -> &[(SmolStr, ErasedAstId)] {
         &self.value_ns
     }
 
-    pub fn type_iter(&self) -> &[(SmolStr, GlobalDefId)] {
+    pub fn type_iter(&self) -> &[(SmolStr, ErasedAstId)] {
         &self.type_ns
     }
 }
 
 impl PackageScopeIndex {
     /// Resolve a symbol in a package by namespace.
-    pub fn resolve(&self, pkg: &str, name: &str, ns: Namespace) -> Option<GlobalDefId> {
+    pub fn resolve(&self, pkg: &str, name: &str, ns: Namespace) -> Option<ErasedAstId> {
         let pkg_idx = self
             .packages
             .binary_search_by(|p| p.name.as_str().cmp(pkg))
@@ -193,7 +197,7 @@ impl PackageScopeIndex {
 
     /// Resolve a symbol in a package across all namespaces.
     /// Used for wildcard import validation.
-    pub fn resolve_any_ns(&self, pkg: &str, name: &str) -> Option<GlobalDefId> {
+    pub fn resolve_any_ns(&self, pkg: &str, name: &str) -> Option<ErasedAstId> {
         let pkg_idx = self
             .packages
             .binary_search_by(|p| p.name.as_str().cmp(pkg))
@@ -226,8 +230,8 @@ pub fn build_package_scope_index(mut packages: Vec<PackageScope>) -> PackageScop
 /// Per-package collected facts for computing the public surface.
 pub struct PackageLocalFacts {
     pub name: SmolStr,
-    pub value_ns: Vec<(SmolStr, GlobalDefId)>,
-    pub type_ns: Vec<(SmolStr, GlobalDefId)>,
+    pub value_ns: Vec<(SmolStr, ErasedAstId)>,
+    pub type_ns: Vec<(SmolStr, ErasedAstId)>,
     pub imports: Vec<crate::def_index::ImportName>,
     pub import_packages: Vec<SmolStr>,
     pub export_decls: Vec<crate::def_index::ExportKey>,
@@ -249,8 +253,8 @@ pub fn compute_public_surface(
 ) -> PackageScope {
     use crate::def_index::ExportKey;
 
-    let mut value_ns: Vec<(SmolStr, GlobalDefId)> = facts.value_ns.clone();
-    let mut type_ns: Vec<(SmolStr, GlobalDefId)> = facts.type_ns.clone();
+    let mut value_ns: Vec<(SmolStr, ErasedAstId)> = facts.value_ns.clone();
+    let mut type_ns: Vec<(SmolStr, ErasedAstId)> = facts.type_ns.clone();
 
     // Track names already present from local defs (owned for borrow checker)
     let local_value_names: std::collections::HashSet<SmolStr> =
@@ -332,8 +336,8 @@ pub fn compute_public_surface(
 }
 
 fn merge_ns_entries(
-    target: &mut Vec<(SmolStr, GlobalDefId)>,
-    source: &[(SmolStr, GlobalDefId)],
+    target: &mut Vec<(SmolStr, ErasedAstId)>,
+    source: &[(SmolStr, ErasedAstId)],
     local_names: &std::collections::HashSet<SmolStr>,
 ) {
     for (name, id) in source {

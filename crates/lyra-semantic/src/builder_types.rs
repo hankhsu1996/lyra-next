@@ -4,6 +4,7 @@ use lyra_ast::{
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
+use lyra_source::NameSpan;
 use smol_str::SmolStr;
 
 use crate::builder::DefContext;
@@ -49,7 +50,7 @@ fn register_type_use_site(
                     expected_ns: ExpectedNs::TypeThenValue,
                     range: nr.text_range(),
                     scope,
-                    ast_id: ast_id.erase(),
+                    name_ref_ast: ast_id.erase(),
                     order_key: 0,
                 });
             }
@@ -66,7 +67,7 @@ fn register_type_use_site(
                         expected_ns: ExpectedNs::TypeThenValue,
                         range: qn.text_range(),
                         scope,
-                        ast_id: ast_id.erase(),
+                        name_ref_ast: ast_id.erase(),
                         order_key: 0,
                     });
                 }
@@ -119,7 +120,7 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
             def_ast,
             name_ast: def_ast,
             type_ast: typedef_type_ast,
-            def_range: name_tok.text_range(),
+            name_span: Some(NameSpan::new(name_tok.text_range())),
             scope,
             origin,
         });
@@ -220,8 +221,8 @@ fn collect_enum_def(
 
         members.push(EnumMemberDef {
             name: name.clone(),
-            name_range: name_tok.text_range(),
-            ast_id: erased_ast_id,
+            name_ast: erased_ast_id,
+            name_span: Some(NameSpan::new(name_tok.text_range())),
             range: range_kind,
             range_text_range,
             init,
@@ -241,7 +242,7 @@ fn collect_enum_def(
                 def_ast: erased_ast_id,
                 name_ast: erased_ast_id,
                 type_ast: None,
-                def_range: name_tok.text_range(),
+                name_span: Some(NameSpan::new(name_tok.text_range())),
                 scope,
                 origin: SymbolOrigin::EnumVariant(idx),
             });
@@ -251,7 +252,7 @@ fn collect_enum_def(
 
     ctx.enum_defs.push(EnumDef {
         name: None,
-        ast_id,
+        enum_type_ast: ast_id,
         scope,
         base,
         members: members.into_boxed_slice(),
@@ -334,9 +335,20 @@ fn collect_record_def(
         };
         for decl in member.declarators() {
             if let Some(name_tok) = decl.name() {
+                let Some(decl_ast) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
+                    ctx.emit_internal_error(
+                        &format!(
+                            "erased_ast_id returned None for {:?} in collect_record_def declarator",
+                            decl.syntax().kind()
+                        ),
+                        decl.syntax().text_range(),
+                    );
+                    continue;
+                };
                 fields.push(RecordField {
                     name: SmolStr::new(name_tok.text()),
-                    name_range: name_tok.text_range(),
+                    name_ast: decl_ast,
+                    name_span: Some(NameSpan::new(name_tok.text_range())),
                     ty: ty.clone(),
                 });
             }
@@ -345,7 +357,7 @@ fn collect_record_def(
 
     ctx.record_defs.push(RecordDef {
         name: None,
-        ast_id,
+        record_type_ast: ast_id,
         kind,
         packing,
         scope,
@@ -366,7 +378,7 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                     expected_ns: ExpectedNs::Exact(Namespace::Value),
                     range: name_ref.text_range(),
                     scope,
-                    ast_id: ast_id.erase(),
+                    name_ref_ast: ast_id.erase(),
                     order_key: 0,
                 });
             }
@@ -384,7 +396,7 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                         expected_ns: ExpectedNs::Exact(Namespace::Value),
                         range: qn.text_range(),
                         scope,
-                        ast_id: ast_id.erase(),
+                        name_ref_ast: ast_id.erase(),
                         order_key: 0,
                     });
                 }

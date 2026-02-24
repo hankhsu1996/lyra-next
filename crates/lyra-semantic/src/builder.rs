@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lyra_ast::{AstIdMap, AstNode, ExportDecl, Port, TypeSpec};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
-use lyra_source::{FileId, TextRange};
+use lyra_source::{FileId, NameSpan, TextRange};
 use smol_str::SmolStr;
 
 use crate::builder_order::{assign_order_keys, detect_duplicates};
@@ -57,11 +57,11 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
 
     let mut enum_by_ast = HashMap::with_capacity(ctx.enum_defs.len());
     for (i, def) in ctx.enum_defs.iter().enumerate() {
-        enum_by_ast.insert(def.ast_id, crate::enum_def::EnumDefIdx(i as u32));
+        enum_by_ast.insert(def.enum_type_ast, crate::enum_def::EnumDefIdx(i as u32));
     }
     let mut record_by_ast = HashMap::with_capacity(ctx.record_defs.len());
     for (i, def) in ctx.record_defs.iter().enumerate() {
-        record_by_ast.insert(def.ast_id, crate::record::RecordDefIdx(i as u32));
+        record_by_ast.insert(def.record_type_ast, crate::record::RecordDefIdx(i as u32));
     }
 
     // Finalize modport defs: convert raw GlobalDefId owners to InterfaceDefId
@@ -193,6 +193,7 @@ impl<'a> DefContext<'a> {
             return;
         }
         let name = sym.name.clone();
+        let name_span = sym.name_span;
         let scope = sym.scope;
         let ordinal = self.local_decl_ordinals.entry(scope).or_insert(0);
         let ord = *ordinal;
@@ -205,7 +206,8 @@ impl<'a> DefContext<'a> {
             symbol_id: sym_id,
             name,
             namespace: ns,
-            ast_id: sym.name_ast,
+            decl_ast: sym.name_ast,
+            name_span,
             order_key: 0,
         });
     }
@@ -241,7 +243,6 @@ impl<'a> DefContext<'a> {
             sym.def_ast,
             sym.type_ast,
             &sym.name,
-            sym.def_range,
         );
         let scope = sym.scope;
         let kind = sym.kind;
@@ -257,7 +258,6 @@ impl<'a> DefContext<'a> {
         def_ast: lyra_ast::ErasedAstId,
         type_ast: Option<lyra_ast::ErasedAstId>,
         name: &str,
-        def_range: TextRange,
     ) {
         let expected_name_kind = match kind {
             SymbolKind::Variable | SymbolKind::Net | SymbolKind::Parameter | SymbolKind::PortTf => {
@@ -286,13 +286,13 @@ impl<'a> DefContext<'a> {
                     kind,
                     name,
                 ),
-                def_range,
+                name_ast.text_range(),
             );
         }
         if kind.namespace() == Namespace::Definition && name_ast != def_ast {
             self.emit_internal_error(
                 &format!("name_ast != def_ast for definition-namespace {kind:?} '{name}'",),
-                def_range,
+                name_ast.text_range(),
             );
         }
         if let Some(ta) = type_ast
@@ -303,7 +303,7 @@ impl<'a> DefContext<'a> {
                     "type_ast kind {:?} (expected TypeSpec) for {kind:?} '{name}'",
                     ta.kind(),
                 ),
-                def_range,
+                name_ast.text_range(),
             );
         }
     }
@@ -336,272 +336,272 @@ fn collect_source_file(ctx: &mut DefContext<'_>, root: &SyntaxNode, file_scope: 
 }
 
 fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: ScopeId) {
-    let module_name = first_ident_token(node);
-    if let Some(name_tok) = &module_name {
-        let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
-            ctx.emit_internal_error(
-                &format!(
-                    "erased_ast_id returned None for {:?} in collect_module",
-                    node.kind()
-                ),
-                node.text_range(),
-            );
-            return;
-        };
-        let name = SmolStr::new(name_tok.text());
-        let range = name_tok.text_range();
-        let module_scope = ctx.scopes.push(ScopeKind::Module, None);
-        let sym_id = ctx.push_symbol(Symbol {
-            name: name.clone(),
-            kind: SymbolKind::Module,
-            def_ast,
-            name_ast: def_ast,
-            type_ast: None,
-            def_range: range,
-            scope: module_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.export_definitions.push(sym_id);
+    let Some(name_tok) = lyra_ast::ModuleDecl::cast(node.clone()).and_then(|m| m.name()) else {
+        return;
+    };
+    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error(
+            &format!(
+                "erased_ast_id returned None for {:?} in collect_module",
+                node.kind()
+            ),
+            node.text_range(),
+        );
+        return;
+    };
+    let name = SmolStr::new(name_tok.text());
+    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let module_scope = ctx.scopes.push(ScopeKind::Module, None);
+    let sym_id = ctx.push_symbol(Symbol {
+        name: name.clone(),
+        kind: SymbolKind::Module,
+        def_ast,
+        name_ast: def_ast,
+        type_ast: None,
+        name_span,
+        scope: module_scope,
+        origin: SymbolOrigin::TypeSpec,
+    });
+    ctx.export_definitions.push(sym_id);
 
-        ctx.register_binding(sym_id);
+    ctx.register_binding(sym_id);
 
-        // Pass 1: header imports (scope facts collected first so ports see them)
-        for child in node.children() {
-            if child.kind() == SyntaxKind::ImportDecl {
-                collect_import_decl(ctx, &child, module_scope);
-            }
+    // Pass 1: header imports (scope facts collected first so ports see them)
+    for child in node.children() {
+        if child.kind() == SyntaxKind::ImportDecl {
+            collect_import_decl(ctx, &child, module_scope);
         }
-        // Pass 2: ports and body
-        for child in node.children() {
-            match child.kind() {
-                SyntaxKind::ParamPortList => {
-                    collect_param_port_list(ctx, &child, module_scope);
-                }
-                SyntaxKind::PortList => {
-                    collect_port_list(ctx, &child, module_scope);
-                }
-                SyntaxKind::ModuleBody => {
-                    collect_module_body(ctx, &child, module_scope);
-                }
-                _ => {}
+    }
+    // Pass 2: ports and body
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::ParamPortList => {
+                collect_param_port_list(ctx, &child, module_scope);
             }
+            SyntaxKind::PortList => {
+                collect_port_list(ctx, &child, module_scope);
+            }
+            SyntaxKind::ModuleBody => {
+                collect_module_body(ctx, &child, module_scope);
+            }
+            _ => {}
         }
     }
 }
 
 fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: ScopeId) {
-    let package_name = first_ident_token(node);
-    if let Some(name_tok) = &package_name {
-        let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
-            ctx.emit_internal_error(
-                &format!(
-                    "erased_ast_id returned None for {:?} in collect_package",
-                    node.kind()
-                ),
-                node.text_range(),
-            );
-            return;
-        };
-        let name = SmolStr::new(name_tok.text());
-        let range = name_tok.text_range();
-        let package_scope = ctx.scopes.push(ScopeKind::Package, None);
-        let sym_id = ctx.push_symbol(Symbol {
-            name: name.clone(),
-            kind: SymbolKind::Package,
-            def_ast,
-            name_ast: def_ast,
-            type_ast: None,
-            def_range: range,
-            scope: package_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.export_packages.push(sym_id);
+    let Some(name_tok) = lyra_ast::PackageDecl::cast(node.clone()).and_then(|p| p.name()) else {
+        return;
+    };
+    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error(
+            &format!(
+                "erased_ast_id returned None for {:?} in collect_package",
+                node.kind()
+            ),
+            node.text_range(),
+        );
+        return;
+    };
+    let name = SmolStr::new(name_tok.text());
+    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let package_scope = ctx.scopes.push(ScopeKind::Package, None);
+    let sym_id = ctx.push_symbol(Symbol {
+        name: name.clone(),
+        kind: SymbolKind::Package,
+        def_ast,
+        name_ast: def_ast,
+        type_ast: None,
+        name_span,
+        scope: package_scope,
+        origin: SymbolOrigin::TypeSpec,
+    });
+    ctx.export_packages.push(sym_id);
 
-        ctx.register_binding(sym_id);
+    ctx.register_binding(sym_id);
 
-        for child in node.children() {
-            if child.kind() == SyntaxKind::PackageBody {
-                collect_package_body(ctx, &child, package_scope);
-            }
+    for child in node.children() {
+        if child.kind() == SyntaxKind::PackageBody {
+            collect_package_body(ctx, &child, package_scope);
         }
     }
 }
 
 fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
-    let name_tok = first_ident_token(node);
-    if let Some(name_tok) = &name_tok {
-        let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
-            ctx.emit_internal_error(
-                &format!(
-                    "erased_ast_id returned None for {:?} in collect_interface",
-                    node.kind()
-                ),
-                node.text_range(),
-            );
-            return;
-        };
-        let name = SmolStr::new(name_tok.text());
-        let range = name_tok.text_range();
-        let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
-        let sym_id = ctx.push_symbol(Symbol {
-            name: name.clone(),
-            kind: SymbolKind::Interface,
-            def_ast,
-            name_ast: def_ast,
-            type_ast: None,
-            def_range: range,
-            scope: iface_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.export_definitions.push(sym_id);
+    let Some(name_tok) = lyra_ast::InterfaceDecl::cast(node.clone()).and_then(|i| i.name()) else {
+        return;
+    };
+    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error(
+            &format!(
+                "erased_ast_id returned None for {:?} in collect_interface",
+                node.kind()
+            ),
+            node.text_range(),
+        );
+        return;
+    };
+    let name = SmolStr::new(name_tok.text());
+    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
+    let sym_id = ctx.push_symbol(Symbol {
+        name: name.clone(),
+        kind: SymbolKind::Interface,
+        def_ast,
+        name_ast: def_ast,
+        type_ast: None,
+        name_span,
+        scope: iface_scope,
+        origin: SymbolOrigin::TypeSpec,
+    });
+    ctx.export_definitions.push(sym_id);
 
-        ctx.register_binding(sym_id);
-        let iface_def_id = Some(crate::symbols::GlobalDefId::new(def_ast));
+    ctx.register_binding(sym_id);
+    let iface_def_id = Some(crate::symbols::GlobalDefId::new(def_ast));
 
-        let prev_iface = ctx.current_iface_def_id.take();
-        ctx.current_iface_def_id = iface_def_id;
-        ctx.modport_ordinal = 0;
-        // Pass 1: header imports
-        for child in node.children() {
-            if child.kind() == SyntaxKind::ImportDecl {
-                collect_import_decl(ctx, &child, iface_scope);
-            }
+    let prev_iface = ctx.current_iface_def_id.take();
+    ctx.current_iface_def_id = iface_def_id;
+    ctx.modport_ordinal = 0;
+    // Pass 1: header imports
+    for child in node.children() {
+        if child.kind() == SyntaxKind::ImportDecl {
+            collect_import_decl(ctx, &child, iface_scope);
         }
-        // Pass 2: ports and body
-        for child in node.children() {
-            match child.kind() {
-                SyntaxKind::ParamPortList => {
-                    collect_param_port_list(ctx, &child, iface_scope);
-                }
-                SyntaxKind::PortList => {
-                    collect_port_list(ctx, &child, iface_scope);
-                }
-                SyntaxKind::InterfaceBody => {
-                    collect_module_body(ctx, &child, iface_scope);
-                }
-                _ => {}
-            }
-        }
-        ctx.current_iface_def_id = prev_iface;
     }
+    // Pass 2: ports and body
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::ParamPortList => {
+                collect_param_port_list(ctx, &child, iface_scope);
+            }
+            SyntaxKind::PortList => {
+                collect_port_list(ctx, &child, iface_scope);
+            }
+            SyntaxKind::InterfaceBody => {
+                collect_module_body(ctx, &child, iface_scope);
+            }
+            _ => {}
+        }
+    }
+    ctx.current_iface_def_id = prev_iface;
 }
 
 fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
-    let name_tok = first_ident_token(node);
-    if let Some(name_tok) = &name_tok {
-        let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
-            ctx.emit_internal_error(
-                &format!(
-                    "erased_ast_id returned None for {:?} in collect_program",
-                    node.kind()
-                ),
-                node.text_range(),
-            );
-            return;
-        };
-        let name = SmolStr::new(name_tok.text());
-        let range = name_tok.text_range();
-        let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
-        let sym_id = ctx.push_symbol(Symbol {
-            name: name.clone(),
-            kind: SymbolKind::Program,
-            def_ast,
-            name_ast: def_ast,
-            type_ast: None,
-            def_range: range,
-            scope: prog_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.export_definitions.push(sym_id);
+    let Some(name_tok) = lyra_ast::ProgramDecl::cast(node.clone()).and_then(|p| p.name()) else {
+        return;
+    };
+    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error(
+            &format!(
+                "erased_ast_id returned None for {:?} in collect_program",
+                node.kind()
+            ),
+            node.text_range(),
+        );
+        return;
+    };
+    let name = SmolStr::new(name_tok.text());
+    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
+    let sym_id = ctx.push_symbol(Symbol {
+        name: name.clone(),
+        kind: SymbolKind::Program,
+        def_ast,
+        name_ast: def_ast,
+        type_ast: None,
+        name_span,
+        scope: prog_scope,
+        origin: SymbolOrigin::TypeSpec,
+    });
+    ctx.export_definitions.push(sym_id);
 
-        ctx.register_binding(sym_id);
+    ctx.register_binding(sym_id);
 
-        // Pass 1: header imports
-        for child in node.children() {
-            if child.kind() == SyntaxKind::ImportDecl {
-                collect_import_decl(ctx, &child, prog_scope);
-            }
+    // Pass 1: header imports
+    for child in node.children() {
+        if child.kind() == SyntaxKind::ImportDecl {
+            collect_import_decl(ctx, &child, prog_scope);
         }
-        // Pass 2: ports and body
-        for child in node.children() {
-            match child.kind() {
-                SyntaxKind::ParamPortList => {
-                    collect_param_port_list(ctx, &child, prog_scope);
-                }
-                SyntaxKind::PortList => {
-                    collect_port_list(ctx, &child, prog_scope);
-                }
-                SyntaxKind::ProgramBody => {
-                    collect_module_body(ctx, &child, prog_scope);
-                }
-                _ => {}
+    }
+    // Pass 2: ports and body
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::ParamPortList => {
+                collect_param_port_list(ctx, &child, prog_scope);
             }
+            SyntaxKind::PortList => {
+                collect_port_list(ctx, &child, prog_scope);
+            }
+            SyntaxKind::ProgramBody => {
+                collect_module_body(ctx, &child, prog_scope);
+            }
+            _ => {}
         }
     }
 }
 
 fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
-    let name_tok = first_ident_token(node);
-    if let Some(name_tok) = &name_tok {
-        let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
-            ctx.emit_internal_error(
-                &format!(
-                    "erased_ast_id returned None for {:?} in collect_primitive",
-                    node.kind()
-                ),
-                node.text_range(),
-            );
-            return;
-        };
-        let name = SmolStr::new(name_tok.text());
-        let range = name_tok.text_range();
-        let prim_scope = ctx.scopes.push(ScopeKind::Module, None);
-        let sym_id = ctx.push_symbol(Symbol {
-            name,
-            kind: SymbolKind::Primitive,
-            def_ast,
-            name_ast: def_ast,
-            type_ast: None,
-            def_range: range,
-            scope: prim_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.export_definitions.push(sym_id);
+    let Some(name_tok) = lyra_ast::PrimitiveDecl::cast(node.clone()).and_then(|p| p.name()) else {
+        return;
+    };
+    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error(
+            &format!(
+                "erased_ast_id returned None for {:?} in collect_primitive",
+                node.kind()
+            ),
+            node.text_range(),
+        );
+        return;
+    };
+    let name = SmolStr::new(name_tok.text());
+    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let prim_scope = ctx.scopes.push(ScopeKind::Module, None);
+    let sym_id = ctx.push_symbol(Symbol {
+        name,
+        kind: SymbolKind::Primitive,
+        def_ast,
+        name_ast: def_ast,
+        type_ast: None,
+        name_span,
+        scope: prim_scope,
+        origin: SymbolOrigin::TypeSpec,
+    });
+    ctx.export_definitions.push(sym_id);
 
-        ctx.register_binding(sym_id);
-    }
+    ctx.register_binding(sym_id);
 }
 
 fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
-    let name_tok = first_ident_token(node);
-    if let Some(name_tok) = &name_tok {
-        let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
-            ctx.emit_internal_error(
-                &format!(
-                    "erased_ast_id returned None for {:?} in collect_config",
-                    node.kind()
-                ),
-                node.text_range(),
-            );
-            return;
-        };
-        let name = SmolStr::new(name_tok.text());
-        let range = name_tok.text_range();
-        let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
-        let sym_id = ctx.push_symbol(Symbol {
-            name,
-            kind: SymbolKind::Config,
-            def_ast,
-            name_ast: def_ast,
-            type_ast: None,
-            def_range: range,
-            scope: cfg_scope,
-            origin: SymbolOrigin::TypeSpec,
-        });
-        ctx.export_definitions.push(sym_id);
+    let Some(name_tok) = lyra_ast::ConfigDecl::cast(node.clone()).and_then(|c| c.name()) else {
+        return;
+    };
+    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error(
+            &format!(
+                "erased_ast_id returned None for {:?} in collect_config",
+                node.kind()
+            ),
+            node.text_range(),
+        );
+        return;
+    };
+    let name = SmolStr::new(name_tok.text());
+    let name_span = Some(NameSpan::new(name_tok.text_range()));
+    let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
+    let sym_id = ctx.push_symbol(Symbol {
+        name,
+        kind: SymbolKind::Config,
+        def_ast,
+        name_ast: def_ast,
+        type_ast: None,
+        name_span,
+        scope: cfg_scope,
+        origin: SymbolOrigin::TypeSpec,
+    });
+    ctx.export_definitions.push(sym_id);
 
-        ctx.register_binding(sym_id);
-    }
+    ctx.register_binding(sym_id);
 }
 
 fn collect_package_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
@@ -624,9 +624,13 @@ fn collect_param_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: S
 
 fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
-        if child.kind() == SyntaxKind::Port
-            && let Some(fallback_tok) = first_ident_token(&child)
-        {
+        if child.kind() == SyntaxKind::Port {
+            let Some(port) = Port::cast(child.clone()) else {
+                continue;
+            };
+            let Some(name_tok) = port.name() else {
+                continue;
+            };
             let Some(def_ast) = ctx.ast_id_map.erased_ast_id(&child) else {
                 ctx.emit_internal_error(
                     &format!(
@@ -637,11 +641,9 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 );
                 continue;
             };
-            // Prefer the port-name ident (last direct Ident child, after
-            // any TypeSpec type name). Fall back to the first Ident.
-            let name_tok = port_name_ident(&child).unwrap_or(fallback_tok);
-            let port_type_ast = Port::cast(child.clone())
-                .and_then(|p| p.type_spec())
+            let name_span = Some(NameSpan::new(name_tok.text_range()));
+            let port_type_ast = port
+                .type_spec()
                 .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
             let sym_id = ctx.push_symbol(Symbol {
                 name: SmolStr::new(name_tok.text()),
@@ -649,7 +651,7 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 def_ast,
                 name_ast: def_ast,
                 type_ast: port_type_ast,
-                def_range: name_tok.text_range(),
+                name_span,
                 scope,
                 origin: SymbolOrigin::TypeSpec,
             });
@@ -718,8 +720,6 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         _ => {}
     }
 }
-
-use crate::syntax_helpers::{first_ident_token, port_name_ident};
 
 use crate::builder_items::{
     collect_callable_decl, collect_export_decl, collect_import_decl, collect_modport_decl,

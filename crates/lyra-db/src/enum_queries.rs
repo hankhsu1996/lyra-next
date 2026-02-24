@@ -82,11 +82,21 @@ pub fn enum_variants<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> E
             out.ordinal += 1;
             continue;
         };
-        let diag_range = member.range_text_range.unwrap_or(member.name_range);
+        let name_ident_range = member
+            .name_span
+            .map_or(member.name_ast.text_range(), |ns| ns.text_range());
+        let diag_range = member.range_text_range.unwrap_or(name_ident_range);
         match range_kind {
             EnumMemberRangeKind::Count(expr_id) => {
                 let result = eval_const_int(db, ConstExprRef::new(db, unit, *expr_id));
-                expand_count(&result, member, member_idx as u32, diag_range, &mut out);
+                expand_count(
+                    &result,
+                    member,
+                    member_idx as u32,
+                    diag_range,
+                    name_ident_range,
+                    &mut out,
+                );
             }
             EnumMemberRangeKind::FromTo(from_id, to_id) => {
                 let from_val = eval_const_int(db, ConstExprRef::new(db, unit, *from_id));
@@ -97,6 +107,7 @@ pub fn enum_variants<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> E
                     member,
                     member_idx as u32,
                     diag_range,
+                    name_ident_range,
                     &mut out,
                 );
             }
@@ -121,6 +132,7 @@ fn expand_count(
     member: &lyra_semantic::enum_def::EnumMemberDef,
     member_idx: u32,
     diag_range: lyra_source::TextRange,
+    name_ident_range: lyra_source::TextRange,
     out: &mut ExpandOutput,
 ) {
     let ConstInt::Known(n) = *result else {
@@ -147,7 +159,7 @@ fn expand_count(
             out.variants.push(ExpandedVariant {
                 name: SmolStr::new(format!("{}{i}", member.name)),
                 variant_ordinal: out.ordinal,
-                def_range: member.name_range,
+                def_range: name_ident_range,
                 source_member: member_idx,
             });
             out.ordinal += 1;
@@ -161,6 +173,7 @@ fn expand_from_to(
     member: &lyra_semantic::enum_def::EnumMemberDef,
     member_idx: u32,
     diag_range: lyra_source::TextRange,
+    name_ident_range: lyra_source::TextRange,
     out: &mut ExpandOutput,
 ) {
     let (&ConstInt::Known(from), &ConstInt::Known(to)) = (from_val, to_val) else {
@@ -184,7 +197,7 @@ fn expand_from_to(
         out.variants.push(ExpandedVariant {
             name: SmolStr::new(format!("{}{val}", member.name)),
             variant_ordinal: out.ordinal,
-            def_range: member.name_range,
+            def_range: name_ident_range,
             source_member: member_idx,
         });
         out.ordinal += 1;
@@ -485,7 +498,7 @@ fn compute_member_values(
                 && lit_w != base_w
             {
                 diags.push(EnumValueDiag::SizedLiteralWidth {
-                    anchor: member.ast_id,
+                    anchor: member.name_ast,
                     literal_width: lit_w,
                     base_width: base_w,
                 });
@@ -531,7 +544,7 @@ fn compute_member_values(
                 for i in 0..count {
                     let variant_value = raw + i128::from(i);
                     let variant_name = SmolStr::new(format!("{}{label_val}", member.name));
-                    produced.push((member.ast_id, variant_value, variant_name));
+                    produced.push((member.name_ast, variant_value, variant_name));
                     label_val += step;
                 }
                 next_raw = raw + i128::from(count);
@@ -543,7 +556,7 @@ fn compute_member_values(
         } else {
             // Plain member: produce 1 variant
             store_member_value(&mut values, raw);
-            produced.push((member.ast_id, raw, member.name.clone()));
+            produced.push((member.name_ast, raw, member.name.clone()));
             next_raw = raw + 1;
             next_raw_valid = raw_valid;
         }

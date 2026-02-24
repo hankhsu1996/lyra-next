@@ -5,6 +5,8 @@ use smol_str::SmolStr;
 
 use smallvec::SmallVec;
 
+use lyra_ast::ErasedAstId;
+
 use crate::def_index::{ExportDeclId, ImportDeclId, LocalDeclId};
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::EnumVariantTarget;
@@ -14,8 +16,9 @@ use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
 /// Offset-independent resolution result from `build_resolve_core`.
 ///
 /// Local resolutions carry a `SymbolId` (per-file); global resolutions
-/// carry a `GlobalDefId` (cross-file, topology-stable). The mapping
-/// to `GlobalSymbolId` happens in `build_resolve_index`.
+/// carry either a `GlobalDefId` (definition-namespace) or an `ErasedAstId`
+/// (package-scope). The mapping to `GlobalSymbolId` happens in
+/// `build_resolve_index`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoreResolution {
     /// Resolved within the same file's lexical scopes.
@@ -23,13 +26,37 @@ pub enum CoreResolution {
         symbol: SymbolId,
         namespace: Namespace,
     },
-    /// Resolved via the global definitions name space or package scope.
-    Global {
-        decl: GlobalDefId,
+    /// Resolved via the global definitions namespace (`GlobalDefIndex`).
+    /// Namespace is always `Definition` (enforced by omission).
+    Def { def: GlobalDefId },
+    /// Resolved via package scope (`PackageScopeIndex`).
+    /// The anchor is a `name_ast` site. Namespace is `Value` or `Type`
+    /// (never `Definition`).
+    Pkg {
+        name_ast: ErasedAstId,
         namespace: Namespace,
     },
     /// Resolved as a range-generated enum variant name.
     EnumVariant(EnumVariantTarget),
+}
+
+impl CoreResolution {
+    /// Construct a Pkg resolution.
+    ///
+    /// Returns `Err` if namespace is `Definition` (structurally prevented
+    /// by `PackageScopeIndex::resolve()` returning `None` for `Definition`,
+    /// and `resolve_qualified` remapping `Definition` to `Value`).
+    pub(crate) fn pkg(name_ast: ErasedAstId, namespace: Namespace) -> Result<Self, SmolStr> {
+        if namespace == Namespace::Definition {
+            return Err(SmolStr::new(format!(
+                "Pkg resolution carries Definition namespace (anchor={name_ast:?})"
+            )));
+        }
+        Ok(Self::Pkg {
+            name_ast,
+            namespace,
+        })
+    }
 }
 
 /// Result of resolving a single use-site.
@@ -55,6 +82,8 @@ pub enum UnresolvedReason {
     AmbiguousWildcardImport { candidates: Box<[SmolStr]> },
     /// Qualified path has more than 2 segments (not yet supported).
     UnsupportedQualifiedPath { len: usize },
+    /// Internal invariant violation (e.g. Pkg with Definition namespace).
+    InternalError { detail: SmolStr },
 }
 
 /// An error from validating an import declaration.

@@ -1,5 +1,5 @@
 use lyra_ast::ErasedAstId;
-use lyra_source::{FileId, TextRange};
+use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
 use crate::record::SymbolOrigin;
@@ -86,10 +86,8 @@ pub struct GlobalSymbolId {
 /// Cross-file identity for definition-namespace constructs (module, package,
 /// interface, program, primitive, config). Wraps `ErasedAstId` with
 /// `def_ast` semantics. `symbol_global_def()` enforces the restriction.
-///
-/// NOTE: `PackageScope` still stores `GlobalDefId` for value/type-namespace
-/// members (not just definition-namespace). A follow-up PR will change
-/// `PackageScope` to use `ErasedAstId` directly for member anchors.
+/// `PackageScope` uses `ErasedAstId` directly for value/type-namespace
+/// member anchors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlobalDefId(ErasedAstId);
 
@@ -180,8 +178,10 @@ impl SymbolKind {
 ///
 /// `type_ast` is the `TypeSpec` node spelling the type, when present.
 ///
-/// `def_range` is in expanded-text coordinate space within the owning
-/// file. The `FileId` lives on `DefIndex`, not duplicated here.
+/// `name_span` is the precise identifier token range captured at builder
+/// time. `None` only on parse error recovery (name token missing).
+/// Diagnostic lowering uses `name_span.text_range()` directly -- no CST
+/// traversal needed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub name: SmolStr,
@@ -189,7 +189,7 @@ pub struct Symbol {
     pub def_ast: ErasedAstId,
     pub name_ast: ErasedAstId,
     pub type_ast: Option<ErasedAstId>,
-    pub def_range: TextRange,
+    pub name_span: Option<NameSpan>,
     pub scope: ScopeId,
     pub origin: SymbolOrigin,
 }

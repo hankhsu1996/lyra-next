@@ -48,7 +48,7 @@ pub fn file_diagnostics(
     // Enum base type diagnostics
     let file_id = file.file_id(db);
     for enum_def in &*def.enum_defs {
-        let enum_id = lyra_semantic::enum_def::EnumId::new(enum_def.ast_id);
+        let enum_id = lyra_semantic::enum_def::EnumId::new(enum_def.enum_type_ast);
         let eref = EnumRef::new(db, unit, enum_id);
         let sem = enum_sem(db, eref);
         for diag in &*sem.diags {
@@ -84,7 +84,7 @@ pub fn file_diagnostics(
 
     // Record diagnostics (type resolution errors + packed union width)
     for record_def in &*def.record_defs {
-        let record_id = lyra_semantic::record::RecordId::new(record_def.ast_id);
+        let record_id = lyra_semantic::record::RecordId::new(record_def.record_type_ast);
         let rref = RecordRef::new(db, unit, record_id);
         diags.extend(record_diagnostics(db, rref).iter().cloned());
     }
@@ -914,7 +914,10 @@ pub fn unit_diagnostics(
                     if let Some(&sym_id) = dup_def.name_ast_to_symbol.get(&dup_def_id.ast_id()) {
                         let sym = dup_def.symbols.get(sym_id);
                         let pp = preprocess_file(db, dup_file);
-                        if let Some(span) = pp.source_map.map_span(sym.def_range) {
+                        let label_range = sym
+                            .name_span
+                            .map_or_else(|| sym.name_ast.text_range(), |ns| ns.text_range());
+                        if let Some(span) = pp.source_map.map_span(label_range) {
                             diags.push(
                                 lyra_diag::Diagnostic::new(
                                     lyra_diag::Severity::Error,

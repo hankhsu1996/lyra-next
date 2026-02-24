@@ -227,9 +227,11 @@ impl<'db> TyFmt<'db> {
     }
 
     fn interface_name(&self, iface_ty: &lyra_semantic::types::InterfaceType) -> String {
-        use crate::semantic::def_symbol;
+        use crate::semantic::symbol_at_name_ast;
 
-        let Some(gsym) = def_symbol(self.db, self.unit, iface_ty.iface.global_def()) else {
+        let Some(gsym) =
+            symbol_at_name_ast(self.db, self.unit, iface_ty.iface.global_def().ast_id())
+        else {
             return "interface".to_string();
         };
         let Some(src) = source_file_by_id(self.db, self.unit, gsym.file) else {
