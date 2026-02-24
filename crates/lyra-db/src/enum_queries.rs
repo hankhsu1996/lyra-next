@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use lyra_ast::ErasedAstId;
 use lyra_semantic::def_index::ExpectedNs;
-use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
+use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use lyra_semantic::enum_def::{
     EnumId, EnumMemberRangeKind, EnumSem, EnumValueDiag, EnumVariantIndex, EnumVariantTarget,
 };
@@ -15,7 +15,7 @@ use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::semantic::{
     compilation_unit_env, def_index_file, global_def_index, name_graph_file, package_scope_index,
 };
-use crate::ty_resolve::resolve_result_to_ty;
+use crate::ty_resolve::{TypeResolveDiagAnchor, resolve_result_to_ty};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
 /// Identifies an enum for semantic resolution.
@@ -82,21 +82,13 @@ pub fn enum_variants<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> E
             out.ordinal += 1;
             continue;
         };
-        let name_ident_range = member
-            .name_span
-            .text_range_or(member.name_site.text_range());
-        let diag_range = member.range_text_range.unwrap_or(name_ident_range);
+        // TODO(gap-1.6): range_text_range sub-node precision lost; using member site
+        let primary = DiagSpan::Site(member.name_site);
+        let label = Some(DiagSpan::Name(member.name_span));
         match range_kind {
             EnumMemberRangeKind::Count(expr_id) => {
                 let result = eval_const_int(db, ConstExprRef::new(db, unit, *expr_id));
-                expand_count(
-                    &result,
-                    member,
-                    member_idx as u32,
-                    diag_range,
-                    name_ident_range,
-                    &mut out,
-                );
+                expand_count(&result, member, member_idx as u32, primary, label, &mut out);
             }
             EnumMemberRangeKind::FromTo(from_id, to_id) => {
                 let from_val = eval_const_int(db, ConstExprRef::new(db, unit, *from_id));
@@ -106,8 +98,8 @@ pub fn enum_variants<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> E
                     &to_val,
                     member,
                     member_idx as u32,
-                    diag_range,
-                    name_ident_range,
+                    primary,
+                    label,
                     &mut out,
                 );
             }
@@ -131,28 +123,34 @@ fn expand_count(
     result: &ConstInt,
     member: &lyra_semantic::enum_def::EnumMemberDef,
     member_idx: u32,
-    diag_range: lyra_source::TextRange,
-    name_ident_range: lyra_source::TextRange,
+    primary: DiagSpan,
+    label: Option<DiagSpan>,
     out: &mut ExpandOutput,
 ) {
+    let name_ident_range = member
+        .name_span
+        .text_range_or(member.name_site.text_range());
     let ConstInt::Known(n) = *result else {
         out.diagnostics.push(SemanticDiag {
             kind: SemanticDiagKind::EnumRangeBoundNotEvaluable,
-            range: diag_range,
+            primary,
+            label,
         });
         return;
     };
     if n < 0 {
         out.diagnostics.push(SemanticDiag {
             kind: SemanticDiagKind::EnumRangeCountNegative { count: n },
-            range: diag_range,
+            primary,
+            label,
         });
     } else if n.cast_unsigned() > MAX_ENUM_RANGE_COUNT {
         out.diagnostics.push(SemanticDiag {
             kind: SemanticDiagKind::EnumRangeTooLarge {
                 count: n.cast_unsigned(),
             },
-            range: diag_range,
+            primary,
+            label,
         });
     } else {
         for i in 0..n {
@@ -172,14 +170,18 @@ fn expand_from_to(
     to_val: &ConstInt,
     member: &lyra_semantic::enum_def::EnumMemberDef,
     member_idx: u32,
-    diag_range: lyra_source::TextRange,
-    name_ident_range: lyra_source::TextRange,
+    primary: DiagSpan,
+    label: Option<DiagSpan>,
     out: &mut ExpandOutput,
 ) {
+    let name_ident_range = member
+        .name_span
+        .text_range_or(member.name_site.text_range());
     let (&ConstInt::Known(from), &ConstInt::Known(to)) = (from_val, to_val) else {
         out.diagnostics.push(SemanticDiag {
             kind: SemanticDiagKind::EnumRangeBoundNotEvaluable,
-            range: diag_range,
+            primary,
+            label,
         });
         return;
     };
@@ -187,7 +189,8 @@ fn expand_from_to(
     if count > MAX_ENUM_RANGE_COUNT {
         out.diagnostics.push(SemanticDiag {
             kind: SemanticDiagKind::EnumRangeTooLarge { count },
-            range: diag_range,
+            primary,
+            label,
         });
         return;
     }
@@ -241,27 +244,32 @@ pub fn enum_variant_index(
         let scope_map = by_scope.entry(enum_def.scope).or_default();
 
         for variant in &*expanded.variants {
+            let member = &enum_def.members[variant.source_member as usize];
+            let variant_primary = DiagSpan::Site(member.name_site);
+            let variant_label = Some(DiagSpan::Name(member.name_span));
             // Check collision with other generated names in this scope
             if scope_map.contains_key(&variant.name) {
-                let diag_range = variant.def_range;
                 diagnostics.push(SemanticDiag {
                     kind: SemanticDiagKind::DuplicateDefinition {
                         name: variant.name.clone(),
-                        original: diag_range,
+                        original_primary: variant_primary,
+                        original_label: variant_label,
                     },
-                    range: diag_range,
+                    primary: variant_primary,
+                    label: variant_label,
                 });
                 continue;
             }
             // Check collision with real symbols in scope
             if existing_names.contains(variant.name.as_str()) {
-                let diag_range = variant.def_range;
                 diagnostics.push(SemanticDiag {
                     kind: SemanticDiagKind::DuplicateDefinition {
                         name: variant.name.clone(),
-                        original: diag_range,
+                        original_primary: variant_primary,
+                        original_label: variant_label,
                     },
-                    range: diag_range,
+                    primary: variant_primary,
+                    label: variant_label,
                 });
                 continue;
             }
@@ -313,13 +321,14 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
         eval_const_int(db, expr_ref)
     };
 
-    let base_range = enum_def.base.range;
+    // TODO(gap-1.4): EnumBase.range precision lost; using enum_type_site
+    let base_primary = DiagSpan::Site(enum_def.enum_type_site);
     let mut diags = Vec::new();
 
     // Resolve the base TypeRef to a Ty
     let base_ty = match &enum_def.base.tref {
         TypeRef::Resolved(ty) => lyra_semantic::normalize_ty(ty, &eval),
-        TypeRef::Named { name, span } => {
+        TypeRef::Named { name, span: _ } => {
             let result = lyra_semantic::resolve_name_in_scope(
                 graph,
                 global,
@@ -329,9 +338,13 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
                 name,
                 ExpectedNs::TypeThenValue,
             );
-            resolve_result_to_ty(db, unit, file_id, &result, name, span.range, &mut diags)
+            let anchor = TypeResolveDiagAnchor {
+                primary: base_primary,
+                label: None,
+            };
+            resolve_result_to_ty(db, unit, file_id, &result, name, anchor, &mut diags)
         }
-        TypeRef::Qualified { segments, span } => {
+        TypeRef::Qualified { segments, span: _ } => {
             let result = lyra_semantic::resolve_qualified_name(
                 segments,
                 global,
@@ -339,13 +352,17 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
                 ExpectedNs::TypeThenValue,
             );
             let display_name = segments.join("::");
+            let anchor = TypeResolveDiagAnchor {
+                primary: base_primary,
+                label: None,
+            };
             resolve_result_to_ty(
                 db,
                 unit,
                 file_id,
                 &result,
                 &display_name,
-                span.range,
+                anchor,
                 &mut diags,
             )
         }
@@ -360,14 +377,16 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
                 kind: SemanticDiagKind::IllegalEnumBaseType {
                     name: base_ty.pretty(),
                 },
-                range: base_range,
+                primary: base_primary,
+                label: None,
             });
             None
         }
         Err(EnumBaseError::DimsNotConstant) => {
             diags.push(SemanticDiag {
                 kind: SemanticDiagKind::EnumBaseDimsNotConstant,
-                range: base_range,
+                primary: base_primary,
+                label: None,
             });
             None
         }

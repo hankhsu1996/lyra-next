@@ -13,6 +13,65 @@ use lyra_ast::AstNode;
 
 use super::*;
 
+// DiagSpan fallback contract tests
+
+/// When the label is `Name(NameSpan::INVALID)`, the lowering layer must fall
+/// back to the primary `Site`, not produce a zero-length range at offset 0.
+#[test]
+fn choose_best_diag_span_falls_back_on_invalid_name() {
+    use lyra_semantic::diagnostic::DiagSpan;
+    use lyra_source::NameSpan;
+
+    let site = lyra_ast::ErasedAstId::placeholder(lyra_source::FileId(0));
+    let primary = DiagSpan::Site(site);
+    let label = Some(DiagSpan::Name(NameSpan::INVALID));
+
+    let tr = crate::lower_diag::choose_best_diag_span(primary, label);
+    // Must use the primary's range, not INVALID's 0..0
+    assert_eq!(tr, site.text_range());
+}
+
+/// When the label is `Token(TokenSpan::INVALID)`, same fallback.
+#[test]
+fn choose_best_diag_span_falls_back_on_invalid_token() {
+    use lyra_semantic::diagnostic::DiagSpan;
+    use lyra_source::TokenSpan;
+
+    let site = lyra_ast::ErasedAstId::placeholder(lyra_source::FileId(0));
+    let primary = DiagSpan::Site(site);
+    let label = Some(DiagSpan::Token(TokenSpan::INVALID));
+
+    let tr = crate::lower_diag::choose_best_diag_span(primary, label);
+    assert_eq!(tr, site.text_range());
+}
+
+/// When the label is a valid `Name`, the lowered span uses the label.
+#[test]
+fn choose_best_diag_span_prefers_valid_name() {
+    use lyra_semantic::diagnostic::DiagSpan;
+    use lyra_source::{NameSpan, TextRange, TextSize};
+
+    let site = lyra_ast::ErasedAstId::placeholder(lyra_source::FileId(0));
+    let primary = DiagSpan::Site(site);
+    let name = NameSpan::new(TextRange::new(TextSize::new(10), TextSize::new(13)));
+    let label = Some(DiagSpan::Name(name));
+
+    let tr = crate::lower_diag::choose_best_diag_span(primary, label);
+    assert_eq!(tr, name.text_range());
+}
+
+/// When there is no label at all, primary is used.
+#[test]
+fn choose_best_diag_span_no_label_uses_primary() {
+    use lyra_semantic::diagnostic::DiagSpan;
+
+    let site = lyra_ast::ErasedAstId::placeholder(lyra_source::FileId(0));
+    let primary = DiagSpan::Site(site);
+
+    let tr = crate::lower_diag::choose_best_diag_span(primary, None);
+    assert_eq!(tr, site.text_range());
+}
+
 pub(super) fn new_file(db: &dyn salsa::Database, id: u32, text: &str) -> SourceFile {
     SourceFile::new(
         db,

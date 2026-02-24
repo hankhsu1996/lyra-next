@@ -111,12 +111,14 @@ fn modport_sem_duplicate_member() {
         "diagnostic should mention 'req': {}",
         diag.format()
     );
-    // The `original` span should point to the first occurrence, not the duplicate
-    if let lyra_semantic::diagnostic::SemanticDiagKind::DuplicateDefinition { original, .. } =
-        &diag.kind
+    // The `original_primary` span should point to the first occurrence, not the duplicate
+    if let lyra_semantic::diagnostic::SemanticDiagKind::DuplicateDefinition {
+        original_primary,
+        ..
+    } = &diag.kind
     {
         assert_ne!(
-            *original, diag.range,
+            *original_primary, diag.primary,
             "original span should differ from duplicate span"
         );
     } else {

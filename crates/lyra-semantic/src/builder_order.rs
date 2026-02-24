@@ -5,7 +5,7 @@ use lyra_parser::SyntaxNode;
 use smallvec::SmallVec;
 
 use crate::builder::DefContext;
-use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::symbols::SymbolId;
 
 enum OrderItem {
@@ -101,9 +101,11 @@ pub(crate) fn detect_duplicates(
             diagnostics.push(SemanticDiag {
                 kind: SemanticDiagKind::DuplicateDefinition {
                     name: curr.name.clone(),
-                    original: prev.name_span.text_range_or(prev.name_site.text_range()),
+                    original_primary: DiagSpan::Site(prev.name_site),
+                    original_label: Some(DiagSpan::Name(prev.name_span)),
                 },
-                range: curr.name_span.text_range_or(curr.name_site.text_range()),
+                primary: DiagSpan::Site(curr.name_site),
+                label: Some(DiagSpan::Name(curr.name_span)),
             });
         }
     }

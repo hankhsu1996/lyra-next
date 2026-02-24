@@ -7,9 +7,11 @@ use lyra_parser::SyntaxNode;
 use lyra_source::NameSpan;
 use smol_str::SmolStr;
 
+use lyra_source::TokenSpan;
+
 use crate::builder::DefContext;
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
-use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::enum_def::{EnumBase, EnumDef, EnumDefIdx, EnumMemberDef, EnumMemberRangeKind};
 use crate::record::{
     Packing, RecordDef, RecordDefIdx, RecordField, RecordKind, SymbolOrigin, TypeRef,
@@ -185,7 +187,8 @@ fn collect_enum_def(
                 kind: SemanticDiagKind::InternalError {
                     detail: SmolStr::new("missing enum keyword token"),
                 },
-                range: enum_type.text_range(),
+                primary: DiagSpan::Site(ast_id),
+                label: None,
             });
             return None;
         };
@@ -300,32 +303,47 @@ fn collect_record_def(
     struct_type: &StructType,
     scope: ScopeId,
 ) -> Option<RecordDefIdx> {
+    let struct_type_site = ctx.ast_id_map.erased_ast_id(struct_type.syntax());
+
     if struct_type.is_union() && struct_type.is_tagged() {
-        let range = if let Some(tok) = struct_type
-            .syntax()
-            .children_with_tokens()
-            .filter_map(lyra_parser::SyntaxElement::into_token)
-            .find(|tok| tok.kind() == SyntaxKind::TaggedKw)
-        {
-            tok.text_range()
+        if let Some(site) = struct_type_site {
+            let primary = DiagSpan::Site(site);
+            if let Some(tok) = struct_type
+                .syntax()
+                .children_with_tokens()
+                .filter_map(lyra_parser::SyntaxElement::into_token)
+                .find(|tok| tok.kind() == SyntaxKind::TaggedKw)
+            {
+                ctx.diagnostics.push(SemanticDiag {
+                    kind: SemanticDiagKind::UnsupportedTaggedUnion,
+                    primary,
+                    label: Some(DiagSpan::Token(TokenSpan::new(tok.text_range()))),
+                });
+            } else {
+                ctx.diagnostics.push(SemanticDiag {
+                    kind: SemanticDiagKind::InternalError {
+                        detail: SmolStr::new("missing tagged keyword token"),
+                    },
+                    primary,
+                    label: None,
+                });
+                ctx.diagnostics.push(SemanticDiag {
+                    kind: SemanticDiagKind::UnsupportedTaggedUnion,
+                    primary,
+                    label: None,
+                });
+            }
         } else {
-            ctx.diagnostics.push(SemanticDiag {
-                kind: SemanticDiagKind::InternalError {
-                    detail: SmolStr::new("missing tagged keyword token"),
-                },
-                range: struct_type.text_range(),
-            });
-            struct_type.text_range()
-        };
-        ctx.diagnostics.push(SemanticDiag {
-            kind: SemanticDiagKind::UnsupportedTaggedUnion,
-            range,
-        });
+            ctx.emit_internal_error(
+                "erased_ast_id returned None for StructType in collect_record_def",
+                struct_type.text_range(),
+            );
+        }
         return None;
     }
 
     debug_assert!(struct_type.syntax().kind() == SyntaxKind::StructType);
-    let ast_id = ctx.ast_id_map.erased_ast_id(struct_type.syntax())?;
+    let ast_id = struct_type_site?;
     let idx = RecordDefIdx(ctx.record_defs.len() as u32);
 
     let kind = if struct_type.is_union() {

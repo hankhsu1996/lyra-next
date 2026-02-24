@@ -20,14 +20,16 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
      5. `NameSpan` non-optional with `INVALID` sentinel on all 4 structs. Builder produces `INVALID` + `InternalError` on parse recovery. All consumer `map_or_else` branching eliminated -- consumers call `.text_range()` directly.
      6. `Site` type alias (`= ErasedAstId`) in lyra-semantic. All semantic struct anchors use `Site` and `_site` suffix convention (`decl_site`, `name_site`, `type_site`, `name_ref_site`, `stmt_site`). Zero `ErasedAstId` references in lyra-semantic outside the alias definition.
    - Remaining:
-     1. `SemanticDiag.range: TextRange` -- every diagnostic embeds a range. Migrating requires anchoring all ~30 diagnostic construction sites.
+     1. ~~`SemanticDiag.range: TextRange`~~ -- DONE. Replaced with `DiagSpan` anchor (`Site`/`Name`/`Token`). All ~15 construction sites migrated. Policy ratchet: `tools/policy/check_diag_textrange.py`.
      2. `TypeCheckItem` -- ~20 `TextRange` fields. Scope explosion; needs batch migration.
      3. `InstanceDecl` -- 2 `TextRange` fields. Touches type resolution and member lookup.
-     4. `EnumBase.range` -- `TypeRef` has no span; needs design work.
+     4. `EnumBase.range` -- `TypeRef` has no span; needs design work. Diagnostic precision lost (TODO(gap-1.4) in `enum_queries.rs`).
      5. `EnumVariantTarget.def_range` -- cascades into resolution and diagnostics.
-     6. `EnumMemberDef.range_text_range` -- no obvious single anchor for `[N:M]` range spec.
-     7. `DuplicateDefinition.original: TextRange` -- part of `SemanticDiag` migration.
+     6. `EnumMemberDef.range_text_range` -- no obvious single anchor for `[N:M]` range spec. Diagnostic precision lost (TODO(gap-1.6) in `enum_queries.rs`).
+     7. ~~`DuplicateDefinition.original: TextRange`~~ -- DONE. Replaced with `original_primary: DiagSpan` + `original_label: Option<DiagSpan>`.
      8. Extract definition-namespace entries from `SymbolTable` into their own first-class def structure.
+     9. Record field type errors lack type-reference precision (TODO(gap-1.typeref) in `record_queries.rs`). Closing requires adding `Site` to `TypeRef`.
+     10. Modport port diagnostics lack `NameSpan` label (TODO(gap-1.modport) in `record_queries.rs`). Closing requires adding `NameSpan` to `ModportEntry`.
    - Outcome: Enables future `TypeSpelling` / provenance queries derived purely from CST/AST without heuristics, preserving incrementality and determinism.
 
 2. CST traversal in semantic producers (blocks clean layering)

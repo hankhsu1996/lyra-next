@@ -5,12 +5,10 @@ use smol_str::SmolStr;
 
 use smallvec::SmallVec;
 
-use lyra_source::TextRange;
-
 use crate::Site;
 
 use crate::def_index::{ExpectedNs, ExportDeclId, ImportDeclId, LocalDeclId, NamePath};
-use crate::diagnostic::{SemanticDiag, SemanticDiagKind};
+use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::enum_def::EnumVariantTarget;
 use crate::scopes::ScopeId;
 use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
@@ -174,7 +172,7 @@ pub(crate) fn reason_to_diagnostic(
     reason: &UnresolvedReason,
     expected_ns: ExpectedNs,
     path: &NamePath,
-    range: TextRange,
+    primary: DiagSpan,
 ) -> SemanticDiag {
     match reason {
         UnresolvedReason::NotFound => {
@@ -187,39 +185,48 @@ pub(crate) fn reason_to_diagnostic(
             } else {
                 SemanticDiagKind::UnresolvedName { name }
             };
-            SemanticDiag { kind, range }
+            SemanticDiag {
+                kind,
+                primary,
+                label: None,
+            }
         }
         UnresolvedReason::PackageNotFound { package } => SemanticDiag {
             kind: SemanticDiagKind::PackageNotFound {
                 package: package.clone(),
             },
-            range,
+            primary,
+            label: None,
         },
         UnresolvedReason::MemberNotFound { package, member } => SemanticDiag {
             kind: SemanticDiagKind::MemberNotFound {
                 package: package.clone(),
                 member: member.clone(),
             },
-            range,
+            primary,
+            label: None,
         },
         UnresolvedReason::AmbiguousWildcardImport { candidates } => SemanticDiag {
             kind: SemanticDiagKind::AmbiguousWildcardImport {
                 name: SmolStr::new(path.display_name()),
                 candidates: candidates.clone(),
             },
-            range,
+            primary,
+            label: None,
         },
         UnresolvedReason::UnsupportedQualifiedPath { .. } => SemanticDiag {
             kind: SemanticDiagKind::UnsupportedQualifiedPath {
                 path: SmolStr::new(path.display_name()),
             },
-            range,
+            primary,
+            label: None,
         },
         UnresolvedReason::InternalError { detail } => SemanticDiag {
             kind: SemanticDiagKind::InternalError {
                 detail: detail.clone(),
             },
-            range,
+            primary,
+            label: None,
         },
     }
 }
@@ -228,14 +235,15 @@ pub(crate) fn check_type_mismatch(
     expected_ns: ExpectedNs,
     actual_ns: Namespace,
     path: &NamePath,
-    range: TextRange,
+    primary: DiagSpan,
 ) -> Option<SemanticDiag> {
     if matches!(expected_ns, ExpectedNs::TypeThenValue) && actual_ns == Namespace::Value {
         Some(SemanticDiag {
             kind: SemanticDiagKind::NotAType {
                 name: SmolStr::new(path.display_name()),
             },
-            range,
+            primary,
+            label: None,
         })
     } else {
         None

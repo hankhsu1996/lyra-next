@@ -4,12 +4,33 @@ use lyra_diag::{
 };
 use lyra_preprocess::PreprocOutput;
 use lyra_semantic::def_index::DefIndex;
-use lyra_semantic::diagnostic::{SemanticDiag, SemanticDiagKind};
+use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use lyra_semantic::resolve_index::{
     CoreResolveOutput, ImportConflict, ImportConflictKind, ResolveIndex,
 };
 use lyra_source::{FileId, Span, TextRange, TextSize};
 use smol_str::SmolStr;
+
+/// Pick the best `DiagSpan` from primary+label.
+/// Uses `is_valid()` on `NameSpan`/`TokenSpan`, not `SourceMap`.
+pub(crate) fn choose_best_diag_span(primary: DiagSpan, label: Option<DiagSpan>) -> TextRange {
+    let chosen = match label {
+        Some(DiagSpan::Name(ns)) if ns.is_valid() => DiagSpan::Name(ns),
+        Some(DiagSpan::Token(ts)) if ts.is_valid() => DiagSpan::Token(ts),
+        Some(DiagSpan::Site(s)) => DiagSpan::Site(s),
+        _ => primary,
+    };
+    diag_span_to_text_range(chosen)
+}
+
+/// Convert a `DiagSpan` to `TextRange` for source-map mapping.
+fn diag_span_to_text_range(span: DiagSpan) -> TextRange {
+    match span {
+        DiagSpan::Site(s) => s.text_range(),
+        DiagSpan::Name(ns) => ns.text_range(),
+        DiagSpan::Token(ts) => ts.text_range(),
+    }
+}
 
 /// Convert parse, preprocess, and semantic errors into structured diagnostics.
 pub(crate) fn lower_file_diagnostics(
@@ -56,7 +77,8 @@ pub(crate) fn lower_file_diagnostics(
     }
 
     for diag in def.diagnostics.iter().chain(resolve.diagnostics.iter()) {
-        let (primary_span, _) = map_span_or_fallback(file_id, &pp.source_map, diag.range);
+        let tr = choose_best_diag_span(diag.primary, diag.label);
+        let (primary_span, _) = map_span_or_fallback(file_id, &pp.source_map, tr);
         diags.push(lower_semantic_diag(diag, primary_span, &pp.source_map));
     }
 
@@ -94,9 +116,17 @@ pub(crate) fn lower_semantic_diag(
             name,
             primary_span,
         ),
-        SemanticDiagKind::DuplicateDefinition { name, original } => {
-            lower_duplicate_def(name, *original, primary_span, source_map)
-        }
+        SemanticDiagKind::DuplicateDefinition {
+            name,
+            original_primary,
+            original_label,
+        } => lower_duplicate_def(
+            name,
+            *original_primary,
+            *original_label,
+            primary_span,
+            source_map,
+        ),
         SemanticDiagKind::PackageNotFound { package } => lower_args_diag(
             DiagnosticCode::PACKAGE_NOT_FOUND,
             MessageId::PackageNotFound,
@@ -338,7 +368,8 @@ fn lower_single_import_conflict(
 
 fn lower_duplicate_def(
     name: &SmolStr,
-    original: TextRange,
+    original_primary: DiagSpan,
+    original_label: Option<DiagSpan>,
     primary_span: Span,
     source_map: &lyra_preprocess::SourceMap,
 ) -> Diagnostic {
@@ -355,7 +386,8 @@ fn lower_duplicate_def(
         span: primary_span,
         message: Message::simple(MessageId::RedefinedHere),
     });
-    if let Some(orig_span) = source_map.map_span(original) {
+    let orig_tr = choose_best_diag_span(original_primary, original_label);
+    if let Some(orig_span) = source_map.map_span(orig_tr) {
         d = d.with_label(Label {
             kind: LabelKind::Secondary,
             span: orig_span,

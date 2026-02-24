@@ -72,6 +72,48 @@ impl NameSpan {
     }
 }
 
+/// Span of a non-identifier token (keyword, operator, punctuation).
+///
+/// Same shape as `NameSpan` but semantically distinct: captures tokens
+/// that are not name-introducing identifiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TokenSpan {
+    start: u32,
+    len: u32,
+}
+
+impl TokenSpan {
+    /// Sentinel for missing tokens (parse error recovery).
+    pub const INVALID: Self = Self {
+        start: u32::MAX,
+        len: 0,
+    };
+
+    pub fn new(range: TextRange) -> Self {
+        Self {
+            start: u32::from(range.start()),
+            len: u32::from(range.end()) - u32::from(range.start()),
+        }
+    }
+
+    pub fn is_valid(self) -> bool {
+        self.start != u32::MAX
+    }
+
+    pub fn text_range(self) -> TextRange {
+        if !self.is_valid() {
+            return Self::unmappable_range();
+        }
+        let start = TextSize::from(self.start);
+        TextRange::at(start, TextSize::from(self.len))
+    }
+
+    #[inline]
+    fn unmappable_range() -> TextRange {
+        TextRange::at(TextSize::from(u32::MAX), TextSize::from(0))
+    }
+}
+
 /// Opaque handle to a source file in the database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
