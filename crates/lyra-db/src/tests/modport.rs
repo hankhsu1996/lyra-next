@@ -1,3 +1,4 @@
+use lyra_semantic::diagnostic::DiagSpan;
 use lyra_semantic::modport_def::PortDirection;
 use lyra_semantic::symbols::Namespace;
 
@@ -93,6 +94,18 @@ fn modport_sem_unknown_member() {
         "diagnostic should mention 'nonexistent': {}",
         diag.format()
     );
+    // Label should be a NameSpan covering the identifier token, not the whole node
+    let label = diag.label.expect("UnresolvedName should have a label");
+    match label {
+        DiagSpan::Name(ns) => {
+            assert_eq!(
+                ns.text_range().len(),
+                lyra_source::TextSize::new("nonexistent".len() as u32),
+                "label should span exactly the identifier token"
+            );
+        }
+        other => panic!("expected DiagSpan::Name, got {other:?}"),
+    }
 }
 
 #[test]
@@ -114,6 +127,7 @@ fn modport_sem_duplicate_member() {
     // The `original_primary` span should point to the first occurrence, not the duplicate
     if let lyra_semantic::diagnostic::SemanticDiagKind::DuplicateDefinition {
         original_primary,
+        original_label,
         ..
     } = &diag.kind
     {
@@ -121,6 +135,21 @@ fn modport_sem_duplicate_member() {
             *original_primary, diag.primary,
             "original span should differ from duplicate span"
         );
+        // Both labels should be NameSpan covering the 3-char identifier "req"
+        let orig_label = original_label.expect("original should have a label");
+        let dup_label = diag.label.expect("duplicate should have a label");
+        for (tag, span) in [("original", orig_label), ("duplicate", dup_label)] {
+            match span {
+                DiagSpan::Name(ns) => {
+                    assert_eq!(
+                        ns.text_range().len(),
+                        lyra_source::TextSize::new("req".len() as u32),
+                        "{tag} label should span exactly the identifier token"
+                    );
+                }
+                other => panic!("expected DiagSpan::Name for {tag}, got {other:?}"),
+            }
+        }
     } else {
         panic!("expected DuplicateDefinition diagnostic");
     }

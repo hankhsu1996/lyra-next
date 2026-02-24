@@ -298,10 +298,7 @@ fn collect_modport_entries(
                         direction: dir,
                         target: ModportTarget::ImplicitMember { member_name: name },
                         port_id,
-                        span: lyra_source::Span {
-                            file: ctx.file,
-                            range: port_name_tok.text_range(),
-                        },
+                        name_span: NameSpan::new(port_name_tok.text_range()),
                     });
                 }
             }
@@ -326,10 +323,7 @@ fn collect_modport_entries(
                         direction: dir,
                         target,
                         port_id,
-                        span: lyra_source::Span {
-                            file: ctx.file,
-                            range: port_name_tok.text_range(),
-                        },
+                        name_span: NameSpan::new(port_name_tok.text_range()),
                     });
                 }
             }

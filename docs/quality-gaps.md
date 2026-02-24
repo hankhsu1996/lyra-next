@@ -29,7 +29,7 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
      7. ~~`DuplicateDefinition.original: TextRange`~~ -- DONE. Replaced with `original_primary: DiagSpan` + `original_label: Option<DiagSpan>`.
      8. Extract definition-namespace entries from `SymbolTable` into their own first-class def structure.
      9. Record field type errors lack type-reference precision (TODO(gap-1.typeref) in `record_queries.rs`). Closing requires adding `Site` to `TypeRef`.
-     10. Modport port diagnostics lack `NameSpan` label (TODO(gap-1.modport) in `record_queries.rs`). Closing requires adding `NameSpan` to `ModportEntry`.
+     10. ~~Modport port diagnostics lack `NameSpan` label~~ -- DONE. `ModportEntry.span` replaced with `name_span: NameSpan`. `DuplicateDefinition` and `UnresolvedName` diagnostics now carry `DiagSpan::Name` labels.
    - Outcome: Enables future `TypeSpelling` / provenance queries derived purely from CST/AST without heuristics, preserving incrementality and determinism.
 
 2. CST traversal in semantic producers (blocks clean layering)
