@@ -221,7 +221,7 @@ pub(crate) fn lower_wildcard_local_conflicts(
 
         let local_range = local
             .name_span
-            .map_or(TextRange::default(), |ns| ns.text_range());
+            .map_or_else(|| local.decl_ast.text_range(), |ns| ns.text_range());
         let (primary_span, _) = map_span_or_fallback(file_id, &pp.source_map, local_range);
         let name = local.name.clone();
         let pkg = import.map_or_else(|| SmolStr::new("?"), |i| i.package.clone());

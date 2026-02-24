@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use lyra_ast::AstIdMap;
 use lyra_parser::SyntaxNode;
-use lyra_source::TextRange;
 use smallvec::SmallVec;
 
 use crate::builder::DefContext;
@@ -105,11 +104,11 @@ pub(crate) fn detect_duplicates(
                     name: curr.name.clone(),
                     original: prev
                         .name_span
-                        .map_or(TextRange::default(), |ns| ns.text_range()),
+                        .map_or_else(|| prev.name_ast.text_range(), |ns| ns.text_range()),
                 },
                 range: curr
                     .name_span
-                    .map_or(TextRange::default(), |ns| ns.text_range()),
+                    .map_or_else(|| curr.name_ast.text_range(), |ns| ns.text_range()),
             });
         }
     }

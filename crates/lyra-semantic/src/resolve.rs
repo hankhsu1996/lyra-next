@@ -489,10 +489,13 @@ fn resolve_simple(
             }
         }
         // 2. Explicit imports in scope chain (positional filter)
-        if let Some(resolution) =
-            resolve_via_explicit_import(ctx.graph, ctx.pkg_scope, scope, name, ns, use_order_key)
+        match resolve_via_explicit_import(ctx.graph, ctx.pkg_scope, scope, name, ns, use_order_key)
         {
-            return CoreResolveResult::Resolved(resolution);
+            Ok(Some(resolution)) => return CoreResolveResult::Resolved(resolution),
+            Ok(None) => {}
+            Err(detail) => {
+                return CoreResolveResult::Unresolved(UnresolvedReason::InternalError { detail });
+            }
         }
         // 3. Wildcard imports in scope chain (positional filter)
         match resolve_via_wildcard_import(ctx, scope, name, ns, use_order_key) {
@@ -503,6 +506,9 @@ fn resolve_simple(
                 return CoreResolveResult::Unresolved(UnresolvedReason::AmbiguousWildcardImport {
                     candidates,
                 });
+            }
+            WildcardResult::InternalError(detail) => {
+                return CoreResolveResult::Unresolved(UnresolvedReason::InternalError { detail });
             }
             WildcardResult::NotFound => {}
         }
@@ -515,6 +521,9 @@ fn resolve_simple(
                 return CoreResolveResult::Unresolved(UnresolvedReason::AmbiguousWildcardImport {
                     candidates,
                 });
+            }
+            WildcardResult::InternalError(detail) => {
+                return CoreResolveResult::Unresolved(UnresolvedReason::InternalError { detail });
             }
             WildcardResult::NotFound => {}
         }
@@ -559,7 +568,12 @@ fn resolve_qualified(
     });
     for &ns in &nss[..len] {
         if let Some(ast_id) = pkg_scope.resolve(pkg_name, member_name, ns) {
-            return CoreResolveResult::Resolved(CoreResolution::pkg(ast_id, ns));
+            return match CoreResolution::pkg(ast_id, ns) {
+                Ok(res) => CoreResolveResult::Resolved(res),
+                Err(detail) => {
+                    CoreResolveResult::Unresolved(UnresolvedReason::InternalError { detail })
+                }
+            };
         }
     }
     CoreResolveResult::Unresolved(UnresolvedReason::MemberNotFound {
@@ -575,7 +589,7 @@ fn resolve_via_explicit_import(
     name: &str,
     ns: Namespace,
     use_order_key: u32,
-) -> Option<CoreResolution> {
+) -> Result<Option<CoreResolution>, SmolStr> {
     // Walk scope chain looking for explicit imports
     let mut current = Some(scope);
     while let Some(sid) = current {
@@ -585,18 +599,19 @@ fn resolve_via_explicit_import(
                 && imp.order_key < use_order_key
                 && let Some(ast_id) = pkg_scope.resolve(&imp.package, name, ns)
             {
-                return Some(CoreResolution::pkg(ast_id, ns));
+                return Ok(Some(CoreResolution::pkg(ast_id, ns)?));
             }
         }
         current = graph.scopes.get(sid).parent;
     }
-    None
+    Ok(None)
 }
 
 enum WildcardResult {
     Found(CoreResolution),
     Ambiguous(Box<[SmolStr]>),
     NotFound,
+    InternalError(SmolStr),
 }
 
 /// Result from wildcard import resolution: symbol, enum variant, or not found.
@@ -670,7 +685,10 @@ fn resolve_via_wildcard_import(
         }
         match found {
             Some(WildcardFound::Symbol(ast_id, _)) => {
-                return WildcardResult::Found(CoreResolution::pkg(ast_id, ns));
+                return match CoreResolution::pkg(ast_id, ns) {
+                    Ok(res) => WildcardResult::Found(res),
+                    Err(detail) => WildcardResult::InternalError(detail),
+                };
             }
             Some(WildcardFound::EnumVariant(target, _)) => {
                 return WildcardResult::Found(CoreResolution::EnumVariant(target));
@@ -720,7 +738,10 @@ fn resolve_via_implicit_import(
             && member.as_str() == name
             && let Some(ast_id) = pkg_scope.resolve(&imp.package, name, ns)
         {
-            return WildcardResult::Found(CoreResolution::pkg(ast_id, ns));
+            return match CoreResolution::pkg(ast_id, ns) {
+                Ok(res) => WildcardResult::Found(res),
+                Err(detail) => WildcardResult::InternalError(detail),
+            };
         }
     }
 
@@ -728,7 +749,10 @@ fn resolve_via_implicit_import(
         return WildcardResult::Ambiguous(ambiguous_pkgs.into_boxed_slice());
     }
     if let Some((ast_id, _)) = found {
-        return WildcardResult::Found(CoreResolution::pkg(ast_id, ns));
+        return match CoreResolution::pkg(ast_id, ns) {
+            Ok(res) => WildcardResult::Found(res),
+            Err(detail) => WildcardResult::InternalError(detail),
+        };
     }
     WildcardResult::NotFound
 }
@@ -1026,27 +1050,14 @@ pub fn build_resolve_index(
                 name_ast,
                 namespace,
             }) => {
-                if *namespace == Namespace::Definition {
-                    diagnostics.push(SemanticDiag {
-                        kind: SemanticDiagKind::InternalError {
-                            detail: SmolStr::new(format!(
-                                "Pkg resolution carries Definition namespace \
-                                 (actual={namespace:?}, path={}, anchor={name_ast:?})",
-                                use_site.path.display_name(),
-                            )),
-                        },
-                        range: use_site.range,
-                    });
-                } else {
-                    resolve_cross_file(
-                        *name_ast,
-                        *namespace,
-                        use_site,
-                        lookup_decl,
-                        &mut resolutions,
-                        &mut diagnostics,
-                    );
-                }
+                resolve_cross_file(
+                    *name_ast,
+                    *namespace,
+                    use_site,
+                    lookup_decl,
+                    &mut resolutions,
+                    &mut diagnostics,
+                );
             }
             CoreResolveResult::Resolved(CoreResolution::EnumVariant(target)) => {
                 resolutions.insert(
@@ -1173,6 +1184,12 @@ fn reason_to_diagnostic(
         UnresolvedReason::UnsupportedQualifiedPath { .. } => SemanticDiag {
             kind: SemanticDiagKind::UnsupportedQualifiedPath {
                 path: SmolStr::new(path.display_name()),
+            },
+            range,
+        },
+        UnresolvedReason::InternalError { detail } => SemanticDiag {
+            kind: SemanticDiagKind::InternalError {
+                detail: detail.clone(),
             },
             range,
         },

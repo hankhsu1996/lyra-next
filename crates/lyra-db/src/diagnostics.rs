@@ -916,7 +916,7 @@ pub fn unit_diagnostics(
                         let pp = preprocess_file(db, dup_file);
                         let label_range = sym
                             .name_span
-                            .map_or(lyra_source::TextRange::default(), |ns| ns.text_range());
+                            .map_or_else(|| sym.name_ast.text_range(), |ns| ns.text_range());
                         if let Some(span) = pp.source_map.map_span(label_range) {
                             diags.push(
                                 lyra_diag::Diagnostic::new(

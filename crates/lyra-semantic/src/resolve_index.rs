@@ -43,20 +43,19 @@ pub enum CoreResolution {
 impl CoreResolution {
     /// Construct a Pkg resolution.
     ///
-    /// Invariant: namespace must be `Value` or `Type`, never `Definition`.
-    /// Structurally guaranteed by `PackageScopeIndex::resolve()` returning
-    /// `None` for `Definition`, and `resolve_qualified` remapping `Definition`
-    /// to `Value` before querying package scope. Validated at the consumer
-    /// in `build_resolve_index` via `SemanticDiagKind::InternalError`.
-    pub(crate) fn pkg(name_ast: ErasedAstId, namespace: Namespace) -> Self {
-        debug_assert!(
-            namespace != Namespace::Definition,
-            "Pkg resolution must not carry Definition namespace (got {namespace:?} for anchor {name_ast:?})",
-        );
-        Self::Pkg {
+    /// Returns `Err` if namespace is `Definition` (structurally prevented
+    /// by `PackageScopeIndex::resolve()` returning `None` for `Definition`,
+    /// and `resolve_qualified` remapping `Definition` to `Value`).
+    pub(crate) fn pkg(name_ast: ErasedAstId, namespace: Namespace) -> Result<Self, SmolStr> {
+        if namespace == Namespace::Definition {
+            return Err(SmolStr::new(format!(
+                "Pkg resolution carries Definition namespace (anchor={name_ast:?})"
+            )));
+        }
+        Ok(Self::Pkg {
             name_ast,
             namespace,
-        }
+        })
     }
 }
 
@@ -83,6 +82,8 @@ pub enum UnresolvedReason {
     AmbiguousWildcardImport { candidates: Box<[SmolStr]> },
     /// Qualified path has more than 2 segments (not yet supported).
     UnsupportedQualifiedPath { len: usize },
+    /// Internal invariant violation (e.g. Pkg with Definition namespace).
+    InternalError { detail: SmolStr },
 }
 
 /// An error from validating an import declaration.

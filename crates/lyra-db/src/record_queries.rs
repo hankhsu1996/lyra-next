@@ -341,12 +341,14 @@ fn check_packed_union_widths(
         }
 
         let field_name = &sem.fields[i].name;
-        let mismatch_range = record_def.fields[i]
-            .name_span
-            .map_or(lyra_source::TextRange::default(), |ns| ns.text_range());
-        let ref_range = record_def.fields[ref_idx]
-            .name_span
-            .map_or(lyra_source::TextRange::default(), |ns| ns.text_range());
+        let mismatch_range = record_def.fields[i].name_span.map_or_else(
+            || record_def.fields[i].name_ast.text_range(),
+            |ns| ns.text_range(),
+        );
+        let ref_range = record_def.fields[ref_idx].name_span.map_or_else(
+            || record_def.fields[ref_idx].name_ast.text_range(),
+            |ns| ns.text_range(),
+        );
 
         let mismatch_span = pp
             .source_map
