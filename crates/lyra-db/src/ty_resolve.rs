@@ -42,7 +42,7 @@ fn classify_resolve_result(
                         return TypeResolveOutcome::Ok(Ty::Error);
                     };
                     let target_def = def_index_file(db, target_file);
-                    let Some(&sym_id) = target_def.name_ast_to_symbol.get(&anchor) else {
+                    let Some(&sym_id) = target_def.name_site_to_symbol.get(&anchor) else {
                         return TypeResolveOutcome::Ok(Ty::Error);
                     };
                     GlobalSymbolId {
@@ -50,13 +50,13 @@ fn classify_resolve_result(
                         local: sym_id,
                     }
                 }
-                CoreResolution::Pkg { name_ast, .. } => {
-                    let target_file_id = name_ast.file();
+                CoreResolution::Pkg { name_site, .. } => {
+                    let target_file_id = name_site.file();
                     let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
                         return TypeResolveOutcome::Ok(Ty::Error);
                     };
                     let target_def = def_index_file(db, target_file);
-                    let Some(&sym_id) = target_def.name_ast_to_symbol.get(name_ast) else {
+                    let Some(&sym_id) = target_def.name_site_to_symbol.get(name_site) else {
                         return TypeResolveOutcome::Ok(Ty::Error);
                     };
                     GlobalSymbolId {

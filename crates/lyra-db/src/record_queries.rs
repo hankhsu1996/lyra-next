@@ -11,7 +11,7 @@ use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::pipeline::preprocess_file;
 use crate::semantic::{
     compilation_unit_env, def_index_file, global_def_index, name_graph_file, package_scope_index,
-    symbol_at_name_ast,
+    symbol_at_name_site,
 };
 use crate::ty_resolve::{FieldTyError, FieldTyErrorKind, classify_for_record_field};
 use crate::type_queries::{TyRef, bit_width_total};
@@ -341,14 +341,12 @@ fn check_packed_union_widths(
         }
 
         let field_name = &sem.fields[i].name;
-        let mismatch_range = record_def.fields[i].name_span.map_or_else(
-            || record_def.fields[i].name_ast.text_range(),
-            |ns| ns.text_range(),
-        );
-        let ref_range = record_def.fields[ref_idx].name_span.map_or_else(
-            || record_def.fields[ref_idx].name_ast.text_range(),
-            |ns| ns.text_range(),
-        );
+        let mismatch_range = record_def.fields[i]
+            .name_span
+            .text_range_or(record_def.fields[i].name_site.text_range());
+        let ref_range = record_def.fields[ref_idx]
+            .name_span
+            .text_range_or(record_def.fields[ref_idx].name_site.text_range());
 
         let mismatch_span = pp
             .source_map
@@ -422,7 +420,7 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
     let unit = mref.unit(db);
     let modport_id = mref.modport_id(db);
 
-    let Some(gsym) = symbol_at_name_ast(db, unit, modport_id.owner.global_def().ast_id()) else {
+    let Some(gsym) = symbol_at_name_site(db, unit, modport_id.owner.global_def().ast_id()) else {
         return empty_modport_sem();
     };
 

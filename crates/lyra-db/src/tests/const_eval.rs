@@ -15,10 +15,10 @@ pub(crate) fn eval_first_param(
         .iter()
         .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Parameter)
         .expect("should have a parameter");
-    let decl_ast_id = def.symbols.get(sym_id).name_ast;
+    let decl_site_id = def.symbols.get(sym_id).name_site;
     let init_ast_id = def
-        .name_ast_to_init_expr
-        .get(&decl_ast_id)
+        .name_site_to_init_expr
+        .get(&decl_site_id)
         .expect("parameter should be tracked")
         .expect("parameter should have init");
     let expr_ref = ConstExprRef::new(db, unit, init_ast_id);
@@ -40,10 +40,10 @@ pub(crate) fn eval_named_param(
             s.kind == lyra_semantic::symbols::SymbolKind::Parameter && s.name.as_str() == name
         })
         .expect("should have named parameter");
-    let decl_ast_id = def.symbols.get(sym_id).name_ast;
+    let decl_site_id = def.symbols.get(sym_id).name_site;
     let init_ast_id = def
-        .name_ast_to_init_expr
-        .get(&decl_ast_id)
+        .name_site_to_init_expr
+        .get(&decl_site_id)
         .expect("parameter should be tracked")
         .expect("parameter should have init");
     let expr_ref = ConstExprRef::new(db, unit, init_ast_id);
@@ -377,8 +377,8 @@ fn const_eval_no_initializer() {
         .iter()
         .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Parameter)
         .expect("should have parameter");
-    let decl_ast_id = def.symbols.get(sym_id).name_ast;
-    let init_opt = def.name_ast_to_init_expr.get(&decl_ast_id);
+    let decl_site_id = def.symbols.get(sym_id).name_site;
+    let init_opt = def.name_site_to_init_expr.get(&decl_site_id);
     // Parameter with no initializer should have None value
     match init_opt {
         Some(None) | None => {} // No initializer

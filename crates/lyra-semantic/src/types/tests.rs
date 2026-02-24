@@ -1,6 +1,6 @@
 use super::*;
 
-fn dummy_ast_id() -> ErasedAstId {
+fn dummy_ast_id() -> Site {
     let src = "module m; endmodule";
     let tokens = lyra_lexer::lex(src);
     let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, src);

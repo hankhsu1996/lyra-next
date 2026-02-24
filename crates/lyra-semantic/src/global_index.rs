@@ -1,4 +1,4 @@
-use lyra_ast::ErasedAstId;
+use crate::Site;
 use smol_str::SmolStr;
 
 use crate::symbols::{GlobalDefId, Namespace};
@@ -41,7 +41,7 @@ impl DefinitionKind {
 /// Stores only stable, offset-independent data: names and
 /// `GlobalDefId`s. Derived `PartialEq` backdates correctly across
 /// whitespace edits because `GlobalDefId` wraps topology-based
-/// `ErasedAstId`.
+/// `Site`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalDefIndex {
     /// All definitions sorted by `(name, id)`. Modules and packages
@@ -125,20 +125,20 @@ pub struct PackageScopeIndex {
 
 /// Exported symbols from a single package, split by namespace.
 ///
-/// Maps exported names to their `name_ast` anchors (the unique
+/// Maps exported names to their `name_site` anchors (the unique
 /// name-introducing AST node for each symbol).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageScope {
     pub(crate) name: SmolStr,
-    pub(crate) value_ns: Box<[(SmolStr, ErasedAstId)]>,
-    pub(crate) type_ns: Box<[(SmolStr, ErasedAstId)]>,
+    pub(crate) value_ns: Box<[(SmolStr, Site)]>,
+    pub(crate) type_ns: Box<[(SmolStr, Site)]>,
 }
 
 impl PackageScope {
     pub fn new(
         name: SmolStr,
-        value_ns: Box<[(SmolStr, ErasedAstId)]>,
-        type_ns: Box<[(SmolStr, ErasedAstId)]>,
+        value_ns: Box<[(SmolStr, Site)]>,
+        type_ns: Box<[(SmolStr, Site)]>,
     ) -> Self {
         Self {
             name,
@@ -151,18 +151,18 @@ impl PackageScope {
         &self.name
     }
 
-    pub fn value_iter(&self) -> &[(SmolStr, ErasedAstId)] {
+    pub fn value_iter(&self) -> &[(SmolStr, Site)] {
         &self.value_ns
     }
 
-    pub fn type_iter(&self) -> &[(SmolStr, ErasedAstId)] {
+    pub fn type_iter(&self) -> &[(SmolStr, Site)] {
         &self.type_ns
     }
 }
 
 impl PackageScopeIndex {
     /// Resolve a symbol in a package by namespace.
-    pub fn resolve(&self, pkg: &str, name: &str, ns: Namespace) -> Option<ErasedAstId> {
+    pub fn resolve(&self, pkg: &str, name: &str, ns: Namespace) -> Option<Site> {
         let pkg_idx = self
             .packages
             .binary_search_by(|p| p.name.as_str().cmp(pkg))
@@ -197,7 +197,7 @@ impl PackageScopeIndex {
 
     /// Resolve a symbol in a package across all namespaces.
     /// Used for wildcard import validation.
-    pub fn resolve_any_ns(&self, pkg: &str, name: &str) -> Option<ErasedAstId> {
+    pub fn resolve_any_ns(&self, pkg: &str, name: &str) -> Option<Site> {
         let pkg_idx = self
             .packages
             .binary_search_by(|p| p.name.as_str().cmp(pkg))
@@ -230,8 +230,8 @@ pub fn build_package_scope_index(mut packages: Vec<PackageScope>) -> PackageScop
 /// Per-package collected facts for computing the public surface.
 pub struct PackageLocalFacts {
     pub name: SmolStr,
-    pub value_ns: Vec<(SmolStr, ErasedAstId)>,
-    pub type_ns: Vec<(SmolStr, ErasedAstId)>,
+    pub value_ns: Vec<(SmolStr, Site)>,
+    pub type_ns: Vec<(SmolStr, Site)>,
     pub imports: Vec<crate::def_index::ImportName>,
     pub import_packages: Vec<SmolStr>,
     pub export_decls: Vec<crate::def_index::ExportKey>,
@@ -253,8 +253,8 @@ pub fn compute_public_surface(
 ) -> PackageScope {
     use crate::def_index::ExportKey;
 
-    let mut value_ns: Vec<(SmolStr, ErasedAstId)> = facts.value_ns.clone();
-    let mut type_ns: Vec<(SmolStr, ErasedAstId)> = facts.type_ns.clone();
+    let mut value_ns: Vec<(SmolStr, Site)> = facts.value_ns.clone();
+    let mut type_ns: Vec<(SmolStr, Site)> = facts.type_ns.clone();
 
     // Track names already present from local defs (owned for borrow checker)
     let local_value_names: std::collections::HashSet<SmolStr> =
@@ -336,8 +336,8 @@ pub fn compute_public_surface(
 }
 
 fn merge_ns_entries(
-    target: &mut Vec<(SmolStr, ErasedAstId)>,
-    source: &[(SmolStr, ErasedAstId)],
+    target: &mut Vec<(SmolStr, Site)>,
+    source: &[(SmolStr, Site)],
     local_names: &std::collections::HashSet<SmolStr>,
 ) {
     for (name, id) in source {

@@ -38,10 +38,10 @@ fn resolve_typespec_ty_with(
     let Some(utr) = lyra_semantic::user_type_ref(ts) else {
         return lyra_semantic::extract_base_ty_from_typespec(ts, id_map);
     };
-    let Some(name_ast_id) = id_map.erased_ast_id(utr.resolve_node()) else {
+    let Some(name_site_id) = id_map.erased_ast_id(utr.resolve_node()) else {
         return Ty::Error;
     };
-    let Some(res) = resolve.resolutions.get(&name_ast_id) else {
+    let Some(res) = resolve.resolutions.get(&name_site_id) else {
         return Ty::Error;
     };
     let target = match &res.target {
@@ -181,12 +181,12 @@ fn extract_callable_sig_impl(
         }
     };
 
-    let decl_ast_id = sym.name_ast;
+    let decl_site_id = sym.name_site;
 
     let parse = parse_file(db, source_file);
     let map = ast_id_map(db, source_file);
 
-    let Some(decl_node) = map.get_node(&parse.syntax(), decl_ast_id) else {
+    let Some(decl_node) = map.get_node(&parse.syntax(), decl_site_id) else {
         return CallableSig::new(sym.name.clone(), kind, Ty::Error, vec![]);
     };
 

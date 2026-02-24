@@ -54,7 +54,7 @@ pub fn global_def_index(db: &dyn salsa::Database, unit: CompilationUnit) -> Glob
         for &sym_id in &*def.exports.definitions {
             let sym = def.symbols.get(sym_id);
             if let Some(def_kind) = DefinitionKind::from_symbol_kind(sym.kind) {
-                entries.push((sym.name.clone(), GlobalDefId::new(sym.def_ast), def_kind));
+                entries.push((sym.name.clone(), GlobalDefId::new(sym.decl_site), def_kind));
             }
         }
         // Collect packages (separate namespace per LRM 3.13(b))
@@ -62,7 +62,7 @@ pub fn global_def_index(db: &dyn salsa::Database, unit: CompilationUnit) -> Glob
             let sym = def.symbols.get(sym_id);
             entries.push((
                 sym.name.clone(),
-                GlobalDefId::new(sym.def_ast),
+                GlobalDefId::new(sym.decl_site),
                 DefinitionKind::Package,
             ));
         }
@@ -94,12 +94,12 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
 
             for &child_sym_id in &*scope_data.value_ns {
                 let child_sym = def.symbols.get(child_sym_id);
-                value_ns.push((child_sym.name.clone(), child_sym.name_ast));
+                value_ns.push((child_sym.name.clone(), child_sym.name_site));
             }
 
             for &child_sym_id in &*scope_data.type_ns {
                 let child_sym = def.symbols.get(child_sym_id);
-                type_ns.push((child_sym.name.clone(), child_sym.name_ast));
+                type_ns.push((child_sym.name.clone(), child_sym.name_site));
             }
 
             value_ns.sort_by(|(a, _), (b, _)| a.cmp(b));
@@ -279,7 +279,7 @@ pub fn base_resolve_index(
         let target_file_id = ast_id.file();
         let target_file = source_file_by_id(db, unit, target_file_id)?;
         let target_def = def_index_file(db, target_file);
-        target_def.name_ast_to_symbol.get(&ast_id).copied()
+        target_def.name_site_to_symbol.get(&ast_id).copied()
     };
     let instance_filter =
         |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
@@ -303,7 +303,7 @@ pub fn resolve_index_file(
         let target_file_id = ast_id.file();
         let target_file = source_file_by_id(db, unit, target_file_id)?;
         let target_def = def_index_file(db, target_file);
-        target_def.name_ast_to_symbol.get(&ast_id).copied()
+        target_def.name_site_to_symbol.get(&ast_id).copied()
     };
     let instance_filter =
         |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
@@ -335,21 +335,21 @@ fn instance_decl_is_interface(
     }
 }
 
-/// Canonical cross-file `name_ast` anchor -> `GlobalSymbolId` resolution
+/// Canonical cross-file `name_site` anchor -> `GlobalSymbolId` resolution
 /// (Salsa-tracked).
 ///
-/// Resolves a cross-file `name_ast` anchor to the symbol declared at
+/// Resolves a cross-file `name_site` anchor to the symbol declared at
 /// that site. Used by `modport_sem`, `member_lookup`, and other consumers.
 #[salsa::tracked]
-pub fn symbol_at_name_ast(
+pub fn symbol_at_name_site(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
-    name_ast: ErasedAstId,
+    name_site: ErasedAstId,
 ) -> Option<GlobalSymbolId> {
-    let file_id = name_ast.file();
+    let file_id = name_site.file();
     let source_file = source_file_by_id(db, unit, file_id)?;
     let def = def_index_file(db, source_file);
-    let local = def.name_ast_to_symbol.get(&name_ast).copied()?;
+    let local = def.name_site_to_symbol.get(&name_site).copied()?;
     Some(GlobalSymbolId {
         file: file_id,
         local,

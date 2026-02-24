@@ -1,4 +1,4 @@
-use lyra_ast::ErasedAstId;
+use crate::Site;
 use lyra_source::FileId;
 
 use crate::def_index::DefIndex;
@@ -15,7 +15,7 @@ pub struct InterfaceDefId(GlobalDefId);
 impl InterfaceDefId {
     /// Construct from a `DefIndex` (per-file, used after symbol table freeze).
     pub fn try_from_def_index(def_index: &DefIndex, def: GlobalDefId) -> Option<Self> {
-        let sym_id = def_index.name_ast_to_symbol.get(&def.ast_id())?;
+        let sym_id = def_index.name_site_to_symbol.get(&def.ast_id())?;
         let kind = DefinitionKind::from_symbol_kind(def_index.symbols.get(*sym_id).kind)?;
         match kind {
             DefinitionKind::Interface => Some(Self(def)),
@@ -38,6 +38,6 @@ impl InterfaceDefId {
 
     /// Builder-internal placeholder. Replaced during finalization.
     pub(crate) fn placeholder() -> Self {
-        Self(GlobalDefId::new(ErasedAstId::placeholder(FileId(u32::MAX))))
+        Self(GlobalDefId::new(Site::placeholder(FileId(u32::MAX))))
     }
 }

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Check CST layering policy: no rowan traversal in lyra-semantic except allowlisted modules.
+"""Check CST layering policy: no Rowan traversal in lyra-semantic except in allowlisted modules.
 
 Rules:
-  C001: No SyntaxNode/SyntaxToken/SyntaxElement imports in lyra-semantic
-  C002: No CST traversal method calls (.children(), .descendants(), etc.)
+  C001: No CST type imports (SyntaxNode/SyntaxToken/SyntaxElement) in lyra-semantic
+  C002: No CST traversal calls (.children(), .descendants(), etc.)
 
 The semantic layer should consume typed AST accessors, not raw CST traversal.
-Files that currently need CST access are allowlisted and tracked as tech debt.
+Files that currently need CST access are temporarily allowlisted and tracked as tech debt.
 
 Usage:
   python3 tools/policy/check_cst_layering.py                          # All files

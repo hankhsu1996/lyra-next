@@ -17,6 +17,8 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
      2. `name_ast` and `type_ast` on Symbol -- canonical name-site and type-spelling anchors. `symbol_to_decl` removed; `symbol_global_def` reads from `Symbol.def_ast` directly.
      3. Deleted `Symbol.def_range`, `Import.range`, `ExportDecl.range`, `EnumMemberDef.name_range`, `RecordField.name_range`. Added `ExportDecl.export_stmt_ast` and `RecordField.name_ast` as `ErasedAstId` anchors.
      4. `NameSpan` on Symbol, EnumMemberDef, RecordField, LocalDecl -- O(1) identifier token range captured at builder time via typed AST accessors. Deleted `span_index.rs` and `ident_range_of_name_site()`. Diagnostic consumers use `name_span.text_range()` directly.
+     5. `NameSpan` non-optional with `INVALID` sentinel on all 4 structs. Builder produces `INVALID` + `InternalError` on parse recovery. All consumer `map_or_else` branching eliminated -- consumers call `.text_range()` directly.
+     6. `Site` type alias (`= ErasedAstId`) in lyra-semantic. All semantic struct anchors use `Site` and `_site` suffix convention (`decl_site`, `name_site`, `type_site`, `name_ref_site`, `stmt_site`). Zero `ErasedAstId` references in lyra-semantic outside the alias definition.
    - Remaining:
      1. `SemanticDiag.range: TextRange` -- every diagnostic embeds a range. Migrating requires anchoring all ~30 diagnostic construction sites.
      2. `TypeCheckItem` -- ~20 `TextRange` fields. Scope explosion; needs batch migration.
@@ -39,4 +41,4 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
    - Outcome: Semantic layer depends only on typed AST accessors and builder-extracted facts, not raw CST.
 
 3. ~~Ambiguous `ErasedAstId` field names~~ -- CLOSED
-   - All 8 fields renamed to `{site}_ast` convention: `EnumDef.enum_type_ast`, `RecordDef.record_type_ast`, `UseSite.name_ref_ast`, `LocalDecl.decl_ast`, `Import.import_stmt_ast`, `RealizedBinding.target_name_ast`, `CoreResolution::Pkg { name_ast }`.
+   - All anchor fields use `_site` suffix convention: `Symbol.decl_site`/`name_site`/`type_site`, `EnumDef.enum_type_site`, `RecordDef.record_type_site`, `UseSite.name_ref_site`, `LocalDecl.decl_site`, `Import.import_stmt_site`, `ExportDecl.export_stmt_site`, `RealizedBinding.target_name_site`, `CoreResolution::Pkg { name_site }`. DefIndex maps keyed by `name_site_to_symbol`, `name_site_to_init_expr`, `enum_by_site`, `record_by_site`.

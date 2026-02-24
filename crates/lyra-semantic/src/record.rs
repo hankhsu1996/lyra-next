@@ -1,4 +1,6 @@
-use lyra_ast::{AstIdMap, AstNode, ErasedAstId, NameRef, QualifiedName};
+use lyra_ast::{AstIdMap, AstNode, NameRef, QualifiedName};
+
+use crate::Site;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_source::{FileId, NameSpan, Span};
@@ -17,16 +19,16 @@ pub struct RecordDefIdx(pub(crate) u32);
 
 /// Stable identity for a record (struct/union) type definition.
 ///
-/// Anchored to the `StructType` CST node's `ErasedAstId`. Invariants:
+/// Anchored to the `StructType` CST node's `Site`. Invariants:
 /// - Anchor is always a `SyntaxKind::StructType` node.
 /// - Builder collects exactly once per definition via `collect_record_def`.
-/// - File identity derived via `ErasedAstId::file()`.
+/// - File identity derived via `Site::file()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct RecordId(ErasedAstId);
+pub struct RecordId(Site);
 
 impl RecordId {
-    pub fn new(def: ErasedAstId) -> Self {
+    pub fn new(def: Site) -> Self {
         Self(def)
     }
 
@@ -34,7 +36,7 @@ impl RecordId {
         self.0.file()
     }
 
-    pub fn as_erased(self) -> ErasedAstId {
+    pub fn as_erased(self) -> Site {
         self.0
     }
 }
@@ -75,7 +77,7 @@ pub enum TypeRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordDef {
     pub name: Option<SmolStr>,
-    pub record_type_ast: ErasedAstId,
+    pub record_type_site: Site,
     pub kind: RecordKind,
     pub packing: Packing,
     pub scope: ScopeId,
@@ -85,8 +87,8 @@ pub struct RecordDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordField {
     pub name: SmolStr,
-    pub name_ast: lyra_ast::ErasedAstId,
-    pub name_span: Option<NameSpan>,
+    pub name_site: Site,
+    pub name_span: NameSpan,
     pub ty: TypeRef,
 }
 

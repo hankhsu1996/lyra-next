@@ -149,7 +149,7 @@ fn extract_port_sigs(
         let port_ast_id = id_map.erased_ast_id(port.syntax());
         let ty = port_ast_id
             .and_then(|ast_id| {
-                let sym_id = def.name_ast_to_symbol.get(&ast_id).copied()?;
+                let sym_id = def.name_site_to_symbol.get(&ast_id).copied()?;
                 let gsym = lyra_semantic::symbols::GlobalSymbolId {
                     file: file_id,
                     local: sym_id,

@@ -11,7 +11,7 @@ fn enum_sem_for_first_enum(
 ) -> lyra_semantic::enum_def::EnumSem {
     let def = def_index_file(db, file);
     let first_enum = &def.enum_defs[0];
-    let enum_id = EnumId::new(first_enum.enum_type_ast);
+    let enum_id = EnumId::new(first_enum.enum_type_site);
     let eref = EnumRef::new(db, unit, enum_id);
     enum_sem(db, eref)
 }
@@ -100,10 +100,10 @@ fn enum_ness_preserved_in_expr_type() {
         .iter()
         .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Parameter)
         .expect("should have a parameter");
-    let decl_ast_id = def.symbols.get(sym_id).name_ast;
+    let decl_site_id = def.symbols.get(sym_id).name_site;
     let init_ast_id = def
-        .name_ast_to_init_expr
-        .get(&decl_ast_id)
+        .name_site_to_init_expr
+        .get(&decl_site_id)
         .expect("param should be tracked")
         .expect("param should have init");
     let expr_ref = ExprRef::new(&db, unit, init_ast_id);

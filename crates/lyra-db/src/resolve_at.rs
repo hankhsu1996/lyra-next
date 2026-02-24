@@ -104,7 +104,7 @@ fn find_qualified_name_at(
         let target_file = source_file_by_id(db, unit, def_id.file())?;
         let target_def = def_index_file(db, target_file);
         let local = target_def
-            .name_ast_to_symbol
+            .name_site_to_symbol
             .get(&def_id.ast_id())
             .copied()?;
         Some(GlobalSymbolId {
@@ -227,10 +227,10 @@ impl<'db> TyFmt<'db> {
     }
 
     fn interface_name(&self, iface_ty: &lyra_semantic::types::InterfaceType) -> String {
-        use crate::semantic::symbol_at_name_ast;
+        use crate::semantic::symbol_at_name_site;
 
         let Some(gsym) =
-            symbol_at_name_ast(self.db, self.unit, iface_ty.iface.global_def().ast_id())
+            symbol_at_name_site(self.db, self.unit, iface_ty.iface.global_def().ast_id())
         else {
             return "interface".to_string();
         };

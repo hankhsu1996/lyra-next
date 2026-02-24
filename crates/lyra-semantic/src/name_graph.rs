@@ -10,7 +10,7 @@ use crate::symbols::{Namespace, SymbolId, SymbolKind};
 /// Offset-independent projection of `DefIndex` for resolution.
 ///
 /// Contains only the facts needed to resolve names: symbol names/kinds,
-/// scope tree, and use-site semantic keys. No `TextRange`, no `ErasedAstId`.
+/// scope tree, and use-site semantic keys. No `TextRange`, no `Site`.
 /// `PartialEq` compares equal across whitespace-only edits, enabling Salsa
 /// to backdate and skip re-running expensive resolution logic downstream.
 /// `FileId` is offset-independent and does not affect backdating.

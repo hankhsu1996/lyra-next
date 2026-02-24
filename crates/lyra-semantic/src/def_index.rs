@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lyra_ast::ErasedAstId;
+use crate::Site;
 use lyra_source::{FileId, NameSpan, TextRange};
 use smol_str::SmolStr;
 
@@ -40,18 +40,18 @@ pub struct DefIndex {
     pub use_sites: Box<[UseSite]>,
     pub imports: Box<[Import]>,
     pub local_decls: Box<[LocalDecl]>,
-    /// Reverse map from name-site `ErasedAstId` to `SymbolId`.
-    /// Used by cross-file resolution to convert `ErasedAstId` (from
+    /// Reverse map from name-site `Site` to `SymbolId`.
+    /// Used by cross-file resolution to convert `Site` (from
     /// `GlobalDefIndex`) back to a `SymbolId` in this file.
-    pub name_ast_to_symbol: HashMap<ErasedAstId, SymbolId>,
-    /// Maps parameter name-site `ErasedAstId` to its initializer `Expression`
-    /// `ErasedAstId`. Key present with `None` = parameter with no default value.
+    pub name_site_to_symbol: HashMap<Site, SymbolId>,
+    /// Maps parameter name-site `Site` to its initializer `Expression`
+    /// `Site`. Key present with `None` = parameter with no default value.
     /// Key absent = not a parameter (not tracked).
-    pub name_ast_to_init_expr: HashMap<ErasedAstId, Option<ErasedAstId>>,
+    pub name_site_to_init_expr: HashMap<Site, Option<Site>>,
     pub enum_defs: Box<[EnumDef]>,
-    pub enum_by_ast: HashMap<ErasedAstId, EnumDefIdx>,
+    pub enum_by_site: HashMap<Site, EnumDefIdx>,
     pub record_defs: Box<[RecordDef]>,
-    pub record_by_ast: HashMap<ErasedAstId, RecordDefIdx>,
+    pub record_by_site: HashMap<Site, RecordDefIdx>,
     pub instance_decls: Box<[InstanceDecl]>,
     pub modport_defs: HashMap<ModportDefId, ModportDef>,
     pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
@@ -70,16 +70,16 @@ impl DefIndex {
     }
 
     pub fn enum_id(&self, idx: EnumDefIdx) -> EnumId {
-        EnumId::new(self.enum_defs[idx.0 as usize].enum_type_ast)
+        EnumId::new(self.enum_defs[idx.0 as usize].enum_type_site)
     }
 
     pub fn enum_def_by_id(&self, id: EnumId) -> Option<&EnumDef> {
-        let idx = self.enum_by_ast.get(&id.as_erased())?;
+        let idx = self.enum_by_site.get(&id.as_erased())?;
         Some(&self.enum_defs[idx.0 as usize])
     }
 
     pub fn record_def_by_id(&self, id: RecordId) -> Option<&RecordDef> {
-        let idx = self.record_by_ast.get(&id.as_erased())?;
+        let idx = self.record_by_site.get(&id.as_erased())?;
         Some(&self.record_defs[idx.0 as usize])
     }
 
@@ -95,13 +95,13 @@ impl DefIndex {
     /// Map a local symbol to its cross-file definition identity.
     ///
     /// Only definition-namespace symbols (module, package, interface, etc.)
-    /// have a `GlobalDefId`. For these, `name_ast == def_ast`.
+    /// have a `GlobalDefId`. For these, `name_site == decl_site`.
     pub fn symbol_global_def(&self, sym: SymbolId) -> Option<GlobalDefId> {
         let symbol = self.symbols.get(sym);
         if symbol.kind.namespace() != Namespace::Definition {
             return None;
         }
-        Some(GlobalDefId::new(symbol.def_ast))
+        Some(GlobalDefId::new(symbol.decl_site))
     }
 
     pub fn package_scope(&self, name: &str) -> Option<ScopeId> {
@@ -118,7 +118,7 @@ impl DefIndex {
     }
 
     pub fn record_id(&self, idx: RecordDefIdx) -> RecordId {
-        RecordId::new(self.record_defs[idx.0 as usize].record_type_ast)
+        RecordId::new(self.record_defs[idx.0 as usize].record_type_site)
     }
 }
 
@@ -161,7 +161,7 @@ pub struct UseSite {
     pub expected_ns: ExpectedNs,
     pub range: TextRange,
     pub scope: ScopeId,
-    pub name_ref_ast: ErasedAstId,
+    pub name_ref_site: Site,
     /// File-local monotonic rank from preorder syntax traversal.
     /// Used by the resolver for LRM 26.3 positional visibility.
     pub order_key: u32,
@@ -177,8 +177,8 @@ pub struct LocalDecl {
     pub symbol_id: SymbolId,
     pub name: SmolStr,
     pub namespace: Namespace,
-    pub decl_ast: ErasedAstId,
-    pub name_span: Option<NameSpan>,
+    pub decl_site: Site,
+    pub name_span: NameSpan,
     /// File-local monotonic rank from preorder syntax traversal.
     pub order_key: u32,
 }
@@ -195,7 +195,7 @@ pub struct Import {
     pub package: SmolStr,
     pub name: ImportName,
     pub scope: ScopeId,
-    pub import_stmt_ast: ErasedAstId,
+    pub import_stmt_site: Site,
     /// File-local monotonic rank from preorder syntax traversal.
     /// Used by the resolver for LRM 26.3 positional visibility.
     pub order_key: u32,
@@ -248,7 +248,7 @@ pub enum ExportKey {
 pub struct ExportDecl {
     pub id: ExportDeclId,
     pub key: ExportKey,
-    pub export_stmt_ast: ErasedAstId,
+    pub export_stmt_site: Site,
 }
 
 /// Compilation-unit-level environment: implicit imports visible in all files.

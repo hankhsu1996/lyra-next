@@ -54,7 +54,7 @@ fn modport_sem_resolves_members() {
 
     // Resolve req and gnt in the interface scope to get their SymbolIds
     let def = def_index_file(&db, file);
-    let gsym = symbol_at_name_ast(&db, unit, modport_id.owner.global_def().ast_id())
+    let gsym = symbol_at_name_site(&db, unit, modport_id.owner.global_def().ast_id())
         .expect("interface symbol");
     let iface_scope = def.symbols.get(gsym.local).scope;
 
@@ -125,7 +125,7 @@ fn modport_sem_duplicate_member() {
 }
 
 #[test]
-fn symbol_at_name_ast_resolves_interface() {
+fn symbol_at_name_site_resolves_interface() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "interface bus; endinterface");
     let unit = single_file_unit(&db, file);
@@ -138,7 +138,7 @@ fn symbol_at_name_ast_resolves_interface() {
         .map(|(_, def_id, _)| *def_id)
         .expect("should find bus");
 
-    let gsym = symbol_at_name_ast(&db, unit, iface_def_id.ast_id()).expect("should resolve");
+    let gsym = symbol_at_name_site(&db, unit, iface_def_id.ast_id()).expect("should resolve");
     let def = def_index_file(&db, file);
     let sym = def.symbols.get(gsym.local);
     assert_eq!(sym.name.as_str(), "bus");

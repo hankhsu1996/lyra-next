@@ -50,7 +50,7 @@ fn register_type_use_site(
                     expected_ns: ExpectedNs::TypeThenValue,
                     range: nr.text_range(),
                     scope,
-                    name_ref_ast: ast_id.erase(),
+                    name_ref_site: ast_id.erase(),
                     order_key: 0,
                 });
             }
@@ -67,7 +67,7 @@ fn register_type_use_site(
                         expected_ns: ExpectedNs::TypeThenValue,
                         range: qn.text_range(),
                         scope,
-                        name_ref_ast: ast_id.erase(),
+                        name_ref_site: ast_id.erase(),
                         order_key: 0,
                     });
                 }
@@ -77,7 +77,7 @@ fn register_type_use_site(
 }
 
 pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    let Some(def_ast) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error(
             &format!(
                 "erased_ast_id returned None for {:?} in collect_typedef",
@@ -111,16 +111,16 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
             | SymbolOrigin::EnumVariant(_)
             | SymbolOrigin::Instance(_) => {}
         }
-        let typedef_type_ast = td
+        let typedef_type_site = td
             .type_spec()
             .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
         let sym_id = ctx.push_symbol(Symbol {
             name: typedef_name,
             kind: SymbolKind::Typedef,
-            def_ast,
-            name_ast: def_ast,
-            type_ast: typedef_type_ast,
-            name_span: Some(NameSpan::new(name_tok.text_range())),
+            decl_site,
+            name_site: decl_site,
+            type_site: typedef_type_site,
+            name_span: NameSpan::new(name_tok.text_range()),
             scope,
             origin,
         });
@@ -175,12 +175,21 @@ fn collect_enum_def(
         EnumBase { tref, range }
     } else {
         // Default base: use the `enum` keyword token's range as anchor
-        let range = enum_type
+        let Some(tok) = enum_type
             .syntax()
             .children_with_tokens()
             .filter_map(lyra_parser::SyntaxElement::into_token)
             .find(|tok| tok.kind() == SyntaxKind::EnumKw)
-            .map_or_else(|| enum_type.text_range(), |tok| tok.text_range());
+        else {
+            ctx.diagnostics.push(SemanticDiag {
+                kind: SemanticDiagKind::InternalError {
+                    detail: SmolStr::new("missing enum keyword token"),
+                },
+                range: enum_type.text_range(),
+            });
+            return None;
+        };
+        let range = tok.text_range();
         EnumBase {
             tref: TypeRef::Resolved(Ty::int()),
             range,
@@ -221,8 +230,8 @@ fn collect_enum_def(
 
         members.push(EnumMemberDef {
             name: name.clone(),
-            name_ast: erased_ast_id,
-            name_span: Some(NameSpan::new(name_tok.text_range())),
+            name_site: erased_ast_id,
+            name_span: NameSpan::new(name_tok.text_range()),
             range: range_kind,
             range_text_range,
             init,
@@ -239,10 +248,10 @@ fn collect_enum_def(
             let sym_id = ctx.push_symbol(Symbol {
                 name,
                 kind: SymbolKind::EnumMember,
-                def_ast: erased_ast_id,
-                name_ast: erased_ast_id,
-                type_ast: None,
-                name_span: Some(NameSpan::new(name_tok.text_range())),
+                decl_site: erased_ast_id,
+                name_site: erased_ast_id,
+                type_site: None,
+                name_span: NameSpan::new(name_tok.text_range()),
                 scope,
                 origin: SymbolOrigin::EnumVariant(idx),
             });
@@ -252,7 +261,7 @@ fn collect_enum_def(
 
     ctx.enum_defs.push(EnumDef {
         name: None,
-        enum_type_ast: ast_id,
+        enum_type_site: ast_id,
         scope,
         base,
         members: members.into_boxed_slice(),
@@ -292,12 +301,22 @@ fn collect_record_def(
     scope: ScopeId,
 ) -> Option<RecordDefIdx> {
     if struct_type.is_union() && struct_type.is_tagged() {
-        let range = struct_type
+        let range = if let Some(tok) = struct_type
             .syntax()
             .children_with_tokens()
             .filter_map(lyra_parser::SyntaxElement::into_token)
             .find(|tok| tok.kind() == SyntaxKind::TaggedKw)
-            .map_or_else(|| struct_type.text_range(), |tok| tok.text_range());
+        {
+            tok.text_range()
+        } else {
+            ctx.diagnostics.push(SemanticDiag {
+                kind: SemanticDiagKind::InternalError {
+                    detail: SmolStr::new("missing tagged keyword token"),
+                },
+                range: struct_type.text_range(),
+            });
+            struct_type.text_range()
+        };
         ctx.diagnostics.push(SemanticDiag {
             kind: SemanticDiagKind::UnsupportedTaggedUnion,
             range,
@@ -335,7 +354,7 @@ fn collect_record_def(
         };
         for decl in member.declarators() {
             if let Some(name_tok) = decl.name() {
-                let Some(decl_ast) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
+                let Some(decl_site) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
                     ctx.emit_internal_error(
                         &format!(
                             "erased_ast_id returned None for {:?} in collect_record_def declarator",
@@ -347,8 +366,8 @@ fn collect_record_def(
                 };
                 fields.push(RecordField {
                     name: SmolStr::new(name_tok.text()),
-                    name_ast: decl_ast,
-                    name_span: Some(NameSpan::new(name_tok.text_range())),
+                    name_site: decl_site,
+                    name_span: NameSpan::new(name_tok.text_range()),
                     ty: ty.clone(),
                 });
             }
@@ -357,7 +376,7 @@ fn collect_record_def(
 
     ctx.record_defs.push(RecordDef {
         name: None,
-        record_type_ast: ast_id,
+        record_type_site: ast_id,
         kind,
         packing,
         scope,
@@ -378,7 +397,7 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                     expected_ns: ExpectedNs::Exact(Namespace::Value),
                     range: name_ref.text_range(),
                     scope,
-                    name_ref_ast: ast_id.erase(),
+                    name_ref_site: ast_id.erase(),
                     order_key: 0,
                 });
             }
@@ -396,7 +415,7 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                         expected_ns: ExpectedNs::Exact(Namespace::Value),
                         range: qn.text_range(),
                         scope,
-                        name_ref_ast: ast_id.erase(),
+                        name_ref_site: ast_id.erase(),
                         order_key: 0,
                     });
                 }

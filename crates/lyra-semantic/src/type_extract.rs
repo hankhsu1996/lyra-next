@@ -45,7 +45,7 @@ pub enum UserTypeRef {
 }
 
 impl UserTypeRef {
-    /// The AST node whose `ErasedAstId` has a resolution in the resolve index.
+    /// The AST node whose `Site` has a resolution in the resolve index.
     pub fn resolve_node(&self) -> &SyntaxNode {
         match self {
             Self::Simple(nr) | Self::InterfaceModport { iface: nr, .. } => nr.syntax(),
@@ -98,7 +98,7 @@ pub(crate) fn typespec_name_ref(typespec: &SyntaxNode) -> Option<SyntaxNode> {
 /// Never changes keyword, signedness, structure, or `NetKind`.
 pub fn normalize_symbol_type(
     st: &SymbolType,
-    eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt,
+    eval: &dyn Fn(crate::Site) -> ConstInt,
 ) -> SymbolType {
     match st {
         SymbolType::Value(ty) => SymbolType::Value(normalize_ty(ty, eval)),
@@ -114,7 +114,7 @@ pub fn normalize_symbol_type(
 /// Normalize all `ConstInt::Unevaluated` values inside a `Ty`.
 ///
 /// Transforms unevaluated dims to `Known`/`Error` by calling `eval`.
-pub fn normalize_ty(ty: &Ty, eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt) -> Ty {
+pub fn normalize_ty(ty: &Ty, eval: &dyn Fn(crate::Site) -> ConstInt) -> Ty {
     match ty {
         Ty::Integral(i) => Ty::Integral(Integral {
             keyword: i.keyword,
@@ -133,10 +133,7 @@ pub fn normalize_ty(ty: &Ty, eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt) -
     }
 }
 
-fn normalize_packed_dim(
-    dim: &PackedDim,
-    eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt,
-) -> PackedDim {
+fn normalize_packed_dim(dim: &PackedDim, eval: &dyn Fn(crate::Site) -> ConstInt) -> PackedDim {
     PackedDim {
         msb: normalize_const_int(&dim.msb, eval),
         lsb: normalize_const_int(&dim.lsb, eval),
@@ -145,7 +142,7 @@ fn normalize_packed_dim(
 
 fn normalize_unpacked_dim(
     dim: &UnpackedDim,
-    eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt,
+    eval: &dyn Fn(crate::Site) -> ConstInt,
 ) -> UnpackedDim {
     match dim {
         UnpackedDim::Range { msb, lsb } => UnpackedDim::Range {
@@ -161,7 +158,7 @@ fn normalize_unpacked_dim(
     }
 }
 
-fn normalize_const_int(c: &ConstInt, eval: &dyn Fn(lyra_ast::ErasedAstId) -> ConstInt) -> ConstInt {
+fn normalize_const_int(c: &ConstInt, eval: &dyn Fn(crate::Site) -> ConstInt) -> ConstInt {
     match c {
         ConstInt::Unevaluated(id) => eval(*id),
         other => other.clone(),
@@ -728,7 +725,7 @@ mod tests {
         // Mock evaluator: use the expression AST offset to distinguish msb/lsb.
         // The first expression (msb=7) has a smaller offset than the second (lsb=0).
         let call_count = std::sync::atomic::AtomicU32::new(0);
-        let eval = |_id: lyra_ast::ErasedAstId| -> ConstInt {
+        let eval = |_id: crate::Site| -> ConstInt {
             let n = call_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if n.is_multiple_of(2) {
                 ConstInt::Known(7)

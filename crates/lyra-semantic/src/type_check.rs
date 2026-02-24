@@ -1,4 +1,4 @@
-use lyra_ast::ErasedAstId;
+use crate::Site;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_source::TextRange;
@@ -114,13 +114,13 @@ pub trait TypeCheckCtx {
     /// Pure identity lookup -- returns the stable ID for a syntax node.
     /// O(1) map lookup, no DB calls, no allocations.
     /// Returns None for nodes without stable IDs (e.g. error-recovered trees).
-    fn node_id(&self, node: &SyntaxNode) -> Option<ErasedAstId>;
+    fn node_id(&self, node: &SyntaxNode) -> Option<Site>;
     /// Evaluate a constant integer expression. Returns None if non-const.
     fn const_eval_int(&self, node: &SyntaxNode) -> Option<i64>;
     /// Get sorted set of known enum member values. None if any value unknown.
     fn enum_known_value_set(&self, id: &EnumId) -> Option<std::sync::Arc<[i64]>>;
     /// Check whether a modport expression target is an lvalue.
-    fn is_modport_target_lvalue(&self, expr_id: ErasedAstId) -> bool;
+    fn is_modport_target_lvalue(&self, expr_id: Site) -> bool;
 }
 
 /// Walk a file's AST and produce type-check items.

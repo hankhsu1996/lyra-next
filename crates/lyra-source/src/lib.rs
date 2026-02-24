@@ -20,6 +20,17 @@ pub struct NameSpan {
 }
 
 impl NameSpan {
+    /// Sentinel for missing name tokens (parse error recovery).
+    ///
+    /// Only the semantic builder (and tests) may produce this value.
+    /// When the builder creates INVALID, it also emits an
+    /// `InternalError` diagnostic anchored at the relevant syntax
+    /// node, so the real diagnostic span is still meaningful.
+    pub const INVALID: Self = Self {
+        start: u32::MAX,
+        len: 0,
+    };
+
     pub fn new(range: TextRange) -> Self {
         Self {
             start: u32::from(range.start()),
@@ -27,9 +38,37 @@ impl NameSpan {
         }
     }
 
+    pub fn is_valid(self) -> bool {
+        self.start != u32::MAX
+    }
+
     pub fn text_range(self) -> TextRange {
+        if !self.is_valid() {
+            return Self::unmappable_range();
+        }
         let start = TextSize::from(self.start);
         TextRange::at(start, TextSize::from(self.len))
+    }
+
+    /// Return the token range, falling back to `fallback` when INVALID.
+    ///
+    /// Use this when a meaningful location is needed for diagnostics
+    /// and the caller has an AST-node anchor to fall back on.
+    pub fn text_range_or(self, fallback: TextRange) -> TextRange {
+        if self.is_valid() {
+            self.text_range()
+        } else {
+            fallback
+        }
+    }
+
+    /// Sentinel range that `map_span` will never resolve.
+    ///
+    /// Starts at `u32::MAX`, which is past any real file content,
+    /// so `SourceMap::map_span` returns `None`.
+    #[inline]
+    fn unmappable_range() -> TextRange {
+        TextRange::at(TextSize::from(u32::MAX), TextSize::from(0))
     }
 }
 

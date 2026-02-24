@@ -1,4 +1,4 @@
-use lyra_ast::ErasedAstId;
+use crate::Site;
 use lyra_source::Span;
 use smol_str::SmolStr;
 
@@ -29,7 +29,7 @@ pub struct ModportEntry {
     pub port_name: SmolStr,
     pub direction: PortDirection,
     pub target: ModportTarget,
-    pub port_id: ErasedAstId,
+    pub port_id: Site,
     pub span: Span,
 }
 
@@ -39,7 +39,7 @@ pub enum ModportTarget {
     /// Bare identifier: the port name equals the member name.
     ImplicitMember { member_name: SmolStr },
     /// `.P(expr)`: the expression AST node id.
-    Expr(ErasedAstId),
+    Expr(Site),
     /// `.P()`: no connection.
     Empty,
 }

@@ -26,10 +26,10 @@ pub(super) fn expr_type_of_first_param(
         .iter()
         .find(|(_, s)| s.kind == lyra_semantic::symbols::SymbolKind::Parameter)
         .expect("should have a parameter");
-    let decl_ast_id = def.symbols.get(sym_id).name_ast;
+    let decl_site_id = def.symbols.get(sym_id).name_site;
     let init_ast_id = def
-        .name_ast_to_init_expr
-        .get(&decl_ast_id)
+        .name_site_to_init_expr
+        .get(&decl_site_id)
         .expect("param should be tracked")
         .expect("param should have init");
     let expr_ref = ExprRef::new(db, unit, init_ast_id);
@@ -51,10 +51,10 @@ pub(super) fn expr_type_of_named_param(
             s.kind == lyra_semantic::symbols::SymbolKind::Parameter && s.name.as_str() == name
         })
         .unwrap_or_else(|| panic!("parameter '{name}' not found"));
-    let decl_ast_id = def.symbols.get(sym_id).name_ast;
+    let decl_site_id = def.symbols.get(sym_id).name_site;
     let init_ast_id = def
-        .name_ast_to_init_expr
-        .get(&decl_ast_id)
+        .name_site_to_init_expr
+        .get(&decl_site_id)
         .expect("param should be tracked")
         .expect("param should have init");
     let expr_ref = ExprRef::new(db, unit, init_ast_id);

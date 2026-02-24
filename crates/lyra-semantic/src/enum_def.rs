@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use lyra_ast::ErasedAstId;
+use crate::Site;
 use lyra_source::{FileId, NameSpan, TextRange};
 use smol_str::SmolStr;
 
@@ -18,16 +18,16 @@ pub struct EnumDefIdx(pub u32);
 
 /// Stable identity for an enum type definition.
 ///
-/// Anchored to the `EnumType` CST node's `ErasedAstId`. Invariants:
+/// Anchored to the `EnumType` CST node's `Site`. Invariants:
 /// - Anchor is always a `SyntaxKind::EnumType` node.
 /// - Builder collects exactly once per definition via `collect_enum_def`.
-/// - File identity derived via `ErasedAstId::file()`.
+/// - File identity derived via `Site::file()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct EnumId(ErasedAstId);
+pub struct EnumId(Site);
 
 impl EnumId {
-    pub fn new(def: ErasedAstId) -> Self {
+    pub fn new(def: Site) -> Self {
         Self(def)
     }
 
@@ -35,7 +35,7 @@ impl EnumId {
         self.0.file()
     }
 
-    pub fn as_erased(self) -> ErasedAstId {
+    pub fn as_erased(self) -> Site {
         self.0
     }
 }
@@ -43,8 +43,8 @@ impl EnumId {
 /// Range specification on an enum member: `[N]` (count) or `[N:M]` (from-to).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnumMemberRangeKind {
-    Count(ErasedAstId),
-    FromTo(ErasedAstId, ErasedAstId),
+    Count(Site),
+    FromTo(Site, Site),
 }
 
 /// A single enum member as declared in the source.
@@ -55,11 +55,11 @@ pub enum EnumMemberRangeKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumMemberDef {
     pub name: SmolStr,
-    pub name_ast: ErasedAstId,
-    pub name_span: Option<NameSpan>,
+    pub name_site: Site,
+    pub name_span: NameSpan,
     pub range: Option<EnumMemberRangeKind>,
     pub range_text_range: Option<TextRange>,
-    pub init: Option<ErasedAstId>,
+    pub init: Option<Site>,
     /// Bit width of a sized literal initializer (e.g., `4'h5` -> `Some(4)`).
     /// `None` if no init, init is not a literal, or literal is unsized.
     pub init_literal_width: Option<u32>,
@@ -79,7 +79,7 @@ pub struct EnumBase {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDef {
     pub name: Option<SmolStr>,
-    pub enum_type_ast: ErasedAstId,
+    pub enum_type_site: Site,
     pub scope: ScopeId,
     pub base: EnumBase,
     pub members: Box<[EnumMemberDef]>,
@@ -87,25 +87,25 @@ pub struct EnumDef {
 
 /// Diagnostic for enum member value legality (duplicate, overflow, width mismatch).
 ///
-/// Uses `ErasedAstId` anchors; conversion to `TextRange` happens in the
+/// Uses `Site` anchors; conversion to `TextRange` happens in the
 /// diagnostic lowering layer only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnumValueDiag {
     DuplicateValue {
-        anchor: ErasedAstId,
-        original: ErasedAstId,
+        anchor: Site,
+        original: Site,
         value: i128,
         member_name: SmolStr,
     },
     Overflow {
-        anchor: ErasedAstId,
+        anchor: Site,
         value: i128,
         width: u32,
         signed: bool,
         member_name: SmolStr,
     },
     SizedLiteralWidth {
-        anchor: ErasedAstId,
+        anchor: Site,
         literal_width: u32,
         base_width: u32,
     },
