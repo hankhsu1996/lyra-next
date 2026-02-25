@@ -31,7 +31,6 @@ TEXTRANGE_ALLOWED = frozenset({
     "type_extract.rs",
     "type_check.rs",
     "modport_facts.rs",
-    "instance_decl.rs",
     "def_index.rs",
     "enum_def.rs",
     "builder_types.rs",

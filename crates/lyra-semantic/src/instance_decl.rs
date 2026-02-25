@@ -1,4 +1,3 @@
-use lyra_source::TextRange;
 use smol_str::SmolStr;
 
 use crate::scopes::ScopeId;
@@ -21,10 +20,6 @@ pub struct InstanceDecl {
     pub sym_id: SymbolId,
     /// Instance name.
     pub name: SmolStr,
-    /// Source range of the instance name identifier.
-    pub name_range: TextRange,
-    /// Source range of the instantiated type name.
-    pub type_name_range: TextRange,
     /// Lexical scope containing this instance.
     pub scope: ScopeId,
 }

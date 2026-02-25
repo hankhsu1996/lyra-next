@@ -22,7 +22,7 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
    - Remaining:
      1. ~~`SemanticDiag.range: TextRange`~~ -- DONE. Replaced with `DiagSpan` anchor (`Site`/`Name`/`Token`). All ~15 construction sites migrated. Policy ratchet: `tools/policy/check_diag_textrange.py`.
      2. `TypeCheckItem` -- ~20 `TextRange` fields. Scope explosion; needs batch migration.
-     3. `InstanceDecl` -- 2 `TextRange` fields. Touches type resolution and member lookup.
+     3. ~~`InstanceDecl` -- 2 `TextRange` fields~~ -- DONE. Removed dead `name_range` and `type_name_range`; instance name available via `Symbol.name_span`/`name_site`, type name via `UseSite.name_ref_site`.
      4. `EnumBase.range` -- `TypeRef` has no span; needs design work. Diagnostic precision lost (TODO(gap-1.4) in `enum_queries.rs`).
      5. `EnumVariantTarget.def_range` -- cascades into resolution and diagnostics.
      6. `EnumMemberDef.range_text_range` -- no obvious single anchor for `[N:M]` range spec. Diagnostic precision lost (TODO(gap-1.6) in `enum_queries.rs`).

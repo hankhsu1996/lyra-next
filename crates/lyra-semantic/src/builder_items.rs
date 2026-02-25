@@ -82,8 +82,6 @@ pub(crate) fn collect_module_instantiation(
                 type_use_site_idx,
                 sym_id,
                 name: SmolStr::new(inst_name_tok.text()),
-                name_range: inst_name_tok.text_range(),
-                type_name_range,
                 scope,
             });
         }
