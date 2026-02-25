@@ -54,10 +54,10 @@ impl Expr {
     }
 }
 
-/// Thin newtype over a `TypeSpec`-kind `SyntaxNode` for the `TfArg` boundary.
+/// Thin newtype over `TypeSpec` for the `TfArg` boundary.
 #[derive(Debug, Clone)]
 pub struct TypeRef {
-    syntax: SyntaxNode,
+    inner: TypeSpec,
 }
 
 impl TypeRef {
@@ -66,20 +66,17 @@ impl TypeRef {
     }
 
     pub fn cast(node: SyntaxNode) -> Option<TypeRef> {
-        if Self::can_cast(node.kind()) {
-            Some(TypeRef { syntax: node })
-        } else {
-            None
-        }
+        use crate::node::AstNode;
+        TypeSpec::cast(node).map(|ts| TypeRef { inner: ts })
     }
 
     pub fn syntax(&self) -> &SyntaxNode {
-        &self.syntax
+        use crate::node::AstNode;
+        self.inner.syntax()
     }
 
     pub fn into_type_spec(self) -> TypeSpec {
-        use crate::node::AstNode;
-        TypeSpec::cast(self.syntax).expect("TypeRef always wraps a TypeSpec-kind node")
+        self.inner
     }
 }
 
