@@ -50,7 +50,6 @@ fn register_type_use_site(
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Simple(SmolStr::new(ident.text())),
                     expected_ns: ExpectedNs::TypeThenValue,
-                    range: nr.text_range(),
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,
@@ -67,7 +66,6 @@ fn register_type_use_site(
                     ctx.use_sites.push(UseSite {
                         path: NamePath::Qualified { segments },
                         expected_ns: ExpectedNs::TypeThenValue,
-                        range: qn.text_range(),
                         scope,
                         name_ref_site: ast_id.erase(),
                         order_key: 0,
@@ -413,7 +411,6 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Simple(SmolStr::new(ident.text())),
                     expected_ns: ExpectedNs::Exact(Namespace::Value),
-                    range: name_ref.text_range(),
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,
@@ -431,7 +428,6 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                     ctx.use_sites.push(UseSite {
                         path: NamePath::Qualified { segments },
                         expected_ns: ExpectedNs::Exact(Namespace::Value),
-                        range: qn.text_range(),
                         scope,
                         name_ref_site: ast_id.erase(),
                         order_key: 0,
