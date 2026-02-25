@@ -21,7 +21,7 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
      6. `Site` type alias (`= ErasedAstId`) in lyra-semantic. All semantic struct anchors use `Site` and `_site` suffix convention (`decl_site`, `name_site`, `type_site`, `name_ref_site`, `stmt_site`). Zero `ErasedAstId` references in lyra-semantic outside the alias definition.
    - Remaining:
      1. ~~`SemanticDiag.range: TextRange`~~ -- DONE. Replaced with `DiagSpan` anchor (`Site`/`Name`/`Token`). All ~15 construction sites migrated. Policy ratchet: `tools/policy/check_diag_textrange.py`.
-     2. `TypeCheckItem` -- ~20 `TextRange` fields. Scope explosion; needs batch migration.
+     2. ~~`TypeCheckItem` -- ~20 `TextRange` fields~~ -- DONE. All `TextRange` fields replaced with `Site` (expression/statement nodes) or `NameSpan` (identifier tokens). Lowering extracts `TextRange` from anchors at diagnostic time.
      3. ~~`InstanceDecl` -- 2 `TextRange` fields~~ -- DONE. Removed dead `name_range` and `type_name_range`; instance name available via `Symbol.name_span`/`name_site`, type name via `UseSite.name_ref_site`.
      4. ~~`EnumBase.range`~~ -- DONE. `TypeRef` now carries `type_site: Site`; `EnumBase.range` replaced with `type_site: Site`. Enum base diagnostics use `enum_def.base.type_site` directly.
      5. ~~`EnumVariantTarget.def_range`~~ -- DONE. Replaced with `name_site: Site` (member's stable AST anchor). `ExpandedVariant.def_range` also replaced.

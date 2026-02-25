@@ -5,6 +5,10 @@ Rules:
   D001: No TextRange code references in non-allowlisted lyra-semantic files
   D002: No TextRange references in diagnostic.rs (hard ban, including comments)
   D003: No text_range() calls in diagnostic.rs (hard ban)
+  D004: No AstIdMap in type-check lowering (lyra-db diagnostics.rs)
+        Site.text_range() is context-free; lowering must not use AstIdMap
+        to resolve Sites. Allowlisted: DbTypeCheckCtx, anchor_span,
+        lower_enum_value_diag (cross-file anchors).
 
 The semantic layer stores stable anchors (Site, NameSpan, TokenSpan) in
 diagnostics. TextRange computation belongs in the lowering layer (lyra-db).
@@ -29,8 +33,6 @@ TARGET_PREFIX = "crates/lyra-semantic/src/"
 # TODO: goal is an empty allowlist -- shrink as TextRange is migrated out.
 TEXTRANGE_ALLOWED = frozenset({
     "type_extract.rs",
-    "type_check.rs",
-    "modport_facts.rs",
     "def_index.rs",
     "builder_types.rs",
     "builder.rs",

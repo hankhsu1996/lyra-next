@@ -1,7 +1,7 @@
 use crate::Site;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
-use lyra_source::TextRange;
+use lyra_source::NameSpan;
 
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
@@ -25,75 +25,79 @@ pub enum AccessKind {
 /// A type-check finding.
 pub enum TypeCheckItem {
     AssignTruncation {
-        assign_range: TextRange,
-        lhs_range: TextRange,
-        rhs_range: TextRange,
+        assign_site: Site,
+        lhs_site: Site,
+        rhs_site: Site,
         lhs_width: u32,
         rhs_width: u32,
     },
     BitsNonDataType {
-        call_range: TextRange,
-        arg_range: TextRange,
+        call_site: Site,
+        arg_site: Site,
     },
     EnumAssignFromNonEnum {
-        assign_range: TextRange,
-        lhs_range: TextRange,
-        rhs_range: TextRange,
+        assign_site: Site,
+        lhs_site: Site,
+        rhs_site: Site,
         lhs_enum: EnumId,
         rhs_ty: Ty,
     },
     EnumAssignWrongEnum {
-        assign_range: TextRange,
-        lhs_range: TextRange,
-        rhs_range: TextRange,
+        assign_site: Site,
+        lhs_site: Site,
+        rhs_site: Site,
         lhs_enum: EnumId,
         rhs_enum: EnumId,
     },
     ConversionArgCategory {
-        call_range: TextRange,
-        arg_range: TextRange,
+        call_site: Site,
+        arg_site: Site,
         fn_name: smol_str::SmolStr,
         expected: &'static str,
     },
     ConversionWidthMismatch {
-        call_range: TextRange,
-        arg_range: TextRange,
+        call_site: Site,
+        arg_site: Site,
         fn_name: smol_str::SmolStr,
         expected_width: u32,
         actual_width: u32,
     },
     ModportDirectionViolation {
-        member_range: TextRange,
+        member_name_span: NameSpan,
         direction: PortDirection,
         access: AccessKind,
     },
     ModportRefUnsupported {
-        member_range: TextRange,
+        member_name_span: NameSpan,
     },
     EnumCastOutOfRange {
-        cast_range: TextRange,
+        cast_site: Site,
         enum_id: EnumId,
         value: i64,
     },
     StreamWithNonArray {
-        with_range: TextRange,
+        with_site: Site,
     },
     ModportEmptyPortAccess {
-        member_range: TextRange,
+        member_name_span: NameSpan,
     },
     ModportExprNotAssignable {
-        member_range: TextRange,
+        member_name_span: NameSpan,
     },
     MethodCallError {
-        call_range: TextRange,
+        call_name_span: NameSpan,
         method_name: smol_str::SmolStr,
         error_kind: crate::type_infer::ExprTypeErrorKind,
     },
     UnsupportedLhsForm {
-        lhs_range: TextRange,
+        lhs_site: Site,
     },
     InvalidLhs {
-        lhs_range: TextRange,
+        lhs_site: Site,
+    },
+    InternalError {
+        detail: smol_str::SmolStr,
+        site: Site,
     },
 }
 
@@ -130,7 +134,17 @@ pub fn check_types(
     field_facts: &FieldAccessFacts,
 ) -> Vec<TypeCheckItem> {
     let mut items = Vec::new();
-    walk_for_checks(root, ctx, field_facts, AccessCtx::Read, &mut items);
+    let root_fallback = ctx
+        .node_id(root)
+        .unwrap_or_else(|| Site::placeholder(ctx.file_id()));
+    walk_for_checks(
+        root,
+        ctx,
+        field_facts,
+        AccessCtx::Read,
+        root_fallback,
+        &mut items,
+    );
     items
 }
 
@@ -142,34 +156,57 @@ enum AccessCtx {
     ReadWrite,
 }
 
+/// Resolve a syntax node to its stable `Site` anchor.
+///
+/// On failure (error-recovered tree), emits `InternalError` anchored at
+/// `fallback` and returns the fallback. Callers must not silently skip
+/// findings when `node_id` returns `None`.
+fn require_site(
+    ctx: &dyn TypeCheckCtx,
+    node: &SyntaxNode,
+    fallback: Site,
+    items: &mut Vec<TypeCheckItem>,
+) -> Site {
+    if let Some(site) = ctx.node_id(node) {
+        return site;
+    }
+    items.push(TypeCheckItem::InternalError {
+        detail: smol_str::SmolStr::new_static("node_id returned None in type checker"),
+        site: fallback,
+    });
+    fallback
+}
+
 fn walk_for_checks(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
     facts: &FieldAccessFacts,
     access: AccessCtx,
+    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
+    let self_site = ctx.node_id(node).unwrap_or(fallback);
     match node.kind() {
         SyntaxKind::ContinuousAssign => {
-            check_continuous_assign(node, ctx, facts, items);
+            check_continuous_assign(node, ctx, facts, self_site, items);
             return;
         }
         SyntaxKind::AssignStmt => {
-            check_assign_stmt(node, ctx, facts, items);
+            check_assign_stmt(node, ctx, facts, self_site, items);
             return;
         }
-        SyntaxKind::VarDecl => check_var_decl(node, ctx, items),
-        SyntaxKind::SystemTfCall => check_system_call(node, ctx, items),
+        SyntaxKind::VarDecl => check_var_decl(node, ctx, self_site, items),
+        SyntaxKind::SystemTfCall => check_system_call(node, ctx, self_site, items),
         SyntaxKind::FieldExpr => check_field_direction(node, ctx, facts, access, items),
-        SyntaxKind::CastExpr => check_cast_expr(node, ctx, items),
+        SyntaxKind::CastExpr => check_cast_expr(node, ctx, self_site, items),
         SyntaxKind::StreamOperandItem => {
-            check_stream_operand(node, ctx, items);
+            check_stream_operand(node, ctx, self_site, items);
         }
         SyntaxKind::CallExpr => check_method_call(node, ctx, items),
         _ => {}
     }
     for child in node.children() {
-        walk_for_checks(&child, ctx, facts, access, items);
+        walk_for_checks(&child, ctx, facts, access, self_site, items);
     }
 }
 
@@ -190,7 +227,7 @@ fn check_field_direction(
     };
     if fact.direction == PortDirection::Ref {
         items.push(TypeCheckItem::ModportRefUnsupported {
-            member_range: fact.member_range,
+            member_name_span: fact.member_name_span,
         });
         return;
     }
@@ -200,7 +237,7 @@ fn check_field_direction(
         AccessCtx::Read => {
             if !direction_permits(fact.direction, AccessKind::Read) {
                 items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_range: fact.member_range,
+                    member_name_span: fact.member_name_span,
                     direction: fact.direction,
                     access: AccessKind::Read,
                 });
@@ -209,7 +246,7 @@ fn check_field_direction(
         AccessCtx::Write => {
             if !direction_permits(fact.direction, AccessKind::Write) {
                 items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_range: fact.member_range,
+                    member_name_span: fact.member_name_span,
                     direction: fact.direction,
                     access: AccessKind::Write,
                 });
@@ -218,14 +255,14 @@ fn check_field_direction(
         AccessCtx::ReadWrite => {
             if !direction_permits(fact.direction, AccessKind::Read) {
                 items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_range: fact.member_range,
+                    member_name_span: fact.member_name_span,
                     direction: fact.direction,
                     access: AccessKind::Read,
                 });
             }
             if !direction_permits(fact.direction, AccessKind::Write) {
                 items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_range: fact.member_range,
+                    member_name_span: fact.member_name_span,
                     direction: fact.direction,
                     access: AccessKind::Write,
                 });
@@ -237,14 +274,14 @@ fn check_field_direction(
     match &fact.target {
         FieldAccessTarget::Empty => {
             items.push(TypeCheckItem::ModportEmptyPortAccess {
-                member_range: fact.member_range,
+                member_name_span: fact.member_name_span,
             });
         }
         FieldAccessTarget::Expr(expr_id) => {
             let is_write = matches!(access, AccessCtx::Write | AccessCtx::ReadWrite);
             if is_write && !ctx.is_modport_target_lvalue(*expr_id) {
                 items.push(TypeCheckItem::ModportExprNotAssignable {
-                    member_range: fact.member_range,
+                    member_name_span: fact.member_name_span,
                 });
             }
         }
@@ -299,29 +336,30 @@ fn check_continuous_assign(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
     facts: &FieldAccessFacts,
+    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
+    let self_site = ctx.node_id(node).unwrap_or(fallback);
     let exprs: Vec<SyntaxNode> = node
         .children()
         .filter(|c| is_expression_kind(c.kind()))
         .collect();
     if exprs.len() >= 2 {
-        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, items);
+        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, self_site, items);
     }
     // Walk LHS in Write context, RHS in Read context
     if exprs.len() >= 2 {
-        walk_for_checks(&exprs[0], ctx, facts, AccessCtx::Write, items);
-        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, items);
-        // Walk any remaining children (unlikely but for completeness)
+        walk_for_checks(&exprs[0], ctx, facts, AccessCtx::Write, self_site, items);
+        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, self_site, items);
         for child in node.children() {
             let r = child.text_range();
             if r != exprs[0].text_range() && r != exprs[1].text_range() {
-                walk_for_checks(&child, ctx, facts, AccessCtx::Read, items);
+                walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
             }
         }
     } else {
         for child in node.children() {
-            walk_for_checks(&child, ctx, facts, AccessCtx::Read, items);
+            walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
         }
     }
 }
@@ -330,14 +368,16 @@ fn check_assign_stmt(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
     facts: &FieldAccessFacts,
+    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
+    let self_site = ctx.node_id(node).unwrap_or(fallback);
     let exprs: Vec<SyntaxNode> = node
         .children()
         .filter(|c| is_expression_kind(c.kind()))
         .collect();
     if exprs.len() >= 2 {
-        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, items);
+        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, self_site, items);
     } else if exprs.len() == 1 && !has_assign_op(node) {
         let _result = ctx.expr_type_stmt(&exprs[0]);
     }
@@ -348,22 +388,28 @@ fn check_assign_stmt(
         AccessCtx::Write
     };
     if exprs.len() >= 2 {
-        walk_for_checks(&exprs[0], ctx, facts, lhs_access, items);
-        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, items);
+        walk_for_checks(&exprs[0], ctx, facts, lhs_access, self_site, items);
+        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, self_site, items);
         for child in node.children() {
             let r = child.text_range();
             if r != exprs[0].text_range() && r != exprs[1].text_range() {
-                walk_for_checks(&child, ctx, facts, AccessCtx::Read, items);
+                walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
             }
         }
     } else {
         for child in node.children() {
-            walk_for_checks(&child, ctx, facts, AccessCtx::Read, items);
+            walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
         }
     }
 }
 
-fn check_var_decl(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+fn check_var_decl(
+    node: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    fallback: Site,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let decl_site = require_site(ctx, node, fallback, items);
     for child in node.children() {
         if child.kind() != SyntaxKind::Declarator {
             continue;
@@ -377,17 +423,13 @@ fn check_var_decl(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<Typ
             continue;
         };
 
+        let lhs_site = require_site(ctx, &child, decl_site, items);
+        let rhs_site = require_site(ctx, &init_expr, decl_site, items);
+
         let lhs_type = ExprType::from_symbol_type(&sym_type);
         let rhs_type = ctx.expr_type(&init_expr);
 
-        check_assignment_compat(
-            &lhs_type,
-            &rhs_type,
-            node.text_range(),
-            child.text_range(),
-            init_expr.text_range(),
-            items,
-        );
+        check_assignment_compat(&lhs_type, &rhs_type, decl_site, lhs_site, rhs_site, items);
     }
 }
 
@@ -416,30 +458,24 @@ fn check_assignment_pair(
     lhs: &SyntaxNode,
     rhs: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
+    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
+    let stmt_site = require_site(ctx, stmt_node, fallback, items);
+    let lhs_site = require_site(ctx, lhs, stmt_site, items);
+    let rhs_site = require_site(ctx, rhs, stmt_site, items);
+
     match crate::lhs::classify_lhs(lhs) {
         crate::lhs::LhsClass::Assignable(lhs_node) => {
             let lhs_type = ctx.expr_type(&lhs_node);
             let rhs_type = ctx.expr_type(rhs);
-            check_assignment_compat(
-                &lhs_type,
-                &rhs_type,
-                stmt_node.text_range(),
-                lhs.text_range(),
-                rhs.text_range(),
-                items,
-            );
+            check_assignment_compat(&lhs_type, &rhs_type, stmt_site, lhs_site, rhs_site, items);
         }
         crate::lhs::LhsClass::Unsupported => {
-            items.push(TypeCheckItem::UnsupportedLhsForm {
-                lhs_range: lhs.text_range(),
-            });
+            items.push(TypeCheckItem::UnsupportedLhsForm { lhs_site });
         }
         crate::lhs::LhsClass::NotAssignable => {
-            items.push(TypeCheckItem::InvalidLhs {
-                lhs_range: lhs.text_range(),
-            });
+            items.push(TypeCheckItem::InvalidLhs { lhs_site });
         }
     }
 }
@@ -447,9 +483,9 @@ fn check_assignment_pair(
 fn check_assignment_compat(
     lhs: &ExprType,
     rhs: &ExprType,
-    assign_range: TextRange,
-    lhs_range: TextRange,
-    rhs_range: TextRange,
+    assign_site: Site,
+    lhs_site: Site,
+    rhs_site: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
     if matches!(lhs.ty, Ty::Error)
@@ -466,9 +502,9 @@ fn check_assignment_compat(
         && rhs_w > lhs_w
     {
         items.push(TypeCheckItem::AssignTruncation {
-            assign_range,
-            lhs_range,
-            rhs_range,
+            assign_site,
+            lhs_site,
+            rhs_site,
             lhs_width: lhs_w,
             rhs_width: rhs_w,
         });
@@ -480,18 +516,18 @@ fn check_assignment_compat(
             Ty::Enum(rhs_id) if lhs_id == rhs_id => {}
             Ty::Enum(rhs_id) => {
                 items.push(TypeCheckItem::EnumAssignWrongEnum {
-                    assign_range,
-                    lhs_range,
-                    rhs_range,
+                    assign_site,
+                    lhs_site,
+                    rhs_site,
                     lhs_enum: *lhs_id,
                     rhs_enum: *rhs_id,
                 });
             }
             _ => {
                 items.push(TypeCheckItem::EnumAssignFromNonEnum {
-                    assign_range,
-                    lhs_range,
-                    rhs_range,
+                    assign_site,
+                    lhs_site,
+                    rhs_site,
                     lhs_enum: *lhs_id,
                     rhs_ty: rhs.ty.clone(),
                 });
@@ -500,7 +536,12 @@ fn check_assignment_compat(
     }
 }
 
-fn check_cast_expr(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+fn check_cast_expr(
+    node: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    fallback: Site,
+    items: &mut Vec<TypeCheckItem>,
+) {
     use lyra_ast::{AstNode, CastExpr};
     let Some(cast) = CastExpr::cast(node.clone()) else {
         return;
@@ -527,8 +568,9 @@ fn check_cast_expr(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<Ty
         return;
     };
     if value_set.binary_search(&value).is_err() {
+        let cast_site = require_site(ctx, node, fallback, items);
         items.push(TypeCheckItem::EnumCastOutOfRange {
-            cast_range: node.text_range(),
+            cast_site,
             enum_id: *enum_id,
             value,
         });
@@ -561,8 +603,9 @@ fn check_method_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
         | ExprTypeErrorKind::MethodArgTypeMismatch
         | ExprTypeErrorKind::MethodArgNotIntegral
         | ExprTypeErrorKind::MethodNotValidOnReceiver(_) => {
+            let call_name_span = NameSpan::new(field_tok.text_range());
             items.push(TypeCheckItem::MethodCallError {
-                call_range: field_tok.text_range(),
+                call_name_span,
                 method_name: smol_str::SmolStr::new(field_tok.text()),
                 error_kind: *error_kind,
             });
@@ -571,7 +614,12 @@ fn check_method_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
     }
 }
 
-fn check_system_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+fn check_system_call(
+    node: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    fallback: Site,
+    items: &mut Vec<TypeCheckItem>,
+) {
     let Some(tok) = system_tf_name(node) else {
         return;
     };
@@ -583,18 +631,18 @@ fn check_system_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
         return;
     };
     match entry.kind {
-        SystemFnKind::Bits => check_bits_call(node, &arg_list, ctx, items),
+        SystemFnKind::Bits => check_bits_call(node, &arg_list, ctx, fallback, items),
         SystemFnKind::IntToReal => {
-            check_conversion_arg_integral(node, &arg_list, name, ctx, items);
+            check_conversion_arg_integral(node, &arg_list, name, ctx, fallback, items);
         }
         SystemFnKind::RealToInt | SystemFnKind::RealToBits | SystemFnKind::ShortRealToBits => {
-            check_conversion_arg_real(node, &arg_list, name, ctx, items);
+            check_conversion_arg_real(node, &arg_list, name, ctx, fallback, items);
         }
         SystemFnKind::BitsToReal => {
-            check_conversion_bits_to_real(node, &arg_list, name, 64, ctx, items);
+            check_conversion_bits_to_real(node, &arg_list, name, 64, ctx, fallback, items);
         }
         SystemFnKind::BitsToShortReal => {
-            check_conversion_bits_to_real(node, &arg_list, name, 32, ctx, items);
+            check_conversion_bits_to_real(node, &arg_list, name, 32, ctx, fallback, items);
         }
         _ => {}
     }
@@ -604,6 +652,7 @@ fn check_bits_call(
     node: &SyntaxNode,
     arg_list: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
+    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
     let Some(first) = iter_args(arg_list).next() else {
@@ -613,9 +662,11 @@ fn check_bits_call(
     if let BitsArgKind::Type(ty) = kind
         && !ty.is_data_type()
     {
+        let call_site = require_site(ctx, node, fallback, items);
+        let arg_site = require_site(ctx, &first, call_site, items);
         items.push(TypeCheckItem::BitsNonDataType {
-            call_range: node.text_range(),
-            arg_range: first.text_range(),
+            call_site,
+            arg_site,
         });
     }
 }
@@ -625,6 +676,7 @@ fn check_conversion_arg_integral(
     arg_list: &SyntaxNode,
     fn_name: &str,
     ctx: &dyn TypeCheckCtx,
+    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
     let Some(first) = iter_args(arg_list).next() else {
@@ -635,9 +687,11 @@ fn check_conversion_arg_integral(
         return;
     }
     if !matches!(arg_ty.ty, Ty::Integral(_) | Ty::Enum(_)) {
+        let call_site = require_site(ctx, node, fallback, items);
+        let arg_site = require_site(ctx, &first, call_site, items);
         items.push(TypeCheckItem::ConversionArgCategory {
-            call_range: node.text_range(),
-            arg_range: first.text_range(),
+            call_site,
+            arg_site,
             fn_name: smol_str::SmolStr::new(fn_name),
             expected: "integral",
         });
@@ -649,6 +703,7 @@ fn check_conversion_arg_real(
     arg_list: &SyntaxNode,
     fn_name: &str,
     ctx: &dyn TypeCheckCtx,
+    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
     let Some(first) = iter_args(arg_list).next() else {
@@ -659,9 +714,11 @@ fn check_conversion_arg_real(
         return;
     }
     if !arg_ty.ty.is_real() {
+        let call_site = require_site(ctx, node, fallback, items);
+        let arg_site = require_site(ctx, &first, call_site, items);
         items.push(TypeCheckItem::ConversionArgCategory {
-            call_range: node.text_range(),
-            arg_range: first.text_range(),
+            call_site,
+            arg_site,
             fn_name: smol_str::SmolStr::new(fn_name),
             expected: "real",
         });
@@ -674,6 +731,7 @@ fn check_conversion_bits_to_real(
     fn_name: &str,
     expected_width: u32,
     ctx: &dyn TypeCheckCtx,
+    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
     let Some(first) = iter_args(arg_list).next() else {
@@ -683,10 +741,12 @@ fn check_conversion_bits_to_real(
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
+    let call_site = require_site(ctx, node, fallback, items);
+    let arg_site = require_site(ctx, &first, call_site, items);
     if !matches!(arg_ty.ty, Ty::Integral(_)) {
         items.push(TypeCheckItem::ConversionArgCategory {
-            call_range: node.text_range(),
-            arg_range: first.text_range(),
+            call_site,
+            arg_site,
             fn_name: smol_str::SmolStr::new(fn_name),
             expected: "integral",
         });
@@ -696,8 +756,8 @@ fn check_conversion_bits_to_real(
         && actual_width != expected_width
     {
         items.push(TypeCheckItem::ConversionWidthMismatch {
-            call_range: node.text_range(),
-            arg_range: first.text_range(),
+            call_site,
+            arg_site,
             fn_name: smol_str::SmolStr::new(fn_name),
             expected_width,
             actual_width,
@@ -705,7 +765,12 @@ fn check_conversion_bits_to_real(
     }
 }
 
-fn check_stream_operand(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+fn check_stream_operand(
+    node: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    fallback: Site,
+    items: &mut Vec<TypeCheckItem>,
+) {
     use lyra_ast::{AstNode, StreamOperandItem};
 
     let Some(item) = StreamOperandItem::cast(node.clone()) else {
@@ -722,9 +787,8 @@ fn check_stream_operand(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut V
         return;
     }
     if !matches!(operand_ty.ty, Ty::Array { .. }) {
-        items.push(TypeCheckItem::StreamWithNonArray {
-            with_range: with_clause.text_range(),
-        });
+        let with_site = require_site(ctx, with_clause.syntax(), fallback, items);
+        items.push(TypeCheckItem::StreamWithNonArray { with_site });
     }
 }
 
