@@ -65,6 +65,8 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - **Frozen stores in semantic** --symbol tables, scope trees are built once per analysis pass, keyed by stable IDs, no direct references.
 - **`lyra-source` has no arena dependency** --spans and text primitives are independent of allocation strategy.
 - **Design docs use semantic terms, not tool terms** --the core provides queries (`resolve`, `type_of`); tools (LSP, linter) consume them. Say "resolve a name to its declaration," not "go-to-definition."
+- **Lowering depends only on anchor data, not producer-layer services** --semantic anchors are self-describing; lowering extracts presentation data (ranges, spans) from the anchor's own stored fields. Injecting producer-layer services (AST maps, syntax trees) into lowering breaks layering and hides producer bugs.
+- **Producers must not silently drop findings** --when a producer encounters an unexpected state (failed lookup, missing data), it must emit an internal diagnostic with a deterministic fallback and continue. Never `return`/`continue` to skip producing a finding. Thread required (non-optional) fallbacks through the call stack so no code path can silently bail.
 
 ## Crate Dependency Graph
 

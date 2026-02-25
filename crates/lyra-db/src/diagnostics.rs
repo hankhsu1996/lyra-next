@@ -129,36 +129,15 @@ fn lower_type_check_item(
     item: &TypeCheckItem,
     source_map: &lyra_preprocess::SourceMap,
     seen: &mut std::collections::HashSet<(
-        lyra_source::TextSize,
-        lyra_source::TextRange,
-        lyra_source::TextRange,
+        lyra_ast::ErasedAstId,
+        lyra_ast::ErasedAstId,
+        lyra_ast::ErasedAstId,
     )>,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
     match item {
-        TypeCheckItem::AssignTruncation {
-            assign_range,
-            lhs_range,
-            rhs_range,
-            lhs_width,
-            rhs_width,
-        } => {
-            let Some(assign_span) = source_map.map_span(*assign_range) else {
-                return;
-            };
-            let key = (assign_span.range.start(), *lhs_range, *rhs_range);
-            if !seen.insert(key) {
-                return;
-            }
-            let lhs_span = source_map.map_span(*lhs_range).unwrap_or(assign_span);
-            let rhs_span = source_map.map_span(*rhs_range).unwrap_or(assign_span);
-            diags.push(truncation_diag(
-                *lhs_width,
-                *rhs_width,
-                assign_span,
-                lhs_span,
-                rhs_span,
-            ));
+        TypeCheckItem::AssignTruncation { .. } => {
+            lower_assign_truncation(item, source_map, seen, diags);
         }
         TypeCheckItem::BitsNonDataType { .. } => {
             lower_bits_non_data_type(item, source_map, diags);
@@ -166,47 +145,9 @@ fn lower_type_check_item(
         TypeCheckItem::EnumAssignFromNonEnum { .. } | TypeCheckItem::EnumAssignWrongEnum { .. } => {
             lower_enum_assign_item(db, unit, item, source_map, diags);
         }
-        TypeCheckItem::ConversionArgCategory {
-            call_range,
-            arg_range,
-            fn_name,
-            expected,
-        } => {
-            let Some(call_span) = source_map.map_span(*call_range) else {
-                return;
-            };
-            let arg_span = source_map.map_span(*arg_range).unwrap_or(call_span);
-            let msg_args = vec![
-                lyra_diag::Arg::Name(fn_name.clone()),
-                lyra_diag::Arg::Name(smol_str::SmolStr::new(expected)),
-            ];
-            diags.push(conversion_diag(
-                lyra_diag::MessageId::ConversionArgCategory,
-                msg_args,
-                arg_span,
-            ));
-        }
-        TypeCheckItem::ConversionWidthMismatch {
-            call_range,
-            arg_range,
-            fn_name,
-            expected_width,
-            actual_width,
-        } => {
-            let Some(call_span) = source_map.map_span(*call_range) else {
-                return;
-            };
-            let arg_span = source_map.map_span(*arg_range).unwrap_or(call_span);
-            let msg_args = vec![
-                lyra_diag::Arg::Name(fn_name.clone()),
-                lyra_diag::Arg::Width(*expected_width),
-                lyra_diag::Arg::Width(*actual_width),
-            ];
-            diags.push(conversion_diag(
-                lyra_diag::MessageId::ConversionWidthMismatch,
-                msg_args,
-                arg_span,
-            ));
+        TypeCheckItem::ConversionArgCategory { .. }
+        | TypeCheckItem::ConversionWidthMismatch { .. } => {
+            lower_conversion_item(item, source_map, diags);
         }
         TypeCheckItem::ModportDirectionViolation { .. }
         | TypeCheckItem::ModportRefUnsupported { .. }
@@ -226,7 +167,126 @@ fn lower_type_check_item(
         TypeCheckItem::UnsupportedLhsForm { .. } | TypeCheckItem::InvalidLhs { .. } => {
             lower_lhs_item(item, source_map, diags);
         }
+        TypeCheckItem::InternalError { .. } => {
+            lower_internal_type_check_error(item, source_map, diags);
+        }
     }
+}
+
+fn lower_assign_truncation(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    seen: &mut std::collections::HashSet<(
+        lyra_ast::ErasedAstId,
+        lyra_ast::ErasedAstId,
+        lyra_ast::ErasedAstId,
+    )>,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::AssignTruncation {
+        assign_site,
+        lhs_site,
+        rhs_site,
+        lhs_width,
+        rhs_width,
+    } = item
+    else {
+        return;
+    };
+    let key = (*assign_site, *lhs_site, *rhs_site);
+    if !seen.insert(key) {
+        return;
+    }
+    let Some(assign_span) = source_map.map_span(assign_site.text_range()) else {
+        return;
+    };
+    let lhs_span = source_map
+        .map_span(lhs_site.text_range())
+        .unwrap_or(assign_span);
+    let rhs_span = source_map
+        .map_span(rhs_site.text_range())
+        .unwrap_or(assign_span);
+    diags.push(truncation_diag(
+        *lhs_width,
+        *rhs_width,
+        assign_span,
+        lhs_span,
+        rhs_span,
+    ));
+}
+
+fn lower_conversion_item(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let (call_site, arg_site, msg_id, msg_args) = match item {
+        TypeCheckItem::ConversionArgCategory {
+            call_site,
+            arg_site,
+            fn_name,
+            expected,
+        } => (
+            call_site,
+            arg_site,
+            lyra_diag::MessageId::ConversionArgCategory,
+            vec![
+                lyra_diag::Arg::Name(fn_name.clone()),
+                lyra_diag::Arg::Name(smol_str::SmolStr::new(expected)),
+            ],
+        ),
+        TypeCheckItem::ConversionWidthMismatch {
+            call_site,
+            arg_site,
+            fn_name,
+            expected_width,
+            actual_width,
+        } => (
+            call_site,
+            arg_site,
+            lyra_diag::MessageId::ConversionWidthMismatch,
+            vec![
+                lyra_diag::Arg::Name(fn_name.clone()),
+                lyra_diag::Arg::Width(*expected_width),
+                lyra_diag::Arg::Width(*actual_width),
+            ],
+        ),
+        _ => return,
+    };
+    let Some(call_span) = source_map.map_span(call_site.text_range()) else {
+        return;
+    };
+    let arg_span = source_map
+        .map_span(arg_site.text_range())
+        .unwrap_or(call_span);
+    diags.push(conversion_diag(msg_id, msg_args, arg_span));
+}
+
+fn lower_internal_type_check_error(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::InternalError { detail, site } = item else {
+        return;
+    };
+    let Some(span) = source_map.map_span(site.text_range()) else {
+        return;
+    };
+    let msg_args = vec![lyra_diag::Arg::Name(detail.clone())];
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Warning,
+            lyra_diag::DiagnosticCode::INTERNAL_ERROR,
+            lyra_diag::Message::new(lyra_diag::MessageId::InternalError, msg_args.clone()),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span,
+            message: lyra_diag::Message::new(lyra_diag::MessageId::InternalError, msg_args),
+        })
+        .with_origin(lyra_diag::DiagnosticOrigin::Internal),
+    );
 }
 
 fn lower_modport_item(
@@ -236,11 +296,11 @@ fn lower_modport_item(
 ) {
     match item {
         TypeCheckItem::ModportDirectionViolation {
-            member_range,
+            member_name_span,
             direction,
             access,
         } => {
-            let Some(member_span) = source_map.map_span(*member_range) else {
+            let Some(member_span) = source_map.map_span(member_name_span.text_range()) else {
                 return;
             };
             let dir_name = match direction {
@@ -276,31 +336,31 @@ fn lower_modport_item(
                 }),
             );
         }
-        TypeCheckItem::ModportRefUnsupported { member_range } => {
+        TypeCheckItem::ModportRefUnsupported { member_name_span } => {
             emit_simple_modport_diag(
                 source_map,
                 diags,
-                *member_range,
+                *member_name_span,
                 lyra_diag::Severity::Warning,
                 lyra_diag::DiagnosticCode::MODPORT_REF_UNSUPPORTED,
                 lyra_diag::MessageId::ModportRefUnsupported,
             );
         }
-        TypeCheckItem::ModportEmptyPortAccess { member_range } => {
+        TypeCheckItem::ModportEmptyPortAccess { member_name_span } => {
             emit_simple_modport_diag(
                 source_map,
                 diags,
-                *member_range,
+                *member_name_span,
                 lyra_diag::Severity::Error,
                 lyra_diag::DiagnosticCode::MODPORT_EMPTY_PORT,
                 lyra_diag::MessageId::ModportEmptyPortAccess,
             );
         }
-        TypeCheckItem::ModportExprNotAssignable { member_range } => {
+        TypeCheckItem::ModportExprNotAssignable { member_name_span } => {
             emit_simple_modport_diag(
                 source_map,
                 diags,
-                *member_range,
+                *member_name_span,
                 lyra_diag::Severity::Error,
                 lyra_diag::DiagnosticCode::MODPORT_EXPR_NOT_ASSIGNABLE,
                 lyra_diag::MessageId::ModportExprNotAssignable,
@@ -313,12 +373,12 @@ fn lower_modport_item(
 fn emit_simple_modport_diag(
     source_map: &lyra_preprocess::SourceMap,
     diags: &mut Vec<lyra_diag::Diagnostic>,
-    range: lyra_source::TextRange,
+    name_span: lyra_source::NameSpan,
     severity: lyra_diag::Severity,
     code: lyra_diag::DiagnosticCode,
     message_id: lyra_diag::MessageId,
 ) {
-    let Some(span) = source_map.map_span(range) else {
+    let Some(span) = source_map.map_span(name_span.text_range()) else {
         return;
     };
     diags.push(
@@ -336,20 +396,20 @@ fn lower_lhs_item(
     source_map: &lyra_preprocess::SourceMap,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
-    let (range, code, msg_id) = match item {
-        TypeCheckItem::UnsupportedLhsForm { lhs_range } => (
-            *lhs_range,
+    let (site, code, msg_id) = match item {
+        TypeCheckItem::UnsupportedLhsForm { lhs_site } => (
+            *lhs_site,
             lyra_diag::DiagnosticCode::UNSUPPORTED_LHS_FORM,
             lyra_diag::MessageId::UnsupportedLhsForm,
         ),
-        TypeCheckItem::InvalidLhs { lhs_range } => (
-            *lhs_range,
+        TypeCheckItem::InvalidLhs { lhs_site } => (
+            *lhs_site,
             lyra_diag::DiagnosticCode::INVALID_ASSIGNMENT_LHS,
             lyra_diag::MessageId::InvalidAssignmentLhs,
         ),
         _ => return,
     };
-    let Some(span) = source_map.map_span(range) else {
+    let Some(span) = source_map.map_span(site.text_range()) else {
         return;
     };
     diags.push(
@@ -374,14 +434,14 @@ fn lower_enum_cast_item(
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
     let TypeCheckItem::EnumCastOutOfRange {
-        cast_range,
+        cast_site,
         enum_id,
         value,
     } = item
     else {
         return;
     };
-    let Some(cast_span) = source_map.map_span(*cast_range) else {
+    let Some(cast_span) = source_map.map_span(cast_site.text_range()) else {
         return;
     };
     let ename = enum_name(db, unit, enum_id);
@@ -410,42 +470,46 @@ fn lower_enum_assign_item(
     source_map: &lyra_preprocess::SourceMap,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
-    let (assign_range, lhs_range, rhs_range, msg_id, rhs_label, lhs_enum) = match item {
+    let (assign_site, lhs_site, rhs_site, msg_id, rhs_label, lhs_enum) = match item {
         TypeCheckItem::EnumAssignFromNonEnum {
-            assign_range,
-            lhs_range,
-            rhs_range,
+            assign_site,
+            lhs_site,
+            rhs_site,
             lhs_enum,
             rhs_ty,
         } => (
-            *assign_range,
-            *lhs_range,
-            *rhs_range,
+            *assign_site,
+            *lhs_site,
+            *rhs_site,
             lyra_diag::MessageId::EnumAssignFromNonEnum,
             rhs_ty.pretty(),
             lhs_enum,
         ),
         TypeCheckItem::EnumAssignWrongEnum {
-            assign_range,
-            lhs_range,
-            rhs_range,
+            assign_site,
+            lhs_site,
+            rhs_site,
             lhs_enum,
             rhs_enum,
         } => (
-            *assign_range,
-            *lhs_range,
-            *rhs_range,
+            *assign_site,
+            *lhs_site,
+            *rhs_site,
             lyra_diag::MessageId::EnumAssignWrongEnum,
             enum_name(db, unit, rhs_enum),
             lhs_enum,
         ),
         _ => return,
     };
-    let Some(assign_span) = source_map.map_span(assign_range) else {
+    let Some(assign_span) = source_map.map_span(assign_site.text_range()) else {
         return;
     };
-    let rhs_span = source_map.map_span(rhs_range).unwrap_or(assign_span);
-    let lhs_span = source_map.map_span(lhs_range).unwrap_or(assign_span);
+    let rhs_span = source_map
+        .map_span(rhs_site.text_range())
+        .unwrap_or(assign_span);
+    let lhs_span = source_map
+        .map_span(lhs_site.text_range())
+        .unwrap_or(assign_span);
     let lhs_name = enum_name(db, unit, lhs_enum);
     diags.push(enum_assign_diag(
         msg_id, rhs_label, lhs_name, rhs_span, lhs_span,
@@ -558,14 +622,14 @@ fn lower_method_call_error(
     use lyra_semantic::type_infer::ExprTypeErrorKind;
 
     let TypeCheckItem::MethodCallError {
-        call_range,
+        call_name_span,
         method_name,
         error_kind,
     } = item
     else {
         return;
     };
-    let Some(call_span) = source_map.map_span(*call_range) else {
+    let Some(call_span) = source_map.map_span(call_name_span.text_range()) else {
         return;
     };
     let msg_id = match error_kind {
@@ -600,16 +664,18 @@ fn lower_bits_non_data_type(
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
     let TypeCheckItem::BitsNonDataType {
-        call_range,
-        arg_range,
+        call_site,
+        arg_site,
     } = item
     else {
         return;
     };
-    let Some(call_span) = source_map.map_span(*call_range) else {
+    let Some(call_span) = source_map.map_span(call_site.text_range()) else {
         return;
     };
-    let arg_span = source_map.map_span(*arg_range).unwrap_or(call_span);
+    let arg_span = source_map
+        .map_span(arg_site.text_range())
+        .unwrap_or(call_span);
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
@@ -629,10 +695,10 @@ fn lower_stream_with_non_array(
     source_map: &lyra_preprocess::SourceMap,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
-    let TypeCheckItem::StreamWithNonArray { with_range } = item else {
+    let TypeCheckItem::StreamWithNonArray { with_site } = item else {
         return;
     };
-    let Some(with_span) = source_map.map_span(*with_range) else {
+    let Some(with_span) = source_map.map_span(with_site.text_range()) else {
         return;
     };
     diags.push(
