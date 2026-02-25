@@ -321,14 +321,13 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
         eval_const_int(db, expr_ref)
     };
 
-    // TODO(gap-1.4): EnumBase.range precision lost; using enum_type_site
-    let base_primary = DiagSpan::Site(enum_def.enum_type_site);
+    let base_primary = DiagSpan::Site(enum_def.base.type_site);
     let mut diags = Vec::new();
 
     // Resolve the base TypeRef to a Ty
     let base_ty = match &enum_def.base.tref {
         TypeRef::Resolved(ty) => lyra_semantic::normalize_ty(ty, &eval),
-        TypeRef::Named { name, span: _ } => {
+        TypeRef::Named { name, .. } => {
             let result = lyra_semantic::resolve_name_in_scope(
                 graph,
                 global,
@@ -344,7 +343,7 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
             };
             resolve_result_to_ty(db, unit, file_id, &result, name, anchor, &mut diags)
         }
-        TypeRef::Qualified { segments, span: _ } => {
+        TypeRef::Qualified { segments, .. } => {
             let result = lyra_semantic::resolve_qualified_name(
                 segments,
                 global,

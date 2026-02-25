@@ -168,32 +168,19 @@ fn collect_enum_def(
     let ast_id = ctx.ast_id_map.erased_ast_id(enum_type.syntax())?;
     let idx = EnumDefIdx(ctx.enum_defs.len() as u32);
 
-    // Extract base type with its source range
+    // Extract base type with its stable anchor
     let base = if let Some(base_ts) = enum_type.base_type_spec() {
-        let range = base_ts.text_range();
-        let tref = extract_typeref_from_typespec(base_ts.syntax(), ctx.file, ctx.ast_id_map);
-        EnumBase { tref, range }
+        let type_site = ctx
+            .ast_id_map
+            .erased_ast_id(base_ts.syntax())
+            .unwrap_or(ast_id);
+        let tref = extract_typeref_from_typespec(base_ts.syntax(), ctx.ast_id_map);
+        EnumBase { tref, type_site }
     } else {
-        // Default base: use the `enum` keyword token's range as anchor
-        let Some(tok) = enum_type
-            .syntax()
-            .children_with_tokens()
-            .filter_map(lyra_parser::SyntaxElement::into_token)
-            .find(|tok| tok.kind() == SyntaxKind::EnumKw)
-        else {
-            ctx.diagnostics.push(SemanticDiag {
-                kind: SemanticDiagKind::InternalError {
-                    detail: SmolStr::new("missing enum keyword token"),
-                },
-                primary: DiagSpan::Site(ast_id),
-                label: None,
-            });
-            return None;
-        };
-        let range = tok.text_range();
+        // Default base (int): anchor to the enum type node itself
         EnumBase {
             tref: TypeRef::Resolved(Ty::int()),
-            range,
+            type_site: ast_id,
         }
     };
 
@@ -364,7 +351,7 @@ fn collect_record_def(
         let ty = match member_ts {
             Some(ref ts) => {
                 collect_type_spec_refs(ctx, ts, scope);
-                extract_typeref_from_typespec(ts.syntax(), ctx.file, ctx.ast_id_map)
+                extract_typeref_from_typespec(ts.syntax(), ctx.ast_id_map)
             }
             None => TypeRef::Resolved(Ty::Error),
         };

@@ -65,14 +65,14 @@ pub struct EnumMemberDef {
     pub init_literal_width: Option<u32>,
 }
 
-/// Wrapper for enum base type that always carries the source range.
+/// Wrapper for enum base type that always carries a stable anchor.
 ///
-/// `TypeRef::Resolved` has no span, so this wrapper ensures diagnostics
-/// always have a range to anchor to.
+/// `TypeRef::Resolved` has no site, so this wrapper ensures diagnostics
+/// always have an anchor to point to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumBase {
     pub tref: TypeRef,
-    pub range: TextRange,
+    pub type_site: Site,
 }
 
 /// Per-file enum definition with optional name, owner scope, and members.
