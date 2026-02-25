@@ -22,13 +22,13 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
    - Remaining:
      1. ~~`SemanticDiag.range: TextRange`~~ -- DONE. Replaced with `DiagSpan` anchor (`Site`/`Name`/`Token`). All ~15 construction sites migrated. Policy ratchet: `tools/policy/check_diag_textrange.py`.
      2. `TypeCheckItem` -- ~20 `TextRange` fields. Scope explosion; needs batch migration.
-     3. `InstanceDecl` -- 2 `TextRange` fields. Touches type resolution and member lookup.
-     4. `EnumBase.range` -- `TypeRef` has no span; needs design work. Diagnostic precision lost (TODO(gap-1.4) in `enum_queries.rs`).
-     5. `EnumVariantTarget.def_range` -- cascades into resolution and diagnostics.
-     6. `EnumMemberDef.range_text_range` -- no obvious single anchor for `[N:M]` range spec. Diagnostic precision lost (TODO(gap-1.6) in `enum_queries.rs`).
+     3. ~~`InstanceDecl` -- 2 `TextRange` fields~~ -- DONE. Removed dead `name_range` and `type_name_range`; instance name available via `Symbol.name_span`/`name_site`, type name via `UseSite.name_ref_site`.
+     4. ~~`EnumBase.range`~~ -- DONE. `TypeRef` now carries `type_site: Site`; `EnumBase.range` replaced with `type_site: Site`. Enum base diagnostics use `enum_def.base.type_site` directly.
+     5. ~~`EnumVariantTarget.def_range`~~ -- DONE. Replaced with `name_site: Site` (member's stable AST anchor). `ExpandedVariant.def_range` also replaced.
+     6. ~~`EnumMemberDef.range_text_range`~~ -- DONE. Replaced with `range_site: Option<Site>` anchored to the range spec AST node. Range-spec diagnostics use `range_site` as primary when available.
      7. ~~`DuplicateDefinition.original: TextRange`~~ -- DONE. Replaced with `original_primary: DiagSpan` + `original_label: Option<DiagSpan>`.
      8. Extract definition-namespace entries from `SymbolTable` into their own first-class def structure.
-     9. Record field type errors lack type-reference precision (TODO(gap-1.typeref) in `record_queries.rs`). Closing requires adding `Site` to `TypeRef`.
+     9. ~~Record field type errors lack type-reference precision~~ -- DONE. `TypeRef::Named`/`Qualified` carry `type_site: Site`; field type error diagnostics use `type_site` as primary anchor.
      10. ~~Modport port diagnostics lack `NameSpan` label~~ -- DONE. `ModportEntry.span` replaced with `name_span: NameSpan`. `DuplicateDefinition` and `UnresolvedName` diagnostics now carry `DiagSpan::Name` labels.
    - Outcome: Enables future `TypeSpelling` / provenance queries derived purely from CST/AST without heuristics, preserving incrementality and determinism.
 

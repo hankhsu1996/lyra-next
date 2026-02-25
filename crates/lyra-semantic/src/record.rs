@@ -3,7 +3,7 @@ use lyra_ast::{AstIdMap, AstNode, NameRef, QualifiedName};
 use crate::Site;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
-use lyra_source::{FileId, NameSpan, Span};
+use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
 use crate::enum_def::EnumDefIdx;
@@ -57,18 +57,19 @@ pub enum Packing {
     Unpacked,
 }
 
-// TypeRef: preserves span + name for record fields and enum base type
+// TypeRef: preserves name + anchor for record fields and enum base type.
+// Gap-1 contract: TypeRef stores Site anchors, not TextRange/Span.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeRef {
     Resolved(Ty),
     Named {
         name: SmolStr,
-        span: Span,
+        type_site: Site,
     },
     Qualified {
         segments: Box<[SmolStr]>,
-        span: Span,
+        type_site: Site,
     },
 }
 
@@ -97,7 +98,7 @@ pub struct RecordField {
 pub struct FieldSem {
     pub name: SmolStr,
     pub ty: Ty,
-    pub span: Span,
+    pub type_site: Site,
 }
 
 /// Resolved record type information.
@@ -144,7 +145,6 @@ pub enum SymbolOrigin {
 // Extract a TypeRef from a TypeSpec syntax node.
 pub(crate) fn extract_typeref_from_typespec(
     typespec: &SyntaxNode,
-    file: FileId,
     ast_id_map: &AstIdMap,
 ) -> TypeRef {
     // Check for NameRef or QualifiedName child (user-defined type)
@@ -152,21 +152,21 @@ pub(crate) fn extract_typeref_from_typespec(
         if child.kind() == SyntaxKind::NameRef
             && let Some(name_ref) = NameRef::cast(child.clone())
             && let Some(ident) = name_ref.ident()
+            && let Some(ast_id) = ast_id_map.ast_id(&name_ref)
         {
-            let range = name_ref.text_range();
             return TypeRef::Named {
                 name: SmolStr::new(ident.text()),
-                span: Span { file, range },
+                type_site: ast_id.erase(),
             };
         } else if child.kind() == SyntaxKind::QualifiedName
             && let Some(qn) = QualifiedName::cast(child.clone())
+            && let Some(ast_id) = ast_id_map.ast_id(&qn)
         {
             let segments: Box<[SmolStr]> = qn.segments().map(|s| SmolStr::new(s.text())).collect();
             if !segments.is_empty() {
-                let range = qn.text_range();
                 return TypeRef::Qualified {
                     segments,
-                    span: Span { file, range },
+                    type_site: ast_id.erase(),
                 };
             }
         }

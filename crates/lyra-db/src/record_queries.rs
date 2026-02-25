@@ -118,7 +118,7 @@ pub fn record_field_tys<'db>(
                 ty: ty.clone(),
                 err: None,
             },
-            TypeRef::Named { name, span } => {
+            TypeRef::Named { name, .. } => {
                 let resolve_result = lyra_semantic::resolve_name_in_scope(
                     graph,
                     global,
@@ -130,11 +130,9 @@ pub fn record_field_tys<'db>(
                 );
                 let path = Box::new([name.clone()]) as Box<[SmolStr]>;
                 let (ty, err) = classify_for_record_field(db, unit, file_id, &resolve_result, path);
-                // Preserve span file for FieldSem construction downstream
-                let _ = span;
                 LoweredFieldTy { ty, err }
             }
-            TypeRef::Qualified { segments, span } => {
+            TypeRef::Qualified { segments, .. } => {
                 let resolve_result = lyra_semantic::resolve_qualified_name(
                     segments,
                     global,
@@ -143,7 +141,6 @@ pub fn record_field_tys<'db>(
                 );
                 let path = segments.clone();
                 let (ty, err) = classify_for_record_field(db, unit, file_id, &resolve_result, path);
-                let _ = span;
                 LoweredFieldTy { ty, err }
             }
         };
@@ -190,10 +187,14 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
         // Normalize unevaluated dims
         let ty = lyra_semantic::normalize_ty(&lowered.ty, &eval);
 
-        // Convert field type errors to SemanticDiag using spans from RecordDef
-        // TODO(gap-1.typeref): type reference vs declarator precision lost; using field name_site
+        // Convert field type errors to SemanticDiag using the type reference anchor
         if let Some(err) = &lowered.err {
-            let primary = DiagSpan::Site(field.name_site);
+            let primary = match &field.ty {
+                TypeRef::Named { type_site, .. } | TypeRef::Qualified { type_site, .. } => {
+                    DiagSpan::Site(*type_site)
+                }
+                TypeRef::Resolved(_) => DiagSpan::Site(field.name_site),
+            };
             let display_name = err.path.join("::");
             match err.kind {
                 FieldTyErrorKind::UndeclaredType => {
@@ -217,18 +218,15 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
             }
         }
 
-        let span = match &field.ty {
-            TypeRef::Named { span, .. } | TypeRef::Qualified { span, .. } => *span,
-            TypeRef::Resolved(_) => lyra_source::Span {
-                file: file_id,
-                range: lyra_source::TextRange::default(),
-            },
+        let type_site = match &field.ty {
+            TypeRef::Named { type_site, .. } | TypeRef::Qualified { type_site, .. } => *type_site,
+            TypeRef::Resolved(_) => field.name_site,
         };
 
         fields.push(FieldSem {
             name: field.name.clone(),
             ty,
-            span,
+            type_site,
         });
     }
 

@@ -50,7 +50,6 @@ fn register_type_use_site(
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Simple(SmolStr::new(ident.text())),
                     expected_ns: ExpectedNs::TypeThenValue,
-                    range: nr.text_range(),
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,
@@ -67,7 +66,6 @@ fn register_type_use_site(
                     ctx.use_sites.push(UseSite {
                         path: NamePath::Qualified { segments },
                         expected_ns: ExpectedNs::TypeThenValue,
-                        range: qn.text_range(),
                         scope,
                         name_ref_site: ast_id.erase(),
                         order_key: 0,
@@ -170,32 +168,19 @@ fn collect_enum_def(
     let ast_id = ctx.ast_id_map.erased_ast_id(enum_type.syntax())?;
     let idx = EnumDefIdx(ctx.enum_defs.len() as u32);
 
-    // Extract base type with its source range
+    // Extract base type with its stable anchor
     let base = if let Some(base_ts) = enum_type.base_type_spec() {
-        let range = base_ts.text_range();
-        let tref = extract_typeref_from_typespec(base_ts.syntax(), ctx.file, ctx.ast_id_map);
-        EnumBase { tref, range }
+        let type_site = ctx
+            .ast_id_map
+            .erased_ast_id(base_ts.syntax())
+            .unwrap_or(ast_id);
+        let tref = extract_typeref_from_typespec(base_ts.syntax(), ctx.ast_id_map);
+        EnumBase { tref, type_site }
     } else {
-        // Default base: use the `enum` keyword token's range as anchor
-        let Some(tok) = enum_type
-            .syntax()
-            .children_with_tokens()
-            .filter_map(lyra_parser::SyntaxElement::into_token)
-            .find(|tok| tok.kind() == SyntaxKind::EnumKw)
-        else {
-            ctx.diagnostics.push(SemanticDiag {
-                kind: SemanticDiagKind::InternalError {
-                    detail: SmolStr::new("missing enum keyword token"),
-                },
-                primary: DiagSpan::Site(ast_id),
-                label: None,
-            });
-            return None;
-        };
-        let range = tok.text_range();
+        // Default base (int): anchor to the enum type node itself
         EnumBase {
             tref: TypeRef::Resolved(Ty::int()),
-            range,
+            type_site: ast_id,
         }
     };
 
@@ -227,7 +212,17 @@ fn collect_enum_def(
             .as_ref()
             .and_then(|expr| crate::literal::extract_sized_literal_width(expr.syntax()));
 
-        let (range_kind, range_text_range) = extract_enum_range_spec(&member, ctx.ast_id_map);
+        let (range_kind, range_site) = extract_enum_range_spec(&member, ctx.ast_id_map);
+
+        if member.range_spec().is_some() && range_site.is_none() {
+            ctx.diagnostics.push(SemanticDiag {
+                kind: SemanticDiagKind::InternalError {
+                    detail: SmolStr::new("erased_ast_id returned None for enum range spec"),
+                },
+                primary: DiagSpan::Site(erased_ast_id),
+                label: None,
+            });
+        }
 
         let has_range = range_kind.is_some();
 
@@ -236,7 +231,7 @@ fn collect_enum_def(
             name_site: erased_ast_id,
             name_span: NameSpan::new(name_tok.text_range()),
             range: range_kind,
-            range_text_range,
+            range_site,
             init,
             init_literal_width,
         });
@@ -275,25 +270,25 @@ fn collect_enum_def(
 fn extract_enum_range_spec(
     member: &EnumMember,
     ast_id_map: &AstIdMap,
-) -> (Option<EnumMemberRangeKind>, Option<lyra_source::TextRange>) {
+) -> (Option<EnumMemberRangeKind>, Option<crate::Site>) {
     let Some(range_spec) = member.range_spec() else {
         return (None, None);
     };
-    let rtr = range_spec.text_range();
+    let site = ast_id_map.erased_ast_id(range_spec.syntax());
     let Some(first) = range_spec.first_expr() else {
-        return (None, Some(rtr));
+        return (None, site);
     };
     let first_id = ast_id_map.erased_ast_id(first.syntax());
     if let Some(second) = range_spec.second_expr() {
         let second_id = ast_id_map.erased_ast_id(second.syntax());
         match (first_id, second_id) {
-            (Some(f), Some(s)) => (Some(EnumMemberRangeKind::FromTo(f, s)), Some(rtr)),
-            _ => (None, Some(rtr)),
+            (Some(f), Some(s)) => (Some(EnumMemberRangeKind::FromTo(f, s)), site),
+            _ => (None, site),
         }
     } else {
         match first_id {
-            Some(f) => (Some(EnumMemberRangeKind::Count(f)), Some(rtr)),
-            None => (None, Some(rtr)),
+            Some(f) => (Some(EnumMemberRangeKind::Count(f)), site),
+            None => (None, site),
         }
     }
 }
@@ -366,7 +361,7 @@ fn collect_record_def(
         let ty = match member_ts {
             Some(ref ts) => {
                 collect_type_spec_refs(ctx, ts, scope);
-                extract_typeref_from_typespec(ts.syntax(), ctx.file, ctx.ast_id_map)
+                extract_typeref_from_typespec(ts.syntax(), ctx.ast_id_map)
             }
             None => TypeRef::Resolved(Ty::Error),
         };
@@ -413,7 +408,6 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Simple(SmolStr::new(ident.text())),
                     expected_ns: ExpectedNs::Exact(Namespace::Value),
-                    range: name_ref.text_range(),
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,
@@ -431,7 +425,6 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                     ctx.use_sites.push(UseSite {
                         path: NamePath::Qualified { segments },
                         expected_ns: ExpectedNs::Exact(Namespace::Value),
-                        range: qn.text_range(),
                         scope,
                         name_ref_site: ast_id.erase(),
                         order_key: 0,

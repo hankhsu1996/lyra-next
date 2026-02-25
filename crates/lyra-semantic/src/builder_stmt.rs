@@ -97,7 +97,6 @@ fn collect_name_refs_from_expr(
             ctx.use_sites.push(UseSite {
                 path: NamePath::Simple(SmolStr::new(ident.text())),
                 expected_ns: ExpectedNs::Exact(Namespace::Value),
-                range: name_ref.text_range(),
                 scope,
                 name_ref_site: ast_id.erase(),
                 order_key: 0,
@@ -117,7 +116,6 @@ fn collect_name_refs_from_expr(
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Qualified { segments },
                     expected_ns: ExpectedNs::Exact(Namespace::Value),
-                    range: qn.text_range(),
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,

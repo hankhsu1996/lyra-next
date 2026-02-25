@@ -270,7 +270,7 @@ pub(crate) fn lower_wildcard_local_conflicts(
 
         // Secondary label: "wildcard import of `name` realized here"
         if let Some(us) = def.use_sites.get(conflict.use_site_idx as usize)
-            && let Some(use_span) = pp.source_map.map_span(us.range)
+            && let Some(use_span) = pp.source_map.map_span(us.name_ref_site.text_range())
         {
             d = d.with_label(Label {
                 kind: LabelKind::Secondary,

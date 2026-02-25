@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Site;
-use lyra_source::{FileId, NameSpan, TextRange};
+use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
@@ -58,21 +58,21 @@ pub struct EnumMemberDef {
     pub name_site: Site,
     pub name_span: NameSpan,
     pub range: Option<EnumMemberRangeKind>,
-    pub range_text_range: Option<TextRange>,
+    pub range_site: Option<Site>,
     pub init: Option<Site>,
     /// Bit width of a sized literal initializer (e.g., `4'h5` -> `Some(4)`).
     /// `None` if no init, init is not a literal, or literal is unsized.
     pub init_literal_width: Option<u32>,
 }
 
-/// Wrapper for enum base type that always carries the source range.
+/// Wrapper for enum base type that always carries a stable anchor.
 ///
-/// `TypeRef::Resolved` has no span, so this wrapper ensures diagnostics
-/// always have a range to anchor to.
+/// `TypeRef::Resolved` has no site, so this wrapper ensures diagnostics
+/// always have an anchor to point to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumBase {
     pub tref: TypeRef,
-    pub range: TextRange,
+    pub type_site: Site,
 }
 
 /// Per-file enum definition with optional name, owner scope, and members.
@@ -133,7 +133,7 @@ pub struct EnumVariantTarget {
     pub enum_id: EnumId,
     /// Per-enum ordering index for value assignment; not a stable identity key.
     pub variant_ordinal: u32,
-    pub def_range: TextRange,
+    pub name_site: Site,
 }
 
 /// Per-file index of range-generated enum variant names, keyed by scope.

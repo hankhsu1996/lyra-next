@@ -32,11 +32,9 @@ pub(crate) fn collect_module_instantiation(
         && let Some(ast_id) = ctx.ast_id_map.ast_id(&inst)
     {
         let type_use_site_idx = ctx.use_sites.len() as u32;
-        let type_name_range = name_tok.text_range();
         ctx.use_sites.push(UseSite {
             path: NamePath::Simple(SmolStr::new(name_tok.text())),
             expected_ns: ExpectedNs::Exact(Namespace::Definition),
-            range: type_name_range,
             scope,
             name_ref_site: ast_id.erase(),
             order_key: 0,
@@ -82,8 +80,6 @@ pub(crate) fn collect_module_instantiation(
                 type_use_site_idx,
                 sym_id,
                 name: SmolStr::new(inst_name_tok.text()),
-                name_range: inst_name_tok.text_range(),
-                type_name_range,
                 scope,
             });
         }

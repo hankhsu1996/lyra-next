@@ -127,7 +127,6 @@ pub(crate) struct RawModportEntry {
 }
 
 pub(crate) struct DefContext<'a> {
-    pub(crate) file: FileId,
     pub(crate) ast_id_map: &'a AstIdMap,
     pub(crate) symbols: SymbolTableBuilder,
     pub(crate) scopes: ScopeTreeBuilder,
@@ -153,9 +152,8 @@ pub(crate) struct DefContext<'a> {
 }
 
 impl<'a> DefContext<'a> {
-    pub(crate) fn new(file: FileId, ast_id_map: &'a AstIdMap) -> Self {
+    pub(crate) fn new(_file: FileId, ast_id_map: &'a AstIdMap) -> Self {
         Self {
-            file,
             ast_id_map,
             symbols: SymbolTableBuilder::new(),
             scopes: ScopeTreeBuilder::new(),

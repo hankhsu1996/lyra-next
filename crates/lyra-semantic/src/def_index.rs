@@ -155,11 +155,11 @@ impl NamePath {
 }
 
 /// A recorded name-use site awaiting resolution.
+// Gap-1 contract: UseSite stores anchors only; no TextRange fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UseSite {
     pub path: NamePath,
     pub expected_ns: ExpectedNs,
-    pub range: TextRange,
     pub scope: ScopeId,
     pub name_ref_site: Site,
     /// File-local monotonic rank from preorder syntax traversal.
