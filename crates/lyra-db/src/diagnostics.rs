@@ -979,10 +979,9 @@ pub fn unit_diagnostics(
                 let dup_file_id = dup_def_id.file();
                 if let Some(dup_file) = source_file_by_id(db, unit, dup_file_id) {
                     let dup_def = def_index_file(db, dup_file);
-                    if let Some(&sym_id) = dup_def.name_site_to_symbol.get(&dup_def_id.ast_id()) {
-                        let sym = dup_def.symbols.get(sym_id);
+                    if let Some(entry) = dup_def.def_entry(*dup_def_id) {
                         let pp = preprocess_file(db, dup_file);
-                        let label_range = sym.name_span.text_range_or(sym.name_site.text_range());
+                        let label_range = entry.name_span.text_range();
                         if let Some(span) = pp.source_map.map_span(label_range) {
                             diags.push(
                                 lyra_diag::Diagnostic::new(

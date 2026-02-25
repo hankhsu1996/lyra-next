@@ -1,4 +1,5 @@
 use lyra_semantic::Site;
+use lyra_semantic::def_entry;
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use lyra_semantic::modport_def::ModportDefId;
@@ -13,7 +14,6 @@ use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::pipeline::preprocess_file;
 use crate::semantic::{
     compilation_unit_env, def_index_file, global_def_index, name_graph_file, package_scope_index,
-    symbol_at_name_site,
 };
 use crate::ty_resolve::{FieldTyError, FieldTyErrorKind, classify_for_record_field};
 use crate::type_queries::{TyRef, bit_width_total};
@@ -421,11 +421,9 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
     let unit = mref.unit(db);
     let modport_id = mref.modport_id(db);
 
-    let Some(gsym) = symbol_at_name_site(db, unit, modport_id.owner.global_def().ast_id()) else {
-        return empty_modport_sem();
-    };
-
-    let Some(src) = source_file_by_id(db, unit, gsym.file) else {
+    let iface_def_id = modport_id.owner.global_def();
+    let file_id = iface_def_id.ast_id().file();
+    let Some(src) = source_file_by_id(db, unit, file_id) else {
         return empty_modport_sem();
     };
     let def = def_index_file(db, src);
@@ -434,7 +432,12 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
         return empty_modport_sem();
     };
 
-    let iface_scope = def.symbols.get(gsym.local).scope;
+    let Some(entry) = def.def_entry(iface_def_id) else {
+        return empty_modport_sem();
+    };
+    let def_entry::DefScope::Owned(iface_scope) = entry.scope else {
+        return empty_modport_sem();
+    };
 
     let mut entries = Vec::new();
     let mut diags = Vec::new();

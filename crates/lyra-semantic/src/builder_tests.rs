@@ -43,10 +43,10 @@ fn package_symbols_collected() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    assert_eq!(def.exports.packages.len(), 1);
-    let pkg_sym = def.symbols.get(def.exports.packages[0]);
-    assert_eq!(pkg_sym.name.as_str(), "pkg");
-    assert_eq!(pkg_sym.kind, SymbolKind::Package);
+    assert_eq!(def.defs_by_name.len(), 1);
+    let pkg_entry = def.def_entry(def.defs_by_name[0]).expect("def entry");
+    assert_eq!(pkg_entry.name.as_str(), "pkg");
+    assert_eq!(pkg_entry.kind, crate::global_index::DefinitionKind::Package);
 
     let has_x = def
         .symbols
@@ -189,14 +189,13 @@ fn decl_site_points_to_expected_node_kind() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let module_sym = def
-        .symbols
+    let module_entry = def
+        .def_entries
         .iter()
-        .find(|(_, s)| s.name.as_str() == "m" && s.kind == SymbolKind::Module)
-        .map(|(_, s)| s);
-    assert!(module_sym.is_some());
+        .find(|e| e.name.as_str() == "m" && e.kind == crate::global_index::DefinitionKind::Module);
+    assert!(module_entry.is_some());
     assert_eq!(
-        module_sym.expect("checked").decl_site.kind(),
+        module_entry.expect("checked").decl_site.kind(),
         SyntaxKind::ModuleDecl,
     );
 
@@ -359,10 +358,9 @@ fn name_site_equals_decl_site_for_single_name() {
     let def = build_def_index(FileId(0), &parse, &map);
 
     let module = def
-        .symbols
+        .def_entries
         .iter()
-        .find(|(_, s)| s.kind == SymbolKind::Module)
-        .map(|(_, s)| s);
+        .find(|e| e.kind == crate::global_index::DefinitionKind::Module);
     assert_eq!(
         module.expect("module").name_site,
         module.expect("module").decl_site
@@ -437,14 +435,11 @@ fn type_site_none_for_untyped() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let module = def
-        .symbols
-        .iter()
-        .find(|(_, s)| s.kind == SymbolKind::Module)
-        .map(|(_, s)| s);
     assert!(
-        module.expect("module").type_site.is_none(),
-        "Module should have no type_site"
+        def.def_entries
+            .iter()
+            .any(|e| e.kind == crate::global_index::DefinitionKind::Module),
+        "Module should be a def entry (not a symbol)"
     );
 
     let inst = def

@@ -6,6 +6,7 @@ mod builder_types;
 pub(crate) mod builtin_methods;
 pub mod coerce;
 pub mod const_eval;
+pub mod def_entry;
 pub mod def_index;
 pub mod diagnostic;
 pub mod enum_def;

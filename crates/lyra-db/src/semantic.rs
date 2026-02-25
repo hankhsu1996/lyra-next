@@ -7,6 +7,7 @@ use lyra_semantic::global_index::{
     DefinitionKind, GlobalDefIndex, PackageLocalFacts, PackageScope, PackageScopeIndex,
 };
 use lyra_semantic::instance_decl::InstanceDeclIdx;
+use lyra_semantic::interface_id::InterfaceDefId;
 use lyra_semantic::name_graph::NameGraph;
 use lyra_semantic::resolve_index::{
     CoreResolveOutput, CoreResolveResult, ImportConflict, ResolveIndex,
@@ -50,21 +51,10 @@ pub fn global_def_index(db: &dyn salsa::Database, unit: CompilationUnit) -> Glob
     let mut entries: Vec<(SmolStr, GlobalDefId, DefinitionKind)> = Vec::new();
     for file in unit.files(db) {
         let def = def_index_file(db, *file);
-        // Collect all definition-namespace constructs (module, interface, program, primitive, config)
-        for &sym_id in &*def.exports.definitions {
-            let sym = def.symbols.get(sym_id);
-            if let Some(def_kind) = DefinitionKind::from_symbol_kind(sym.kind) {
-                entries.push((sym.name.clone(), GlobalDefId::new(sym.decl_site), def_kind));
+        for &def_id in &*def.defs_by_name {
+            if let Some(entry) = def.def_entry(def_id) {
+                entries.push((entry.name.clone(), def_id, entry.kind));
             }
-        }
-        // Collect packages (separate namespace per LRM 3.13(b))
-        for &sym_id in &*def.exports.packages {
-            let sym = def.symbols.get(sym_id);
-            entries.push((
-                sym.name.clone(),
-                GlobalDefId::new(sym.decl_site),
-                DefinitionKind::Package,
-            ));
         }
     }
     lyra_semantic::global_index::build_global_def_index(&entries)
@@ -81,9 +71,17 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
     for file in unit.files(db) {
         let def = def_index_file(db, *file);
         let graph = name_graph_file(db, *file);
-        for &sym_id in &*def.exports.packages {
-            let pkg_sym = def.symbols.get(sym_id);
-            let pkg_scope = pkg_sym.scope;
+        for &def_id in &*def.defs_by_name {
+            let Some(entry) = def.def_entry(def_id) else {
+                continue;
+            };
+            if entry.kind != DefinitionKind::Package {
+                continue;
+            }
+            let pkg_scope = match entry.scope {
+                lyra_semantic::def_entry::DefScope::Owned(s) => s,
+                lyra_semantic::def_entry::DefScope::None => continue,
+            };
             let scope_data = def.scopes.get(pkg_scope);
             if scope_data.kind != ScopeKind::Package {
                 continue;
@@ -120,7 +118,7 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
                 .collect();
 
             all_facts.push(PackageLocalFacts {
-                name: pkg_sym.name.clone(),
+                name: entry.name.clone(),
                 value_ns,
                 type_ns,
                 imports: import_names,
@@ -313,8 +311,8 @@ pub fn resolve_index_file(
 /// Check whether an instance declaration refers to an interface type.
 ///
 /// Uses the already-computed `resolve_core_file` result to look up the
-/// instance's type-name use-site resolution, then checks the global
-/// definition index for `DefinitionKind::Interface`.
+/// instance's type-name use-site resolution, then checks whether the
+/// definition target is an interface.
 fn instance_decl_is_interface(
     core: &CoreResolveOutput,
     def: &DefIndex,
@@ -329,7 +327,7 @@ fn instance_decl_is_interface(
         def: def_id,
     }) = result
     {
-        matches!(global.def_kind(*def_id), Some(DefinitionKind::Interface))
+        InterfaceDefId::try_from_global_index(global, *def_id).is_some()
     } else {
         false
     }

@@ -126,11 +126,11 @@ fn module_not_in_lexical_scope() {
         !unresolved.is_empty(),
         "module name 'm' should not resolve as a lexical name: {diags:?}"
     );
-    // But exports should contain it
+    // But def_entries should contain it
     let def = def_index_file(&db, file);
     assert!(
-        !def.exports.definitions.is_empty(),
-        "module 'm' should be in exports"
+        !def.defs_by_name.is_empty(),
+        "module 'm' should be in def_entries"
     );
 }
 

@@ -215,12 +215,17 @@ fn type_of_error_dim() {
 fn type_of_module_symbol() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "module m; endmodule");
-    let unit = single_file_unit(&db, file);
-    let ty = get_type(&db, file, unit, "m");
-    assert_eq!(
-        ty,
-        SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind)
+    let def = def_index_file(&db, file);
+    // Modules are def-namespace entries, not symbols
+    let has_module_sym = def.symbols.iter().any(|(_, s)| s.name == "m");
+    assert!(
+        !has_module_sym,
+        "module should not appear in the symbol table"
     );
+    let has_module_def = def.def_entries.iter().any(|e| {
+        e.name.as_str() == "m" && e.kind == lyra_semantic::global_index::DefinitionKind::Module
+    });
+    assert!(has_module_def, "module should appear in def_entries");
 }
 
 #[test]
