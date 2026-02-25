@@ -55,9 +55,12 @@ fn modport_sem_resolves_members() {
 
     // Resolve req and gnt in the interface scope to get their SymbolIds
     let def = def_index_file(&db, file);
-    let gsym = symbol_at_name_site(&db, unit, modport_id.owner.global_def().ast_id())
-        .expect("interface symbol");
-    let iface_scope = def.symbols.get(gsym.local).scope;
+    let entry = def
+        .def_entry(modport_id.owner.global_def())
+        .expect("interface def entry");
+    let lyra_semantic::def_entry::DefScope::Owned(iface_scope) = entry.scope else {
+        panic!("interface should own a scope");
+    };
 
     def.scopes
         .resolve(&def.symbols, iface_scope, Namespace::Value, "req")
@@ -156,7 +159,7 @@ fn modport_sem_duplicate_member() {
 }
 
 #[test]
-fn symbol_at_name_site_resolves_interface() {
+fn def_entry_resolves_interface() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "interface bus; endinterface");
     let unit = single_file_unit(&db, file);
@@ -169,9 +172,11 @@ fn symbol_at_name_site_resolves_interface() {
         .map(|(_, def_id, _)| *def_id)
         .expect("should find bus");
 
-    let gsym = symbol_at_name_site(&db, unit, iface_def_id.ast_id()).expect("should resolve");
     let def = def_index_file(&db, file);
-    let sym = def.symbols.get(gsym.local);
-    assert_eq!(sym.name.as_str(), "bus");
-    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Interface);
+    let entry = def.def_entry(iface_def_id).expect("def entry should exist");
+    assert_eq!(entry.name.as_str(), "bus");
+    assert_eq!(
+        entry.kind,
+        lyra_semantic::global_index::DefinitionKind::Interface
+    );
 }

@@ -90,7 +90,8 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
 
         let sym = match &resolution.target {
             lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => s,
-            lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
+            lyra_semantic::resolve_index::ResolvedTarget::Def(_)
+            | lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
                 return Err(ConstEvalError::NonConstant);
             }
         };
@@ -230,6 +231,9 @@ fn resolve_type_from_typespec(
     let res = resolve.resolutions.get(&name_site_id)?;
     let sym_id = match &res.target {
         lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+        lyra_semantic::resolve_index::ResolvedTarget::Def(def_id) => {
+            return Some(crate::ty_resolve::def_target_ty(db, unit, *def_id));
+        }
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
             return Some(Ty::Enum(ev.enum_id));
         }
@@ -261,6 +265,9 @@ fn resolve_as_type(
     if let Some(res) = resolve.resolutions.get(&ast_id) {
         let sym_id = match &res.target {
             lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+            lyra_semantic::resolve_index::ResolvedTarget::Def(def_id) => {
+                return Some(crate::ty_resolve::def_target_ty(db, unit, *def_id));
+            }
             lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
                 return Some(Ty::Enum(ev.enum_id));
             }
@@ -348,14 +355,6 @@ fn core_resolution_to_ty(
                 _ => None,
             }
         }
-        CoreResolveResult::Resolved(CoreResolution::Def { def }) => {
-            let sym_id = crate::semantic::symbol_at_name_site(db, unit, def.ast_id())?;
-            let sym_ref = SymbolRef::new(db, unit, sym_id);
-            match type_of_symbol_raw(db, sym_ref) {
-                SymbolType::TypeAlias(ty) => Some(ty),
-                _ => None,
-            }
-        }
         CoreResolveResult::Resolved(CoreResolution::Pkg { name_site, .. }) => {
             let sym_id = crate::semantic::symbol_at_name_site(db, unit, *name_site)?;
             let sym_ref = SymbolRef::new(db, unit, sym_id);
@@ -367,7 +366,8 @@ fn core_resolution_to_ty(
         CoreResolveResult::Resolved(CoreResolution::EnumVariant(target)) => {
             Some(Ty::Enum(target.enum_id))
         }
-        CoreResolveResult::Unresolved(_) => None,
+        CoreResolveResult::Resolved(CoreResolution::Def { .. })
+        | CoreResolveResult::Unresolved(_) => None,
     }
 }
 

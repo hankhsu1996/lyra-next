@@ -220,6 +220,25 @@ fn module_instance_not_interface_type() {
 }
 
 #[test]
+fn interface_variable_with_unpacked_dims() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "interface intf; endinterface module m; intf a[2]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "a");
+    match ty {
+        SymbolType::Value(Ty::Array { ref elem, .. }) => match elem.as_ref() {
+            Ty::Interface(_) => {}
+            other => panic!("expected Array(Interface), got Array({other:?})"),
+        },
+        other => panic!("expected Value(Array{{Interface, ..}}), got {other:?}"),
+    }
+}
+
+#[test]
 fn port_with_keyword_type_still_works() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "module m(input logic a); endmodule");

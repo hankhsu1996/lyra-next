@@ -1,11 +1,13 @@
 use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
+use lyra_semantic::global_index::DefinitionKind;
+use lyra_semantic::interface_id::InterfaceDefId;
 use lyra_semantic::resolve_index::CoreResolveResult;
-use lyra_semantic::symbols::GlobalSymbolId;
-use lyra_semantic::types::Ty;
+use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId};
+use lyra_semantic::types::{InterfaceType, Ty};
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
-use crate::semantic::def_index_file;
+use crate::semantic::{def_index_file, global_def_index};
 use crate::type_queries::{SymbolRef, type_of_symbol};
 use crate::{CompilationUnit, source_file_by_id};
 
@@ -36,19 +38,7 @@ fn classify_resolve_result(
                     local: *symbol,
                 },
                 CoreResolution::Def { def } => {
-                    let anchor = def.ast_id();
-                    let target_file_id = anchor.file();
-                    let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
-                        return TypeResolveOutcome::Ok(Ty::Error);
-                    };
-                    let target_def = def_index_file(db, target_file);
-                    let Some(&sym_id) = target_def.name_site_to_symbol.get(&anchor) else {
-                        return TypeResolveOutcome::Ok(Ty::Error);
-                    };
-                    GlobalSymbolId {
-                        file: target_file_id,
-                        local: sym_id,
-                    }
+                    return TypeResolveOutcome::Ok(def_target_ty(db, unit, *def));
                 }
                 CoreResolution::Pkg { name_site, .. } => {
                     let target_file_id = name_site.file();
@@ -138,6 +128,54 @@ pub(crate) struct FieldTyError {
 pub(crate) enum FieldTyErrorKind {
     UndeclaredType,
     NotAType,
+}
+
+/// Semantic classification of a definition-namespace target.
+pub(crate) enum DefTargetSem {
+    Interface(InterfaceDefId),
+    Other,
+}
+
+/// Classify a `GlobalDefId` into its semantic role.
+///
+/// All consumers that need to branch on definition kind should call this
+/// single canonical function rather than re-checking `entry.kind` themselves.
+pub(crate) fn def_target_sem(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    def_id: GlobalDefId,
+) -> Option<DefTargetSem> {
+    let target_file_id = def_id.ast_id().file();
+    let target_file = source_file_by_id(db, unit, target_file_id)?;
+    let target_def = def_index_file(db, target_file);
+    let entry = target_def.def_entry(def_id)?;
+    match entry.kind {
+        DefinitionKind::Interface => {
+            let global = global_def_index(db, unit);
+            InterfaceDefId::try_from_global_index(global, def_id)
+                .map(DefTargetSem::Interface)
+                .or(Some(DefTargetSem::Other))
+        }
+        _ => Some(DefTargetSem::Other),
+    }
+}
+
+/// Classify a definition-namespace target into a `Ty`.
+///
+/// Thin wrapper over `def_target_sem`. Only interfaces produce a meaningful
+/// type (`Ty::Interface`); all other definition kinds produce `Ty::Error`.
+pub(crate) fn def_target_ty(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    def_id: GlobalDefId,
+) -> Ty {
+    match def_target_sem(db, unit, def_id) {
+        Some(DefTargetSem::Interface(iface)) => Ty::Interface(InterfaceType {
+            iface,
+            modport: None,
+        }),
+        _ => Ty::Error,
+    }
 }
 
 /// Classify a `CoreResolveResult` for a record field, returning a `Ty` and

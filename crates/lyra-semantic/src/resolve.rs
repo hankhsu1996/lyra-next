@@ -1036,13 +1036,12 @@ pub fn build_resolve_index(
                 }
             }
             CoreResolveResult::Resolved(CoreResolution::Def { def }) => {
-                resolve_cross_file(
-                    def.ast_id(),
-                    Namespace::Definition,
-                    use_site,
-                    lookup_decl,
-                    &mut resolutions,
-                    &mut diagnostics,
+                resolutions.insert(
+                    use_site.name_ref_site,
+                    Resolution {
+                        target: ResolvedTarget::Def(*def),
+                        namespace: Namespace::Definition,
+                    },
                 );
             }
             CoreResolveResult::Resolved(CoreResolution::Pkg {

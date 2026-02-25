@@ -18,25 +18,26 @@ fn cross_file_module_instantiation() {
     );
     let unit = new_compilation_unit(&db, vec![file_a, file_b]);
 
-    // Cursor on 'adder' in file_b's instantiation
-    let text_b = file_b.text(&db);
-    let adder_pos = text_b.find("adder").expect("should find 'adder'");
-    let result = resolve_at(
-        &db,
-        file_b,
-        unit,
-        lyra_source::TextSize::new(adder_pos as u32),
+    // Verify the module instantiation resolves (no unresolved diagnostics)
+    let diags = file_diagnostics(&db, file_b, unit);
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            let msg = d.render_message();
+            msg.contains("unresolved") && msg.contains("adder")
+        })
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "'adder' should resolve cross-file: {diags:?}"
     );
-    assert!(result.is_some(), "'adder' should resolve cross-file");
-    let sym_id = result.expect("checked above");
-    assert_eq!(
-        sym_id.file,
-        lyra_source::FileId(0),
-        "should resolve to file_a"
-    );
-    let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-    assert_eq!(sym.name.as_str(), "adder");
-    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Module);
+    // Verify it appears in the global def index
+    let global = global_def_index(&db, unit);
+    let (def_id, kind) = global
+        .resolve_definition("adder")
+        .expect("adder should be in global def index");
+    assert_eq!(def_id.ast_id().file(), lyra_source::FileId(0));
+    assert_eq!(kind, lyra_semantic::global_index::DefinitionKind::Module);
 }
 
 #[test]
@@ -209,13 +210,14 @@ fn def_resolves_to_def_variant() {
                 lyra_source::FileId(0),
                 "def anchor should point to file_a"
             );
-            // Verify symbol_at_name_site resolves this
-            let gsym = symbol_at_name_site(&db, unit, anchor).expect("should resolve def anchor");
-            assert_eq!(gsym.file, lyra_source::FileId(0));
+            // Verify def_entry resolves this
             let def_a = def_index_file(&db, file_a);
-            let sym = def_a.symbols.get(gsym.local);
-            assert_eq!(sym.name.as_str(), "adder");
-            assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Module);
+            let entry = def_a.def_entry(*def).expect("def entry should exist");
+            assert_eq!(entry.name.as_str(), "adder");
+            assert_eq!(
+                entry.kind,
+                lyra_semantic::global_index::DefinitionKind::Module
+            );
         }
         other => panic!("expected CoreResolution::Def, got {other:?}"),
     }

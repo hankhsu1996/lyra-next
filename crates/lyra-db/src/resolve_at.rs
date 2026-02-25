@@ -124,7 +124,7 @@ fn find_qualified_name_at(
 fn resolution_to_symbol(target: &ResolvedTarget) -> Option<GlobalSymbolId> {
     match target {
         ResolvedTarget::Symbol(sym) => Some(*sym),
-        ResolvedTarget::EnumVariant(_) => None,
+        ResolvedTarget::Def(_) | ResolvedTarget::EnumVariant(_) => None,
     }
 }
 
@@ -227,18 +227,16 @@ impl<'db> TyFmt<'db> {
     }
 
     fn interface_name(&self, iface_ty: &lyra_semantic::types::InterfaceType) -> String {
-        use crate::semantic::symbol_at_name_site;
-
-        let Some(gsym) =
-            symbol_at_name_site(self.db, self.unit, iface_ty.iface.global_def().ast_id())
-        else {
-            return "interface".to_string();
-        };
-        let Some(src) = source_file_by_id(self.db, self.unit, gsym.file) else {
+        let iface_def_id = iface_ty.iface.global_def();
+        let file_id = iface_def_id.ast_id().file();
+        let Some(src) = source_file_by_id(self.db, self.unit, file_id) else {
             return "interface".to_string();
         };
         let def = def_index_file(self.db, src);
-        let iface_name = def.symbols.get(gsym.local).name.clone();
+        let Some(entry) = def.def_entry(iface_def_id) else {
+            return "interface".to_string();
+        };
+        let iface_name = entry.name.clone();
         match iface_ty.modport {
             Some(mp_id) => {
                 let mp_name = def.modport_defs.get(&mp_id).map(|d| d.name.as_str());

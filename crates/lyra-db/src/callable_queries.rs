@@ -3,14 +3,13 @@ use std::sync::Arc;
 use lyra_ast::{AstNode, FunctionDecl, TaskDecl};
 use lyra_lexer::SyntaxKind;
 use lyra_semantic::UserTypeRef;
-use lyra_semantic::interface_id::InterfaceDefId;
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::types::{InterfaceType, SymbolType, Ty};
 use smol_str::SmolStr;
 
 use crate::module_sig::{CallableKind, CallableSig, PortDirection, TfPortSig};
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::semantic::{base_resolve_index, def_index_file, global_def_index, resolve_index_file};
+use crate::semantic::{base_resolve_index, def_index_file, resolve_index_file};
 use crate::type_queries::{SymbolRef, type_of_symbol, type_of_symbol_raw};
 use crate::{CompilationUnit, source_file_by_id};
 
@@ -46,19 +45,13 @@ fn resolve_typespec_ty_with(
     };
     let target = match &res.target {
         lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+        lyra_semantic::resolve_index::ResolvedTarget::Def(def_id) => {
+            return resolve_def_interface_ty(db, unit, &utr, *def_id);
+        }
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
             return Ty::Enum(ev.enum_id);
         }
     };
-    let Some(target_file) = source_file_by_id(db, unit, target.file) else {
-        return Ty::Error;
-    };
-    let target_def = def_index_file(db, target_file);
-    let target_info = target_def.symbols.get(target.local);
-
-    if target_info.kind == SymbolKind::Interface {
-        return resolve_interface_ty(db, unit, &utr, target_def, target.local);
-    }
 
     let sym_type = type_of_sym(db, unit, target);
     match sym_type {
@@ -67,22 +60,24 @@ fn resolve_typespec_ty_with(
     }
 }
 
-fn resolve_interface_ty(
+fn resolve_def_interface_ty(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     utr: &UserTypeRef,
-    target_def: &lyra_semantic::def_index::DefIndex,
-    local_sym: lyra_semantic::symbols::SymbolId,
+    def_id: lyra_semantic::symbols::GlobalDefId,
 ) -> Ty {
-    let Some(def_id) = target_def.symbol_global_def(local_sym) else {
-        return Ty::Error;
-    };
-    let global = global_def_index(db, unit);
-    let Some(iface_def) = InterfaceDefId::try_from_global_index(global, def_id) else {
+    use crate::ty_resolve::{DefTargetSem, def_target_sem};
+
+    let Some(DefTargetSem::Interface(iface_def)) = def_target_sem(db, unit, def_id) else {
         return Ty::Error;
     };
     let modport = match utr {
         UserTypeRef::InterfaceModport { modport_name, .. } => {
+            let target_file_id = def_id.ast_id().file();
+            let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
+                return Ty::Error;
+            };
+            let target_def = def_index_file(db, target_file);
             match target_def.modport_by_name(iface_def, modport_name.as_str()) {
                 Some(mp_def) => Some(mp_def.id),
                 None => return Ty::Error,

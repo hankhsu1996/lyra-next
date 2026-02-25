@@ -19,6 +19,9 @@ pub(crate) fn resolve_type_arg_impl(
     let resolution = resolve.resolutions.get(&ast_id)?;
     let sym_id = match &resolution.target {
         lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+        lyra_semantic::resolve_index::ResolvedTarget::Def(def_id) => {
+            return Some(crate::ty_resolve::def_target_ty(db, unit, *def_id));
+        }
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
             return Some(Ty::Enum(target.enum_id));
         }

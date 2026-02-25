@@ -1,6 +1,5 @@
 use lyra_lexer::SyntaxKind;
 use lyra_semantic::UserTypeRef;
-use lyra_semantic::interface_id::InterfaceDefId;
 use lyra_semantic::record::{Packing, RecordKind, SymbolOrigin};
 use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::GlobalSymbolId;
@@ -11,7 +10,7 @@ use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::enum_queries::{EnumRef, enum_sem};
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::record_queries::{RecordRef, record_field_tys};
-use crate::semantic::{def_index_file, global_def_index, resolve_core_file, resolve_index_file};
+use crate::semantic::{def_index_file, resolve_core_file, resolve_index_file};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
 /// Identifies a symbol for type extraction.
@@ -250,7 +249,7 @@ fn type_of_instance(
     idx: lyra_semantic::instance_decl::InstanceDeclIdx,
     kind: lyra_semantic::symbols::SymbolKind,
 ) -> lyra_semantic::types::SymbolType {
-    use lyra_semantic::global_index::DefinitionKind;
+    use crate::ty_resolve::{DefTargetSem, def_target_sem};
     use lyra_semantic::resolve_index::CoreResolution;
     use lyra_semantic::types::{SymbolType, SymbolTypeError};
 
@@ -266,26 +265,96 @@ fn type_of_instance(
         return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
     };
 
-    let global = global_def_index(db, unit);
-    match global.def_kind(*def_id) {
-        Some(DefinitionKind::Interface) => {
-            let Some(iface_def) = InterfaceDefId::try_from_global_index(global, *def_id) else {
-                return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
-            };
-            classify(
-                Ty::Interface(InterfaceType {
-                    iface: iface_def,
-                    modport: None,
-                }),
-                kind,
-            )
-        }
+    match def_target_sem(db, unit, *def_id) {
+        Some(DefTargetSem::Interface(iface_def)) => classify(
+            Ty::Interface(InterfaceType {
+                iface: iface_def,
+                modport: None,
+            }),
+            kind,
+        ),
         _ => SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
     }
 }
 
-/// Expand a user-defined type reference via single-step typedef resolution.
+/// Resolve a definition-namespace target to its base `Ty` (no dims).
 ///
+/// For interfaces, produces `Ty::Interface(...)`.
+/// All other definition kinds produce an error.
+/// Dims are applied by the caller (`expand_typedef`), not here.
+fn resolve_def_base_ty(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    def_id: lyra_semantic::symbols::GlobalDefId,
+    user_type: &UserTypeRef,
+) -> Result<Ty, lyra_semantic::types::SymbolType> {
+    use crate::ty_resolve::{DefTargetSem, def_target_sem};
+    use lyra_semantic::types::{SymbolType, SymbolTypeError};
+
+    let Some(DefTargetSem::Interface(iface_def)) = def_target_sem(db, unit, def_id) else {
+        return Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved));
+    };
+    let modport = match user_type {
+        UserTypeRef::InterfaceModport { modport_name, .. } => {
+            let target_file_id = def_id.ast_id().file();
+            let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
+                return Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved));
+            };
+            let target_def = def_index_file(db, target_file);
+            match target_def.modport_by_name(iface_def, modport_name.as_str()) {
+                Some(mp_def) => Some(mp_def.id),
+                None => return Err(SymbolType::Error(SymbolTypeError::UnknownModport)),
+            }
+        }
+        _ => None,
+    };
+    Ok(Ty::Interface(InterfaceType {
+        iface: iface_def,
+        modport,
+    }))
+}
+
+/// Resolve a symbol-namespace target (typedef) to its base `Ty` (no dims).
+///
+/// For typedefs, chases one level of typedef indirection and returns the
+/// underlying type. Dims are applied by the caller.
+fn resolve_symbol_base_ty(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    target_id: lyra_semantic::symbols::GlobalSymbolId,
+    user_type: &UserTypeRef,
+) -> Result<Ty, lyra_semantic::types::SymbolType> {
+    use lyra_semantic::types::{SymbolType, SymbolTypeError};
+
+    let Some(target_file) = source_file_by_id(db, unit, target_id.file) else {
+        return Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved));
+    };
+    let target_def = def_index_file(db, target_file);
+    let target_info = target_def.symbols.get(target_id.local);
+
+    match target_info.kind {
+        lyra_semantic::symbols::SymbolKind::Typedef => {
+            if matches!(user_type, UserTypeRef::InterfaceModport { .. }) {
+                return Err(SymbolType::Error(SymbolTypeError::ModportOnNonInterface));
+            }
+            let typedef_ref = SymbolRef::new(db, unit, target_id);
+            let typedef_type = type_of_symbol_raw(db, typedef_ref);
+
+            match &typedef_type {
+                SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => Ok(ty.clone()),
+                SymbolType::Error(e) => Err(SymbolType::Error(*e)),
+                SymbolType::Net(_) => Err(SymbolType::Error(
+                    SymbolTypeError::TypedefUnderlyingUnsupported,
+                )),
+            }
+        }
+        _ if matches!(user_type, UserTypeRef::InterfaceModport { .. }) => {
+            Err(SymbolType::Error(SymbolTypeError::ModportOnNonInterface))
+        }
+        _ => Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved)),
+    }
+}
+
 /// `dim_source` is the node whose children contain unpacked dims to merge
 /// (Declarator for variables, Port node for ports, None for typedefs).
 /// `caller_kind` is the symbol kind of the declaration being typed, used
@@ -312,90 +381,34 @@ fn expand_typedef(
         return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
     };
 
-    let target_id = match &resolution.target {
-        lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
+    // Resolve to base Ty (no dims). All target kinds go through this.
+    let base_ty = match &resolution.target {
+        lyra_semantic::resolve_index::ResolvedTarget::Def(def_id) => {
+            match resolve_def_base_ty(db, unit, *def_id, user_type) {
+                Ok(ty) => ty,
+                Err(e) => return e,
+            }
+        }
+        lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => {
+            match resolve_symbol_base_ty(db, unit, *s, user_type) {
+                Ok(ty) => ty,
+                Err(e) => return e,
+            }
+        }
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
             return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
         }
     };
 
-    // Look up target symbol kind
-    let Some(target_file) = source_file_by_id(db, unit, target_id.file) else {
-        return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
-    };
-    let target_def = def_index_file(db, target_file);
-    let target_info = target_def.symbols.get(target_id.local);
-
-    let ty = match target_info.kind {
-        lyra_semantic::symbols::SymbolKind::Interface => {
-            let Some(def_id) = target_def.symbol_global_def(target_id.local) else {
-                return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
-            };
-            let global = global_def_index(db, unit);
-            let Some(iface_def) = InterfaceDefId::try_from_global_index(global, def_id) else {
-                return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
-            };
-            let modport = match &user_type {
-                UserTypeRef::InterfaceModport { modport_name, .. } => {
-                    match target_def.modport_by_name(iface_def, modport_name.as_str()) {
-                        Some(mp_def) => Some(mp_def.id),
-                        None => return SymbolType::Error(SymbolTypeError::UnknownModport),
-                    }
-                }
-                _ => None,
-            };
-            Ty::Interface(InterfaceType {
-                iface: iface_def,
-                modport,
-            })
-        }
-        lyra_semantic::symbols::SymbolKind::Typedef => {
-            if matches!(user_type, UserTypeRef::InterfaceModport { .. }) {
-                return SymbolType::Error(SymbolTypeError::ModportOnNonInterface);
-            }
-            // Recursively get the typedef's type (Salsa cycle detection)
-            let typedef_ref = SymbolRef::new(db, unit, target_id);
-            let typedef_type = type_of_symbol_raw(db, typedef_ref);
-
-            let underlying_ty = match &typedef_type {
-                SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => ty.clone(),
-                SymbolType::Error(e) => return SymbolType::Error(*e),
-                SymbolType::Net(_) => {
-                    return SymbolType::Error(SymbolTypeError::TypedefUnderlyingUnsupported);
-                }
-            };
-
-            // Collect use-site unpacked dims from dim source node
-            let use_site_unpacked: Vec<UnpackedDim> = dim_source
-                .map(|d| lyra_semantic::extract_unpacked_dims(d, id_map))
-                .unwrap_or_default();
-
-            let wrap = if caller_kind == lyra_semantic::symbols::SymbolKind::Typedef {
-                SymbolType::TypeAlias
-            } else {
-                SymbolType::Value
-            };
-            return wrap(lyra_semantic::wrap_unpacked(
-                underlying_ty,
-                &use_site_unpacked,
-            ));
-        }
-        _ if matches!(user_type, UserTypeRef::InterfaceModport { .. }) => {
-            return SymbolType::Error(SymbolTypeError::ModportOnNonInterface);
-        }
-        _ => return SymbolType::Error(SymbolTypeError::UserTypeUnresolved),
-    };
-
-    // Common wrapping + classification for non-typedef type targets
+    // Apply use-site unpacked dims uniformly
     let use_site_unpacked: Vec<UnpackedDim> = dim_source
         .map(|d| lyra_semantic::extract_unpacked_dims(d, id_map))
         .unwrap_or_default();
-    let wrap = if caller_kind == lyra_semantic::symbols::SymbolKind::Typedef {
-        SymbolType::TypeAlias
-    } else {
-        SymbolType::Value
-    };
-    wrap(lyra_semantic::wrap_unpacked(ty, &use_site_unpacked))
+
+    classify(
+        lyra_semantic::wrap_unpacked(base_ty, &use_site_unpacked),
+        caller_kind,
+    )
 }
 
 fn classify(ty: Ty, kind: lyra_semantic::symbols::SymbolKind) -> lyra_semantic::types::SymbolType {

@@ -9,15 +9,17 @@ use smol_str::SmolStr;
 use crate::builder_order::{assign_order_keys, detect_duplicates};
 use crate::builder_types::{collect_name_refs, collect_type_spec_refs, collect_typedef};
 
-use crate::def_index::{DefIndex, Exports, Import, LocalDecl, LocalDeclId, UseSite};
+use crate::def_entry::{DefEntry, DefEntryBuilder, DefScope};
+use crate::def_index::{DefIndex, Import, LocalDecl, LocalDeclId, UseSite};
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::EnumDef;
+use crate::global_index::DefinitionKind;
 use crate::instance_decl::InstanceDecl;
 use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId};
 use crate::record::{RecordDef, SymbolOrigin};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
-use crate::symbols::{Namespace, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
+use crate::symbols::{GlobalDefId, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
 
 pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> DefIndex {
     let mut ctx = DefContext::new(file, ast_id_map);
@@ -30,10 +32,20 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
     let symbols = ctx.symbols.freeze();
     let scopes = ctx.scopes.freeze(&symbols);
 
-    ctx.export_definitions
-        .sort_by(|a, b| symbols.get(*a).name.cmp(&symbols.get(*b).name));
-    ctx.export_packages
-        .sort_by(|a, b| symbols.get(*a).name.cmp(&symbols.get(*b).name));
+    let def_entries = ctx.def_entries.freeze();
+    let name_site_to_def = ctx.name_site_to_def;
+    let mut defs_by_name: Vec<GlobalDefId> = name_site_to_def.values().copied().collect();
+    defs_by_name.sort_by(|a, b| {
+        let ea = def_entries
+            .iter()
+            .find(|e| e.decl_site == a.ast_id())
+            .map(|e| (&e.name, e.kind as u8, e.decl_site));
+        let eb = def_entries
+            .iter()
+            .find(|e| e.decl_site == b.ast_id())
+            .map(|e| (&e.name, e.kind as u8, e.decl_site));
+        ea.cmp(&eb)
+    });
 
     let mut diagnostics = ctx.diagnostics;
     for scope_idx in 0..scopes.len() {
@@ -71,10 +83,9 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         file,
         symbols,
         scopes,
-        exports: Exports {
-            definitions: ctx.export_definitions.into_boxed_slice(),
-            packages: ctx.export_packages.into_boxed_slice(),
-        },
+        def_entries,
+        name_site_to_def,
+        defs_by_name: defs_by_name.into_boxed_slice(),
         use_sites: ctx.use_sites.into_boxed_slice(),
         imports: ctx.imports.into_boxed_slice(),
         local_decls: ctx.local_decls.into_boxed_slice(),
@@ -130,8 +141,8 @@ pub(crate) struct DefContext<'a> {
     pub(crate) ast_id_map: &'a AstIdMap,
     pub(crate) symbols: SymbolTableBuilder,
     pub(crate) scopes: ScopeTreeBuilder,
-    pub(crate) export_definitions: Vec<SymbolId>,
-    pub(crate) export_packages: Vec<SymbolId>,
+    pub(crate) def_entries: DefEntryBuilder,
+    pub(crate) name_site_to_def: HashMap<crate::Site, GlobalDefId>,
     pub(crate) name_site_to_symbol: HashMap<crate::Site, SymbolId>,
     pub(crate) name_site_to_init_expr: HashMap<crate::Site, Option<crate::Site>>,
     pub(crate) use_sites: Vec<UseSite>,
@@ -145,7 +156,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) local_decl_ordinals: HashMap<ScopeId, u32>,
     pub(crate) import_ordinals: HashMap<ScopeId, u32>,
     pub(crate) export_ordinals: HashMap<ScopeId, u32>,
-    pub(crate) current_iface_def_id: Option<crate::symbols::GlobalDefId>,
+    pub(crate) current_iface_def_id: Option<GlobalDefId>,
     pub(crate) modport_ordinal: u32,
     pub(crate) diagnostics: Vec<SemanticDiag>,
     pub(crate) internal_errors: Vec<(TextRange, SmolStr)>,
@@ -157,8 +168,8 @@ impl<'a> DefContext<'a> {
             ast_id_map,
             symbols: SymbolTableBuilder::new(),
             scopes: ScopeTreeBuilder::new(),
-            export_definitions: Vec::new(),
-            export_packages: Vec::new(),
+            def_entries: DefEntryBuilder::new(),
+            name_site_to_def: HashMap::new(),
             name_site_to_symbol: HashMap::new(),
             name_site_to_init_expr: HashMap::new(),
             use_sites: Vec::new(),
@@ -187,9 +198,6 @@ impl<'a> DefContext<'a> {
         let sym = self.symbols.get(sym_id);
         self.name_site_to_symbol.insert(sym.name_site, sym_id);
         let ns = sym.kind.namespace();
-        if ns == Namespace::Definition {
-            return;
-        }
         let name = sym.name.clone();
         let name_span = sym.name_span;
         let scope = sym.scope;
@@ -213,12 +221,6 @@ impl<'a> DefContext<'a> {
     pub(crate) fn push_symbol(&mut self, sym: Symbol) -> SymbolId {
         debug_assert!(
             match sym.kind {
-                SymbolKind::Module => sym.decl_site.kind() == SyntaxKind::ModuleDecl,
-                SymbolKind::Package => sym.decl_site.kind() == SyntaxKind::PackageDecl,
-                SymbolKind::Interface => sym.decl_site.kind() == SyntaxKind::InterfaceDecl,
-                SymbolKind::Program => sym.decl_site.kind() == SyntaxKind::ProgramDecl,
-                SymbolKind::Primitive => sym.decl_site.kind() == SyntaxKind::PrimitiveDecl,
-                SymbolKind::Config => sym.decl_site.kind() == SyntaxKind::ConfigDecl,
                 SymbolKind::Function => sym.decl_site.kind() == SyntaxKind::FunctionDecl,
                 SymbolKind::Task => sym.decl_site.kind() == SyntaxKind::TaskDecl,
                 SymbolKind::Variable => sym.decl_site.kind() == SyntaxKind::VarDecl,
@@ -230,6 +232,12 @@ impl<'a> DefContext<'a> {
                 SymbolKind::EnumMember => sym.decl_site.kind() == SyntaxKind::EnumMember,
                 SymbolKind::Modport => sym.decl_site.kind() == SyntaxKind::ModportItem,
                 SymbolKind::Instance => sym.decl_site.kind() == SyntaxKind::ModuleInstantiation,
+                SymbolKind::Module
+                | SymbolKind::Package
+                | SymbolKind::Interface
+                | SymbolKind::Program
+                | SymbolKind::Primitive
+                | SymbolKind::Config => false,
             },
             "decl_site kind {:?} does not match SymbolKind::{:?}",
             sym.decl_site.kind(),
@@ -249,11 +257,33 @@ impl<'a> DefContext<'a> {
         id
     }
 
+    /// Push a definition-namespace entry (module, package, interface, etc.).
+    pub(crate) fn push_def_entry(
+        &mut self,
+        decl_site: crate::Site,
+        kind: DefinitionKind,
+        name: SmolStr,
+        name_span: NameSpan,
+        scope: DefScope,
+    ) -> GlobalDefId {
+        let entry = DefEntry {
+            kind,
+            name,
+            decl_site,
+            name_site: decl_site,
+            name_span,
+            scope,
+        };
+        let def_id = self.def_entries.push(decl_site, entry);
+        self.name_site_to_def.insert(decl_site, def_id);
+        def_id
+    }
+
     fn check_name_site_invariants(
         &mut self,
         kind: SymbolKind,
         name_site: crate::Site,
-        decl_site: crate::Site,
+        _decl_site: crate::Site,
         type_site: Option<crate::Site>,
         name: &str,
     ) {
@@ -263,17 +293,25 @@ impl<'a> DefContext<'a> {
             }
             SymbolKind::PortAnsi => SyntaxKind::Port,
             SymbolKind::Instance => SyntaxKind::HierarchicalInstance,
-            SymbolKind::Module => SyntaxKind::ModuleDecl,
-            SymbolKind::Package => SyntaxKind::PackageDecl,
-            SymbolKind::Interface => SyntaxKind::InterfaceDecl,
-            SymbolKind::Program => SyntaxKind::ProgramDecl,
-            SymbolKind::Primitive => SyntaxKind::PrimitiveDecl,
-            SymbolKind::Config => SyntaxKind::ConfigDecl,
             SymbolKind::Function => SyntaxKind::FunctionDecl,
             SymbolKind::Task => SyntaxKind::TaskDecl,
             SymbolKind::Typedef => SyntaxKind::TypedefDecl,
             SymbolKind::EnumMember => SyntaxKind::EnumMember,
             SymbolKind::Modport => SyntaxKind::ModportItem,
+            SymbolKind::Module
+            | SymbolKind::Package
+            | SymbolKind::Interface
+            | SymbolKind::Program
+            | SymbolKind::Primitive
+            | SymbolKind::Config => {
+                self.emit_internal_error(
+                    &format!(
+                        "def-namespace kind {kind:?} '{name}' routed to push_symbol instead of push_def_entry",
+                    ),
+                    name_site.text_range(),
+                );
+                return;
+            }
         };
         if name_site.kind() != expected_name_kind {
             self.emit_internal_error(
@@ -284,12 +322,6 @@ impl<'a> DefContext<'a> {
                     kind,
                     name,
                 ),
-                name_site.text_range(),
-            );
-        }
-        if kind.namespace() == Namespace::Definition && name_site != decl_site {
-            self.emit_internal_error(
-                &format!("name_site != decl_site for definition-namespace {kind:?} '{name}'",),
                 name_site.text_range(),
             );
         }
@@ -350,19 +382,13 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let module_scope = ctx.scopes.push(ScopeKind::Module, None);
-    let sym_id = ctx.push_symbol(Symbol {
-        name: name.clone(),
-        kind: SymbolKind::Module,
+    ctx.push_def_entry(
         decl_site,
-        name_site: decl_site,
-        type_site: None,
+        DefinitionKind::Module,
+        name,
         name_span,
-        scope: module_scope,
-        origin: SymbolOrigin::TypeSpec,
-    });
-    ctx.export_definitions.push(sym_id);
-
-    ctx.register_binding(sym_id);
+        DefScope::Owned(module_scope),
+    );
 
     // Pass 1: header imports (scope facts collected first so ports see them)
     for child in node.children() {
@@ -404,19 +430,13 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let package_scope = ctx.scopes.push(ScopeKind::Package, None);
-    let sym_id = ctx.push_symbol(Symbol {
-        name: name.clone(),
-        kind: SymbolKind::Package,
+    ctx.push_def_entry(
         decl_site,
-        name_site: decl_site,
-        type_site: None,
+        DefinitionKind::Package,
+        name,
         name_span,
-        scope: package_scope,
-        origin: SymbolOrigin::TypeSpec,
-    });
-    ctx.export_packages.push(sym_id);
-
-    ctx.register_binding(sym_id);
+        DefScope::Owned(package_scope),
+    );
 
     for child in node.children() {
         if child.kind() == SyntaxKind::PackageBody {
@@ -442,20 +462,14 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
-    let sym_id = ctx.push_symbol(Symbol {
-        name: name.clone(),
-        kind: SymbolKind::Interface,
+    let def_id = ctx.push_def_entry(
         decl_site,
-        name_site: decl_site,
-        type_site: None,
+        DefinitionKind::Interface,
+        name,
         name_span,
-        scope: iface_scope,
-        origin: SymbolOrigin::TypeSpec,
-    });
-    ctx.export_definitions.push(sym_id);
-
-    ctx.register_binding(sym_id);
-    let iface_def_id = Some(crate::symbols::GlobalDefId::new(decl_site));
+        DefScope::Owned(iface_scope),
+    );
+    let iface_def_id = Some(def_id);
 
     let prev_iface = ctx.current_iface_def_id.take();
     ctx.current_iface_def_id = iface_def_id;
@@ -501,19 +515,13 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
-    let sym_id = ctx.push_symbol(Symbol {
-        name: name.clone(),
-        kind: SymbolKind::Program,
+    ctx.push_def_entry(
         decl_site,
-        name_site: decl_site,
-        type_site: None,
+        DefinitionKind::Program,
+        name,
         name_span,
-        scope: prog_scope,
-        origin: SymbolOrigin::TypeSpec,
-    });
-    ctx.export_definitions.push(sym_id);
-
-    ctx.register_binding(sym_id);
+        DefScope::Owned(prog_scope),
+    );
 
     // Pass 1: header imports
     for child in node.children() {
@@ -555,19 +563,13 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let prim_scope = ctx.scopes.push(ScopeKind::Module, None);
-    let sym_id = ctx.push_symbol(Symbol {
-        name,
-        kind: SymbolKind::Primitive,
+    ctx.push_def_entry(
         decl_site,
-        name_site: decl_site,
-        type_site: None,
+        DefinitionKind::Primitive,
+        name,
         name_span,
-        scope: prim_scope,
-        origin: SymbolOrigin::TypeSpec,
-    });
-    ctx.export_definitions.push(sym_id);
-
-    ctx.register_binding(sym_id);
+        DefScope::Owned(prim_scope),
+    );
 }
 
 fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
@@ -587,19 +589,13 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
-    let sym_id = ctx.push_symbol(Symbol {
-        name,
-        kind: SymbolKind::Config,
+    ctx.push_def_entry(
         decl_site,
-        name_site: decl_site,
-        type_site: None,
+        DefinitionKind::Config,
+        name,
         name_span,
-        scope: cfg_scope,
-        origin: SymbolOrigin::TypeSpec,
-    });
-    ctx.export_definitions.push(sym_id);
-
-    ctx.register_binding(sym_id);
+        DefScope::Owned(cfg_scope),
+    );
 }
 
 fn collect_package_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {

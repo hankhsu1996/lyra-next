@@ -11,7 +11,7 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
 
 1. Missing canonical syntax anchors + range leakage (blocks provenance / refactor tools)
    - Problem: Some semantic structs and diagnostics store `TextRange` directly, coupling semantics to presentation and preventing a clean provenance/spelling query layer.
-   - Design smell: Definition-namespace entries (module, package, interface, program, primitive, config) are stored as `Symbol` entries but do not participate in the Symbol contract (no type computation, no lexical scope resolution, always `SymbolOrigin::TypeSpec`). They are defs wearing a symbol costume; their real identity is `GlobalDefId`.
+   - ~~Design smell: Definition-namespace entries stored as `Symbol` entries but do not participate in the Symbol contract.~~ Resolved: def-namespace items now stored as `DefEntry` keyed by `GlobalDefId`.
    - Done:
      1. `def_ast` on Symbol -- non-optional declaration item anchor on every symbol.
      2. `name_ast` and `type_ast` on Symbol -- canonical name-site and type-spelling anchors. `symbol_to_decl` removed; `symbol_global_def` reads from `Symbol.def_ast` directly.
@@ -27,7 +27,7 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
      5. ~~`EnumVariantTarget.def_range`~~ -- DONE. Replaced with `name_site: Site` (member's stable AST anchor). `ExpandedVariant.def_range` also replaced.
      6. ~~`EnumMemberDef.range_text_range`~~ -- DONE. Replaced with `range_site: Option<Site>` anchored to the range spec AST node. Range-spec diagnostics use `range_site` as primary when available.
      7. ~~`DuplicateDefinition.original: TextRange`~~ -- DONE. Replaced with `original_primary: DiagSpan` + `original_label: Option<DiagSpan>`.
-     8. Extract definition-namespace entries from `SymbolTable` into their own first-class def structure.
+     8. ~~Extract definition-namespace entries from `SymbolTable`~~ -- DONE. Definition-namespace items (module, package, interface, program, primitive, config) stored as first-class `DefEntry` keyed by `GlobalDefId` in `DefIndex.def_entries`. No `Symbol` created for def-namespace declarations. Resolution uses `ResolvedTarget::Def(GlobalDefId)`. Interface scope/name lookups use `def_entry()` directly.
      9. ~~Record field type errors lack type-reference precision~~ -- DONE. `TypeRef::Named`/`Qualified` carry `type_site: Site`; field type error diagnostics use `type_site` as primary anchor.
      10. ~~Modport port diagnostics lack `NameSpan` label~~ -- DONE. `ModportEntry.span` replaced with `name_span: NameSpan`. `DuplicateDefinition` and `UnresolvedName` diagnostics now carry `DiagSpan::Name` labels.
    - Outcome: Enables future `TypeSpelling` / provenance queries derived purely from CST/AST without heuristics, preserving incrementality and determinism.

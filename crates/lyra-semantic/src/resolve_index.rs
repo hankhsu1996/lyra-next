@@ -115,10 +115,11 @@ pub struct WildcardLocalConflict {
     pub use_site_idx: u32,
 }
 
-/// The resolved target of a name: either a declared symbol or a range-generated enum variant.
+/// The resolved target of a name: a symbol, a definition-namespace entry, or a range-generated enum variant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedTarget {
     Symbol(GlobalSymbolId),
+    Def(GlobalDefId),
     EnumVariant(EnumVariantTarget),
 }
 

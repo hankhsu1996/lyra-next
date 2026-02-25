@@ -1,29 +1,35 @@
 use super::*;
 
 #[test]
-fn interface_in_exports() {
+fn interface_in_def_entries() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "interface my_if; endinterface");
     let def = def_index_file(&db, file);
-    assert_eq!(def.exports.definitions.len(), 1);
-    let sym = def.symbols.get(def.exports.definitions[0]);
-    assert_eq!(sym.name.as_str(), "my_if");
-    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Interface);
+    assert_eq!(def.defs_by_name.len(), 1);
+    let entry = def.def_entry(def.defs_by_name[0]).expect("def entry");
+    assert_eq!(entry.name.as_str(), "my_if");
+    assert_eq!(
+        entry.kind,
+        lyra_semantic::global_index::DefinitionKind::Interface
+    );
 }
 
 #[test]
-fn program_in_exports() {
+fn program_in_def_entries() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "program my_prog; endprogram");
     let def = def_index_file(&db, file);
-    assert_eq!(def.exports.definitions.len(), 1);
-    let sym = def.symbols.get(def.exports.definitions[0]);
-    assert_eq!(sym.name.as_str(), "my_prog");
-    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Program);
+    assert_eq!(def.defs_by_name.len(), 1);
+    let entry = def.def_entry(def.defs_by_name[0]).expect("def entry");
+    assert_eq!(entry.name.as_str(), "my_prog");
+    assert_eq!(
+        entry.kind,
+        lyra_semantic::global_index::DefinitionKind::Program
+    );
 }
 
 #[test]
-fn primitive_in_exports() {
+fn primitive_in_def_entries() {
     let db = LyraDatabase::default();
     let file = new_file(
         &db,
@@ -31,21 +37,27 @@ fn primitive_in_exports() {
         "primitive my_udp(output y, input a); table 0 : 0; endtable endprimitive",
     );
     let def = def_index_file(&db, file);
-    assert_eq!(def.exports.definitions.len(), 1);
-    let sym = def.symbols.get(def.exports.definitions[0]);
-    assert_eq!(sym.name.as_str(), "my_udp");
-    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Primitive);
+    assert_eq!(def.defs_by_name.len(), 1);
+    let entry = def.def_entry(def.defs_by_name[0]).expect("def entry");
+    assert_eq!(entry.name.as_str(), "my_udp");
+    assert_eq!(
+        entry.kind,
+        lyra_semantic::global_index::DefinitionKind::Primitive
+    );
 }
 
 #[test]
-fn config_in_exports() {
+fn config_in_def_entries() {
     let db = LyraDatabase::default();
     let file = new_file(&db, 0, "config my_cfg; design top; endconfig");
     let def = def_index_file(&db, file);
-    assert_eq!(def.exports.definitions.len(), 1);
-    let sym = def.symbols.get(def.exports.definitions[0]);
-    assert_eq!(sym.name.as_str(), "my_cfg");
-    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Config);
+    assert_eq!(def.defs_by_name.len(), 1);
+    let entry = def.def_entry(def.defs_by_name[0]).expect("def entry");
+    assert_eq!(entry.name.as_str(), "my_cfg");
+    assert_eq!(
+        entry.kind,
+        lyra_semantic::global_index::DefinitionKind::Config
+    );
 }
 
 #[test]
@@ -55,15 +67,12 @@ fn cross_file_interface_instantiation() {
     let file_b = new_file(&db, 1, "module top; my_bus u_bus(); endmodule");
     let unit = new_compilation_unit(&db, vec![file_a, file_b]);
 
-    let text = file_b.text(&db);
-    let pos = text.find("my_bus").expect("should find 'my_bus'");
-    let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(pos as u32));
-    assert!(result.is_some(), "'my_bus' should resolve cross-file");
-    let sym_id = result.expect("checked");
-    assert_eq!(sym_id.file, lyra_source::FileId(0));
-    let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-    assert_eq!(sym.name.as_str(), "my_bus");
-    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Interface);
+    // Verify the interface appears in the global def index
+    let global = global_def_index(&db, unit);
+    let def_id = global
+        .resolve_definition("my_bus")
+        .expect("my_bus should appear in global def index");
+    assert_eq!(def_id.0.ast_id().file(), lyra_source::FileId(0));
 }
 
 #[test]
@@ -73,15 +82,12 @@ fn cross_file_program_instantiation() {
     let file_b = new_file(&db, 1, "module top; my_prog u_prog(); endmodule");
     let unit = new_compilation_unit(&db, vec![file_a, file_b]);
 
-    let text = file_b.text(&db);
-    let pos = text.find("my_prog").expect("should find 'my_prog'");
-    let result = resolve_at(&db, file_b, unit, lyra_source::TextSize::new(pos as u32));
-    assert!(result.is_some(), "'my_prog' should resolve cross-file");
-    let sym_id = result.expect("checked");
-    assert_eq!(sym_id.file, lyra_source::FileId(0));
-    let sym = symbol_global(&db, unit, sym_id).expect("symbol should exist");
-    assert_eq!(sym.name.as_str(), "my_prog");
-    assert_eq!(sym.kind, lyra_semantic::symbols::SymbolKind::Program);
+    // Verify the program appears in the global def index
+    let global = global_def_index(&db, unit);
+    let def_id = global
+        .resolve_definition("my_prog")
+        .expect("my_prog should appear in global def index");
+    assert_eq!(def_id.0.ast_id().file(), lyra_source::FileId(0));
 }
 
 #[test]

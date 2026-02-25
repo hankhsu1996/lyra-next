@@ -4,8 +4,10 @@ use crate::Site;
 use lyra_source::{FileId, NameSpan, TextRange};
 use smol_str::SmolStr;
 
+use crate::def_entry::{DefEntry, DefScope};
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::{EnumDef, EnumDefIdx, EnumId};
+use crate::global_index::DefinitionKind;
 use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId};
@@ -27,7 +29,7 @@ pub enum ExpectedNs {
     TypeThenValue,
 }
 
-/// Per-file definition index: symbols, scopes, exports.
+/// Per-file definition index: symbols, scopes, definition entries.
 ///
 /// Depends only on the parse result. Does NOT resolve uses.
 /// All ranges are in expanded-text coordinate space within `file`.
@@ -36,13 +38,20 @@ pub struct DefIndex {
     pub file: FileId,
     pub symbols: SymbolTable,
     pub scopes: ScopeTree,
-    pub exports: Exports,
+    /// Definition-namespace entries keyed by insertion order.
+    /// Use `def_entry()` to look up by `GlobalDefId`.
+    pub def_entries: Box<[DefEntry]>,
+    /// Reverse map from definition name-site to `GlobalDefId`.
+    pub name_site_to_def: HashMap<Site, GlobalDefId>,
+    /// All `GlobalDefId`s in this file, sorted by `(name, kind, name_site)` for
+    /// deterministic iteration. Used by `global_def_index` and `package_scope_index`.
+    pub defs_by_name: Box<[GlobalDefId]>,
     pub use_sites: Box<[UseSite]>,
     pub imports: Box<[Import]>,
     pub local_decls: Box<[LocalDecl]>,
     /// Reverse map from name-site `Site` to `SymbolId`.
     /// Used by cross-file resolution to convert `Site` (from
-    /// `GlobalDefIndex`) back to a `SymbolId` in this file.
+    /// `PackageScopeIndex`) back to a `SymbolId` in this file.
     pub name_site_to_symbol: HashMap<Site, SymbolId>,
     /// Maps parameter name-site `Site` to its initializer `Expression`
     /// `Site`. Key present with `None` = parameter with no default value.
@@ -61,6 +70,13 @@ pub struct DefIndex {
 }
 
 impl DefIndex {
+    /// Look up a definition entry by `GlobalDefId`.
+    pub fn def_entry(&self, id: GlobalDefId) -> Option<&DefEntry> {
+        let def_id = self.name_site_to_def.get(&id.ast_id())?;
+        debug_assert_eq!(*def_id, id);
+        self.def_entries.iter().find(|e| e.decl_site == id.ast_id())
+    }
+
     pub fn enum_def(&self, idx: EnumDefIdx) -> &EnumDef {
         &self.enum_defs[idx.0 as usize]
     }
@@ -92,25 +108,16 @@ impl DefIndex {
         self.modport_defs.get(id)
     }
 
-    /// Map a local symbol to its cross-file definition identity.
-    ///
-    /// Only definition-namespace symbols (module, package, interface, etc.)
-    /// have a `GlobalDefId`. For these, `name_site == decl_site`.
-    pub fn symbol_global_def(&self, sym: SymbolId) -> Option<GlobalDefId> {
-        let symbol = self.symbols.get(sym);
-        if symbol.kind.namespace() != Namespace::Definition {
-            return None;
-        }
-        Some(GlobalDefId::new(symbol.decl_site))
-    }
-
     pub fn package_scope(&self, name: &str) -> Option<ScopeId> {
-        for &sym_id in &*self.exports.packages {
-            let sym = self.symbols.get(sym_id);
-            if sym.name == name {
-                let scope_data = self.scopes.get(sym.scope);
+        for &def_id in &*self.defs_by_name {
+            if let Some(entry) = self.def_entry(def_id)
+                && entry.kind == DefinitionKind::Package
+                && entry.name == name
+                && let DefScope::Owned(scope_id) = entry.scope
+            {
+                let scope_data = self.scopes.get(scope_id);
                 if scope_data.kind == ScopeKind::Package {
-                    return Some(sym.scope);
+                    return Some(scope_id);
                 }
             }
         }
@@ -262,19 +269,4 @@ pub struct CompilationUnitEnv {
 pub struct ImplicitImport {
     pub package: SmolStr,
     pub name: ImportName,
-}
-
-/// Definition-namespace and package names exported to compilation-unit namespace.
-///
-/// Separate from lexical `ScopeTree`. Entries sorted by
-/// `symbols[id].name` for binary-search lookup.
-///
-/// `definitions` holds all definition-namespace constructs (module, interface,
-/// program, primitive, config) per LRM 3.13(a). Packages stay separate since
-/// they are in a distinct namespace (LRM 3.13(b)) and are used differently
-/// (package scope index).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Exports {
-    pub definitions: Box<[SymbolId]>,
-    pub packages: Box<[SymbolId]>,
 }
