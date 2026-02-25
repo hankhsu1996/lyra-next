@@ -212,7 +212,17 @@ fn collect_enum_def(
             .as_ref()
             .and_then(|expr| crate::literal::extract_sized_literal_width(expr.syntax()));
 
-        let (range_kind, range_text_range) = extract_enum_range_spec(&member, ctx.ast_id_map);
+        let (range_kind, range_site) = extract_enum_range_spec(&member, ctx.ast_id_map);
+
+        if member.range_spec().is_some() && range_site.is_none() {
+            ctx.diagnostics.push(SemanticDiag {
+                kind: SemanticDiagKind::InternalError {
+                    detail: SmolStr::new("erased_ast_id returned None for enum range spec"),
+                },
+                primary: DiagSpan::Site(erased_ast_id),
+                label: None,
+            });
+        }
 
         let has_range = range_kind.is_some();
 
@@ -221,7 +231,7 @@ fn collect_enum_def(
             name_site: erased_ast_id,
             name_span: NameSpan::new(name_tok.text_range()),
             range: range_kind,
-            range_text_range,
+            range_site,
             init,
             init_literal_width,
         });
@@ -260,25 +270,25 @@ fn collect_enum_def(
 fn extract_enum_range_spec(
     member: &EnumMember,
     ast_id_map: &AstIdMap,
-) -> (Option<EnumMemberRangeKind>, Option<lyra_source::TextRange>) {
+) -> (Option<EnumMemberRangeKind>, Option<crate::Site>) {
     let Some(range_spec) = member.range_spec() else {
         return (None, None);
     };
-    let rtr = range_spec.text_range();
+    let site = ast_id_map.erased_ast_id(range_spec.syntax());
     let Some(first) = range_spec.first_expr() else {
-        return (None, Some(rtr));
+        return (None, site);
     };
     let first_id = ast_id_map.erased_ast_id(first.syntax());
     if let Some(second) = range_spec.second_expr() {
         let second_id = ast_id_map.erased_ast_id(second.syntax());
         match (first_id, second_id) {
-            (Some(f), Some(s)) => (Some(EnumMemberRangeKind::FromTo(f, s)), Some(rtr)),
-            _ => (None, Some(rtr)),
+            (Some(f), Some(s)) => (Some(EnumMemberRangeKind::FromTo(f, s)), site),
+            _ => (None, site),
         }
     } else {
         match first_id {
-            Some(f) => (Some(EnumMemberRangeKind::Count(f)), Some(rtr)),
-            None => (None, Some(rtr)),
+            Some(f) => (Some(EnumMemberRangeKind::Count(f)), site),
+            None => (None, site),
         }
     }
 }

@@ -37,7 +37,7 @@ enum EnumBaseError {
 pub struct ExpandedVariant {
     pub name: SmolStr,
     pub variant_ordinal: u32,
-    pub def_range: lyra_source::TextRange,
+    pub name_site: lyra_semantic::Site,
     pub source_member: u32,
 }
 
@@ -82,8 +82,9 @@ pub fn enum_variants<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> E
             out.ordinal += 1;
             continue;
         };
-        // TODO(gap-1.6): range_text_range sub-node precision lost; using member site
-        let primary = DiagSpan::Site(member.name_site);
+        let primary = member
+            .range_site
+            .map_or(DiagSpan::Site(member.name_site), DiagSpan::Site);
         let label = Some(DiagSpan::Name(member.name_span));
         match range_kind {
             EnumMemberRangeKind::Count(expr_id) => {
@@ -127,9 +128,6 @@ fn expand_count(
     label: Option<DiagSpan>,
     out: &mut ExpandOutput,
 ) {
-    let name_ident_range = member
-        .name_span
-        .text_range_or(member.name_site.text_range());
     let ConstInt::Known(n) = *result else {
         out.diagnostics.push(SemanticDiag {
             kind: SemanticDiagKind::EnumRangeBoundNotEvaluable,
@@ -157,7 +155,7 @@ fn expand_count(
             out.variants.push(ExpandedVariant {
                 name: SmolStr::new(format!("{}{i}", member.name)),
                 variant_ordinal: out.ordinal,
-                def_range: name_ident_range,
+                name_site: member.name_site,
                 source_member: member_idx,
             });
             out.ordinal += 1;
@@ -174,9 +172,6 @@ fn expand_from_to(
     label: Option<DiagSpan>,
     out: &mut ExpandOutput,
 ) {
-    let name_ident_range = member
-        .name_span
-        .text_range_or(member.name_site.text_range());
     let (&ConstInt::Known(from), &ConstInt::Known(to)) = (from_val, to_val) else {
         out.diagnostics.push(SemanticDiag {
             kind: SemanticDiagKind::EnumRangeBoundNotEvaluable,
@@ -200,7 +195,7 @@ fn expand_from_to(
         out.variants.push(ExpandedVariant {
             name: SmolStr::new(format!("{}{val}", member.name)),
             variant_ordinal: out.ordinal,
-            def_range: name_ident_range,
+            name_site: member.name_site,
             source_member: member_idx,
         });
         out.ordinal += 1;
@@ -278,7 +273,7 @@ pub fn enum_variant_index(
                 EnumVariantTarget {
                     enum_id,
                     variant_ordinal: variant.variant_ordinal,
-                    def_range: variant.def_range,
+                    name_site: variant.name_site,
                 },
             );
         }

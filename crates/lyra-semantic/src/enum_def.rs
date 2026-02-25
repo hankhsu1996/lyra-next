@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Site;
-use lyra_source::{FileId, NameSpan, TextRange};
+use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
@@ -58,7 +58,7 @@ pub struct EnumMemberDef {
     pub name_site: Site,
     pub name_span: NameSpan,
     pub range: Option<EnumMemberRangeKind>,
-    pub range_text_range: Option<TextRange>,
+    pub range_site: Option<Site>,
     pub init: Option<Site>,
     /// Bit width of a sized literal initializer (e.g., `4'h5` -> `Some(4)`).
     /// `None` if no init, init is not a literal, or literal is unsized.
@@ -133,7 +133,7 @@ pub struct EnumVariantTarget {
     pub enum_id: EnumId,
     /// Per-enum ordering index for value assignment; not a stable identity key.
     pub variant_ordinal: u32,
-    pub def_range: TextRange,
+    pub name_site: Site,
 }
 
 /// Per-file index of range-generated enum variant names, keyed by scope.
