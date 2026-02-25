@@ -53,7 +53,7 @@ fn compute_field_fact(
     let field_tok = field_expr.field_name()?;
     let member_name = field_tok.text();
 
-    let base_ast_id = map.erased_ast_id(&base)?;
+    let base_ast_id = map.erased_ast_id(base.syntax())?;
     let expr_ref = ExprRef::new(db, unit, base_ast_id);
     let base_type = type_of_expr(db, expr_ref);
 

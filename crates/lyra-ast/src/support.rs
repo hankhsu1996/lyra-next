@@ -41,6 +41,23 @@ pub(crate) fn token(parent: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxToken
         .find(|tok| tok.kind() == kind)
 }
 
+/// Get the nth expression-kind child of `parent`.
+pub(crate) fn expr_child(parent: &SyntaxNode, n: u8) -> Option<crate::expr::Expr> {
+    parent
+        .children()
+        .filter(|c| crate::node::is_expression_kind(c.kind()))
+        .nth(n as usize)
+        .and_then(crate::expr::Expr::cast)
+}
+
+/// Iterate all expression-kind children of `parent`.
+pub(crate) fn expr_children(parent: &SyntaxNode) -> impl Iterator<Item = crate::expr::Expr> {
+    parent
+        .children()
+        .filter(|c| crate::node::is_expression_kind(c.kind()))
+        .filter_map(crate::expr::Expr::cast)
+}
+
 /// Find a token from a set of possible kinds.
 pub(crate) fn token_in(parent: &SyntaxNode, kinds: &[SyntaxKind]) -> Option<SyntaxToken> {
     parent

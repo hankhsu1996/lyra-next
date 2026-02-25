@@ -33,13 +33,13 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
    - Outcome: Enables future `TypeSpelling` / provenance queries derived purely from CST/AST without heuristics, preserving incrementality and determinism.
 
 2. CST traversal in semantic producers (blocks clean layering)
-   - Problem: ~12 locations in lyra-semantic perform raw CST traversal (`.children()`, `.descendants()`, `.children_with_tokens()`) outside the builder phase: `type_extract.rs`, `type_infer/mod.rs`, `type_check.rs`, `const_eval.rs`, `system_functions.rs`, `system_call_view.rs`, `literal.rs`, `record.rs`.
-   - Design smell: Semantic queries re-walk CST to extract properties that should be cached in def structs or exposed via typed AST accessors.
-   - CI enforcement: `tools/policy/check_cst_layering.py` prevents new CST usage in non-allowlisted modules.
-   - Action:
-     1. For syntactic classification checks (compound assign, assignment op detection in `type_check.rs`), extract to builder phase and store in symbol definitions.
-     2. For type inference CST dependency (`type_infer/mod.rs`), add typed AST accessors in `lyra-ast` for expression forms (prefix, binary, conditional, replication, streaming).
-     3. For `type_extract.rs`, cache extracted type properties in def structs.
+   - Problem: Residual raw CST traversal in tier-3 semantic modules. Category A (expression-form accessors) is complete; Category B (`type_extract.rs`, `record.rs`) remains.
+   - Progress: Added typed AST accessors in `lyra-ast` (`Expr`, `TfArg`, `BinExpr`, `PrefixExpr`, `CondExpr`, `ConcatExpr`, `ReplicExpr`, `StreamExpr`, `CallExpr`, `SystemTfCall`, `AssignStmt`, `ContinuousAssign`, `Declarator`, `Literal`). Migrated `const_eval.rs`, `type_infer/mod.rs`, `type_check.rs`, `system_functions.rs`, `literal.rs`. Deleted `expr_helpers.rs`, `system_call_view.rs`, `syntax_helpers.rs`.
+   - CI enforcement: `tools/policy/check_cst_layering.py` prevents new CST usage in non-allowlisted modules. Tier-3 modules have ceiling enforcement via `CST_CALL_CEILINGS`.
+   - Remaining:
+     1. Category B: `type_extract.rs` (16 violations) -- cache extracted type properties in def structs.
+     2. Residual Expression-unwrapping `first_child()` calls in `const_eval.rs`, `type_infer/mod.rs`, `literal.rs` -- could move to an `Expr::from_expression_wrapper()` accessor.
+     3. `type_check.rs` tree walks in `walk_for_checks` (7 violations) -- inherent to recursive checking.
    - Outcome: Semantic layer depends only on typed AST accessors and builder-extracted facts, not raw CST.
 
 3. ~~Ambiguous `ErasedAstId` field names~~ -- CLOSED

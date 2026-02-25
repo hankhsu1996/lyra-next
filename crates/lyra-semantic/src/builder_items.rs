@@ -307,7 +307,7 @@ fn collect_modport_entries(
                     && let Some(port_id) = ctx.ast_id_map.erased_ast_id(port.syntax())
                 {
                     let target = if let Some(expr_node) = port.target_expr() {
-                        match ctx.ast_id_map.erased_ast_id(&expr_node) {
+                        match ctx.ast_id_map.erased_ast_id(expr_node.syntax()) {
                             Some(expr_id) => ModportTarget::Expr(expr_id),
                             None => ModportTarget::Empty,
                         }
@@ -570,4 +570,4 @@ pub(crate) fn collect_declarators(
     }
 }
 
-pub(crate) use crate::expr_helpers::is_expression_kind;
+pub(crate) use lyra_ast::is_expression_kind;

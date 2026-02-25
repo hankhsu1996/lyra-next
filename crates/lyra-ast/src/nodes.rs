@@ -66,7 +66,7 @@ ast_nodes! {
         declarators: [Declarator],
     }
 
-    ContinuousAssign(SyntaxKind::ContinuousAssign) {}
+    ContinuousAssign(SyntaxKind::ContinuousAssign) { @custom }
 
     PackedDimension(SyntaxKind::PackedDimension) {}
     UnpackedDimension(SyntaxKind::UnpackedDimension) {}
@@ -84,7 +84,7 @@ ast_nodes! {
     WhileStmt(SyntaxKind::WhileStmt) {}
     RepeatStmt(SyntaxKind::RepeatStmt) {}
     ForeverStmt(SyntaxKind::ForeverStmt) {}
-    AssignStmt(SyntaxKind::AssignStmt) {}
+    AssignStmt(SyntaxKind::AssignStmt) { @custom }
     TimingControl(SyntaxKind::TimingControl) {}
     EventExpr(SyntaxKind::EventExpr) {}
     EventItem(SyntaxKind::EventItem) {}
@@ -94,45 +94,34 @@ ast_nodes! {
     BinExpr(SyntaxKind::BinExpr) { @custom }
     PrefixExpr(SyntaxKind::PrefixExpr) { @custom }
     ParenExpr(SyntaxKind::ParenExpr) { @custom }
-    CondExpr(SyntaxKind::CondExpr) {}
-    ConcatExpr(SyntaxKind::ConcatExpr) {}
-    ReplicExpr(SyntaxKind::ReplicExpr) {}
-    StreamExpr(SyntaxKind::StreamExpr) {}
+    CondExpr(SyntaxKind::CondExpr) { @custom }
+    ConcatExpr(SyntaxKind::ConcatExpr) { @custom }
+    ReplicExpr(SyntaxKind::ReplicExpr) { @custom }
+    StreamExpr(SyntaxKind::StreamExpr) { @custom }
     StreamSliceSize(SyntaxKind::StreamSliceSize) {}
-    StreamOperands(SyntaxKind::StreamOperands) {}
+    StreamOperands(SyntaxKind::StreamOperands) { @custom }
     CastExpr(SyntaxKind::CastExpr) { @custom }
     IndexExpr(SyntaxKind::IndexExpr) { @custom }
     RangeExpr(SyntaxKind::RangeExpr) {}
     FieldExpr(SyntaxKind::FieldExpr) { @custom }
 
-    CallExpr(SyntaxKind::CallExpr) {
-        arg_list: ArgList,
-    }
+    CallExpr(SyntaxKind::CallExpr) { @custom }
 
     ArgList(SyntaxKind::ArgList) { @custom }
 
-    SystemTfCall(SyntaxKind::SystemTfCall) {
-        arg_list: SystemTfArgList,
-    }
+    SystemTfCall(SyntaxKind::SystemTfCall) { @custom }
 
-    SystemTfArgList(SyntaxKind::SystemTfArgList) {}
+    SystemTfArgList(SyntaxKind::SystemTfArgList) { @custom }
 
     NameRef(SyntaxKind::NameRef) {
         ident: token([Ident, EscapedIdent]),
     }
 
-    Literal(SyntaxKind::Literal) {
-        token: token([
-            IntLiteral, RealLiteral, BasedLiteral,
-            UnbasedUnsizedLiteral, StringLiteral,
-        ]),
-    }
+    Literal(SyntaxKind::Literal) { @custom }
 
     ErrorNode(SyntaxKind::ErrorNode) {}
 
-    Declarator(SyntaxKind::Declarator) {
-        name: token([Ident, EscapedIdent]),
-    }
+    Declarator(SyntaxKind::Declarator) { @custom }
 
     ModuleInstantiation(SyntaxKind::ModuleInstantiation) {
         module_name: token([Ident, EscapedIdent]),
@@ -258,19 +247,15 @@ ast_nodes! {
 
 impl Expression {
     /// The single wrapped expression child.
-    pub fn inner(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn inner(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 }
 
 impl ParenExpr {
     /// The expression inside the parentheses.
-    pub fn inner(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn inner(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 }
 
@@ -317,6 +302,128 @@ impl BinExpr {
         }
         None
     }
+
+    pub fn lhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    pub fn rhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 1)
+    }
+
+    pub fn binary_op(&self) -> Option<SyntaxBinaryOp> {
+        SyntaxBinaryOp::from_token(self.op_token()?.kind())
+    }
+}
+
+/// Syntactic binary operator classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxBinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitXnor,
+    Shl,
+    Shr,
+    Ashl,
+    Ashr,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+    Eq,
+    Neq,
+    CaseEq,
+    CaseNeq,
+    WildEq,
+    WildNeq,
+    LogAnd,
+    LogOr,
+    Power,
+}
+
+impl SyntaxBinaryOp {
+    pub fn from_token(kind: SyntaxKind) -> Option<SyntaxBinaryOp> {
+        match kind {
+            SyntaxKind::Plus => Some(SyntaxBinaryOp::Add),
+            SyntaxKind::Minus => Some(SyntaxBinaryOp::Sub),
+            SyntaxKind::Star => Some(SyntaxBinaryOp::Mul),
+            SyntaxKind::Slash => Some(SyntaxBinaryOp::Div),
+            SyntaxKind::Percent => Some(SyntaxBinaryOp::Mod),
+            SyntaxKind::Amp => Some(SyntaxBinaryOp::BitAnd),
+            SyntaxKind::Pipe => Some(SyntaxBinaryOp::BitOr),
+            SyntaxKind::Caret => Some(SyntaxBinaryOp::BitXor),
+            SyntaxKind::TildeCaret | SyntaxKind::CaretTilde => Some(SyntaxBinaryOp::BitXnor),
+            SyntaxKind::LtLt => Some(SyntaxBinaryOp::Shl),
+            SyntaxKind::GtGt => Some(SyntaxBinaryOp::Shr),
+            SyntaxKind::LtLtLt => Some(SyntaxBinaryOp::Ashl),
+            SyntaxKind::GtGtGt => Some(SyntaxBinaryOp::Ashr),
+            SyntaxKind::Lt => Some(SyntaxBinaryOp::Lt),
+            SyntaxKind::LtEq => Some(SyntaxBinaryOp::LtEq),
+            SyntaxKind::Gt => Some(SyntaxBinaryOp::Gt),
+            SyntaxKind::GtEq => Some(SyntaxBinaryOp::GtEq),
+            SyntaxKind::EqEq => Some(SyntaxBinaryOp::Eq),
+            SyntaxKind::BangEq => Some(SyntaxBinaryOp::Neq),
+            SyntaxKind::EqEqEq => Some(SyntaxBinaryOp::CaseEq),
+            SyntaxKind::BangEqEq => Some(SyntaxBinaryOp::CaseNeq),
+            SyntaxKind::EqEqQuestion => Some(SyntaxBinaryOp::WildEq),
+            SyntaxKind::BangEqQuestion => Some(SyntaxBinaryOp::WildNeq),
+            SyntaxKind::AmpAmp => Some(SyntaxBinaryOp::LogAnd),
+            SyntaxKind::PipePipe => Some(SyntaxBinaryOp::LogOr),
+            SyntaxKind::StarStar => Some(SyntaxBinaryOp::Power),
+            _ => None,
+        }
+    }
+}
+
+/// Syntactic assignment operator classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxAssignOp {
+    Blocking,
+    NonBlocking,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    ModAssign,
+    AndAssign,
+    OrAssign,
+    XorAssign,
+    ShlAssign,
+    ShrAssign,
+    AshlAssign,
+    AshrAssign,
+}
+
+impl SyntaxAssignOp {
+    pub fn from_token(kind: SyntaxKind) -> Option<SyntaxAssignOp> {
+        match kind {
+            SyntaxKind::Assign => Some(SyntaxAssignOp::Blocking),
+            SyntaxKind::LtEq => Some(SyntaxAssignOp::NonBlocking),
+            SyntaxKind::PlusEq => Some(SyntaxAssignOp::AddAssign),
+            SyntaxKind::MinusEq => Some(SyntaxAssignOp::SubAssign),
+            SyntaxKind::StarEq => Some(SyntaxAssignOp::MulAssign),
+            SyntaxKind::SlashEq => Some(SyntaxAssignOp::DivAssign),
+            SyntaxKind::PercentEq => Some(SyntaxAssignOp::ModAssign),
+            SyntaxKind::AmpEq => Some(SyntaxAssignOp::AndAssign),
+            SyntaxKind::PipeEq => Some(SyntaxAssignOp::OrAssign),
+            SyntaxKind::CaretEq => Some(SyntaxAssignOp::XorAssign),
+            SyntaxKind::LtLtEq => Some(SyntaxAssignOp::ShlAssign),
+            SyntaxKind::GtGtEq => Some(SyntaxAssignOp::ShrAssign),
+            SyntaxKind::LtLtLtEq => Some(SyntaxAssignOp::AshlAssign),
+            SyntaxKind::GtGtGtEq => Some(SyntaxAssignOp::AshrAssign),
+            _ => None,
+        }
+    }
+
+    pub fn is_compound(&self) -> bool {
+        !matches!(self, SyntaxAssignOp::Blocking | SyntaxAssignOp::NonBlocking)
+    }
 }
 
 /// Either a bare `ModportPort` or an expression `ModportExprPort`.
@@ -348,10 +455,8 @@ impl ModportItem {
 }
 
 impl ModportExprPort {
-    pub fn target_expr(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn target_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 }
 
@@ -362,16 +467,17 @@ impl PrefixExpr {
             .filter_map(rowan::NodeOrToken::into_token)
             .find(|tok| tok.kind() != SyntaxKind::Whitespace)
     }
+
+    pub fn operand(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
 }
 
 impl IndexExpr {
     /// The (base, index) expression pair. Returns None if not exactly 2
     /// expression children (error recovery).
-    fn expr_pair(&self) -> Option<(lyra_parser::SyntaxNode, lyra_parser::SyntaxNode)> {
-        let mut iter = self
-            .syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()));
+    fn expr_pair(&self) -> Option<(crate::expr::Expr, crate::expr::Expr)> {
+        let mut iter = support::expr_children(&self.syntax);
         let first = iter.next()?;
         let second = iter.next()?;
         if iter.next().is_some() {
@@ -381,22 +487,20 @@ impl IndexExpr {
     }
 
     /// The base expression (left of the brackets).
-    pub fn base_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+    pub fn base_expr(&self) -> Option<crate::expr::Expr> {
         self.expr_pair().map(|(base, _)| base)
     }
 
     /// The index expression (inside the brackets).
-    pub fn index_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+    pub fn index_expr(&self) -> Option<crate::expr::Expr> {
         self.expr_pair().map(|(_, idx)| idx)
     }
 }
 
 impl FieldExpr {
     /// The base expression before the dot.
-    pub fn base_expr(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn base_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 
     pub fn field_name(&self) -> Option<SyntaxToken> {
@@ -409,12 +513,215 @@ impl FieldExpr {
     }
 }
 
+impl CondExpr {
+    pub fn condition(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    pub fn then_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 1)
+    }
+
+    pub fn else_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 2)
+    }
+}
+
+impl ConcatExpr {
+    pub fn operands(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
+        support::expr_children(&self.syntax)
+    }
+}
+
+impl ReplicExpr {
+    pub fn count(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    pub fn body_exprs(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
+        support::expr_children(&self.syntax).skip(1)
+    }
+}
+
+impl CallExpr {
+    pub fn arg_list(&self) -> Option<ArgList> {
+        support::child(&self.syntax)
+    }
+
+    pub fn callee(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+}
+
+impl StreamExpr {
+    pub fn stream_operands(&self) -> Option<StreamOperands> {
+        support::child(&self.syntax)
+    }
+}
+
+impl StreamOperands {
+    pub fn items(&self) -> AstChildren<StreamOperandItem> {
+        support::children(&self.syntax)
+    }
+}
+
+impl SystemTfCall {
+    pub fn arg_list(&self) -> Option<SystemTfArgList> {
+        support::child(&self.syntax)
+    }
+
+    pub fn system_name(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::SystemIdent)
+    }
+}
+
+impl SystemTfArgList {
+    pub fn args(&self) -> impl Iterator<Item = crate::expr::TfArg> + '_ {
+        self.syntax.children().map(|child| {
+            if let Some(t) = crate::expr::TypeRef::cast(child.clone()) {
+                crate::expr::TfArg::Type(t)
+            } else if let Some(e) = crate::expr::Expr::cast(child.clone()) {
+                crate::expr::TfArg::Expr(e)
+            } else {
+                crate::expr::TfArg::Unknown(child)
+            }
+        })
+    }
+}
+
+impl Literal {
+    pub fn token(&self) -> Option<SyntaxToken> {
+        support::token_in(
+            &self.syntax,
+            &[
+                SyntaxKind::IntLiteral,
+                SyntaxKind::RealLiteral,
+                SyntaxKind::BasedLiteral,
+                SyntaxKind::UnbasedUnsizedLiteral,
+                SyntaxKind::StringLiteral,
+            ],
+        )
+    }
+
+    pub fn literal_kind(&self) -> Option<crate::expr::LiteralKind> {
+        let tokens: Vec<SyntaxToken> = self
+            .syntax
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .filter(|t| {
+                !matches!(
+                    t.kind(),
+                    SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
+                )
+            })
+            .collect();
+
+        if tokens.is_empty() {
+            return None;
+        }
+
+        // Check for BasedLiteral anywhere
+        let based_pos = tokens
+            .iter()
+            .position(|t| t.kind() == SyntaxKind::BasedLiteral);
+        if let Some(bp) = based_pos {
+            let size_token = if bp > 0 && tokens[bp - 1].kind() == SyntaxKind::IntLiteral {
+                Some(tokens[bp - 1].clone())
+            } else {
+                None
+            };
+            return Some(crate::expr::LiteralKind::Based {
+                size_token,
+                base_token: tokens[bp].clone(),
+            });
+        }
+
+        let first = &tokens[0];
+        match first.kind() {
+            SyntaxKind::IntLiteral => Some(crate::expr::LiteralKind::Int {
+                token: first.clone(),
+            }),
+            SyntaxKind::UnbasedUnsizedLiteral => Some(crate::expr::LiteralKind::UnbasedUnsized {
+                token: first.clone(),
+            }),
+            SyntaxKind::RealLiteral => Some(crate::expr::LiteralKind::Real {
+                token: first.clone(),
+            }),
+            SyntaxKind::StringLiteral => Some(crate::expr::LiteralKind::String {
+                token: first.clone(),
+            }),
+            SyntaxKind::TimeLiteral => Some(crate::expr::LiteralKind::Time {
+                token: first.clone(),
+            }),
+            _ => Some(crate::expr::LiteralKind::Unknown {
+                token: first.clone(),
+            }),
+        }
+    }
+}
+
+impl AssignStmt {
+    pub fn op_token(&self) -> Option<SyntaxToken> {
+        self.syntax
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|tok| SyntaxAssignOp::from_token(tok.kind()).is_some())
+    }
+
+    pub fn assign_op(&self) -> Option<SyntaxAssignOp> {
+        SyntaxAssignOp::from_token(self.op_token()?.kind())
+    }
+
+    pub fn lhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    pub fn rhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 1)
+    }
+}
+
+impl ContinuousAssign {
+    pub fn lhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    pub fn rhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 1)
+    }
+}
+
+impl Declarator {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
+    }
+
+    /// The initializer expression after `=`, if present.
+    pub fn init_expr(&self) -> Option<crate::expr::Expr> {
+        let mut seen_assign = false;
+        for child in self.syntax.children_with_tokens() {
+            if child
+                .as_token()
+                .is_some_and(|t| t.kind() == SyntaxKind::Assign)
+            {
+                seen_assign = true;
+                continue;
+            }
+            if seen_assign
+                && let Some(node) = child.as_node()
+                && crate::node::is_expression_kind(node.kind())
+            {
+                return crate::expr::Expr::cast(node.clone());
+            }
+        }
+        None
+    }
+}
+
 impl ArgList {
     /// Iterate over argument expression nodes.
-    pub fn args(&self) -> impl Iterator<Item = lyra_parser::SyntaxNode> + '_ {
-        self.syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn args(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
+        support::expr_children(&self.syntax)
     }
 }
 
@@ -445,27 +752,18 @@ impl RangeExpr {
         }
     }
 
-    /// Filtered iterator over expression children (deterministic order).
-    fn expr_children(&self) -> impl Iterator<Item = lyra_parser::SyntaxNode> + '_ {
-        self.syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()))
-    }
-
     /// The base object expression (before the brackets).
     /// For `a[hi:lo]` or `a[idx+:w]`, returns `a`.
-    pub fn base_expr(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.expr_children().next()
+    pub fn base_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 
     /// The two operand expressions inside the brackets.
     /// Fixed `[hi:lo]`: returns (hi, lo).
     /// Indexed `[idx+:w]` / `[idx-:w]`: returns (idx, w).
-    pub fn operand_exprs(&self) -> Option<(lyra_parser::SyntaxNode, lyra_parser::SyntaxNode)> {
-        let mut iter = self.expr_children();
-        let _base = iter.next()?;
-        let first = iter.next()?;
-        let second = iter.next()?;
+    pub fn operand_exprs(&self) -> Option<(crate::expr::Expr, crate::expr::Expr)> {
+        let first = support::expr_child(&self.syntax, 1)?;
+        let second = support::expr_child(&self.syntax, 2)?;
         Some((first, second))
     }
 }
@@ -521,10 +819,11 @@ impl CastExpr {
 
     /// The inner expression of the cast (the operand inside parentheses).
     /// Returns the first expression-kind direct child that is not a `TypeSpec`.
-    pub fn inner_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+    pub fn inner_expr(&self) -> Option<crate::expr::Expr> {
         self.syntax
             .children()
             .find(|c| c.kind() != SyntaxKind::TypeSpec && crate::node::is_expression_kind(c.kind()))
+            .and_then(crate::expr::Expr::cast)
     }
 }
 
@@ -715,10 +1014,8 @@ pub enum StreamRangeOp {
 
 impl StreamOperandItem {
     /// The operand expression (first expression-kind child).
-    pub fn expr(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 
     /// The optional `with [...]` clause.
@@ -740,11 +1037,7 @@ impl StreamRange {
     /// A `+` inside a `BinExpr` child (e.g. `[a + b]`) is NOT a direct
     /// token of `StreamRange`, so it cannot trigger `IndexedPlus`.
     pub fn op(&self) -> Option<StreamRangeOp> {
-        let expr_count = self
-            .syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()))
-            .count();
+        let expr_count = support::expr_children(&self.syntax).count();
         match expr_count {
             1 => Some(StreamRangeOp::Single),
             2 => {
@@ -785,18 +1078,13 @@ impl StreamRange {
     }
 
     /// First expression child (the index/base).
-    pub fn lhs(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn lhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 
     /// Second expression child (upper bound/width), `None` for `Single`.
-    pub fn rhs(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()))
-            .nth(1)
+    pub fn rhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 1)
     }
 }
 

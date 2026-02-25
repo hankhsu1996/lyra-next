@@ -1,8 +1,8 @@
-use lyra_ast::{AstNode, NameRef, QualifiedName};
+use lyra_ast::{AstNode, NameRef, QualifiedName, SystemTfCall, TfArg};
 use lyra_lexer::SyntaxKind;
+use lyra_parser::SyntaxNode;
 use lyra_semantic::resolve_index::{CoreResolution, CoreResolveResult};
 use lyra_semantic::symbols::{GlobalSymbolId, Namespace};
-use lyra_semantic::system_call_view::SystemCallView;
 use lyra_semantic::types::{ConstEvalError, ConstInt, SymbolType, Ty};
 use smol_str::SmolStr;
 
@@ -14,6 +14,15 @@ use crate::semantic::{
 };
 use crate::type_queries::{SymbolRef, TyRef, bit_width_total, type_of_symbol_raw};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
+
+/// Extract the syntax node from a `TfArg`.
+fn tf_arg_node(arg: &TfArg) -> &SyntaxNode {
+    match arg {
+        TfArg::Expr(e) => e.syntax(),
+        TfArg::Type(t) => t.syntax(),
+        TfArg::Unknown(n) => n,
+    }
+}
 
 /// Identifies a constant expression for evaluation.
 ///
@@ -123,10 +132,13 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
     };
 
     let eval_call = |call_node: &lyra_parser::SyntaxNode| -> Option<Result<i64, ConstEvalError>> {
-        let view = SystemCallView::try_from_node(call_node)?;
-        let intrinsic = ConstIntrinsic::from_name(view.name())?;
+        let stf = SystemTfCall::cast(call_node.clone())?;
+        let name_tok = stf.system_name()?;
+        let intrinsic = ConstIntrinsic::from_name(name_tok.text())?;
+        let al = stf.arg_list()?;
+        let args: Vec<TfArg> = al.args().collect();
         let result = match intrinsic {
-            ConstIntrinsic::Bits => eval_bits_intrinsic(db, &view, unit, source_file, map),
+            ConstIntrinsic::Bits => eval_bits_intrinsic(db, &args, unit, source_file, map),
             ConstIntrinsic::Left
             | ConstIntrinsic::Right
             | ConstIntrinsic::Low
@@ -135,7 +147,7 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
             | ConstIntrinsic::Increment
             | ConstIntrinsic::Dimensions
             | ConstIntrinsic::UnpackedDimensions => {
-                eval_dim_intrinsic(db, &view, unit, source_file, map, &intrinsic, &resolve_name)
+                eval_dim_intrinsic(db, &args, unit, source_file, map, &intrinsic, &resolve_name)
             }
         };
         Some(match result {
@@ -167,19 +179,20 @@ fn const_eval_recover<'db>(
 /// - Everything else -> expr-form (infer via `type_of_expr_raw`)
 fn eval_bits_intrinsic(
     db: &dyn salsa::Database,
-    view: &SystemCallView,
+    args: &[TfArg],
     unit: CompilationUnit,
     source_file: SourceFile,
     map: &lyra_ast::AstIdMap,
 ) -> ConstInt {
-    if view.arg_count() != 1 {
+    if args.len() != 1 {
         return ConstInt::Error(ConstEvalError::InvalidArgument);
     }
-    let Some(arg) = view.nth_arg(0) else {
+    let Some(arg) = args.first() else {
         return ConstInt::Error(ConstEvalError::InvalidArgument);
     };
+    let arg_node = tf_arg_node(arg);
 
-    let ty = classify_bits_arg_for_const(db, unit, source_file, map, &arg);
+    let ty = classify_bits_arg_for_const(db, unit, source_file, map, arg_node);
     bits_from_ty(db, unit, &ty)
 }
 
@@ -374,14 +387,14 @@ fn core_resolution_to_ty(
 /// Evaluate an array query intrinsic ($left, $right, etc.) at const-eval time.
 fn eval_dim_intrinsic(
     db: &dyn salsa::Database,
-    view: &SystemCallView,
+    args: &[TfArg],
     unit: CompilationUnit,
     source_file: SourceFile,
     map: &lyra_ast::AstIdMap,
     intrinsic: &ConstIntrinsic,
     resolve_name: &dyn Fn(&lyra_parser::SyntaxNode) -> Result<i64, ConstEvalError>,
 ) -> ConstInt {
-    let arg_count = view.arg_count();
+    let arg_count = args.len();
     let is_counting = matches!(
         intrinsic,
         ConstIntrinsic::Dimensions | ConstIntrinsic::UnpackedDimensions
@@ -391,11 +404,12 @@ fn eval_dim_intrinsic(
         return ConstInt::Error(ConstEvalError::InvalidArgument);
     }
 
-    let Some(first_arg) = view.nth_arg(0) else {
+    let Some(first_arg) = args.first() else {
         return ConstInt::Error(ConstEvalError::InvalidArgument);
     };
+    let first_node = tf_arg_node(first_arg);
 
-    let ty = classify_bits_arg_for_const(db, unit, source_file, map, &first_arg);
+    let ty = classify_bits_arg_for_const(db, unit, source_file, map, first_node);
     let normalized = normalize_for_dim(db, unit, &ty);
 
     if matches!(normalized, Ty::Error) {
@@ -413,10 +427,11 @@ fn eval_dim_intrinsic(
 
     // Per-dimension queries: resolve optional second arg (default 1)
     let dim_num = if arg_count >= 2 {
-        let Some(dim_arg) = view.nth_arg(1) else {
+        let Some(second_arg) = args.get(1) else {
             return ConstInt::Error(ConstEvalError::InvalidArgument);
         };
-        match lyra_semantic::const_eval::eval_const_expr_full(&dim_arg, resolve_name, &|_| None) {
+        let dim_node = tf_arg_node(second_arg);
+        match lyra_semantic::const_eval::eval_const_expr_full(dim_node, resolve_name, &|_| None) {
             Ok(v) => match u32::try_from(v) {
                 Ok(0) | Err(_) => {
                     return ConstInt::Error(ConstEvalError::InvalidArgument);

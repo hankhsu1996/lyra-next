@@ -1,16 +1,15 @@
 use crate::Site;
+use lyra_ast::{AstNode, SystemTfCall, TfArg};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_source::NameSpan;
 
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
-use crate::expr_helpers::is_expression_kind;
 use crate::modport_def::PortDirection;
 use crate::modport_facts::FieldAccessFacts;
-use crate::syntax_helpers::{system_tf_args, system_tf_name};
 use crate::system_functions::{
-    BitsArgKind, SystemFnKind, classify_bits_arg, iter_args, lookup_builtin,
+    BitsArgKind, SystemFnKind, classify_bits_arg, lookup_builtin, tf_arg_node,
 };
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
 use crate::types::{SymbolType, Ty};
@@ -300,36 +299,9 @@ fn direction_permits(dir: PortDirection, access: AccessKind) -> bool {
 
 /// Check whether a node is a compound assignment (+=, -=, etc.).
 fn is_compound_assign(node: &SyntaxNode) -> bool {
-    node.children_with_tokens().any(|child| {
-        child.as_token().is_some_and(|t| {
-            matches!(
-                t.kind(),
-                SyntaxKind::PlusEq
-                    | SyntaxKind::MinusEq
-                    | SyntaxKind::StarEq
-                    | SyntaxKind::SlashEq
-                    | SyntaxKind::PercentEq
-                    | SyntaxKind::AmpEq
-                    | SyntaxKind::PipeEq
-                    | SyntaxKind::CaretEq
-                    | SyntaxKind::LtLtEq
-                    | SyntaxKind::GtGtEq
-                    | SyntaxKind::LtLtLtEq
-                    | SyntaxKind::GtGtGtEq
-            )
-        })
-    })
-}
-
-fn has_assign_op(node: &SyntaxNode) -> bool {
-    use lyra_parser::SyntaxElement;
-    node.children_with_tokens().any(|el| {
-        if let SyntaxElement::Token(tok) = el {
-            matches!(tok.kind(), SyntaxKind::Assign | SyntaxKind::LtEq)
-        } else {
-            false
-        }
-    })
+    lyra_ast::AssignStmt::cast(node.clone())
+        .and_then(|a| a.assign_op())
+        .is_some_and(|op| op.is_compound())
 }
 
 fn check_continuous_assign(
@@ -340,20 +312,16 @@ fn check_continuous_assign(
     items: &mut Vec<TypeCheckItem>,
 ) {
     let self_site = ctx.node_id(node).unwrap_or(fallback);
-    let exprs: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if exprs.len() >= 2 {
-        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, self_site, items);
-    }
-    // Walk LHS in Write context, RHS in Read context
-    if exprs.len() >= 2 {
-        walk_for_checks(&exprs[0], ctx, facts, AccessCtx::Write, self_site, items);
-        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, self_site, items);
+    let ca = lyra_ast::ContinuousAssign::cast(node.clone());
+    let lhs = ca.as_ref().and_then(|c| c.lhs());
+    let rhs = ca.as_ref().and_then(|c| c.rhs());
+    if let (Some(l), Some(r)) = (&lhs, &rhs) {
+        check_assignment_pair(node, l.syntax(), r.syntax(), ctx, self_site, items);
+        walk_for_checks(l.syntax(), ctx, facts, AccessCtx::Write, self_site, items);
+        walk_for_checks(r.syntax(), ctx, facts, AccessCtx::Read, self_site, items);
         for child in node.children() {
-            let r = child.text_range();
-            if r != exprs[0].text_range() && r != exprs[1].text_range() {
+            let cr = child.text_range();
+            if cr != l.syntax().text_range() && cr != r.syntax().text_range() {
                 walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
             }
         }
@@ -372,14 +340,18 @@ fn check_assign_stmt(
     items: &mut Vec<TypeCheckItem>,
 ) {
     let self_site = ctx.node_id(node).unwrap_or(fallback);
-    let exprs: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if exprs.len() >= 2 {
-        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, self_site, items);
-    } else if exprs.len() == 1 && !has_assign_op(node) {
-        let _result = ctx.expr_type_stmt(&exprs[0]);
+    let assign = lyra_ast::AssignStmt::cast(node.clone());
+    let lhs = assign.as_ref().and_then(|a| a.lhs());
+    let rhs = assign.as_ref().and_then(|a| a.rhs());
+    let has_op = assign.as_ref().and_then(|a| a.assign_op()).is_some();
+
+    if let (Some(l), Some(r)) = (&lhs, &rhs) {
+        check_assignment_pair(node, l.syntax(), r.syntax(), ctx, self_site, items);
+    } else if rhs.is_none()
+        && !has_op
+        && let Some(l) = &lhs
+    {
+        let _result = ctx.expr_type_stmt(l.syntax());
     }
     let compound = is_compound_assign(node);
     let lhs_access = if compound {
@@ -387,12 +359,12 @@ fn check_assign_stmt(
     } else {
         AccessCtx::Write
     };
-    if exprs.len() >= 2 {
-        walk_for_checks(&exprs[0], ctx, facts, lhs_access, self_site, items);
-        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, self_site, items);
+    if let (Some(l), Some(r)) = (&lhs, &rhs) {
+        walk_for_checks(l.syntax(), ctx, facts, lhs_access, self_site, items);
+        walk_for_checks(r.syntax(), ctx, facts, AccessCtx::Read, self_site, items);
         for child in node.children() {
-            let r = child.text_range();
-            if r != exprs[0].text_range() && r != exprs[1].text_range() {
+            let cr = child.text_range();
+            if cr != l.syntax().text_range() && cr != r.syntax().text_range() {
                 walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
             }
         }
@@ -414,7 +386,8 @@ fn check_var_decl(
         if child.kind() != SyntaxKind::Declarator {
             continue;
         }
-        let init_expr = find_declarator_init_expr(&child);
+        let decl = lyra_ast::Declarator::cast(child.clone());
+        let init_expr = decl.as_ref().and_then(|d| d.init_expr());
         let Some(init_expr) = init_expr else {
             continue;
         };
@@ -424,33 +397,13 @@ fn check_var_decl(
         };
 
         let lhs_site = require_site(ctx, &child, decl_site, items);
-        let rhs_site = require_site(ctx, &init_expr, decl_site, items);
+        let rhs_site = require_site(ctx, init_expr.syntax(), decl_site, items);
 
         let lhs_type = ExprType::from_symbol_type(&sym_type);
-        let rhs_type = ctx.expr_type(&init_expr);
+        let rhs_type = ctx.expr_type(init_expr.syntax());
 
         check_assignment_compat(&lhs_type, &rhs_type, decl_site, lhs_site, rhs_site, items);
     }
-}
-
-fn find_declarator_init_expr(declarator: &SyntaxNode) -> Option<SyntaxNode> {
-    let mut seen_assign = false;
-    for child in declarator.children_with_tokens() {
-        if child
-            .as_token()
-            .is_some_and(|t| t.kind() == SyntaxKind::Assign)
-        {
-            seen_assign = true;
-            continue;
-        }
-        if seen_assign
-            && let Some(node) = child.as_node()
-            && is_expression_kind(node.kind())
-        {
-            return Some(node.clone());
-        }
-    }
-    None
 }
 
 fn check_assignment_pair(
@@ -561,7 +514,7 @@ fn check_cast_expr(
     let Some(inner) = cast.inner_expr() else {
         return;
     };
-    let Some(value) = ctx.const_eval_int(&inner) else {
+    let Some(value) = ctx.const_eval_int(inner.syntax()) else {
         return;
     };
     let Some(value_set) = ctx.enum_known_value_set(enum_id) else {
@@ -581,11 +534,16 @@ fn check_method_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
     use crate::type_infer::ExprTypeErrorKind;
     use lyra_ast::{AstNode, FieldExpr};
 
-    let callee = match node.first_child() {
-        Some(c) if c.kind() == SyntaxKind::FieldExpr => c,
-        _ => return,
+    let Some(call) = lyra_ast::CallExpr::cast(node.clone()) else {
+        return;
     };
-    let Some(field_expr) = FieldExpr::cast(callee) else {
+    let Some(callee) = call.callee() else {
+        return;
+    };
+    if callee.kind() != SyntaxKind::FieldExpr {
+        return;
+    }
+    let Some(field_expr) = FieldExpr::cast(callee.syntax().clone()) else {
         return;
     };
     let Some(field_tok) = field_expr.field_name() else {
@@ -620,29 +578,33 @@ fn check_system_call(
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(tok) = system_tf_name(node) else {
+    let Some(stf) = SystemTfCall::cast(node.clone()) else {
+        return;
+    };
+    let Some(tok) = stf.system_name() else {
         return;
     };
     let name = tok.text();
     let Some(entry) = lookup_builtin(name) else {
         return;
     };
-    let Some(arg_list) = system_tf_args(node) else {
+    let Some(al) = stf.arg_list() else {
         return;
     };
+    let args: Vec<TfArg> = al.args().collect();
     match entry.kind {
-        SystemFnKind::Bits => check_bits_call(node, &arg_list, ctx, fallback, items),
+        SystemFnKind::Bits => check_bits_call(node, &args, ctx, fallback, items),
         SystemFnKind::IntToReal => {
-            check_conversion_arg_integral(node, &arg_list, name, ctx, fallback, items);
+            check_conversion_arg_integral(node, &args, name, ctx, fallback, items);
         }
         SystemFnKind::RealToInt | SystemFnKind::RealToBits | SystemFnKind::ShortRealToBits => {
-            check_conversion_arg_real(node, &arg_list, name, ctx, fallback, items);
+            check_conversion_arg_real(node, &args, name, ctx, fallback, items);
         }
         SystemFnKind::BitsToReal => {
-            check_conversion_bits_to_real(node, &arg_list, name, 64, ctx, fallback, items);
+            check_conversion_bits_to_real(node, &args, name, 64, ctx, fallback, items);
         }
         SystemFnKind::BitsToShortReal => {
-            check_conversion_bits_to_real(node, &arg_list, name, 32, ctx, fallback, items);
+            check_conversion_bits_to_real(node, &args, name, 32, ctx, fallback, items);
         }
         _ => {}
     }
@@ -650,20 +612,21 @@ fn check_system_call(
 
 fn check_bits_call(
     node: &SyntaxNode,
-    arg_list: &SyntaxNode,
+    args: &[TfArg],
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(first) = iter_args(arg_list).next() else {
+    let Some(first) = args.first() else {
         return;
     };
-    let kind = classify_bits_arg(&first, ctx.file_id(), &|n| ctx.resolve_type_arg(n));
+    let first_node = tf_arg_node(first);
+    let kind = classify_bits_arg(first_node, ctx.file_id(), &|n| ctx.resolve_type_arg(n));
     if let BitsArgKind::Type(ty) = kind
         && !ty.is_data_type()
     {
         let call_site = require_site(ctx, node, fallback, items);
-        let arg_site = require_site(ctx, &first, call_site, items);
+        let arg_site = require_site(ctx, first_node, call_site, items);
         items.push(TypeCheckItem::BitsNonDataType {
             call_site,
             arg_site,
@@ -673,22 +636,23 @@ fn check_bits_call(
 
 fn check_conversion_arg_integral(
     node: &SyntaxNode,
-    arg_list: &SyntaxNode,
+    args: &[TfArg],
     fn_name: &str,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(first) = iter_args(arg_list).next() else {
+    let Some(first) = args.first() else {
         return;
     };
-    let arg_ty = ctx.expr_type(&first);
+    let first_node = tf_arg_node(first);
+    let arg_ty = ctx.expr_type(first_node);
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
     if !matches!(arg_ty.ty, Ty::Integral(_) | Ty::Enum(_)) {
         let call_site = require_site(ctx, node, fallback, items);
-        let arg_site = require_site(ctx, &first, call_site, items);
+        let arg_site = require_site(ctx, first_node, call_site, items);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -700,22 +664,23 @@ fn check_conversion_arg_integral(
 
 fn check_conversion_arg_real(
     node: &SyntaxNode,
-    arg_list: &SyntaxNode,
+    args: &[TfArg],
     fn_name: &str,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(first) = iter_args(arg_list).next() else {
+    let Some(first) = args.first() else {
         return;
     };
-    let arg_ty = ctx.expr_type(&first);
+    let first_node = tf_arg_node(first);
+    let arg_ty = ctx.expr_type(first_node);
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
     if !arg_ty.ty.is_real() {
         let call_site = require_site(ctx, node, fallback, items);
-        let arg_site = require_site(ctx, &first, call_site, items);
+        let arg_site = require_site(ctx, first_node, call_site, items);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -727,22 +692,23 @@ fn check_conversion_arg_real(
 
 fn check_conversion_bits_to_real(
     node: &SyntaxNode,
-    arg_list: &SyntaxNode,
+    args: &[TfArg],
     fn_name: &str,
     expected_width: u32,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(first) = iter_args(arg_list).next() else {
+    let Some(first) = args.first() else {
         return;
     };
-    let arg_ty = ctx.expr_type(&first);
+    let first_node = tf_arg_node(first);
+    let arg_ty = ctx.expr_type(first_node);
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
     let call_site = require_site(ctx, node, fallback, items);
-    let arg_site = require_site(ctx, &first, call_site, items);
+    let arg_site = require_site(ctx, first_node, call_site, items);
     if !matches!(arg_ty.ty, Ty::Integral(_)) {
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
@@ -782,7 +748,7 @@ fn check_stream_operand(
     let Some(expr_node) = item.expr() else {
         return;
     };
-    let operand_ty = ctx.expr_type(&expr_node);
+    let operand_ty = ctx.expr_type(expr_node.syntax());
     if matches!(operand_ty.view, ExprView::Error(_)) {
         return;
     }

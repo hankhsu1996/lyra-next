@@ -46,7 +46,7 @@ pub(super) fn infer_range(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     let Some(base_node) = range.base_expr() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let base = infer_expr_type(&base_node, ctx, None);
+    let base = infer_expr_type(base_node.syntax(), ctx, None);
     if matches!(base.view, ExprView::Error(_)) {
         return base;
     }
@@ -67,21 +67,24 @@ pub(super) fn infer_range(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     let Some((op1_node, op2_node)) = range.operand_exprs() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let op1_et = infer_expr_type(&op1_node, ctx, None);
+    let op1_et = infer_expr_type(op1_node.syntax(), ctx, None);
     if matches!(op1_et.view, ExprView::Error(_)) {
         return op1_et;
     }
-    let op2_et = infer_expr_type(&op2_node, ctx, None);
+    let op2_et = infer_expr_type(op2_node.syntax(), ctx, None);
     if matches!(op2_et.view, ExprView::Error(_)) {
         return op2_et;
     }
 
     // 3. Const-eval and compute width
-    let width =
-        match compute_slice_width(kind, ctx.const_eval(&op1_node), ctx.const_eval(&op2_node)) {
-            Ok(w) => w,
-            Err(e) => return ExprType::error(e),
-        };
+    let width = match compute_slice_width(
+        kind,
+        ctx.const_eval(op1_node.syntax()),
+        ctx.const_eval(op2_node.syntax()),
+    ) {
+        Ok(w) => w,
+        Err(e) => return ExprType::error(e),
+    };
 
     // 4. Construct result type
     match &base.ty {

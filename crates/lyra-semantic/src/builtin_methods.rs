@@ -20,7 +20,7 @@ pub(crate) fn infer_builtin_method_call(
 
     let args: Vec<SyntaxNode> = CallExpr::cast(call_node.clone())
         .and_then(|c| c.arg_list())
-        .map(|al| al.args().collect())
+        .map(|al| al.args().map(|e| e.syntax().clone()).collect())
         .unwrap_or_default();
 
     let (min, max) = match bm {

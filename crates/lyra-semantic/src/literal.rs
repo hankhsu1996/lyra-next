@@ -1,3 +1,4 @@
+use lyra_ast::{AstNode, Expr, LiteralKind};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 
@@ -52,18 +53,16 @@ fn unwrap_parens(node: &SyntaxNode) -> SyntaxNode {
     let mut current = node.clone();
     loop {
         match current.kind() {
-            SyntaxKind::Expression | SyntaxKind::ParenExpr => {
-                let child = current.children().find(|c| {
-                    !matches!(
-                        c.kind(),
-                        SyntaxKind::Whitespace | SyntaxKind::BlockComment | SyntaxKind::LineComment
-                    )
-                });
-                match child {
-                    Some(c) => current = c,
+            SyntaxKind::Expression => {
+                match lyra_ast::Expression::cast(current.clone()).and_then(|e| e.inner()) {
+                    Some(inner) => current = inner.syntax().clone(),
                     None => return current,
                 }
             }
+            SyntaxKind::ParenExpr => match Expr::cast(current.clone()).map(Expr::unwrap_parens) {
+                Some(inner) => return inner.syntax().clone(),
+                None => return current,
+            },
             _ => return current,
         }
     }
@@ -71,52 +70,34 @@ fn unwrap_parens(node: &SyntaxNode) -> SyntaxNode {
 
 /// Parse a Literal syntax node into its shape.
 ///
-/// Accepts the Literal AST node directly (inspects child tokens `IntLiteral`,
-/// `BasedLiteral`, `UnbasedUnsizedLiteral`, `RealLiteral`, `StringLiteral`).
-/// Returns None for malformed or non-numeric literal forms (real, string).
+/// Accepts the Literal AST node directly and uses the typed `literal_kind()`
+/// accessor to classify the literal. Returns None for malformed or
+/// non-numeric literal forms (real, string).
 pub(crate) fn parse_literal_shape(literal_node: &SyntaxNode) -> Option<LiteralShape> {
-    let tokens: Vec<_> = literal_node
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .filter(|tok| {
-            matches!(
-                tok.kind(),
-                SyntaxKind::IntLiteral
-                    | SyntaxKind::BasedLiteral
-                    | SyntaxKind::UnbasedUnsizedLiteral
-            )
-        })
-        .collect();
-
-    match tokens.as_slice() {
-        // Pure decimal: 42, 1_000
-        [tok] if tok.kind() == SyntaxKind::IntLiteral => Some(LiteralShape {
+    let literal = lyra_ast::Literal::cast(literal_node.clone())?;
+    let kind = literal.literal_kind()?;
+    match kind {
+        LiteralKind::Int { .. } => Some(LiteralShape {
             width: 32,
             signed: true,
             base: Base::Decimal,
             is_unsized: true,
             has_xz: false,
         }),
-        // Unbased unsized: '0, '1, 'x, 'z
-        [tok] if tok.kind() == SyntaxKind::UnbasedUnsizedLiteral => Some(LiteralShape {
+        LiteralKind::UnbasedUnsized { token } => Some(LiteralShape {
             width: 1,
             signed: false,
             base: Base::Binary,
             is_unsized: true,
-            has_xz: tok
+            has_xz: token
                 .text()
                 .chars()
                 .any(|c| matches!(c, 'x' | 'X' | 'z' | 'Z')),
         }),
-        // Unsized based: 'hFF, 'b1010
-        [tok] if tok.kind() == SyntaxKind::BasedLiteral => parse_based_shape(None, tok.text()),
-        // Sized based: 8'hFF
-        [size_tok, based_tok]
-            if size_tok.kind() == SyntaxKind::IntLiteral
-                && based_tok.kind() == SyntaxKind::BasedLiteral =>
-        {
-            parse_based_shape(Some(size_tok.text()), based_tok.text())
-        }
+        LiteralKind::Based {
+            size_token,
+            base_token,
+        } => parse_based_shape(size_token.as_ref().map(|t| t.text()), base_token.text()),
         _ => None,
     }
 }

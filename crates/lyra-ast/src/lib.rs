@@ -1,9 +1,11 @@
 mod ast_id;
+mod expr;
 mod node;
 mod nodes;
 mod support;
 
 pub use ast_id::{AstId, AstIdMap, ErasedAstId};
+pub use expr::{Expr, LiteralKind, TfArg, TypeRef};
 pub use node::{AstNode, is_expression_kind};
 pub use nodes::{
     AlwaysBlock, ArgList, AssignStmt, BinExpr, BlockStmt, CallExpr, CaseItem, CaseStmt, CastExpr,
@@ -16,7 +18,8 @@ pub use nodes::{
     ParamDecl, ParamPortList, ParenExpr, Port, PortList, PrefixExpr, PrimitiveDecl, ProgramBody,
     ProgramDecl, QualifiedName, RangeExpr, RangeKind, RepeatStmt, ReplicExpr, SourceFile,
     StreamExpr, StreamOperandItem, StreamOperands, StreamRange, StreamRangeOp, StreamSliceSize,
-    StreamWithClause, StructMember, StructType, SystemTfArgList, SystemTfCall, TaskDecl,
-    TfPortDecl, TimingControl, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
+    StreamWithClause, StructMember, StructType, SyntaxAssignOp, SyntaxBinaryOp, SystemTfArgList,
+    SystemTfCall, TaskDecl, TfPortDecl, TimingControl, TypeSpec, TypedefDecl, UnpackedDimension,
+    VarDecl, WhileStmt,
 };
 pub use support::AstChildren;

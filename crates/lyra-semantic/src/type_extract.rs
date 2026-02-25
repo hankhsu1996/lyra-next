@@ -4,11 +4,11 @@ use lyra_parser::{SyntaxElement, SyntaxNode};
 use lyra_source::TextRange;
 use smol_str::SmolStr;
 
-use crate::expr_helpers::is_expression_kind;
 use crate::types::{
     AssocIndex, ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType, PackedDim,
     PackedDims, RealKw, SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
 };
+use lyra_ast::is_expression_kind;
 
 /// Extract a `SymbolType` from a declaration container node.
 ///

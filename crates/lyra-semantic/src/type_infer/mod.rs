@@ -1,5 +1,9 @@
 mod range;
 
+use lyra_ast::{
+    AstNode, BinExpr, CallExpr, ConcatExpr, CondExpr, Expr, LiteralKind, PrefixExpr, ReplicExpr,
+    StreamExpr, SystemTfCall,
+};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
@@ -9,11 +13,9 @@ use crate::coerce::{
     operator_result_self,
 };
 use crate::enum_def::EnumId;
-use crate::expr_helpers::{find_binary_op, find_operator_token, is_expression_kind};
 use crate::literal::parse_literal_shape;
 use crate::member::{MemberInfo, MemberKind, MemberLookupError, MethodInvalidReason};
 use crate::symbols::{GlobalSymbolId, SymbolKind};
-use crate::syntax_helpers::system_tf_name;
 use crate::types::{
     ConstEvalError, ConstInt, Integral, IntegralKw, PackedDim, PackedDims, RealKw, SymbolType, Ty,
 };
@@ -352,8 +354,14 @@ pub fn infer_expr_type(
     match expr.kind() {
         SyntaxKind::NameRef | SyntaxKind::QualifiedName => ctx.type_of_name(expr),
         SyntaxKind::Literal => infer_literal(expr, expected),
-        SyntaxKind::Expression | SyntaxKind::ParenExpr => match expr.first_child() {
-            Some(child) => infer_expr_type(&child, ctx, expected),
+        SyntaxKind::Expression => {
+            match lyra_ast::Expression::cast(expr.clone()).and_then(|e| e.inner()) {
+                Some(inner) => infer_expr_type(inner.syntax(), ctx, expected),
+                None => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
+            }
+        }
+        SyntaxKind::ParenExpr => match Expr::cast(expr.clone()).map(Expr::unwrap_parens) {
+            Some(inner) => infer_expr_type(inner.syntax(), ctx, expected),
             None => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
         },
         SyntaxKind::PrefixExpr => infer_prefix(expr, ctx, expected),
@@ -388,32 +396,21 @@ pub fn infer_expr_type_stmt(expr: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 }
 
 fn infer_literal(node: &SyntaxNode, expected: Option<&IntegralCtx>) -> ExprType {
-    let lit_kind = node
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .map(|t| t.kind())
-        .find(|k| {
-            matches!(
-                k,
-                SyntaxKind::TimeLiteral
-                    | SyntaxKind::RealLiteral
-                    | SyntaxKind::StringLiteral
-                    | SyntaxKind::IntLiteral
-                    | SyntaxKind::BasedLiteral
-                    | SyntaxKind::UnbasedUnsizedLiteral
-            )
-        });
-
-    match lit_kind {
-        Some(SyntaxKind::TimeLiteral) => ExprType::from_ty(&Ty::Real(RealKw::Time)),
-        Some(SyntaxKind::RealLiteral) => ExprType::from_ty(&Ty::Real(RealKw::Real)),
-        Some(SyntaxKind::StringLiteral) => ExprType::from_ty(&Ty::String),
-        Some(SyntaxKind::UnbasedUnsizedLiteral) => {
-            let has_xz = node
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .find(|t| t.kind() == SyntaxKind::UnbasedUnsizedLiteral)
-                .is_some_and(|t| t.text().chars().any(|c| matches!(c, 'x' | 'X' | 'z' | 'Z')));
+    let Some(literal) = lyra_ast::Literal::cast(node.clone()) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedLiteralKind);
+    };
+    let Some(kind) = literal.literal_kind() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedLiteralKind);
+    };
+    match kind {
+        LiteralKind::Time { .. } => ExprType::from_ty(&Ty::Real(RealKw::Time)),
+        LiteralKind::Real { .. } => ExprType::from_ty(&Ty::Real(RealKw::Real)),
+        LiteralKind::String { .. } => ExprType::from_ty(&Ty::String),
+        LiteralKind::UnbasedUnsized { token } => {
+            let has_xz = token
+                .text()
+                .chars()
+                .any(|c| matches!(c, 'x' | 'X' | 'z' | 'Z'));
             let self_ty = BitVecType {
                 width: BitWidth::ContextDependent,
                 signed: Signedness::Unsigned,
@@ -444,13 +441,18 @@ fn infer_literal(node: &SyntaxNode, expected: Option<&IntegralCtx>) -> ExprType 
 }
 
 fn infer_prefix(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralCtx>) -> ExprType {
-    let Some(op) = find_operator_token(node) else {
+    let Some(pfx) = PrefixExpr::cast(node.clone()) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
+    let Some(op_tok) = pfx.op_token() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let op = op_tok.kind();
 
-    let Some(operand_node) = node.children().find(|c| is_expression_kind(c.kind())) else {
+    let Some(operand_node) = pfx.operand() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
+    let operand_node = operand_node.syntax().clone();
 
     match op {
         // Logical negation: always 1-bit unsigned, operand self-determined
@@ -485,21 +487,23 @@ fn infer_prefix(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
 }
 
 fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralCtx>) -> ExprType {
-    let children: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if children.len() < 2 {
+    let Some(bin) = BinExpr::cast(node.clone()) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    }
+    };
+    let Some(lhs_node) = bin.lhs() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let Some(rhs_node) = bin.rhs() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
 
-    let Some(op) = find_binary_op(node) else {
+    let Some(op) = bin.binary_op() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
     // Step 1-2: self-determined types of both operands
-    let lhs_self = infer_expr_type(&children[0], ctx, None);
-    let rhs_self = infer_expr_type(&children[1], ctx, None);
+    let lhs_self = infer_expr_type(lhs_node.syntax(), ctx, None);
+    let rhs_self = infer_expr_type(rhs_node.syntax(), ctx, None);
 
     let spec = op_spec(op);
 
@@ -526,17 +530,17 @@ fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
     // Step 5: re-infer operands with context (branched by category)
     match spec.category {
         OpCategory::ContextBoth => {
-            infer_expr_type(&children[0], ctx, Some(&result_ctx));
-            infer_expr_type(&children[1], ctx, Some(&result_ctx));
+            infer_expr_type(lhs_node.syntax(), ctx, Some(&result_ctx));
+            infer_expr_type(rhs_node.syntax(), ctx, Some(&result_ctx));
         }
         OpCategory::ShiftLike => {
-            infer_expr_type(&children[0], ctx, Some(&result_ctx));
+            infer_expr_type(lhs_node.syntax(), ctx, Some(&result_ctx));
             // RHS is self-determined
         }
         OpCategory::Comparison => {
             let cmp_ctx = comparison_context(&lhs_bv, &rhs_bv);
-            infer_expr_type(&children[0], ctx, Some(&cmp_ctx));
-            infer_expr_type(&children[1], ctx, Some(&cmp_ctx));
+            infer_expr_type(lhs_node.syntax(), ctx, Some(&cmp_ctx));
+            infer_expr_type(rhs_node.syntax(), ctx, Some(&cmp_ctx));
         }
         OpCategory::Logical => {
             // Both operands are self-determined
@@ -548,20 +552,25 @@ fn infer_binary(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&Integra
 }
 
 fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralCtx>) -> ExprType {
-    let children: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if children.len() < 3 {
+    let Some(cond_expr) = CondExpr::cast(node.clone()) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    }
+    };
+    let Some(cond_node) = cond_expr.condition() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let Some(then_node) = cond_expr.then_expr() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let Some(else_node) = cond_expr.else_expr() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
 
     // Condition is always self-determined
-    let _cond = infer_expr_type(&children[0], ctx, None);
+    let _cond = infer_expr_type(cond_node.syntax(), ctx, None);
 
     // Self-determined types of both arms
-    let then_ty = infer_expr_type(&children[1], ctx, None);
-    let else_ty = infer_expr_type(&children[2], ctx, None);
+    let then_ty = infer_expr_type(then_node.syntax(), ctx, None);
+    let else_ty = infer_expr_type(else_node.syntax(), ctx, None);
 
     match (&then_ty.view, &else_ty.view) {
         (ExprView::BitVec(a), ExprView::BitVec(b)) => {
@@ -593,8 +602,8 @@ fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralC
             };
 
             // Re-infer arms with context
-            infer_expr_type(&children[1], ctx, Some(&arm_ctx));
-            infer_expr_type(&children[2], ctx, Some(&arm_ctx));
+            infer_expr_type(then_node.syntax(), ctx, Some(&arm_ctx));
+            infer_expr_type(else_node.syntax(), ctx, Some(&arm_ctx));
 
             ExprType::bitvec(coerce_integral(&merged, &arm_ctx))
         }
@@ -606,15 +615,15 @@ fn infer_cond(node: &SyntaxNode, ctx: &dyn InferCtx, expected: Option<&IntegralC
 }
 
 fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+    let Some(concat) = ConcatExpr::cast(node.clone()) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
     let mut total_width: Option<u32> = Some(0);
     let mut all_known = true;
     let mut any_four_state = false;
 
-    for child in node.children() {
-        if !is_expression_kind(child.kind()) {
-            continue;
-        }
-        let child_ty = infer_expr_type(&child, ctx, None);
+    for child in concat.operands() {
+        let child_ty = infer_expr_type(child.syntax(), ctx, None);
         if let ExprView::Error(_) = &child_ty.view {
             return child_ty;
         }
@@ -698,31 +707,23 @@ fn stream_elem_view(elem_ty: &Ty, ctx: &dyn InferCtx) -> Option<StreamElemView> 
 }
 
 fn infer_stream(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    use lyra_ast::{AstNode, StreamOperandItem};
-
-    let Some(operands) = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::StreamOperands)
-    else {
+    let Some(stream) = StreamExpr::cast(node.clone()) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let Some(operands) = stream.stream_operands() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
     let mut width = StreamWidth::Known(0);
     let mut any_four_state = false;
 
-    for item_node in operands.children() {
-        if item_node.kind() != SyntaxKind::StreamOperandItem {
-            continue;
-        }
-        let Some(item) = StreamOperandItem::cast(item_node) else {
-            continue;
-        };
+    for item in operands.items() {
         let Some(expr_node) = item.expr() else {
             width = width.add(StreamWidth::Error);
             continue;
         };
 
-        let child_ty = infer_expr_type(&expr_node, ctx, None);
+        let child_ty = infer_expr_type(expr_node.syntax(), ctx, None);
         if let ExprView::Error(_) = &child_ty.view {
             width = width.add(StreamWidth::Error);
             continue;
@@ -795,7 +796,7 @@ fn infer_stream_with_operand(
             let Some(width_node) = range.rhs() else {
                 return StreamWidth::Error;
             };
-            match ctx.const_eval(&width_node) {
+            match ctx.const_eval(width_node.syntax()) {
                 ConstInt::Known(w) if w > 0 => match u32::try_from(w) {
                     Ok(v) => StreamWidth::Known(v),
                     Err(_) => StreamWidth::Dynamic,
@@ -809,7 +810,10 @@ fn infer_stream_with_operand(
             let (Some(lo_node), Some(hi_node)) = (range.lhs(), range.rhs()) else {
                 return StreamWidth::Error;
             };
-            match (ctx.const_eval(&lo_node), ctx.const_eval(&hi_node)) {
+            match (
+                ctx.const_eval(lo_node.syntax()),
+                ctx.const_eval(hi_node.syntax()),
+            ) {
                 (ConstInt::Known(lo), ConstInt::Known(hi)) => {
                     let diff = (i128::from(hi) - i128::from(lo)).unsigned_abs() + 1;
                     match u32::try_from(diff) {
@@ -830,21 +834,13 @@ fn infer_stream_with_operand(
 }
 
 fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let children: Vec<SyntaxNode> = node.children().collect();
-
-    let expr_children: Vec<SyntaxNode> = children
-        .iter()
-        .filter(|c| is_expression_kind(c.kind()))
-        .cloned()
-        .collect();
-
-    if expr_children.is_empty() {
+    let Some(replic) = ReplicExpr::cast(node.clone()) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    }
-
-    // First expression child is the replication count
-    let count_node = &expr_children[0];
-    let count = ctx.const_eval(count_node);
+    };
+    let Some(count_expr) = replic.count() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let count = ctx.const_eval(count_expr.syntax());
 
     let replic_count = match count {
         ConstInt::Known(n) => {
@@ -859,53 +855,51 @@ fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         ConstInt::Unevaluated(_) => None,
     };
 
-    // Remaining children are the inner items (to be concatenated)
-    let inner_items = &expr_children[1..];
+    // Body expressions after count (typically a single ConcatExpr)
+    let body: Vec<lyra_ast::Expr> = replic.body_exprs().collect();
 
-    // Check for ConcatExpr child
-    let concat_child = children.iter().find(|c| c.kind() == SyntaxKind::ConcatExpr);
-
-    let (inner_width, inner_four_state) = if let Some(concat) = concat_child {
-        let inner = infer_concat(concat, ctx);
-        if let ExprView::Error(_) = &inner.view {
-            return inner;
-        }
-        let Some(bv) = try_integral_view(&inner, ctx) else {
-            return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
-        };
-        (bv.width, bv.four_state)
-    } else if inner_items.is_empty() {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    } else {
-        // Sum widths of inner items
-        let mut total: Option<u32> = Some(0);
-        let mut all_known = true;
-        let mut any_four_state = false;
-        for item in inner_items {
-            let item_ty = infer_expr_type(item, ctx, None);
-            if let ExprView::Error(_) = &item_ty.view {
-                return item_ty;
+    let (inner_width, inner_four_state) =
+        if body.len() == 1 && body[0].kind() == SyntaxKind::ConcatExpr {
+            let inner = infer_concat(body[0].syntax(), ctx);
+            if let ExprView::Error(_) = &inner.view {
+                return inner;
             }
-            let Some(bv) = try_integral_view(&item_ty, ctx) else {
+            let Some(bv) = try_integral_view(&inner, ctx) else {
                 return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
             };
-            any_four_state = any_four_state || bv.four_state;
-            match bv.width.self_determined() {
-                Some(w) => {
-                    if let Some(ref mut t) = total {
-                        *t = t.saturating_add(w);
-                    }
-                }
-                None => all_known = false,
-            }
-        }
-        let width = if all_known {
-            BitWidth::Known(total.unwrap_or(0))
+            (bv.width, bv.four_state)
+        } else if body.is_empty() {
+            return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
         } else {
-            BitWidth::Unknown
+            // Sum widths of inner items
+            let mut total: Option<u32> = Some(0);
+            let mut all_known = true;
+            let mut any_four_state = false;
+            for item in &body {
+                let item_ty = infer_expr_type(item.syntax(), ctx, None);
+                if let ExprView::Error(_) = &item_ty.view {
+                    return item_ty;
+                }
+                let Some(bv) = try_integral_view(&item_ty, ctx) else {
+                    return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
+                };
+                any_four_state = any_four_state || bv.four_state;
+                match bv.width.self_determined() {
+                    Some(w) => {
+                        if let Some(ref mut t) = total {
+                            *t = t.saturating_add(w);
+                        }
+                    }
+                    None => all_known = false,
+                }
+            }
+            let width = if all_known {
+                BitWidth::Known(total.unwrap_or(0))
+            } else {
+                BitWidth::Unknown
+            };
+            (width, any_four_state)
         };
-        (width, any_four_state)
-    };
 
     let result_width = match (replic_count, inner_width.self_determined()) {
         (Some(n), Some(w)) => BitWidth::Known(n.saturating_mul(w)),
@@ -939,7 +933,6 @@ fn classify_index(ty: &Ty) -> Result<IndexKind, ExprTypeErrorKind> {
 }
 
 fn infer_index(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    use lyra_ast::AstNode;
     let Some(idx_expr) = lyra_ast::IndexExpr::cast(node.clone()) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -950,12 +943,12 @@ fn infer_index(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    let base = infer_expr_type(&base_node, ctx, None);
+    let base = infer_expr_type(base_node.syntax(), ctx, None);
     if matches!(base.view, ExprView::Error(_)) {
         return base;
     }
 
-    let idx = infer_expr_type(&index_node, ctx, None);
+    let idx = infer_expr_type(index_node.syntax(), ctx, None);
     if matches!(idx.view, ExprView::Error(_)) {
         return idx;
     }
@@ -983,8 +976,7 @@ fn apply_index(base: &ExprType) -> ExprType {
 }
 
 fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    use lyra_ast::{AstNode, FieldExpr};
-
+    use lyra_ast::FieldExpr;
     let Some(field_expr) = FieldExpr::cast(node.clone()) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -995,7 +987,7 @@ fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    let lhs_type = infer_expr_type(&lhs, ctx, None);
+    let lhs_type = infer_expr_type(lhs.syntax(), ctx, None);
     if let ExprView::Error(_) = &lhs_type.view {
         return lhs_type;
     }
@@ -1020,15 +1012,21 @@ fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
 
 fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     // System task/function calls: $clog2, $signed, $bits, etc.
-    if system_tf_name(node).is_some() {
+    if SystemTfCall::cast(node.clone())
+        .and_then(|s| s.system_name())
+        .is_some()
+    {
         return crate::system_functions::infer_system_call(node, ctx);
     }
 
     // User-defined call: classify callee form
-    let callee_node = match node.first_child() {
-        Some(c) if is_expression_kind(c.kind()) => c,
-        _ => return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
+    let Some(call) = CallExpr::cast(node.clone()) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
+    let Some(callee_expr) = call.callee() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let callee_node = callee_expr.syntax().clone();
 
     match callee_node.kind() {
         SyntaxKind::NameRef | SyntaxKind::QualifiedName => {}
@@ -1063,25 +1061,19 @@ fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         return ExprType::error(ExprTypeErrorKind::TaskInExprContext);
     }
 
-    // Check arguments
     check_call_args(node, &sig, ctx);
-
-    // Return the declared return type
     ExprType::from_ty(&sig.return_ty)
 }
 
 /// Check call arguments against the callable signature.
 fn check_call_args(call_node: &SyntaxNode, sig: &CallableSigRef, ctx: &dyn InferCtx) {
-    // Find ArgList child
-    let arg_list = call_node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::ArgList);
-
-    let args: Vec<SyntaxNode> = arg_list
-        .iter()
-        .flat_map(|al| al.children())
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
+    let Some(call) = CallExpr::cast(call_node.clone()) else {
+        return;
+    };
+    let args: Vec<lyra_ast::Expr> = call
+        .arg_list()
+        .map(|al| al.args().collect())
+        .unwrap_or_default();
 
     // Infer each argument with expected type from the port signature
     for (i, arg) in args.iter().enumerate() {
@@ -1096,7 +1088,7 @@ fn check_call_args(call_node: &SyntaxNode, sig: &CallableSigRef, ctx: &dyn Infer
                 _ => None,
             }
         });
-        infer_expr_type(arg, ctx, expected_ctx.as_ref());
+        infer_expr_type(arg.syntax(), ctx, expected_ctx.as_ref());
     }
 }
 
@@ -1105,8 +1097,7 @@ fn infer_method_call(
     callee_node: &SyntaxNode,
     ctx: &dyn InferCtx,
 ) -> ExprType {
-    use lyra_ast::{AstNode, FieldExpr};
-
+    use lyra_ast::FieldExpr;
     let Some(field_expr) = FieldExpr::cast(callee_node.clone()) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -1117,7 +1108,7 @@ fn infer_method_call(
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    let lhs_type = infer_expr_type(&lhs_node, ctx, None);
+    let lhs_type = infer_expr_type(lhs_node.syntax(), ctx, None);
     if let ExprView::Error(_) = &lhs_type.view {
         return lhs_type;
     }
@@ -1148,15 +1139,14 @@ fn infer_method_call(
 }
 
 fn infer_cast(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    use lyra_ast::{AstNode, CastExpr};
-
+    use lyra_ast::CastExpr;
     let Some(cast) = CastExpr::cast(node.clone()) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
     // Infer the inner expression (for side effects / context propagation)
     if let Some(inner) = cast.inner_expr() {
-        let _ = infer_expr_type(&inner, ctx, None);
+        let _ = infer_expr_type(inner.syntax(), ctx, None);
     }
 
     // Resolve the target type from the TypeSpec child

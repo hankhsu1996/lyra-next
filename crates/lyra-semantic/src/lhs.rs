@@ -24,7 +24,7 @@ pub(crate) fn classify_lhs(node: &SyntaxNode) -> LhsClass {
         SyntaxKind::FieldExpr => {
             if FieldExpr::cast(node.clone())
                 .and_then(|f| f.base_expr())
-                .is_some_and(|base| is_lvalue(&base))
+                .is_some_and(|base| is_lvalue(base.syntax()))
             {
                 LhsClass::Assignable(node.clone())
             } else {
@@ -34,7 +34,7 @@ pub(crate) fn classify_lhs(node: &SyntaxNode) -> LhsClass {
         SyntaxKind::IndexExpr => {
             if IndexExpr::cast(node.clone())
                 .and_then(|i| i.base_expr())
-                .is_some_and(|base| is_lvalue(&base))
+                .is_some_and(|base| is_lvalue(base.syntax()))
             {
                 LhsClass::Assignable(node.clone())
             } else {
@@ -44,7 +44,7 @@ pub(crate) fn classify_lhs(node: &SyntaxNode) -> LhsClass {
         SyntaxKind::RangeExpr => {
             if RangeExpr::cast(node.clone())
                 .and_then(|r| r.base_expr())
-                .is_some_and(|base| is_lvalue(&base))
+                .is_some_and(|base| is_lvalue(base.syntax()))
             {
                 LhsClass::Assignable(node.clone())
             } else {
@@ -52,11 +52,11 @@ pub(crate) fn classify_lhs(node: &SyntaxNode) -> LhsClass {
             }
         }
         SyntaxKind::ParenExpr => match ParenExpr::cast(node.clone()).and_then(|p| p.inner()) {
-            Some(inner) => classify_lhs(&inner),
+            Some(inner) => classify_lhs(inner.syntax()),
             None => LhsClass::NotAssignable,
         },
         SyntaxKind::Expression => match Expression::cast(node.clone()).and_then(|e| e.inner()) {
-            Some(inner) => classify_lhs(&inner),
+            Some(inner) => classify_lhs(inner.syntax()),
             None => LhsClass::NotAssignable,
         },
         SyntaxKind::ConcatExpr | SyntaxKind::StreamExpr => LhsClass::Unsupported,

@@ -1,8 +1,7 @@
+use lyra_ast::{AstNode, SystemTfCall, TfArg};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 
-use crate::expr_helpers::is_expression_kind;
-use crate::syntax_helpers::{system_tf_args, system_tf_name};
 use crate::type_infer::{ExprType, ExprTypeErrorKind, InferCtx, infer_expr_type};
 
 pub(crate) enum SystemFnKind {
@@ -300,30 +299,17 @@ static BUILTINS: &[SystemFnEntry] = &[
     },
 ];
 
-/// Iterate argument nodes in a system task/function argument list.
-///
-/// Accepts `TypeSpec` (type-form args), `NameRef`/`QualifiedName`, and
-/// expression nodes. Reuses `is_expression_kind` as the single maintained
-/// predicate for expression node kinds.
-pub(crate) fn iter_args(arg_list: &SyntaxNode) -> impl Iterator<Item = SyntaxNode> + '_ {
-    arg_list.children().filter(|c| {
-        matches!(
-            c.kind(),
-            SyntaxKind::TypeSpec | SyntaxKind::NameRef | SyntaxKind::QualifiedName
-        ) || is_expression_kind(c.kind())
-    })
+/// Get the syntax node from a `TfArg` (the node for expr or type or unknown).
+pub(crate) fn tf_arg_node(arg: &TfArg) -> &SyntaxNode {
+    match arg {
+        TfArg::Expr(e) => e.syntax(),
+        TfArg::Type(t) => t.syntax(),
+        TfArg::Unknown(n) => n,
+    }
 }
 
-fn arg_count(arg_list: &SyntaxNode) -> usize {
-    iter_args(arg_list).count()
-}
-
-pub(crate) fn nth_arg(arg_list: &SyntaxNode, n: usize) -> Option<SyntaxNode> {
-    iter_args(arg_list).nth(n)
-}
-
-fn check_arity(arg_list: &SyntaxNode, entry: &SystemFnEntry) -> Option<ExprType> {
-    let count = arg_count(arg_list);
+fn check_arity(args: &[TfArg], entry: &SystemFnEntry) -> Option<ExprType> {
+    let count = args.len();
     if count < entry.min_args as usize {
         return Some(ExprType::error(ExprTypeErrorKind::UnsupportedExprKind));
     }
@@ -341,16 +327,20 @@ pub(crate) fn lookup_builtin(name: &str) -> Option<&'static SystemFnEntry> {
 }
 
 pub(crate) fn infer_system_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let Some(tok) = system_tf_name(node) else {
+    let Some(stf) = SystemTfCall::cast(node.clone()) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    let Some(tok) = stf.system_name() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
     let name = tok.text();
     let Some(entry) = lookup_builtin(name) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedSystemCall);
     };
-    let Some(args) = system_tf_args(node) else {
+    let Some(arg_list) = stf.arg_list() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
+    let args: Vec<TfArg> = arg_list.args().collect();
     if let Some(err) = check_arity(&args, entry) {
         return err;
     }
@@ -375,10 +365,10 @@ pub(crate) fn infer_system_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprTy
     }
 }
 
-fn infer_clog2(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+fn infer_clog2(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::type_infer::{BitVecType, BitWidth, Signedness};
-    if let Some(arg) = nth_arg(args, 0) {
-        let _ = infer_expr_type(&arg, ctx, None);
+    if let Some(arg) = args.first() {
+        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
     }
     ExprType::bitvec(BitVecType {
         width: BitWidth::Known(32),
@@ -392,14 +382,14 @@ fn infer_bits() -> ExprType {
     ExprType::from_ty(&Ty::int())
 }
 
-fn infer_signedness_cast(args: &SyntaxNode, ctx: &dyn InferCtx, target_signed: bool) -> ExprType {
+fn infer_signedness_cast(args: &[TfArg], ctx: &dyn InferCtx, target_signed: bool) -> ExprType {
     use crate::type_infer::ExprView;
     use crate::types::{Integral, Ty};
 
-    let Some(arg_node) = nth_arg(args, 0) else {
+    let Some(first) = args.first() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let arg = infer_expr_type(&arg_node, ctx, None);
+    let arg = infer_expr_type(tf_arg_node(first), ctx, None);
     if let ExprView::Error(_) = &arg.view {
         return arg;
     }
@@ -414,45 +404,45 @@ fn infer_signedness_cast(args: &SyntaxNode, ctx: &dyn InferCtx, target_signed: b
     ExprType::from_ty(&new_ty)
 }
 
-fn infer_one_arg_returns_real(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+fn infer_one_arg_returns_real(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::types::{RealKw, Ty};
-    if let Some(arg) = nth_arg(args, 0) {
-        let _ = infer_expr_type(&arg, ctx, None);
+    if let Some(arg) = args.first() {
+        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
     }
     ExprType::from_ty(&Ty::Real(RealKw::Real))
 }
 
-fn infer_two_arg_returns_real(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+fn infer_two_arg_returns_real(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::types::{RealKw, Ty};
-    if let Some(arg) = nth_arg(args, 0) {
-        let _ = infer_expr_type(&arg, ctx, None);
+    if let Some(arg) = args.first() {
+        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
     }
-    if let Some(arg) = nth_arg(args, 1) {
-        let _ = infer_expr_type(&arg, ctx, None);
+    if let Some(arg) = args.get(1) {
+        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
     }
     ExprType::from_ty(&Ty::Real(RealKw::Real))
 }
 
-fn infer_one_arg_returns_int(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+fn infer_one_arg_returns_int(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::types::Ty;
-    if let Some(arg) = nth_arg(args, 0) {
-        let _ = infer_expr_type(&arg, ctx, None);
+    if let Some(arg) = args.first() {
+        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
     }
     ExprType::from_ty(&Ty::int())
 }
 
-fn infer_one_arg_returns_bits(args: &SyntaxNode, ctx: &dyn InferCtx, width: u32) -> ExprType {
+fn infer_one_arg_returns_bits(args: &[TfArg], ctx: &dyn InferCtx, width: u32) -> ExprType {
     use crate::types::Ty;
-    if let Some(arg) = nth_arg(args, 0) {
-        let _ = infer_expr_type(&arg, ctx, None);
+    if let Some(arg) = args.first() {
+        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
     }
     ExprType::from_ty(&Ty::bit_n(width))
 }
 
-fn infer_one_arg_returns_shortreal(args: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
+fn infer_one_arg_returns_shortreal(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::types::{RealKw, Ty};
-    if let Some(arg) = nth_arg(args, 0) {
-        let _ = infer_expr_type(&arg, ctx, None);
+    if let Some(arg) = args.first() {
+        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
     }
     ExprType::from_ty(&Ty::Real(RealKw::Short))
 }
@@ -515,35 +505,36 @@ mod tests {
         None
     }
 
-    fn arg_list_from(src: &str) -> SyntaxNode {
+    fn arg_list_from(src: &str) -> lyra_ast::SystemTfArgList {
         let call = parse_system_call(src);
-        system_tf_args(&call).expect("should have arg list")
+        let stf = SystemTfCall::cast(call).expect("should be SystemTfCall");
+        stf.arg_list().expect("should have arg list")
     }
 
     #[test]
     fn iter_args_three() {
         let al = arg_list_from("module m; initial $foo(a, b, c); endmodule");
-        assert_eq!(iter_args(&al).count(), 3);
+        assert_eq!(al.args().count(), 3);
     }
 
     #[test]
     fn iter_args_single_nameref() {
         let al = arg_list_from("module m; initial $foo(x); endmodule");
-        let args: Vec<_> = iter_args(&al).collect();
+        let args: Vec<_> = al.args().collect();
         assert_eq!(args.len(), 1);
-        assert_eq!(args[0].kind(), SyntaxKind::NameRef);
+        assert!(matches!(args[0], TfArg::Expr(ref e) if e.kind() == SyntaxKind::NameRef));
     }
 
     #[test]
     fn iter_args_complex_exprs() {
         let al = arg_list_from("module m; initial $foo(a+b, f(x), x[i], x.y); endmodule");
-        assert_eq!(iter_args(&al).count(), 4);
+        assert_eq!(al.args().count(), 4);
     }
 
     #[test]
     fn iter_args_sparse_commas() {
         let al = arg_list_from("module m; initial $foo(a,,b); endmodule");
-        let count = iter_args(&al).count();
+        let count = al.args().count();
         assert!(count <= 3, "sparse commas: got {count} args");
     }
 
