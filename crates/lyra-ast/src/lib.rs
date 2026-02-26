@@ -2,12 +2,13 @@ mod ast_id;
 mod expr;
 mod node;
 mod nodes;
+mod nodes_decl;
 mod support;
 mod type_spec;
 
 pub use ast_id::{AstId, AstIdMap, ErasedAstId};
 pub use expr::{Expr, LiteralKind, TfArg, TypeRef};
-pub use node::{AstNode, is_expression_kind};
+pub use node::{AstNode, StmtNode, is_expression_kind, is_statement_kind};
 pub use nodes::{
     AlwaysBlock, ArgList, AssignStmt, BinExpr, BlockStmt, CallExpr, CaseItem, CaseStmt, CastExpr,
     ConcatExpr, CondExpr, ConfigDecl, ContinuousAssign, Declarator, DottedName, EnumMember,
@@ -23,5 +24,5 @@ pub use nodes::{
     SystemTfCall, TaskDecl, TfPortDecl, TimingControl, TypeSpec, TypedefDecl, UnpackedDimension,
     VarDecl, WhileStmt,
 };
-pub use support::AstChildren;
+pub use support::{AstChildren, expr_children};
 pub use type_spec::{TypeNameRef, UnpackedDimKind};

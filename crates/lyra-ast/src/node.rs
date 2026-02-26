@@ -29,6 +29,55 @@ pub trait AstNode: Sized {
     }
 }
 
+/// Whether a `SyntaxKind` represents a statement or statement-like node.
+pub fn is_statement_kind(kind: lyra_lexer::SyntaxKind) -> bool {
+    use lyra_lexer::SyntaxKind;
+    matches!(
+        kind,
+        SyntaxKind::BlockStmt
+            | SyntaxKind::IfStmt
+            | SyntaxKind::CaseStmt
+            | SyntaxKind::ForStmt
+            | SyntaxKind::WhileStmt
+            | SyntaxKind::RepeatStmt
+            | SyntaxKind::ForeverStmt
+            | SyntaxKind::AssignStmt
+            | SyntaxKind::ContinuousAssign
+            | SyntaxKind::VarDecl
+            | SyntaxKind::NetDecl
+            | SyntaxKind::TimingControl
+            | SyntaxKind::SystemTfCall
+    )
+}
+
+/// Untyped statement node wrapper.
+///
+/// Wraps any `SyntaxNode` whose kind satisfies `is_statement_kind`.
+/// Used for generic statement iteration in typed accessors (e.g.
+/// `BlockStmt::statements()`, `IfStmt::then_body()`).
+#[derive(Debug, Clone)]
+pub struct StmtNode {
+    pub(crate) syntax: lyra_parser::SyntaxNode,
+}
+
+impl AstNode for StmtNode {
+    fn can_cast(kind: lyra_lexer::SyntaxKind) -> bool {
+        is_statement_kind(kind)
+    }
+
+    fn cast(node: lyra_parser::SyntaxNode) -> Option<Self> {
+        if Self::can_cast(node.kind()) {
+            Some(Self { syntax: node })
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> &lyra_parser::SyntaxNode {
+        &self.syntax
+    }
+}
+
 /// Whether a `SyntaxKind` represents an expression node.
 pub fn is_expression_kind(kind: lyra_lexer::SyntaxKind) -> bool {
     use lyra_lexer::SyntaxKind;

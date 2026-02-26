@@ -4,6 +4,7 @@ use lyra_semantic::type_check::{AccessKind, TypeCheckCtx, TypeCheckItem};
 use lyra_semantic::type_infer::ExprType;
 use lyra_semantic::types::SymbolType;
 
+use crate::checks_index::{CheckKind, checks_index};
 use crate::enum_queries::{EnumRef, enum_sem, enum_variant_index};
 use crate::expr_queries::{ExprRef, IntegralCtxKey};
 use crate::facts::modport::field_access_facts;
@@ -95,6 +96,9 @@ pub fn file_diagnostics(
 }
 
 /// Per-file type-check diagnostics (Salsa-cached).
+///
+/// Iterates the `ChecksIndex` for this file and dispatches each entry
+/// to the appropriate pure `check_*` function in `lyra-semantic`.
 #[salsa::tracked(return_ref)]
 pub fn type_diagnostics(
     db: &dyn salsa::Database,
@@ -104,6 +108,8 @@ pub fn type_diagnostics(
     let parse = parse_file(db, file);
     let map = ast_id_map(db, file);
     let pp = preprocess_file(db, file);
+    let index = checks_index(db, file);
+    let facts = field_access_facts(db, file, unit);
 
     let ctx = DbTypeCheckCtx {
         db,
@@ -112,8 +118,48 @@ pub fn type_diagnostics(
         ast_id_map: map,
     };
 
-    let facts = field_access_facts(db, file, unit);
-    let items = lyra_semantic::type_check::check_types(&parse.syntax(), &ctx, facts);
+    let root = parse.syntax();
+    let mut items = Vec::new();
+    for entry in &*index.entries {
+        let Some(node) = map.get_node(&root, entry.site) else {
+            continue;
+        };
+        let fallback = entry.site;
+        match entry.kind {
+            CheckKind::ContinuousAssign => {
+                lyra_semantic::type_check::check_continuous_assign(
+                    &node, &ctx, fallback, &mut items,
+                );
+            }
+            CheckKind::AssignStmt => {
+                lyra_semantic::type_check::check_assign_stmt(&node, &ctx, fallback, &mut items);
+            }
+            CheckKind::VarDecl => {
+                lyra_semantic::type_check::check_var_decl(&node, &ctx, fallback, &mut items);
+            }
+            CheckKind::SystemTfCall => {
+                lyra_semantic::type_check::check_system_call(&node, &ctx, fallback, &mut items);
+            }
+            CheckKind::FieldExpr => {
+                lyra_semantic::type_check::check_field_direction(
+                    &node,
+                    &ctx,
+                    facts,
+                    entry.access,
+                    &mut items,
+                );
+            }
+            CheckKind::CastExpr => {
+                lyra_semantic::type_check::check_cast_expr(&node, &ctx, fallback, &mut items);
+            }
+            CheckKind::StreamOperandItem => {
+                lyra_semantic::type_check::check_stream_operand(&node, &ctx, fallback, &mut items);
+            }
+            CheckKind::CallExpr => {
+                lyra_semantic::type_check::check_method_call(&node, &ctx, &mut items);
+            }
+        }
+    }
 
     let mut seen = std::collections::HashSet::new();
     let mut diags = Vec::new();

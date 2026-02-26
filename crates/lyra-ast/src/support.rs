@@ -51,7 +51,7 @@ pub(crate) fn expr_child(parent: &SyntaxNode, n: u8) -> Option<crate::expr::Expr
 }
 
 /// Iterate all expression-kind children of `parent`.
-pub(crate) fn expr_children(parent: &SyntaxNode) -> impl Iterator<Item = crate::expr::Expr> {
+pub fn expr_children(parent: &SyntaxNode) -> impl Iterator<Item = crate::expr::Expr> {
     parent
         .children()
         .filter(|c| crate::node::is_expression_kind(c.kind()))

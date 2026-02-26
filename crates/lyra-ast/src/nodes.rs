@@ -47,14 +47,9 @@ ast_nodes! {
         type_spec: TypeSpec,
     }
 
-    AlwaysBlock(SyntaxKind::AlwaysBlock) {
-        keyword: token([AlwaysKw, AlwaysCombKw, AlwaysFfKw, AlwaysLatchKw]),
-        block_stmt: BlockStmt,
-    }
+    AlwaysBlock(SyntaxKind::AlwaysBlock) { @custom }
 
-    InitialBlock(SyntaxKind::InitialBlock) {
-        block_stmt: BlockStmt,
-    }
+    InitialBlock(SyntaxKind::InitialBlock) { @custom }
 
     VarDecl(SyntaxKind::VarDecl) {
         type_spec: TypeSpec,
@@ -72,20 +67,20 @@ ast_nodes! {
     UnpackedDimension(SyntaxKind::UnpackedDimension) {}
 
     // Statements
-    BlockStmt(SyntaxKind::BlockStmt) {}
-    IfStmt(SyntaxKind::IfStmt) {}
+    BlockStmt(SyntaxKind::BlockStmt) { @custom }
+    IfStmt(SyntaxKind::IfStmt) { @custom }
 
     CaseStmt(SyntaxKind::CaseStmt) {
         items: [CaseItem],
     }
 
-    CaseItem(SyntaxKind::CaseItem) {}
-    ForStmt(SyntaxKind::ForStmt) {}
-    WhileStmt(SyntaxKind::WhileStmt) {}
-    RepeatStmt(SyntaxKind::RepeatStmt) {}
-    ForeverStmt(SyntaxKind::ForeverStmt) {}
+    CaseItem(SyntaxKind::CaseItem) { @custom }
+    ForStmt(SyntaxKind::ForStmt) { @custom }
+    WhileStmt(SyntaxKind::WhileStmt) { @custom }
+    RepeatStmt(SyntaxKind::RepeatStmt) { @custom }
+    ForeverStmt(SyntaxKind::ForeverStmt) { @custom }
     AssignStmt(SyntaxKind::AssignStmt) { @custom }
-    TimingControl(SyntaxKind::TimingControl) {}
+    TimingControl(SyntaxKind::TimingControl) { @custom }
     EventExpr(SyntaxKind::EventExpr) {}
     EventItem(SyntaxKind::EventItem) {}
 
@@ -244,6 +239,106 @@ ast_nodes! {
 }
 
 // Custom accessors
+
+impl AlwaysBlock {
+    pub fn keyword(&self) -> Option<SyntaxToken> {
+        support::token_in(
+            &self.syntax,
+            &[
+                SyntaxKind::AlwaysKw,
+                SyntaxKind::AlwaysCombKw,
+                SyntaxKind::AlwaysFfKw,
+                SyntaxKind::AlwaysLatchKw,
+            ],
+        )
+    }
+
+    pub fn block_stmt(&self) -> Option<BlockStmt> {
+        support::child(&self.syntax)
+    }
+
+    /// The body statement (first statement-kind child after keyword).
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
+
+impl InitialBlock {
+    pub fn block_stmt(&self) -> Option<BlockStmt> {
+        support::child(&self.syntax)
+    }
+
+    /// The body statement.
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
+
+impl BlockStmt {
+    /// Iterate over all statement-kind children.
+    pub fn statements(&self) -> AstChildren<crate::node::StmtNode> {
+        support::children(&self.syntax)
+    }
+}
+
+impl IfStmt {
+    /// The condition expression.
+    pub fn condition(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    /// The then-branch body (first statement-kind child).
+    pub fn then_body(&self) -> Option<crate::node::StmtNode> {
+        support::children::<crate::node::StmtNode>(&self.syntax).next()
+    }
+
+    /// The else-branch body (second statement-kind child), or `None`.
+    pub fn else_body(&self) -> Option<crate::node::StmtNode> {
+        support::children::<crate::node::StmtNode>(&self.syntax).nth(1)
+    }
+}
+
+impl CaseItem {
+    /// The body statement of this case item.
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
+
+impl ForStmt {
+    /// The loop body (last statement-kind child).
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::children::<crate::node::StmtNode>(&self.syntax).last()
+    }
+}
+
+impl WhileStmt {
+    /// The loop body.
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
+
+impl RepeatStmt {
+    /// The loop body.
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
+
+impl ForeverStmt {
+    /// The loop body.
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
+
+impl TimingControl {
+    /// The body statement following the timing control.
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
 
 impl Expression {
     /// The single wrapped expression child.
@@ -679,6 +774,11 @@ impl AssignStmt {
     pub fn rhs(&self) -> Option<crate::expr::Expr> {
         support::expr_child(&self.syntax, 1)
     }
+
+    /// Optional timing control (intra-assignment delay).
+    pub fn timing_control(&self) -> Option<TimingControl> {
+        support::child(&self.syntax)
+    }
 }
 
 impl ContinuousAssign {
@@ -688,6 +788,11 @@ impl ContinuousAssign {
 
     pub fn rhs(&self) -> Option<crate::expr::Expr> {
         support::expr_child(&self.syntax, 1)
+    }
+
+    /// Optional timing control (delay) on the assign.
+    pub fn timing_control(&self) -> Option<TimingControl> {
+        support::child(&self.syntax)
     }
 }
 
@@ -800,157 +905,6 @@ impl CastExpr {
             .children()
             .find(|c| c.kind() != SyntaxKind::TypeSpec && crate::node::is_expression_kind(c.kind()))
             .and_then(crate::expr::Expr::cast)
-    }
-}
-
-impl PackageDecl {
-    pub fn name(&self) -> Option<SyntaxToken> {
-        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
-    }
-
-    pub fn body(&self) -> Option<PackageBody> {
-        support::child(&self.syntax)
-    }
-}
-
-impl PackageBody {
-    pub fn var_decls(&self) -> AstChildren<VarDecl> {
-        support::children(&self.syntax)
-    }
-
-    pub fn net_decls(&self) -> AstChildren<NetDecl> {
-        support::children(&self.syntax)
-    }
-
-    pub fn param_decls(&self) -> AstChildren<ParamDecl> {
-        support::children(&self.syntax)
-    }
-
-    pub fn import_decls(&self) -> AstChildren<ImportDecl> {
-        support::children(&self.syntax)
-    }
-}
-
-impl ImportDecl {
-    pub fn items(&self) -> AstChildren<ImportItem> {
-        support::children(&self.syntax)
-    }
-}
-
-impl ImportItem {
-    pub fn qualified_name(&self) -> Option<QualifiedName> {
-        support::child(&self.syntax)
-    }
-
-    pub fn package_name(&self) -> Option<SyntaxToken> {
-        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
-    }
-
-    pub fn is_wildcard(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::Star).is_some()
-    }
-}
-
-impl ExportItem {
-    /// Returns the package name token (first Ident), or None for *::*
-    pub fn package_name(&self) -> Option<SyntaxToken> {
-        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
-    }
-
-    /// True if this item contains a wildcard (* after ::)
-    pub fn is_wildcard(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::Star).is_some()
-    }
-
-    /// True if this is *::* (re-export all)
-    pub fn is_all_wildcard(&self) -> bool {
-        let stars: Vec<_> = self
-            .syntax
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|tok| tok.kind() == SyntaxKind::Star)
-            .collect();
-        stars.len() >= 2
-    }
-
-    /// Returns the member name token (Ident after ::), or None for wildcards
-    pub fn member_name(&self) -> Option<SyntaxToken> {
-        let mut past_colon_colon = false;
-        for el in self.syntax.children_with_tokens() {
-            if let Some(tok) = el.into_token() {
-                if tok.kind() == SyntaxKind::ColonColon {
-                    past_colon_colon = true;
-                } else if past_colon_colon
-                    && matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
-                {
-                    return Some(tok);
-                }
-            }
-        }
-        None
-    }
-}
-
-impl QualifiedName {
-    pub fn segments(&self) -> impl Iterator<Item = SyntaxToken> + '_ {
-        self.syntax
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
-    }
-}
-
-impl FunctionDecl {
-    pub fn name(&self) -> Option<SyntaxToken> {
-        // The function name is the Ident that follows either:
-        //   (a) the TypeSpec child (explicit return type), or
-        //   (b) the `function` keyword + optional lifetime (implicit return type).
-        // In case (b), no TypeSpec exists, so we find the first Ident after
-        // skipping `function` and optional `automatic`/`static`.
-        let has_type_spec = self
-            .syntax
-            .children()
-            .any(|n| n.kind() == SyntaxKind::TypeSpec);
-
-        if has_type_spec {
-            let mut past_type_spec = false;
-            for el in self.syntax.children_with_tokens() {
-                match el {
-                    rowan::NodeOrToken::Node(ref n) if n.kind() == SyntaxKind::TypeSpec => {
-                        past_type_spec = true;
-                    }
-                    rowan::NodeOrToken::Token(tok) => {
-                        if past_type_spec
-                            && matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
-                        {
-                            return Some(tok);
-                        }
-                    }
-                    rowan::NodeOrToken::Node(_) => {}
-                }
-            }
-            None
-        } else {
-            // No TypeSpec -- first Ident after FunctionKw and optional lifetime
-            self.syntax
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .find(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
-        }
-    }
-
-    pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
-        support::children(&self.syntax)
-    }
-}
-
-impl TaskDecl {
-    pub fn name(&self) -> Option<SyntaxToken> {
-        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
-    }
-
-    pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
-        support::children(&self.syntax)
     }
 }
 

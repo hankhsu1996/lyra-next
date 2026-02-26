@@ -9,9 +9,8 @@ legitimately use these types in function signatures. The real enforcement is
 C002: actual CST traversal calls in production code.
 
 The semantic layer should consume typed AST accessors, not raw CST traversal.
-Builder-phase modules (tier 1) are permanently allowlisted since their job is
-to walk the CST. Residual traversal in producer modules (tier 3) has ceiling
-enforcement.
+Builder-phase modules are permanently allowlisted since their job is to walk
+the CST via direct dot-calls. All other semantic modules are banned.
 
 Usage:
   python3 tools/policy/check_cst_layering.py                          # All files
@@ -28,32 +27,15 @@ from pathlib import Path
 # Only check files under this path (relative to repo root).
 TARGET_PREFIX = "crates/lyra-semantic/src/"
 
-# Allowlisted modules that may use CST traversal.
-#
-# Tier 1 -- Builder phase (permanent: their job is to walk the CST).
-# Tier 3 -- Residual CST usage (tech debt: should migrate to typed accessors).
-#
-# When a tier-3 module reaches 0 violations, remove from both sets.
+# Allowlisted modules that may use CST traversal (permanent -- their job is
+# to walk the CST).
 ALLOWED_MODULES = frozenset({
-    # Tier 1: builder phase (permanent)
     "builder.rs",
     "builder_items.rs",
     "builder_stmt.rs",
     "builder_types.rs",
     "builder_order.rs",
-    # Tier 3: residual CST usage with ceiling enforcement
-    "type_check.rs",
 })
-
-# Ceiling enforcement for tier-3 modules.
-#
-# Maps module name -> max allowed C002 (traversal) violation count.
-# If a module exceeds its ceiling, the check fails. If it drops below,
-# update the ceiling to the new count (ratchet down).
-# Tier-1 modules are not tracked here (no ceiling).
-CST_CALL_CEILINGS = {
-    "type_check.rs": 5,
-}
 
 # C002: CST traversal method calls
 RE_CST_TRAVERSAL = re.compile(
@@ -171,10 +153,10 @@ def compute_test_lines(lines: list[str]) -> set[int]:
     return test_lines
 
 
-def count_c002(filepath: str, repo_root: Path) -> tuple[list[str], int]:
+def check_violations(filepath: str, repo_root: Path) -> list[str]:
     """Check a file for C002 (CST traversal) violations.
 
-    Returns (list of violation messages, C002 count).
+    Returns list of violation messages.
     """
     errors = []
     full_path = repo_root / filepath
@@ -182,10 +164,9 @@ def count_c002(filepath: str, repo_root: Path) -> tuple[list[str], int]:
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
-        return [f"{filepath}: failed to read: {e}"], 0
+        return [f"{filepath}: failed to read: {e}"]
 
     lines = content.splitlines()
-    c002 = 0
     test_lines = compute_test_lines(lines)
 
     for lineno_0, line in enumerate(lines):
@@ -204,9 +185,8 @@ def count_c002(filepath: str, repo_root: Path) -> tuple[list[str], int]:
             errors.append(
                 f"{filepath}:{lineno}: C002 CST traversal call in semantic layer"
             )
-            c002 += 1
 
-    return errors, c002
+    return errors
 
 
 def self_test() -> int:
@@ -359,26 +339,12 @@ def main() -> int:
         return 0
 
     all_errors = []
-    ceiling_errors = []
     for filepath in sorted(set(files)):
         if not (repo_root / filepath).exists():
             continue
-        mod_name = _module_name(filepath)
-        if is_allowed(filepath):
-            # Ceiling enforcement for tier-3 modules.
-            if mod_name in CST_CALL_CEILINGS:
-                _, c002 = count_c002(filepath, repo_root)
-                ceiling = CST_CALL_CEILINGS[mod_name]
-                if c002 > ceiling:
-                    ceiling_errors.append(
-                        f"{filepath}: {c002} C002 violations exceeds "
-                        f"ceiling {ceiling}"
-                    )
-        else:
-            errors, _ = count_c002(filepath, repo_root)
+        if not is_allowed(filepath):
+            errors = check_violations(filepath, repo_root)
             all_errors.extend(errors)
-
-    failed = False
 
     if all_errors:
         print("CST layering violations:\n")
@@ -387,28 +353,12 @@ def main() -> int:
         print(f"\nTotal: {len(all_errors)} violations")
         print("\nRule: C002 -- no .children()/.descendants()/etc. traversal")
         print("Allowlisted modules: see ALLOWED_MODULES in this script")
-        failed = True
-
-    if ceiling_errors:
-        if all_errors:
-            print()
-        print("CST ceiling violations:\n")
-        for error in ceiling_errors:
-            print(f"  {error}")
-        print("\nUpdate CST_CALL_CEILINGS or reduce CST usage.")
-        failed = True
-
-    if failed:
         return 1
 
     checked = len([f for f in files if not is_allowed(f)])
-    ceilinged = len([
-        f for f in files
-        if is_allowed(f) and _module_name(f) in CST_CALL_CEILINGS
-    ])
-    print(f"Checked {checked} files, {ceilinged} ceiling-enforced "
-          f"({len(files)} total, "
-          f"{len(files) - checked} allowlisted), no violations")
+    allowlisted = len(files) - checked
+    print(f"Checked {checked} files ({len(files)} total, "
+          f"{allowlisted} allowlisted), no violations")
     return 0
 
 

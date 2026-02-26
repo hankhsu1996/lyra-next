@@ -21,6 +21,15 @@ pub enum AccessKind {
     Write,
 }
 
+/// Access mode propagated from the index to individual check sites.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum AccessMode {
+    Read = 0,
+    Write = 1,
+    ReadWrite = 2,
+}
+
 /// A type-check finding.
 pub enum TypeCheckItem {
     AssignTruncation {
@@ -126,35 +135,6 @@ pub trait TypeCheckCtx {
     fn is_modport_target_lvalue(&self, expr_id: Site) -> bool;
 }
 
-/// Walk a file's AST and produce type-check items.
-pub fn check_types(
-    root: &SyntaxNode,
-    ctx: &dyn TypeCheckCtx,
-    field_facts: &FieldAccessFacts,
-) -> Vec<TypeCheckItem> {
-    let mut items = Vec::new();
-    let root_fallback = ctx
-        .node_id(root)
-        .unwrap_or_else(|| Site::placeholder(ctx.file_id()));
-    walk_for_checks(
-        root,
-        ctx,
-        field_facts,
-        AccessCtx::Read,
-        root_fallback,
-        &mut items,
-    );
-    items
-}
-
-/// Checker-internal access context propagated through the walk.
-#[derive(Debug, Clone, Copy)]
-enum AccessCtx {
-    Read,
-    Write,
-    ReadWrite,
-}
-
 /// Resolve a syntax node to its stable `Site` anchor.
 ///
 /// On failure (error-recovered tree), emits `InternalError` anchored at
@@ -176,138 +156,14 @@ fn require_site(
     fallback
 }
 
-fn walk_for_checks(
+/// Check a `ContinuousAssign` node for type errors.
+///
+/// Performs only the local assignment check (truncation, enum compat, LHS
+/// validity). Does not recurse into children -- the `ChecksIndex` ensures
+/// nested expression sites are checked separately.
+pub fn check_continuous_assign(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
-    facts: &FieldAccessFacts,
-    access: AccessCtx,
-    fallback: Site,
-    items: &mut Vec<TypeCheckItem>,
-) {
-    let self_site = ctx.node_id(node).unwrap_or(fallback);
-    match node.kind() {
-        SyntaxKind::ContinuousAssign => {
-            check_continuous_assign(node, ctx, facts, self_site, items);
-            return;
-        }
-        SyntaxKind::AssignStmt => {
-            check_assign_stmt(node, ctx, facts, self_site, items);
-            return;
-        }
-        SyntaxKind::VarDecl => check_var_decl(node, ctx, self_site, items),
-        SyntaxKind::SystemTfCall => check_system_call(node, ctx, self_site, items),
-        SyntaxKind::FieldExpr => check_field_direction(node, ctx, facts, access, items),
-        SyntaxKind::CastExpr => check_cast_expr(node, ctx, self_site, items),
-        SyntaxKind::StreamOperandItem => {
-            check_stream_operand(node, ctx, self_site, items);
-        }
-        SyntaxKind::CallExpr => check_method_call(node, ctx, items),
-        _ => {}
-    }
-    for child in node.children() {
-        walk_for_checks(&child, ctx, facts, access, self_site, items);
-    }
-}
-
-fn check_field_direction(
-    node: &SyntaxNode,
-    ctx: &dyn TypeCheckCtx,
-    facts: &FieldAccessFacts,
-    access: AccessCtx,
-    items: &mut Vec<TypeCheckItem>,
-) {
-    use crate::modport_facts::FieldAccessTarget;
-
-    let Some(ast_id) = ctx.node_id(node) else {
-        return;
-    };
-    let Some(fact) = facts.get(&ast_id) else {
-        return;
-    };
-    if fact.direction == PortDirection::Ref {
-        items.push(TypeCheckItem::ModportRefUnsupported {
-            member_name_span: fact.member_name_span,
-        });
-        return;
-    }
-
-    // Direction check
-    match access {
-        AccessCtx::Read => {
-            if !direction_permits(fact.direction, AccessKind::Read) {
-                items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_name_span: fact.member_name_span,
-                    direction: fact.direction,
-                    access: AccessKind::Read,
-                });
-            }
-        }
-        AccessCtx::Write => {
-            if !direction_permits(fact.direction, AccessKind::Write) {
-                items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_name_span: fact.member_name_span,
-                    direction: fact.direction,
-                    access: AccessKind::Write,
-                });
-            }
-        }
-        AccessCtx::ReadWrite => {
-            if !direction_permits(fact.direction, AccessKind::Read) {
-                items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_name_span: fact.member_name_span,
-                    direction: fact.direction,
-                    access: AccessKind::Read,
-                });
-            }
-            if !direction_permits(fact.direction, AccessKind::Write) {
-                items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_name_span: fact.member_name_span,
-                    direction: fact.direction,
-                    access: AccessKind::Write,
-                });
-            }
-        }
-    }
-
-    // Target legality check
-    match &fact.target {
-        FieldAccessTarget::Empty => {
-            items.push(TypeCheckItem::ModportEmptyPortAccess {
-                member_name_span: fact.member_name_span,
-            });
-        }
-        FieldAccessTarget::Expr(expr_id) => {
-            let is_write = matches!(access, AccessCtx::Write | AccessCtx::ReadWrite);
-            if is_write && !ctx.is_modport_target_lvalue(*expr_id) {
-                items.push(TypeCheckItem::ModportExprNotAssignable {
-                    member_name_span: fact.member_name_span,
-                });
-            }
-        }
-        FieldAccessTarget::Member => {}
-    }
-}
-
-/// Check whether a modport direction permits the given access kind.
-/// Input = read-only, Output = write-only, Inout = both.
-fn direction_permits(dir: PortDirection, access: AccessKind) -> bool {
-    !matches!(
-        (dir, access),
-        (PortDirection::Input, AccessKind::Write) | (PortDirection::Output, AccessKind::Read)
-    )
-}
-
-/// Check whether a node is a compound assignment (+=, -=, etc.).
-fn is_compound_assign(node: &SyntaxNode) -> bool {
-    lyra_ast::AssignStmt::cast(node.clone())
-        .and_then(|a| a.assign_op())
-        .is_some_and(|op| op.is_compound())
-}
-
-fn check_continuous_assign(
-    node: &SyntaxNode,
-    ctx: &dyn TypeCheckCtx,
-    facts: &FieldAccessFacts,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
@@ -317,25 +173,15 @@ fn check_continuous_assign(
     let rhs = ca.as_ref().and_then(|c| c.rhs());
     if let (Some(l), Some(r)) = (&lhs, &rhs) {
         check_assignment_pair(node, l.syntax(), r.syntax(), ctx, self_site, items);
-        walk_for_checks(l.syntax(), ctx, facts, AccessCtx::Write, self_site, items);
-        walk_for_checks(r.syntax(), ctx, facts, AccessCtx::Read, self_site, items);
-        for child in node.children() {
-            let cr = child.text_range();
-            if cr != l.syntax().text_range() && cr != r.syntax().text_range() {
-                walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
-            }
-        }
-    } else {
-        for child in node.children() {
-            walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
-        }
     }
 }
 
-fn check_assign_stmt(
+/// Check an `AssignStmt` node for type errors.
+///
+/// Performs only the local assignment check. Does not recurse.
+pub fn check_assign_stmt(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
-    facts: &FieldAccessFacts,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
@@ -353,29 +199,10 @@ fn check_assign_stmt(
     {
         let _result = ctx.expr_type_stmt(l.syntax());
     }
-    let compound = is_compound_assign(node);
-    let lhs_access = if compound {
-        AccessCtx::ReadWrite
-    } else {
-        AccessCtx::Write
-    };
-    if let (Some(l), Some(r)) = (&lhs, &rhs) {
-        walk_for_checks(l.syntax(), ctx, facts, lhs_access, self_site, items);
-        walk_for_checks(r.syntax(), ctx, facts, AccessCtx::Read, self_site, items);
-        for child in node.children() {
-            let cr = child.text_range();
-            if cr != l.syntax().text_range() && cr != r.syntax().text_range() {
-                walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
-            }
-        }
-    } else {
-        for child in node.children() {
-            walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
-        }
-    }
 }
 
-fn check_var_decl(
+/// Check a `VarDecl` node for initializer type compatibility.
+pub fn check_var_decl(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
@@ -487,7 +314,8 @@ fn check_assignment_compat(
     }
 }
 
-fn check_cast_expr(
+/// Check a `CastExpr` for enum cast-out-of-range.
+pub fn check_cast_expr(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
@@ -528,7 +356,12 @@ fn check_cast_expr(
     }
 }
 
-fn check_method_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+/// Check a `CallExpr` for method-call errors.
+pub fn check_method_call(
+    node: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
     use crate::type_infer::ExprTypeErrorKind;
     use lyra_ast::{AstNode, FieldExpr};
 
@@ -570,7 +403,97 @@ fn check_method_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
     }
 }
 
-fn check_system_call(
+/// Check a `FieldExpr` for modport direction violations.
+pub fn check_field_direction(
+    node: &SyntaxNode,
+    ctx: &dyn TypeCheckCtx,
+    facts: &FieldAccessFacts,
+    access: AccessMode,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    use crate::modport_facts::FieldAccessTarget;
+
+    let Some(ast_id) = ctx.node_id(node) else {
+        return;
+    };
+    let Some(fact) = facts.get(&ast_id) else {
+        return;
+    };
+    if fact.direction == PortDirection::Ref {
+        items.push(TypeCheckItem::ModportRefUnsupported {
+            member_name_span: fact.member_name_span,
+        });
+        return;
+    }
+
+    // Direction check
+    match access {
+        AccessMode::Read => {
+            if !direction_permits(fact.direction, AccessKind::Read) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_name_span: fact.member_name_span,
+                    direction: fact.direction,
+                    access: AccessKind::Read,
+                });
+            }
+        }
+        AccessMode::Write => {
+            if !direction_permits(fact.direction, AccessKind::Write) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_name_span: fact.member_name_span,
+                    direction: fact.direction,
+                    access: AccessKind::Write,
+                });
+            }
+        }
+        AccessMode::ReadWrite => {
+            if !direction_permits(fact.direction, AccessKind::Read) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_name_span: fact.member_name_span,
+                    direction: fact.direction,
+                    access: AccessKind::Read,
+                });
+            }
+            if !direction_permits(fact.direction, AccessKind::Write) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_name_span: fact.member_name_span,
+                    direction: fact.direction,
+                    access: AccessKind::Write,
+                });
+            }
+        }
+    }
+
+    // Target legality check
+    match &fact.target {
+        FieldAccessTarget::Empty => {
+            items.push(TypeCheckItem::ModportEmptyPortAccess {
+                member_name_span: fact.member_name_span,
+            });
+        }
+        FieldAccessTarget::Expr(expr_id) => {
+            let is_write = matches!(access, AccessMode::Write | AccessMode::ReadWrite);
+            if is_write && !ctx.is_modport_target_lvalue(*expr_id) {
+                items.push(TypeCheckItem::ModportExprNotAssignable {
+                    member_name_span: fact.member_name_span,
+                });
+            }
+        }
+        FieldAccessTarget::Member => {}
+    }
+}
+
+/// Check whether a modport direction permits the given access kind.
+/// Input = read-only, Output = write-only, Inout = both.
+fn direction_permits(dir: PortDirection, access: AccessKind) -> bool {
+    !matches!(
+        (dir, access),
+        (PortDirection::Input, AccessKind::Write) | (PortDirection::Output, AccessKind::Read)
+    )
+}
+
+/// Check a `SystemTfCall` for argument type errors.
+pub fn check_system_call(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
@@ -729,7 +652,8 @@ fn check_conversion_bits_to_real(
     }
 }
 
-fn check_stream_operand(
+/// Check a `StreamOperandItem` for non-array `with` clause.
+pub fn check_stream_operand(
     node: &SyntaxNode,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
