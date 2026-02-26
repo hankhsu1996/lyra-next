@@ -2,7 +2,7 @@ use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxNode, SyntaxToken};
 
 use crate::node::is_expression_kind;
-use crate::nodes::{ParenExpr, TypeSpec};
+use crate::nodes::{Expression, ParenExpr, TypeSpec};
 
 /// Typed handle for any expression-kind syntax node.
 ///
@@ -34,22 +34,29 @@ impl Expr {
         self.syntax.kind()
     }
 
-    /// Strip `ParenExpr` wrappers to find the inner expression.
+    /// Strip `Expression` and `ParenExpr` syntactic wrappers.
     ///
-    /// Consumes self. Loops: if the current node is a `ParenExpr`, replace
-    /// with its inner expression and repeat. Only unwraps `ParenExpr` nodes.
-    #[must_use]
-    pub fn unwrap_parens(self) -> Expr {
-        let mut current = self;
+    /// Casts `node` to `Expr`, then loops: if the current expression is
+    /// an `Expression` or `ParenExpr` wrapper, replaces with its inner
+    /// child. Returns `None` if `node` is not an expression kind.
+    /// If a wrapper has no inner child (malformed), returns the wrapper.
+    pub fn peel(node: &SyntaxNode) -> Option<Expr> {
+        use crate::node::AstNode;
+        let mut current = Expr::cast(node.clone())?;
         loop {
-            use crate::node::AstNode;
-            let Some(paren) = ParenExpr::cast(current.syntax.clone()) else {
-                return current;
+            let inner = match current.kind() {
+                SyntaxKind::Expression => {
+                    Expression::cast(current.syntax().clone()).and_then(|w| w.inner())
+                }
+                SyntaxKind::ParenExpr => {
+                    ParenExpr::cast(current.syntax().clone()).and_then(|p| p.inner())
+                }
+                _ => return Some(current),
             };
-            let Some(inner) = paren.inner() else {
-                return current;
-            };
-            current = inner;
+            match inner {
+                Some(expr) => current = expr,
+                None => return Some(current),
+            }
         }
     }
 }

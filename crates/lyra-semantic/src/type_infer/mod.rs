@@ -11,7 +11,7 @@ pub use expr_type::{
     ExprTypeErrorKind, ExprView, InferCtx, ResolveCallableError, Signedness,
 };
 
-use lyra_ast::{AstNode, Expr};
+use lyra_ast::Expr;
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 
@@ -27,30 +27,23 @@ pub fn infer_expr_type(
     ctx: &dyn InferCtx,
     expected: Option<&IntegralCtx>,
 ) -> ExprType {
-    match expr.kind() {
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName => ctx.type_of_name(expr),
-        SyntaxKind::Literal => scalar::infer_literal(expr, expected),
-        SyntaxKind::Expression => {
-            match lyra_ast::Expression::cast(expr.clone()).and_then(|e| e.inner()) {
-                Some(inner) => infer_expr_type(inner.syntax(), ctx, expected),
-                None => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
-            }
-        }
-        SyntaxKind::ParenExpr => match Expr::cast(expr.clone()).map(Expr::unwrap_parens) {
-            Some(inner) => infer_expr_type(inner.syntax(), ctx, expected),
-            None => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
-        },
-        SyntaxKind::PrefixExpr => scalar::infer_prefix(expr, ctx, expected),
-        SyntaxKind::BinExpr => scalar::infer_binary(expr, ctx, expected),
-        SyntaxKind::CondExpr => scalar::infer_cond(expr, ctx, expected),
-        SyntaxKind::ConcatExpr => aggregate::infer_concat(expr, ctx),
-        SyntaxKind::ReplicExpr => aggregate::infer_replic(expr, ctx),
-        SyntaxKind::IndexExpr => access::infer_index(expr, ctx),
-        SyntaxKind::RangeExpr => range::infer_range(expr, ctx),
-        SyntaxKind::FieldExpr => access::infer_field_access(expr, ctx),
-        SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => call::infer_call(expr, ctx),
-        SyntaxKind::StreamExpr => aggregate::infer_stream(expr, ctx),
-        SyntaxKind::CastExpr => scalar::infer_cast(expr, ctx),
+    let Some(peeled) = Expr::peel(expr) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    match peeled.kind() {
+        SyntaxKind::NameRef | SyntaxKind::QualifiedName => ctx.type_of_name(peeled.syntax()),
+        SyntaxKind::Literal => scalar::infer_literal(peeled.syntax(), expected),
+        SyntaxKind::PrefixExpr => scalar::infer_prefix(peeled.syntax(), ctx, expected),
+        SyntaxKind::BinExpr => scalar::infer_binary(peeled.syntax(), ctx, expected),
+        SyntaxKind::CondExpr => scalar::infer_cond(peeled.syntax(), ctx, expected),
+        SyntaxKind::ConcatExpr => aggregate::infer_concat(peeled.syntax(), ctx),
+        SyntaxKind::ReplicExpr => aggregate::infer_replic(peeled.syntax(), ctx),
+        SyntaxKind::IndexExpr => access::infer_index(peeled.syntax(), ctx),
+        SyntaxKind::RangeExpr => range::infer_range(peeled.syntax(), ctx),
+        SyntaxKind::FieldExpr => access::infer_field_access(peeled.syntax(), ctx),
+        SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => call::infer_call(peeled.syntax(), ctx),
+        SyntaxKind::StreamExpr => aggregate::infer_stream(peeled.syntax(), ctx),
+        SyntaxKind::CastExpr => scalar::infer_cast(peeled.syntax(), ctx),
         _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
     }
 }

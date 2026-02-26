@@ -36,35 +36,15 @@ pub(crate) struct LiteralShape {
 /// `Literal` node, then checks if it is sized. Returns `Some(width)` for
 /// sized literals, `None` for unsized, non-literal, or malformed expressions.
 pub(crate) fn extract_sized_literal_width(expr_node: &SyntaxNode) -> Option<u32> {
-    let inner = unwrap_parens(expr_node);
-    if inner.kind() != SyntaxKind::Literal {
+    let peeled = Expr::peel(expr_node)?;
+    if peeled.kind() != SyntaxKind::Literal {
         return None;
     }
-    let shape = parse_literal_shape(&inner)?;
+    let shape = parse_literal_shape(peeled.syntax())?;
     if shape.is_unsized {
         None
     } else {
         Some(shape.width)
-    }
-}
-
-/// Strip `Expression` and `ParenExpr` wrappers to find the inner node.
-fn unwrap_parens(node: &SyntaxNode) -> SyntaxNode {
-    let mut current = node.clone();
-    loop {
-        match current.kind() {
-            SyntaxKind::Expression => {
-                match lyra_ast::Expression::cast(current.clone()).and_then(|e| e.inner()) {
-                    Some(inner) => current = inner.syntax().clone(),
-                    None => return current,
-                }
-            }
-            SyntaxKind::ParenExpr => match Expr::cast(current.clone()).map(Expr::unwrap_parens) {
-                Some(inner) => return inner.syntax().clone(),
-                None => return current,
-            },
-            _ => return current,
-        }
     }
 }
 

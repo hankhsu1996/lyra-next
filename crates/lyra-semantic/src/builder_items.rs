@@ -504,9 +504,9 @@ pub(crate) fn collect_declarators(
             .and_then(|nd| nd.type_spec())
             .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax())),
         other => {
-            ctx.emit_internal_error_unanchored(
-                &format!("collect_declarators called with unexpected {other:?}"),
-            );
+            ctx.emit_internal_error_unanchored(&format!(
+                "collect_declarators called with unexpected {other:?}"
+            ));
             None
         }
     };

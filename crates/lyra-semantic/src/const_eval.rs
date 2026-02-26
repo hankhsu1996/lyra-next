@@ -69,30 +69,19 @@ pub fn eval_const_expr_full(
     resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
     eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
 ) -> EvalResult {
-    match node.kind() {
-        SyntaxKind::Literal => eval_literal(node),
-        SyntaxKind::BinExpr => eval_bin_expr(node, resolve_name, eval_call),
-        SyntaxKind::PrefixExpr => eval_prefix_expr(node, resolve_name, eval_call),
-        SyntaxKind::Expression => {
-            let wrapper =
-                lyra_ast::Expression::cast(node.clone()).ok_or(ConstEvalError::Unsupported)?;
-            let inner = wrapper.inner().ok_or(ConstEvalError::Unsupported)?;
-            eval_const_expr_full(inner.syntax(), resolve_name, eval_call)
-        }
-        SyntaxKind::ParenExpr => {
-            let inner = Expr::cast(node.clone())
-                .ok_or(ConstEvalError::Unsupported)?
-                .unwrap_parens();
-            eval_const_expr_full(inner.syntax(), resolve_name, eval_call)
-        }
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName => resolve_name(node),
+    let expr = Expr::peel(node).ok_or(ConstEvalError::Unsupported)?;
+    match expr.kind() {
+        SyntaxKind::Literal => eval_literal(expr.syntax()),
+        SyntaxKind::BinExpr => eval_bin_expr(expr.syntax(), resolve_name, eval_call),
+        SyntaxKind::PrefixExpr => eval_prefix_expr(expr.syntax(), resolve_name, eval_call),
+        SyntaxKind::NameRef | SyntaxKind::QualifiedName => resolve_name(expr.syntax()),
         SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => {
-            if let Some(result) = eval_call(node) {
+            if let Some(result) = eval_call(expr.syntax()) {
                 return result;
             }
-            eval_call_expr(node, resolve_name, eval_call)
+            eval_call_expr(expr.syntax(), resolve_name, eval_call)
         }
-        SyntaxKind::CastExpr => eval_cast_expr(node, resolve_name, eval_call),
+        SyntaxKind::CastExpr => eval_cast_expr(expr.syntax(), resolve_name, eval_call),
         _ => Err(ConstEvalError::Unsupported),
     }
 }

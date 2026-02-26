@@ -214,9 +214,24 @@ fn literal_kind_int() {
 }
 
 #[test]
-fn expr_unwrap_parens() {
+fn expr_peel_parens() {
     let node = parse_expr("((x))");
-    let expr = Expr::cast(node).expect("should be expr");
-    let inner = expr.unwrap_parens();
-    assert_eq!(inner.kind(), SyntaxKind::NameRef);
+    let peeled = Expr::peel(&node).expect("should peel");
+    assert_eq!(peeled.kind(), SyntaxKind::NameRef);
+}
+
+#[test]
+fn expr_peel_expression_wrapper() {
+    let src = "module m; typedef enum { A = 42 } e; endmodule";
+    let tokens = lyra_lexer::lex(src);
+    let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, src);
+    let root = lyra_parser::parse(&pp.tokens, &pp.expanded_text).syntax();
+    let expr_node = find_expression_wrapper(&root).expect("should find Expression wrapper");
+    let peeled = Expr::peel(&expr_node).expect("should peel");
+    assert_eq!(peeled.kind(), SyntaxKind::Literal);
+}
+
+fn find_expression_wrapper(node: &SyntaxNode) -> Option<SyntaxNode> {
+    node.descendants()
+        .find(|n| n.kind() == SyntaxKind::Expression)
 }

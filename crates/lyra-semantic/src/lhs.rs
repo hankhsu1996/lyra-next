@@ -1,4 +1,4 @@
-use lyra_ast::{AstNode, Expression, FieldExpr, IndexExpr, ParenExpr, RangeExpr};
+use lyra_ast::{AstNode, Expr, FieldExpr, IndexExpr, RangeExpr};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 
@@ -19,46 +19,43 @@ pub(crate) enum LhsClass {
 /// modport lvalue checks, and builtin method arg validation all
 /// derive their answers from this function.
 pub(crate) fn classify_lhs(node: &SyntaxNode) -> LhsClass {
-    match node.kind() {
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName => LhsClass::Assignable(node.clone()),
+    let Some(expr) = Expr::peel(node) else {
+        return LhsClass::NotAssignable;
+    };
+    match expr.kind() {
+        SyntaxKind::NameRef | SyntaxKind::QualifiedName => {
+            LhsClass::Assignable(expr.syntax().clone())
+        }
         SyntaxKind::FieldExpr => {
-            if FieldExpr::cast(node.clone())
+            if FieldExpr::cast(expr.syntax().clone())
                 .and_then(|f| f.base_expr())
                 .is_some_and(|base| is_lvalue(base.syntax()))
             {
-                LhsClass::Assignable(node.clone())
+                LhsClass::Assignable(expr.syntax().clone())
             } else {
                 LhsClass::NotAssignable
             }
         }
         SyntaxKind::IndexExpr => {
-            if IndexExpr::cast(node.clone())
+            if IndexExpr::cast(expr.syntax().clone())
                 .and_then(|i| i.base_expr())
                 .is_some_and(|base| is_lvalue(base.syntax()))
             {
-                LhsClass::Assignable(node.clone())
+                LhsClass::Assignable(expr.syntax().clone())
             } else {
                 LhsClass::NotAssignable
             }
         }
         SyntaxKind::RangeExpr => {
-            if RangeExpr::cast(node.clone())
+            if RangeExpr::cast(expr.syntax().clone())
                 .and_then(|r| r.base_expr())
                 .is_some_and(|base| is_lvalue(base.syntax()))
             {
-                LhsClass::Assignable(node.clone())
+                LhsClass::Assignable(expr.syntax().clone())
             } else {
                 LhsClass::NotAssignable
             }
         }
-        SyntaxKind::ParenExpr => match ParenExpr::cast(node.clone()).and_then(|p| p.inner()) {
-            Some(inner) => classify_lhs(inner.syntax()),
-            None => LhsClass::NotAssignable,
-        },
-        SyntaxKind::Expression => match Expression::cast(node.clone()).and_then(|e| e.inner()) {
-            Some(inner) => classify_lhs(inner.syntax()),
-            None => LhsClass::NotAssignable,
-        },
         SyntaxKind::ConcatExpr | SyntaxKind::StreamExpr => LhsClass::Unsupported,
         _ => LhsClass::NotAssignable,
     }
