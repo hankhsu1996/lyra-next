@@ -78,13 +78,10 @@ fn register_type_use_site(
 
 pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
-        ctx.emit_internal_error(
-            &format!(
-                "erased_ast_id returned None for {:?} in collect_typedef",
-                node.kind()
-            ),
-            node.text_range(),
-        );
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_typedef",
+            node.kind()
+        ));
         return;
     };
     // Detect enum/struct in the TypeSpec child
@@ -329,9 +326,8 @@ fn collect_record_def(
                 });
             }
         } else {
-            ctx.emit_internal_error(
+            ctx.emit_internal_error_unanchored(
                 "erased_ast_id returned None for StructType in collect_record_def",
-                struct_type.text_range(),
             );
         }
         return None;
@@ -368,13 +364,10 @@ fn collect_record_def(
         for decl in member.declarators() {
             if let Some(name_tok) = decl.name() {
                 let Some(decl_site) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
-                    ctx.emit_internal_error(
-                        &format!(
-                            "erased_ast_id returned None for {:?} in collect_record_def declarator",
-                            decl.syntax().kind()
-                        ),
-                        decl.syntax().text_range(),
-                    );
+                    ctx.emit_internal_error_unanchored(&format!(
+                        "erased_ast_id returned None for {:?} in collect_record_def declarator",
+                        decl.syntax().kind()
+                    ));
                     continue;
                 };
                 fields.push(RecordField {

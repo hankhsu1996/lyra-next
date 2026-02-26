@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::Site;
-use lyra_source::{FileId, NameSpan, TextRange};
+use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
 use crate::def_entry::{DefEntry, DefScope};
@@ -66,7 +66,7 @@ pub struct DefIndex {
     pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportDecl]>,
     pub diagnostics: Box<[SemanticDiag]>,
-    pub internal_errors: Box<[(TextRange, SmolStr)]>,
+    pub internal_errors: Box<[(Option<Site>, SmolStr)]>,
 }
 
 impl DefIndex {

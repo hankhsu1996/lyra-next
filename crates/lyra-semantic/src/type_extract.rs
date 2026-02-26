@@ -4,7 +4,6 @@ use lyra_ast::{
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
-use lyra_source::TextRange;
 use smol_str::SmolStr;
 
 use crate::types::{
@@ -42,7 +41,6 @@ pub enum UserTypeRef {
     InterfaceModport {
         iface: NameRef,
         modport_name: SmolStr,
-        modport_range: TextRange,
     },
 }
 
@@ -68,7 +66,6 @@ pub fn user_type_ref(typespec: &SyntaxNode) -> Option<UserTypeRef> {
             Some(UserTypeRef::InterfaceModport {
                 iface: nr,
                 modport_name: SmolStr::new(mp_token.text()),
-                modport_range: mp_token.text_range(),
             })
         }
     }

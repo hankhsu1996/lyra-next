@@ -82,8 +82,17 @@ pub(crate) fn lower_file_diagnostics(
         diags.push(lower_semantic_diag(diag, primary_span, &pp.source_map));
     }
 
-    for (range, detail) in &*def.internal_errors {
-        let (span, extra) = map_span_or_fallback(file_id, &pp.source_map, *range);
+    for (site_opt, detail) in &*def.internal_errors {
+        let (span, extra) = match site_opt {
+            Some(site) => map_span_or_fallback(file_id, &pp.source_map, site.text_range()),
+            None => (
+                Span {
+                    file: file_id,
+                    range: TextRange::empty(TextSize::new(0)),
+                },
+                Some(" [unanchored]"),
+            ),
+        };
         let text = freeform_text(&format!("internal error: {detail}"), extra);
         diags.push(
             Diagnostic::new(
@@ -506,11 +515,9 @@ mod tests {
         let map = lyra_ast::AstIdMap::from_root(FileId(0), &parse.syntax());
         let mut def = lyra_semantic::build_def_index(FileId(0), &parse, &map);
         // Inject a synthetic internal error to test the lowering path
+        let module_site = map.erased_ast_id(&parse.syntax().first_child().unwrap());
         let mut errors = def.internal_errors.to_vec();
-        errors.push((
-            TextRange::new(TextSize::new(0), TextSize::new(6)),
-            SmolStr::new("test invariant violation"),
-        ));
+        errors.push((module_site, SmolStr::new("test invariant violation")));
         def.internal_errors = errors.into_boxed_slice();
 
         let resolve = lyra_semantic::resolve_index::ResolveIndex {

@@ -30,7 +30,7 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
      8. ~~Extract definition-namespace entries from `SymbolTable`~~ -- DONE. Definition-namespace items (module, package, interface, program, primitive, config) stored as first-class `DefEntry` keyed by `GlobalDefId` in `DefIndex.def_entries`. No `Symbol` created for def-namespace declarations. Resolution uses `ResolvedTarget::Def(GlobalDefId)`. Interface scope/name lookups use `def_entry()` directly.
      9. ~~Record field type errors lack type-reference precision~~ -- DONE. `TypeRef::Named`/`Qualified` carry `type_site: Site`; field type error diagnostics use `type_site` as primary anchor.
      10. ~~Modport port diagnostics lack `NameSpan` label~~ -- DONE. `ModportEntry.span` replaced with `name_span: NameSpan`. `DuplicateDefinition` and `UnresolvedName` diagnostics now carry `DiagSpan::Name` labels.
-     11. Residual `TextRange` in D001 allowlist (5 files): `type_extract.rs` (`modport_range: TextRange`), `builder.rs`/`def_index.rs` (`internal_errors: Vec<(TextRange, SmolStr)>`), `builder_types.rs`, `name_graph.rs` (comment-only). Goal: empty allowlist.
+     11. ~~Residual `TextRange` in D001 allowlist~~ -- DONE. Deleted dead `modport_range` field from `UserTypeRef`. `internal_errors` migrated from `(TextRange, SmolStr)` to `(Option<Site>, SmolStr)`; unanchored errors carry `None` and lowering falls back to file-start span. D001 allowlist is now empty.
    - Outcome: Enables future `TypeSpelling` / provenance queries derived purely from CST/AST without heuristics, preserving incrementality and determinism.
 
 2. CST traversal in semantic producers (blocks clean layering)

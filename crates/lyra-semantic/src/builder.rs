@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lyra_ast::{AstIdMap, AstNode, ExportDecl, Port, TypeSpec};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
-use lyra_source::{FileId, NameSpan, TextRange};
+use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
 use crate::builder_order::{assign_order_keys, detect_duplicates};
@@ -159,7 +159,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) current_iface_def_id: Option<GlobalDefId>,
     pub(crate) modport_ordinal: u32,
     pub(crate) diagnostics: Vec<SemanticDiag>,
-    pub(crate) internal_errors: Vec<(TextRange, SmolStr)>,
+    pub(crate) internal_errors: Vec<(Option<crate::Site>, SmolStr)>,
 }
 
 impl<'a> DefContext<'a> {
@@ -190,8 +190,13 @@ impl<'a> DefContext<'a> {
         }
     }
 
-    pub(crate) fn emit_internal_error(&mut self, detail: &str, range: TextRange) {
-        self.internal_errors.push((range, SmolStr::new(detail)));
+    pub(crate) fn emit_internal_error(&mut self, detail: &str, site: crate::Site) {
+        self.internal_errors
+            .push((Some(site), SmolStr::new(detail)));
+    }
+
+    pub(crate) fn emit_internal_error_unanchored(&mut self, detail: &str) {
+        self.internal_errors.push((None, SmolStr::new(detail)));
     }
 
     pub(crate) fn register_binding(&mut self, sym_id: SymbolId) {
@@ -308,7 +313,7 @@ impl<'a> DefContext<'a> {
                     &format!(
                         "def-namespace kind {kind:?} '{name}' routed to push_symbol instead of push_def_entry",
                     ),
-                    name_site.text_range(),
+                    name_site,
                 );
                 return;
             }
@@ -322,7 +327,7 @@ impl<'a> DefContext<'a> {
                     kind,
                     name,
                 ),
-                name_site.text_range(),
+                name_site,
             );
         }
         if let Some(ta) = type_site
@@ -333,7 +338,7 @@ impl<'a> DefContext<'a> {
                     "type_site kind {:?} (expected TypeSpec) for {kind:?} '{name}'",
                     ta.kind(),
                 ),
-                name_site.text_range(),
+                name_site,
             );
         }
     }
@@ -370,13 +375,10 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
-        ctx.emit_internal_error(
-            &format!(
-                "erased_ast_id returned None for {:?} in collect_module",
-                node.kind()
-            ),
-            node.text_range(),
-        );
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_module",
+            node.kind()
+        ));
         return;
     };
     let name = SmolStr::new(name_tok.text());
@@ -418,13 +420,10 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
-        ctx.emit_internal_error(
-            &format!(
-                "erased_ast_id returned None for {:?} in collect_package",
-                node.kind()
-            ),
-            node.text_range(),
-        );
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_package",
+            node.kind()
+        ));
         return;
     };
     let name = SmolStr::new(name_tok.text());
@@ -450,13 +449,10 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
-        ctx.emit_internal_error(
-            &format!(
-                "erased_ast_id returned None for {:?} in collect_interface",
-                node.kind()
-            ),
-            node.text_range(),
-        );
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_interface",
+            node.kind()
+        ));
         return;
     };
     let name = SmolStr::new(name_tok.text());
@@ -503,13 +499,10 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
-        ctx.emit_internal_error(
-            &format!(
-                "erased_ast_id returned None for {:?} in collect_program",
-                node.kind()
-            ),
-            node.text_range(),
-        );
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_program",
+            node.kind()
+        ));
         return;
     };
     let name = SmolStr::new(name_tok.text());
@@ -551,13 +544,10 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
-        ctx.emit_internal_error(
-            &format!(
-                "erased_ast_id returned None for {:?} in collect_primitive",
-                node.kind()
-            ),
-            node.text_range(),
-        );
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_primitive",
+            node.kind()
+        ));
         return;
     };
     let name = SmolStr::new(name_tok.text());
@@ -577,13 +567,10 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
-        ctx.emit_internal_error(
-            &format!(
-                "erased_ast_id returned None for {:?} in collect_config",
-                node.kind()
-            ),
-            node.text_range(),
-        );
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_config",
+            node.kind()
+        ));
         return;
     };
     let name = SmolStr::new(name_tok.text());
@@ -626,13 +613,10 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 continue;
             };
             let Some(decl_site) = ctx.ast_id_map.erased_ast_id(&child) else {
-                ctx.emit_internal_error(
-                    &format!(
-                        "erased_ast_id returned None for {:?} in collect_port_list",
-                        child.kind()
-                    ),
-                    child.text_range(),
-                );
+                ctx.emit_internal_error_unanchored(&format!(
+                    "erased_ast_id returned None for {:?} in collect_port_list",
+                    child.kind()
+                ));
                 continue;
             };
             let name_span = NameSpan::new(name_tok.text_range());

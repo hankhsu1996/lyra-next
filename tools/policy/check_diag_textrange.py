@@ -27,17 +27,8 @@ from pathlib import Path
 
 TARGET_PREFIX = "crates/lyra-semantic/src/"
 
-# Files that legitimately use TextRange for non-diagnostic purposes
-# (type extraction, type checking, builder internals, etc.).
-# diagnostic.rs and resolve_index.rs are NOT in this list.
-# TODO: goal is an empty allowlist -- shrink as TextRange is migrated out.
-TEXTRANGE_ALLOWED = frozenset({
-    "type_extract.rs",
-    "def_index.rs",
-    "builder_types.rs",
-    "builder.rs",
-    "name_graph.rs",
-})
+# D001 is a hard ban: no TextRange in any lyra-semantic non-test file.
+TEXTRANGE_ALLOWED = frozenset()
 
 # D001: TextRange in code (imports, type annotations, expressions).
 # Matches whole-word TextRange, not inside doc comments.
