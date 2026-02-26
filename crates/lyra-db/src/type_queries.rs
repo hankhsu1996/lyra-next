@@ -222,7 +222,7 @@ pub fn type_of_symbol_raw<'db>(
     if let Some(ts) = container.type_spec()
         && let Some(utr) = user_type_ref(ts.syntax())
     {
-        let dim_source = if decl_node.kind() == SyntaxKind::Port {
+        let dim_source = if matches!(container, TypeDeclSite::Port(_)) {
             Some(&decl_node)
         } else {
             declarator.as_ref()

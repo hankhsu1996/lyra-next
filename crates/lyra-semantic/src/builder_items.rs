@@ -503,7 +503,12 @@ pub(crate) fn collect_declarators(
         SyntaxKind::NetDecl => lyra_ast::NetDecl::cast(node.clone())
             .and_then(|nd| nd.type_spec())
             .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax())),
-        _ => None,
+        other => {
+            ctx.emit_internal_error_unanchored(
+                &format!("collect_declarators called with unexpected {other:?}"),
+            );
+            None
+        }
     };
     for child in node.children() {
         if let Some(ts) = TypeSpec::cast(child.clone()) {
