@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Check CST layering policy: no raw CST traversal in lyra-semantic producer paths.
 
-Rule:
-  C002: No CST traversal calls (.children(), .descendants(), etc.)
+Rules:
+  C001: No CST traversal calls (.children(), .descendants(), etc.)
+  C002: No manual Expression/ParenExpr wrapper matching
 
-SyntaxNode/SyntaxToken imports (former C001) are not checked -- many modules
-legitimately use these types in function signatures. The real enforcement is
-C002: actual CST traversal calls in production code.
+SyntaxNode/SyntaxToken imports are not checked -- many modules legitimately
+use these types in function signatures. The real enforcement is C001 (actual
+CST traversal calls) and C002 (manual wrapper peeling).
 
 The semantic layer should consume typed AST accessors, not raw CST traversal.
-Builder-phase modules are permanently allowlisted since their job is to walk
-the CST via direct dot-calls. All other semantic modules are banned.
+Use `Expr::peel()` instead of matching on `SyntaxKind::Expression` or
+`SyntaxKind::ParenExpr`. Builder-phase modules are permanently allowlisted
+since their job is to walk the CST via direct dot-calls.
 
 Usage:
   python3 tools/policy/check_cst_layering.py                          # All files
@@ -37,13 +39,18 @@ ALLOWED_MODULES = frozenset({
     "builder_order.rs",
 })
 
-# C002: CST traversal method calls
+# C001: CST traversal method calls
 RE_CST_TRAVERSAL = re.compile(
     r'\.'
     r'(?:children|descendants|first_child|last_child'
     r'|children_with_tokens|first_token|last_token'
     r'|descendants_with_tokens'
     r')\s*\('
+)
+
+# C002: Manual wrapper-kind matching (use Expr::peel() instead)
+RE_WRAPPER_MATCH = re.compile(
+    r'SyntaxKind::(?:Expression|ParenExpr)\b'
 )
 
 
@@ -154,7 +161,7 @@ def compute_test_lines(lines: list[str]) -> set[int]:
 
 
 def check_violations(filepath: str, repo_root: Path) -> list[str]:
-    """Check a file for C002 (CST traversal) violations.
+    """Check a file for C001/C002 violations.
 
     Returns list of violation messages.
     """
@@ -183,7 +190,13 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
 
         if RE_CST_TRAVERSAL.search(line):
             errors.append(
-                f"{filepath}:{lineno}: C002 CST traversal call in semantic layer"
+                f"{filepath}:{lineno}: C001 CST traversal call in semantic layer"
+            )
+
+        if RE_WRAPPER_MATCH.search(line):
+            errors.append(
+                f"{filepath}:{lineno}: C002 manual wrapper match "
+                f"(use Expr::peel() instead)"
             )
 
     return errors
@@ -298,6 +311,52 @@ def self_test() -> int:
         print("FAIL: #[cfg(test)] use after block was not exempt")
         failures += 1
 
+    # Test 8 (C002): SyntaxKind::Expression in match arm -> should fire
+    c003_bad = [
+        'match node.kind() {',
+        '    SyntaxKind::Expression => { wrapper.inner() }',
+        '    SyntaxKind::ParenExpr => { paren.inner() }',
+        '    _ => {}',
+        '}',
+    ]
+    tl8 = compute_test_lines(c003_bad)
+    for idx, line in enumerate(c003_bad):
+        if idx in tl8:
+            continue
+        if RE_WRAPPER_MATCH.search(line):
+            break
+    else:
+        print("FAIL: C002 did not catch SyntaxKind::Expression match")
+        failures += 1
+
+    # Test 9 (C002): SyntaxKind::Literal should NOT fire
+    c003_ok = [
+        'match node.kind() {',
+        '    SyntaxKind::Literal => eval_literal(node),',
+        '    SyntaxKind::BinExpr => eval_bin(node),',
+        '    _ => {}',
+        '}',
+    ]
+    for line in c003_ok:
+        if RE_WRAPPER_MATCH.search(line):
+            print(f"FAIL: C002 false positive on: {line.strip()}")
+            failures += 1
+
+    # Test 10 (C002): wrapper match inside #[cfg(test)] -> should NOT fire
+    c003_test = [
+        '#[cfg(test)]',
+        'mod tests {',
+        '    fn foo() { match k { SyntaxKind::Expression => {} _ => {} } }',
+        '}',
+    ]
+    tl10 = compute_test_lines(c003_test)
+    for idx, line in enumerate(c003_test):
+        if idx in tl10:
+            continue
+        if RE_WRAPPER_MATCH.search(line):
+            print("FAIL: C002 fired inside #[cfg(test)] block")
+            failures += 1
+
     if failures:
         print(f"\n{failures} self-test(s) FAILED")
         return 1
@@ -351,7 +410,10 @@ def main() -> int:
         for error in all_errors:
             print(f"  {error}")
         print(f"\nTotal: {len(all_errors)} violations")
-        print("\nRule: C002 -- no .children()/.descendants()/etc. traversal")
+        print("\nRules:")
+        print("  C001: No .children()/.descendants()/etc. CST traversal")
+        print("  C002: No SyntaxKind::Expression/ParenExpr matching "
+              "(use Expr::peel())")
         print("Allowlisted modules: see ALLOWED_MODULES in this script")
         return 1
 
