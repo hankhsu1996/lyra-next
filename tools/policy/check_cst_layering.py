@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Check CST layering policy: no Rowan traversal in lyra-semantic except in allowlisted modules.
+"""Check CST layering policy: no raw CST traversal in lyra-semantic producer paths.
 
-Rules:
-  C001: No CST type imports (SyntaxNode/SyntaxToken/SyntaxElement) in lyra-semantic
+Rule:
   C002: No CST traversal calls (.children(), .descendants(), etc.)
 
-The semantic layer should consume typed AST accessors, not raw CST traversal.
-Files that currently need CST access are temporarily allowlisted and tracked as tech debt.
+SyntaxNode/SyntaxToken imports (former C001) are not checked -- many modules
+legitimately use these types in function signatures. The real enforcement is
+C002: actual CST traversal calls in production code.
 
-Tier-3 modules have ceiling enforcement: the violation count must not exceed the
-ceiling. When a module reaches 0, remove it from both ALLOWED_MODULES and
-CST_CALL_CEILINGS.
+The semantic layer should consume typed AST accessors, not raw CST traversal.
+Builder-phase modules (tier 1) are permanently allowlisted since their job is
+to walk the CST. Residual traversal in producer modules (tier 3) has ceiling
+enforcement.
 
 Usage:
   python3 tools/policy/check_cst_layering.py                          # All files
@@ -34,42 +35,25 @@ TARGET_PREFIX = "crates/lyra-semantic/src/"
 #
 # When a tier-3 module reaches 0 violations, remove from both sets.
 ALLOWED_MODULES = frozenset({
-    # Tier 1: builder phase
+    # Tier 1: builder phase (permanent)
     "builder.rs",
     "builder_items.rs",
     "builder_stmt.rs",
     "builder_types.rs",
     "builder_order.rs",
-    # Tier 2: SyntaxNode in public API signatures only (no CST traversal)
-    "type_extract.rs",
-    "record.rs",
     # Tier 3: residual CST usage with ceiling enforcement
-    "type_infer/mod.rs",
-    "type_infer/range.rs",
     "type_check.rs",
-    "const_eval.rs",
-    "system_functions.rs",
-    "literal.rs",
-    "lhs.rs",
-    "builtin_methods.rs",
 })
 
 # Ceiling enforcement for tier-3 modules.
 #
 # Maps module name -> max allowed C002 (traversal) violation count.
-# C001 (imports) are not counted -- modules legitimately use SyntaxNode
-# in their signatures. Only actual CST traversal calls are tracked.
 # If a module exceeds its ceiling, the check fails. If it drops below,
 # update the ceiling to the new count (ratchet down).
 # Tier-1 modules are not tracked here (no ceiling).
 CST_CALL_CEILINGS = {
-    "type_check.rs": 6,
+    "type_check.rs": 5,
 }
-
-# C001: importing rowan / SyntaxNode / SyntaxToken / SyntaxElement
-RE_CST_IMPORT = re.compile(
-    r'\buse\s+(?:lyra_parser|rowan).*\b(?:SyntaxNode|SyntaxToken|SyntaxElement)\b'
-)
 
 # C002: CST traversal method calls
 RE_CST_TRAVERSAL = re.compile(
@@ -135,11 +119,36 @@ RE_CFG_TEST = re.compile(r'#\[cfg\(test\)\]')
 RE_TEST_FN = re.compile(r'#\[test\]')
 
 
+def _find_item_extent(lines: list[str], start: int) -> int:
+    """Find the last line of the item starting at `start`.
+
+    Scans forward from `start`. If a `{` is found before a bare `;`,
+    tracks brace depth and returns the line where depth reaches 0.
+    If a `;` is found first (non-braced item), returns that line.
+    If the file ends without either, returns `start` (defensive).
+    """
+    n = len(lines)
+    depth = 0
+    found_open = False
+    for j in range(start, n):
+        line_j = lines[j]
+        # Bare semicolon before any brace -> single item (e.g. `use foo;`)
+        if not found_open and ';' in line_j and '{' not in line_j:
+            return j
+        depth += line_j.count('{') - line_j.count('}')
+        if not found_open and '{' in line_j:
+            found_open = True
+        if found_open and depth <= 0:
+            return j
+    return start
+
+
 def compute_test_lines(lines: list[str]) -> set[int]:
     """Compute the set of 0-based line indices that are inside test code.
 
     Handles #[cfg(test)] mod ... { } blocks by tracking brace depth,
-    and individual #[test] fn blocks.
+    and individual #[test] fn blocks. Non-braced items (e.g.
+    `#[cfg(test)] use foo;`) exempt only the item itself.
     """
     test_lines: set[int] = set()
     i = 0
@@ -147,45 +156,25 @@ def compute_test_lines(lines: list[str]) -> set[int]:
     while i < n:
         line = lines[i]
         if RE_CFG_TEST.search(line):
-            # Found #[cfg(test)]; scan forward for opening brace
-            start = i
-            depth = 0
-            found_open = False
-            for j in range(i, n):
+            end = _find_item_extent(lines, i)
+            for j in range(i, end + 1):
                 test_lines.add(j)
-                depth += lines[j].count('{') - lines[j].count('}')
-                if not found_open and '{' in lines[j]:
-                    found_open = True
-                if found_open and depth <= 0:
-                    i = j + 1
-                    break
-            else:
-                i = n
+            i = end + 1
             continue
         if RE_TEST_FN.search(line):
-            # Individual #[test] fn: mark until closing brace
-            test_lines.add(i)
-            depth = 0
-            found_open = False
-            for j in range(i + 1, n):
+            end = _find_item_extent(lines, i)
+            for j in range(i, end + 1):
                 test_lines.add(j)
-                depth += lines[j].count('{') - lines[j].count('}')
-                if not found_open and '{' in lines[j]:
-                    found_open = True
-                if found_open and depth <= 0:
-                    i = j + 1
-                    break
-            else:
-                i = n
+            i = end + 1
             continue
         i += 1
     return test_lines
 
 
-def count_violations(filepath: str, repo_root: Path) -> tuple[list[str], int, int]:
-    """Check a file for CST violations.
+def count_c002(filepath: str, repo_root: Path) -> tuple[list[str], int]:
+    """Check a file for C002 (CST traversal) violations.
 
-    Returns (list of violation messages, C001 count, C002 count).
+    Returns (list of violation messages, C002 count).
     """
     errors = []
     full_path = repo_root / filepath
@@ -193,10 +182,9 @@ def count_violations(filepath: str, repo_root: Path) -> tuple[list[str], int, in
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
-        return [f"{filepath}: failed to read: {e}"], 0, 0
+        return [f"{filepath}: failed to read: {e}"], 0
 
     lines = content.splitlines()
-    c001 = 0
     c002 = 0
     test_lines = compute_test_lines(lines)
 
@@ -212,19 +200,13 @@ def count_violations(filepath: str, repo_root: Path) -> tuple[list[str], int, in
         if lineno_0 in test_lines:
             continue
 
-        if RE_CST_IMPORT.search(line):
-            errors.append(
-                f"{filepath}:{lineno}: C001 CST type import in semantic layer"
-            )
-            c001 += 1
-
         if RE_CST_TRAVERSAL.search(line):
             errors.append(
                 f"{filepath}:{lineno}: C002 CST traversal call in semantic layer"
             )
             c002 += 1
 
-    return errors, c001, c002
+    return errors, c002
 
 
 def self_test() -> int:
@@ -291,6 +273,51 @@ def self_test() -> int:
         print("FAIL: empty file produced test lines")
         failures += 1
 
+    # Test 5: #[cfg(test)] on non-braced item (use) must not exempt rest of file
+    lines_5 = [
+        '#[cfg(test)]',
+        'use some_crate::test_util;',
+        'fn prod() { node.children(); }',
+    ]
+    tl5 = compute_test_lines(lines_5)
+    if 0 not in tl5 or 1 not in tl5:
+        print("FAIL: #[cfg(test)] use item lines were not exempt")
+        failures += 1
+    if 2 in tl5:
+        print("FAIL: production fn after #[cfg(test)] use was exempt")
+        failures += 1
+
+    # Test 6: #[cfg(test)] on same line as non-braced item
+    lines_6 = [
+        '#[cfg(test)] use foo::bar;',
+        'fn prod() { node.children(); }',
+    ]
+    tl6 = compute_test_lines(lines_6)
+    if 0 not in tl6:
+        print("FAIL: inline #[cfg(test)] use was not exempt")
+        failures += 1
+    if 1 in tl6:
+        print("FAIL: production fn after inline #[cfg(test)] use was exempt")
+        failures += 1
+
+    # Test 7: #[cfg(test)] block followed by #[cfg(test)] use
+    lines_7 = [
+        '#[cfg(test)]',
+        'mod tests {',
+        '    fn foo() {}',
+        '}',
+        '#[cfg(test)]',
+        'use test_util::helper;',
+        'fn prod() { node.children(); }',
+    ]
+    tl7 = compute_test_lines(lines_7)
+    if 6 in tl7:
+        print("FAIL: production fn after block+use was exempt")
+        failures += 1
+    if 4 not in tl7 or 5 not in tl7:
+        print("FAIL: #[cfg(test)] use after block was not exempt")
+        failures += 1
+
     if failures:
         print(f"\n{failures} self-test(s) FAILED")
         return 1
@@ -338,11 +365,9 @@ def main() -> int:
             continue
         mod_name = _module_name(filepath)
         if is_allowed(filepath):
-            # Ceiling enforcement for tier-3 modules (C002 only).
-            # C001 imports are expected in modules that handle SyntaxNode
-            # in their signatures; only actual traversal calls count.
+            # Ceiling enforcement for tier-3 modules.
             if mod_name in CST_CALL_CEILINGS:
-                _, _, c002 = count_violations(filepath, repo_root)
+                _, c002 = count_c002(filepath, repo_root)
                 ceiling = CST_CALL_CEILINGS[mod_name]
                 if c002 > ceiling:
                     ceiling_errors.append(
@@ -350,7 +375,7 @@ def main() -> int:
                         f"ceiling {ceiling}"
                     )
         else:
-            errors, _, _ = count_violations(filepath, repo_root)
+            errors, _ = count_c002(filepath, repo_root)
             all_errors.extend(errors)
 
     failed = False
@@ -360,10 +385,8 @@ def main() -> int:
         for error in all_errors:
             print(f"  {error}")
         print(f"\nTotal: {len(all_errors)} violations")
-        print("\nRules:")
-        print("  C001: No SyntaxNode/SyntaxToken/SyntaxElement imports")
-        print("  C002: No .children()/.descendants()/etc. traversal calls")
-        print("  Allowlisted modules: see ALLOWED_MODULES in this script")
+        print("\nRule: C002 -- no .children()/.descendants()/etc. traversal")
+        print("Allowlisted modules: see ALLOWED_MODULES in this script")
         failed = True
 
     if ceiling_errors:

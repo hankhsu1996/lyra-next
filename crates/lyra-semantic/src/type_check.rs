@@ -382,21 +382,19 @@ fn check_var_decl(
     items: &mut Vec<TypeCheckItem>,
 ) {
     let decl_site = require_site(ctx, node, fallback, items);
-    for child in node.children() {
-        if child.kind() != SyntaxKind::Declarator {
-            continue;
-        }
-        let decl = lyra_ast::Declarator::cast(child.clone());
-        let init_expr = decl.as_ref().and_then(|d| d.init_expr());
-        let Some(init_expr) = init_expr else {
+    let Some(var_decl) = lyra_ast::VarDecl::cast(node.clone()) else {
+        return;
+    };
+    for decl in var_decl.declarators() {
+        let Some(init_expr) = decl.init_expr() else {
             continue;
         };
 
-        let Some(sym_type) = ctx.symbol_type_of_declarator(&child) else {
+        let Some(sym_type) = ctx.symbol_type_of_declarator(decl.syntax()) else {
             continue;
         };
 
-        let lhs_site = require_site(ctx, &child, decl_site, items);
+        let lhs_site = require_site(ctx, decl.syntax(), decl_site, items);
         let rhs_site = require_site(ctx, init_expr.syntax(), decl_site, items);
 
         let lhs_type = ExprType::from_symbol_type(&sym_type);

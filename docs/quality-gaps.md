@@ -41,8 +41,9 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
    - CI enforcement: `tools/policy/check_cst_layering.py` prevents new CST usage in non-allowlisted modules. `tools/policy/check_classifier_payloads.py` enforces classifier purity.
    - Remaining:
      1. Residual Expression-unwrapping `first_child()` calls in `const_eval.rs`, `type_infer/mod.rs`, `literal.rs` -- needs `Expr::from_expression_wrapper()` accessor.
-     2. `type_check.rs` tree walks in `walk_for_checks` (6 violations) -- needs typed traversal APIs (`Expr::walk()`, `Stmt::walk()`, `AstNode::descendants_typed<T>()`).
-     3. Ceiling machinery should be temporary. End-state: one hard boundary rule (no CST traversal in semantic/db producer paths) with zero exceptions, enforced by typed traversal facilities instead of allowlists.
+     2. `type_check.rs` tree walks in `walk_for_checks` (5 violations, ceiling-enforced) -- needs typed traversal API. `check_var_decl` migrated to `VarDecl::declarators()`.
+     3. Kind-switch smells in `lyra-db/type_queries.rs`: `find_typespec()`, `extract_unpacked_dims_typed()`, `closest_decl_container()` dispatch on `SyntaxKind`. Needs `DeclContainer` typed enum in `lyra-ast` with `.type_spec()` and `.unpacked_dimensions()` methods.
+     4. Allowlist simplified: 5 builder modules (permanent) + `type_check.rs` (ceiling 5). C001 (import) enforcement dropped -- only C002 (traversal) matters. 9 stale tier-2/3 entries removed.
    - Outcome: Semantic layer depends only on typed AST accessors and builder-extracted facts, not raw CST.
 
 3. ~~Ambiguous `ErasedAstId` field names~~ -- CLOSED
