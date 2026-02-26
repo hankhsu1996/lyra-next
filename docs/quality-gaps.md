@@ -33,13 +33,16 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
    - Outcome: Enables future `TypeSpelling` / provenance queries derived purely from CST/AST without heuristics, preserving incrementality and determinism.
 
 2. CST traversal in semantic producers (blocks clean layering)
-   - Problem: Residual raw CST traversal in tier-3 semantic modules. Category A (expression-form accessors) is complete; Category B (`type_extract.rs`, `record.rs`) remains.
-   - Progress: Added typed AST accessors in `lyra-ast` (`Expr`, `TfArg`, `BinExpr`, `PrefixExpr`, `CondExpr`, `ConcatExpr`, `ReplicExpr`, `StreamExpr`, `CallExpr`, `SystemTfCall`, `AssignStmt`, `ContinuousAssign`, `Declarator`, `Literal`). Migrated `const_eval.rs`, `type_infer/mod.rs`, `type_check.rs`, `system_functions.rs`, `literal.rs`. Deleted `expr_helpers.rs`, `system_call_view.rs`, `syntax_helpers.rs`.
-   - CI enforcement: `tools/policy/check_cst_layering.py` prevents new CST usage in non-allowlisted modules. Tier-3 modules have ceiling enforcement via `CST_CALL_CEILINGS`.
+   - Problem: Residual raw CST traversal in semantic modules bypasses typed AST boundary.
+   - Done:
+     1. Category A (expression-form accessors): typed accessors for `Expr`, `TfArg`, `BinExpr`, `PrefixExpr`, `CondExpr`, `ConcatExpr`, `ReplicExpr`, `StreamExpr`, `CallExpr`, `SystemTfCall`, `AssignStmt`, `ContinuousAssign`, `Declarator`, `Literal`. Migrated `const_eval.rs`, `type_infer/mod.rs`, `type_check.rs`, `system_functions.rs`, `literal.rs`. Deleted `expr_helpers.rs`, `system_call_view.rs`, `syntax_helpers.rs`.
+     2. Category B (type boundary): typed accessors for `TypeSpec`, `PackedDimension`, `UnpackedDimension`, `DottedName`, `EnumType`, `StructType`, plus parent-specific `unpacked_dimensions()` accessors. `UnpackedDimKind` classifier. Migrated `type_extract.rs` (16 -> 0 violations), `record.rs` (1 -> 0 violations). `lyra-db` callers migrated to typed parent dispatch.
+     3. Centralized `SyntaxKind::is_trivia()` method -- removed 3 duplicate free functions.
+   - CI enforcement: `tools/policy/check_cst_layering.py` prevents new CST usage in non-allowlisted modules. `tools/policy/check_classifier_payloads.py` enforces classifier purity.
    - Remaining:
-     1. Category B: `type_extract.rs` (16 violations) -- cache extracted type properties in def structs.
-     2. Residual Expression-unwrapping `first_child()` calls in `const_eval.rs`, `type_infer/mod.rs`, `literal.rs` -- could move to an `Expr::from_expression_wrapper()` accessor.
-     3. `type_check.rs` tree walks in `walk_for_checks` (7 violations) -- inherent to recursive checking.
+     1. Residual Expression-unwrapping `first_child()` calls in `const_eval.rs`, `type_infer/mod.rs`, `literal.rs` -- needs `Expr::from_expression_wrapper()` accessor.
+     2. `type_check.rs` tree walks in `walk_for_checks` (6 violations) -- needs typed traversal APIs (`Expr::walk()`, `Stmt::walk()`, `AstNode::descendants_typed<T>()`).
+     3. Ceiling machinery should be temporary. End-state: one hard boundary rule (no CST traversal in semantic/db producer paths) with zero exceptions, enforced by typed traversal facilities instead of allowlists.
    - Outcome: Semantic layer depends only on typed AST accessors and builder-extracted facts, not raw CST.
 
 3. ~~Ambiguous `ErasedAstId` field names~~ -- CLOSED

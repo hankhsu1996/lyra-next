@@ -3,6 +3,7 @@ mod expr;
 mod node;
 mod nodes;
 mod support;
+mod type_spec;
 
 pub use ast_id::{AstId, AstIdMap, ErasedAstId};
 pub use expr::{Expr, LiteralKind, TfArg, TypeRef};
@@ -23,3 +24,4 @@ pub use nodes::{
     VarDecl, WhileStmt,
 };
 pub use support::AstChildren;
+pub use type_spec::{TypeNameRef, UnpackedDimKind};

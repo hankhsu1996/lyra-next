@@ -33,7 +33,7 @@ pub fn lex(src: &str) -> Vec<Token> {
             attr_depth = 0;
         }
 
-        if !is_trivia(kind) {
+        if !kind.is_trivia() {
             prev_sig_kind = kind;
         }
 
@@ -49,13 +49,6 @@ pub fn lex(src: &str) -> Vec<Token> {
         len: TextSize::new(0),
     });
     tokens
-}
-
-fn is_trivia(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
-    )
 }
 
 fn is_attr_depth_reset(kind: SyntaxKind) -> bool {

@@ -218,9 +218,7 @@ pub fn type_of_symbol_raw<'db>(
     };
 
     // Check for user-defined type (typedef expansion trigger)
-    let typespec = container
-        .children()
-        .find(|c| c.kind() == SyntaxKind::TypeSpec);
+    let typespec = find_typespec(&container);
 
     if let Some(ref ts) = typespec
         && let Some(utr) = user_type_ref(ts)
@@ -402,7 +400,7 @@ fn expand_typedef(
 
     // Apply use-site unpacked dims uniformly
     let use_site_unpacked: Vec<UnpackedDim> = dim_source
-        .map(|d| lyra_semantic::extract_unpacked_dims(d, id_map))
+        .map(|d| extract_unpacked_dims_typed(d, id_map))
         .unwrap_or_default();
 
     classify(
@@ -433,11 +431,43 @@ fn wrap_unpacked_dims_from_node(
     ) {
         return ty;
     }
-    let dims = lyra_semantic::extract_unpacked_dims(node, ast_id_map);
+    let dims = extract_unpacked_dims_typed(node, ast_id_map);
     if dims.is_empty() {
         return ty;
     }
     lyra_semantic::wrap_unpacked(ty, &dims)
+}
+
+/// Extract unpacked dims via typed parent accessors.
+fn extract_unpacked_dims_typed(
+    node: &lyra_parser::SyntaxNode,
+    ast_id_map: &lyra_ast::AstIdMap,
+) -> Vec<lyra_semantic::types::UnpackedDim> {
+    use lyra_ast::AstNode;
+    match node.kind() {
+        SyntaxKind::Declarator => lyra_ast::Declarator::cast(node.clone())
+            .map(|d| {
+                d.unpacked_dimensions()
+                    .map(|dim| lyra_semantic::extract_unpacked_dim(&dim, ast_id_map))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        SyntaxKind::Port => lyra_ast::Port::cast(node.clone())
+            .map(|p| {
+                p.unpacked_dimensions()
+                    .map(|dim| lyra_semantic::extract_unpacked_dim(&dim, ast_id_map))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        SyntaxKind::TypedefDecl => lyra_ast::TypedefDecl::cast(node.clone())
+            .map(|td| {
+                td.unpacked_dimensions()
+                    .map(|dim| lyra_semantic::extract_unpacked_dim(&dim, ast_id_map))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
 }
 
 fn type_of_symbol_raw_recover<'db>(
@@ -446,6 +476,20 @@ fn type_of_symbol_raw_recover<'db>(
     _sym_ref: SymbolRef<'db>,
 ) -> lyra_semantic::types::SymbolType {
     lyra_semantic::types::SymbolType::Error(lyra_semantic::types::SymbolTypeError::TypedefCycle)
+}
+
+/// Find the `TypeSpec` child of a declaration container using typed accessors.
+fn find_typespec(container: &lyra_parser::SyntaxNode) -> Option<lyra_parser::SyntaxNode> {
+    use lyra_ast::AstNode;
+    let ts = match container.kind() {
+        SyntaxKind::VarDecl => lyra_ast::VarDecl::cast(container.clone())?.type_spec(),
+        SyntaxKind::NetDecl => lyra_ast::NetDecl::cast(container.clone())?.type_spec(),
+        SyntaxKind::ParamDecl => lyra_ast::ParamDecl::cast(container.clone())?.type_spec(),
+        SyntaxKind::Port => lyra_ast::Port::cast(container.clone())?.type_spec(),
+        SyntaxKind::TypedefDecl => lyra_ast::TypedefDecl::cast(container.clone())?.type_spec(),
+        _ => None,
+    };
+    ts.map(|t| t.syntax().clone())
 }
 
 /// Find the closest declaration container above a Declarator.

@@ -65,3 +65,34 @@ pub(crate) fn token_in(parent: &SyntaxNode, kinds: &[SyntaxKind]) -> Option<Synt
         .filter_map(rowan::NodeOrToken::into_token)
         .find(|tok| kinds.contains(&tok.kind()))
 }
+
+/// Find the immediately-next non-trivia token after any anchor, if it matches `want`.
+///
+/// Scans direct token children only (never descends into subtrees).
+/// After seeing any anchor token, the very first non-trivia token must be `want`;
+/// if that token has a different kind, returns `None` immediately (does not
+/// continue scanning for `want` further along).
+pub(crate) fn token_after_any(
+    parent: &SyntaxNode,
+    anchors: &[SyntaxKind],
+    want: SyntaxKind,
+) -> Option<SyntaxToken> {
+    let mut seen_anchor = false;
+    for el in parent.children_with_tokens() {
+        if let Some(tok) = el.into_token() {
+            let k = tok.kind();
+            if anchors.contains(&k) {
+                seen_anchor = true;
+                continue;
+            }
+            if !seen_anchor || k.is_trivia() {
+                continue;
+            }
+            if k == want {
+                return Some(tok);
+            }
+            return None;
+        }
+    }
+    None
+}

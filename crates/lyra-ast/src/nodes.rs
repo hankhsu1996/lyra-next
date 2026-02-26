@@ -788,30 +788,6 @@ impl EnumMemberRange {
     }
 }
 
-impl EnumType {
-    pub fn base_type_spec(&self) -> Option<TypeSpec> {
-        support::child(&self.syntax)
-    }
-}
-
-impl StructType {
-    pub fn is_packed(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::PackedKw).is_some()
-    }
-
-    pub fn is_union(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::UnionKw).is_some()
-    }
-
-    pub fn is_tagged(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::TaggedKw).is_some()
-    }
-
-    pub fn is_soft(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::SoftKw).is_some()
-    }
-}
-
 impl CastExpr {
     pub fn cast_type(&self) -> Option<TypeSpec> {
         support::child(&self.syntax)
@@ -824,27 +800,6 @@ impl CastExpr {
             .children()
             .find(|c| c.kind() != SyntaxKind::TypeSpec && crate::node::is_expression_kind(c.kind()))
             .and_then(crate::expr::Expr::cast)
-    }
-}
-
-impl TypeSpec {
-    pub fn keyword(&self) -> Option<SyntaxToken> {
-        // First token that is a keyword or ident
-        self.syntax
-            .children_with_tokens()
-            .find_map(rowan::NodeOrToken::into_token)
-    }
-
-    pub fn packed_dimensions(&self) -> AstChildren<PackedDimension> {
-        support::children(&self.syntax)
-    }
-
-    pub fn enum_type(&self) -> Option<EnumType> {
-        support::child(&self.syntax)
-    }
-
-    pub fn struct_type(&self) -> Option<StructType> {
-        support::child(&self.syntax)
     }
 }
 

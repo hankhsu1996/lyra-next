@@ -40,8 +40,10 @@ ALLOWED_MODULES = frozenset({
     "builder_stmt.rs",
     "builder_types.rs",
     "builder_order.rs",
-    # Tier 3: residual CST usage with ceiling enforcement
+    # Tier 2: SyntaxNode in public API signatures only (no CST traversal)
     "type_extract.rs",
+    "record.rs",
+    # Tier 3: residual CST usage with ceiling enforcement
     "type_infer/mod.rs",
     "type_infer/range.rs",
     "type_check.rs",
@@ -49,7 +51,6 @@ ALLOWED_MODULES = frozenset({
     "system_functions.rs",
     "literal.rs",
     "lhs.rs",
-    "record.rs",
     "builtin_methods.rs",
 })
 
@@ -63,8 +64,6 @@ ALLOWED_MODULES = frozenset({
 # Tier-1 modules are not tracked here (no ceiling).
 CST_CALL_CEILINGS = {
     "type_check.rs": 6,
-    "record.rs": 1,
-    "type_extract.rs": 15,
 }
 
 # C001: importing rowan / SyntaxNode / SyntaxToken / SyntaxElement
