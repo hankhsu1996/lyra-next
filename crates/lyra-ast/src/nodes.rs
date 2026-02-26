@@ -184,6 +184,8 @@ ast_nodes! {
 
     InterfaceBody(SyntaxKind::InterfaceBody) {}
 
+    GenerateRegion(SyntaxKind::GenerateRegion) {}
+
     ModportDecl(SyntaxKind::ModportDecl) {
         items: [ModportItem],
     }

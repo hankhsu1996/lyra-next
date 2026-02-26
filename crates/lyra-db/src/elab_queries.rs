@@ -452,18 +452,41 @@ fn elaborate_unit_body(
 }
 
 fn expand_body_children(ctx: &mut ElabCtx<'_>, body_node: &SyntaxNode, env: &ScopeEnv<'_>) {
-    for child in body_node.children() {
-        match child.kind() {
-            SyntaxKind::ModuleInstantiation => {
-                process_instantiation(ctx, &child, env);
-            }
-            SyntaxKind::IfStmt => process_generate_if(ctx, &child, env),
-            SyntaxKind::ForStmt => process_generate_for(ctx, &child, env),
-            SyntaxKind::CaseStmt => process_generate_case(ctx, &child, env),
-            SyntaxKind::GenerateRegion => expand_body_children(ctx, &child, env),
-            SyntaxKind::BlockStmt => process_generate_block(ctx, &child, env),
-            _ => {}
+    if let Some(mb) = lyra_ast::ModuleBody::cast(body_node.clone()) {
+        for item in mb.generate_items() {
+            dispatch_generate_item(ctx, item, env);
         }
+    } else if let Some(ib) = lyra_ast::InterfaceBody::cast(body_node.clone()) {
+        for item in ib.generate_items() {
+            dispatch_generate_item(ctx, item, env);
+        }
+    } else if let Some(gr) = lyra_ast::GenerateRegion::cast(body_node.clone()) {
+        for item in gr.generate_items() {
+            dispatch_generate_item(ctx, item, env);
+        }
+    } else if let Some(bs) = lyra_ast::BlockStmt::cast(body_node.clone()) {
+        for item in bs.generate_items() {
+            dispatch_generate_item(ctx, item, env);
+        }
+    } else if let Some(item) = lyra_ast::GenerateItem::cast(body_node) {
+        dispatch_generate_item(ctx, item, env);
+    }
+}
+
+fn dispatch_generate_item(ctx: &mut ElabCtx<'_>, item: lyra_ast::GenerateItem, env: &ScopeEnv<'_>) {
+    match item {
+        lyra_ast::GenerateItem::ModuleInstantiation(_) => {
+            process_instantiation(ctx, item.syntax(), env);
+        }
+        lyra_ast::GenerateItem::IfStmt(_) => process_generate_if(ctx, item.syntax(), env),
+        lyra_ast::GenerateItem::ForStmt(_) => process_generate_for(ctx, item.syntax(), env),
+        lyra_ast::GenerateItem::CaseStmt(_) => process_generate_case(ctx, item.syntax(), env),
+        lyra_ast::GenerateItem::GenerateRegion(r) => {
+            for sub in r.generate_items() {
+                dispatch_generate_item(ctx, sub, env);
+            }
+        }
+        lyra_ast::GenerateItem::BlockStmt(_) => process_generate_block(ctx, item.syntax(), env),
     }
 }
 
