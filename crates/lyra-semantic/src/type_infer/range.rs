@@ -1,7 +1,8 @@
 use lyra_ast::RangeKind;
 use lyra_parser::SyntaxNode;
 
-use super::{ExprType, ExprTypeErrorKind, ExprView, InferCtx, infer_expr_type};
+use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx};
+use super::infer_expr_type;
 use crate::types::{ConstInt, Ty, UnpackedDim};
 
 /// Compute the constant width of a range select from const-eval results.

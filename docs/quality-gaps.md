@@ -30,6 +30,7 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
      8. ~~Extract definition-namespace entries from `SymbolTable`~~ -- DONE. Definition-namespace items (module, package, interface, program, primitive, config) stored as first-class `DefEntry` keyed by `GlobalDefId` in `DefIndex.def_entries`. No `Symbol` created for def-namespace declarations. Resolution uses `ResolvedTarget::Def(GlobalDefId)`. Interface scope/name lookups use `def_entry()` directly.
      9. ~~Record field type errors lack type-reference precision~~ -- DONE. `TypeRef::Named`/`Qualified` carry `type_site: Site`; field type error diagnostics use `type_site` as primary anchor.
      10. ~~Modport port diagnostics lack `NameSpan` label~~ -- DONE. `ModportEntry.span` replaced with `name_span: NameSpan`. `DuplicateDefinition` and `UnresolvedName` diagnostics now carry `DiagSpan::Name` labels.
+     11. Residual `TextRange` in D001 allowlist (5 files): `type_extract.rs` (`modport_range: TextRange`), `builder.rs`/`def_index.rs` (`internal_errors: Vec<(TextRange, SmolStr)>`), `builder_types.rs`, `name_graph.rs` (comment-only). Goal: empty allowlist.
    - Outcome: Enables future `TypeSpelling` / provenance queries derived purely from CST/AST without heuristics, preserving incrementality and determinism.
 
 2. CST traversal in semantic producers (blocks clean layering)
@@ -40,10 +41,21 @@ follow-up PR. The north star reference is in `docs/architecture.md`.
      3. Centralized `SyntaxKind::is_trivia()` method -- removed 3 duplicate free functions.
    - CI enforcement: `tools/policy/check_cst_layering.py` prevents new CST usage in non-allowlisted modules. `tools/policy/check_classifier_payloads.py` enforces classifier purity.
    - Remaining:
-     1. Residual Expression-unwrapping `first_child()` calls in `const_eval.rs`, `type_infer/mod.rs`, `literal.rs` -- needs `Expr::from_expression_wrapper()` accessor.
+     1. ~~Residual Expression-unwrapping `first_child()` calls~~ -- DONE. Zero `first_child()` calls in production code. All CST traversal in `const_eval.rs`, `literal.rs`, `system_functions.rs` is test-only (inside `#[cfg(test)]`). `type_infer/mod.rs` has zero CST calls.
      2. ~~`type_check.rs` tree walks in `walk_for_checks`~~ -- DONE. Type checks are now site-indexed via `ChecksIndex` (Salsa-cached, deterministic). `lyra-db` builds the index using typed AST APIs, dispatches each entry to pure `check_*` functions in `lyra-semantic`. Zero CST traversal in `type_check.rs`.
      3. Kind-switch smells in `lyra-db/type_queries.rs`: `find_typespec()`, `extract_unpacked_dims_typed()`, `closest_decl_container()` dispatch on `SyntaxKind`. Needs `DeclContainer` typed enum in `lyra-ast` with `.type_spec()` and `.unpacked_dimensions()` methods.
    - Outcome: Semantic layer depends only on typed AST accessors and builder-extracted facts, not raw CST.
 
 3. ~~Ambiguous `ErasedAstId` field names~~ -- CLOSED
    - All anchor fields use `_site` suffix convention: `Symbol.decl_site`/`name_site`/`type_site`, `EnumDef.enum_type_site`, `RecordDef.record_type_site`, `UseSite.name_ref_site`, `LocalDecl.decl_site`, `Import.import_stmt_site`, `ExportDecl.export_stmt_site`, `RealizedBinding.target_name_site`, `CoreResolution::Pkg { name_site }`. DefIndex maps keyed by `name_site_to_symbol`, `name_site_to_init_expr`, `enum_by_site`, `record_by_site`.
+
+4. File size warnings (blocks future growth)
+   - Problem: 5 files exceed 800-line soft limit. One is within 60 lines of the 1200-line hard limit.
+   - Files:
+     1. ~~`lyra-semantic/src/type_infer/mod.rs` -- 1187 lines~~ -- DONE. Split into `expr_type.rs`, `scalar.rs`, `aggregate.rs`, `access.rs`, `call.rs` submodules. `mod.rs` is now a ~70-line facade + dispatch.
+     2. `lyra-semantic/src/resolve.rs` -- 1141 lines (59 from hard limit)
+     3. `lyra-ast/src/nodes.rs` -- 1090 lines
+     4. `lyra-db/src/elab_queries.rs` -- 1065 lines
+     5. `lyra-db/src/diagnostics.rs` -- 1058 lines
+     6. `lyra-db/tests/expr_type/members.rs` -- 979 lines (test file, lower priority)
+   - Enforcement: `tools/policy/check_lines.py` (L001 hard fail at 1200, L002 warning at 800).
