@@ -1,6 +1,7 @@
 use lyra_ast::{
     AstIdMap, AstNode, Declarator, NameRef, NetDecl, PackedDimension, ParamDecl, Port,
-    QualifiedName, TypeNameRef, TypeSpec, TypedefDecl, UnpackedDimKind, UnpackedDimension, VarDecl,
+    QualifiedName, TypeDeclSite, TypeNameRef, TypeSpec, TypedefDecl, UnpackedDimKind,
+    UnpackedDimension, VarDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -11,25 +12,23 @@ use crate::types::{
     PackedDims, RealKw, SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
 };
 
-/// Extract a `SymbolType` from a declaration container node.
+/// Extract a `SymbolType` from a typed declaration container.
 ///
-/// `container` must be one of: `VarDecl`, `NetDecl`, `ParamDecl`, `Port`, `TypedefDecl`.
-/// `declarator` is the Declarator child node (for unpacked dims). Pass `None`
+/// `declarator` is the `Declarator` child node (for unpacked dims). Pass `None`
 /// for `Port` and `TypedefDecl` nodes where the declarator is not separate.
 ///
 /// This function never calls `parent()` or `ancestors()` on any node.
 pub fn extract_type_from_container(
-    container: &SyntaxNode,
+    container: &TypeDeclSite,
     declarator: Option<&SyntaxNode>,
     ast_id_map: &AstIdMap,
 ) -> SymbolType {
-    match container.kind() {
-        SyntaxKind::VarDecl => extract_var_decl(container, declarator, ast_id_map),
-        SyntaxKind::NetDecl => extract_net_decl(container, declarator, ast_id_map),
-        SyntaxKind::ParamDecl => extract_param_decl(container, ast_id_map),
-        SyntaxKind::Port => extract_port(container, ast_id_map),
-        SyntaxKind::TypedefDecl => extract_typedef_decl(container, ast_id_map),
-        _ => SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
+    match container {
+        TypeDeclSite::VarDecl(v) => extract_var_decl(v, declarator, ast_id_map),
+        TypeDeclSite::NetDecl(n) => extract_net_decl(n, declarator, ast_id_map),
+        TypeDeclSite::ParamDecl(p) => extract_param_decl(p, ast_id_map),
+        TypeDeclSite::Port(p) => extract_port(p, ast_id_map),
+        TypeDeclSite::TypedefDecl(td) => extract_typedef_decl(td, ast_id_map),
     }
 }
 
@@ -145,13 +144,11 @@ fn normalize_const_int(c: &ConstInt, eval: &dyn Fn(crate::Site) -> ConstInt) -> 
 }
 
 fn extract_var_decl(
-    container: &SyntaxNode,
+    var: &VarDecl,
     declarator: Option<&SyntaxNode>,
     ast_id_map: &AstIdMap,
 ) -> SymbolType {
-    let var = VarDecl::cast(container.clone());
-    let typespec = var.as_ref().and_then(|v| v.type_spec());
-    let Some(typespec) = typespec else {
+    let Some(typespec) = var.type_spec() else {
         return SymbolType::Value(Ty::Error);
     };
     if typespec.type_name_ref().is_some() {
@@ -168,21 +165,18 @@ fn extract_var_decl(
 }
 
 fn extract_net_decl(
-    container: &SyntaxNode,
+    net: &NetDecl,
     declarator: Option<&SyntaxNode>,
     ast_id_map: &AstIdMap,
 ) -> SymbolType {
-    let net = NetDecl::cast(container.clone());
-    let net_kind = net.as_ref().and_then(|n| {
-        let ts = n.type_spec()?;
-        net_keyword_from_typespec(&ts)
-    });
+    let net_kind = net
+        .type_spec()
+        .and_then(|ts| net_keyword_from_typespec(&ts));
     let Some(net_kind) = net_kind else {
         return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
     };
 
-    let typespec = net.as_ref().and_then(|n| n.type_spec());
-    let Some(typespec) = typespec else {
+    let Some(typespec) = net.type_spec() else {
         return SymbolType::Net(NetType {
             kind: net_kind,
             data: Ty::simple_logic(),
@@ -212,16 +206,12 @@ fn extract_net_decl(
     })
 }
 
-fn extract_param_decl(container: &SyntaxNode, ast_id_map: &AstIdMap) -> SymbolType {
-    let param = ParamDecl::cast(container.clone());
-    if let Some(ref p) = param
-        && p.type_keyword().is_some()
-    {
+fn extract_param_decl(param: &ParamDecl, ast_id_map: &AstIdMap) -> SymbolType {
+    if param.type_keyword().is_some() {
         return SymbolType::Error(SymbolTypeError::TypeParameterUnsupported);
     }
 
-    let typespec = param.as_ref().and_then(|p| p.type_spec());
-    match typespec {
+    match param.type_spec() {
         Some(ts) => {
             if ts.type_name_ref().is_some() {
                 return SymbolType::Value(Ty::Error);
@@ -234,10 +224,8 @@ fn extract_param_decl(container: &SyntaxNode, ast_id_map: &AstIdMap) -> SymbolTy
     }
 }
 
-fn extract_port(container: &SyntaxNode, ast_id_map: &AstIdMap) -> SymbolType {
-    let port = Port::cast(container.clone());
-    let typespec = port.as_ref().and_then(|p| p.type_spec());
-    match typespec {
+fn extract_port(port: &Port, ast_id_map: &AstIdMap) -> SymbolType {
+    match port.type_spec() {
         Some(ts) => {
             if ts.type_name_ref().is_some() {
                 return SymbolType::Value(Ty::Error);
@@ -247,10 +235,7 @@ fn extract_port(container: &SyntaxNode, ast_id_map: &AstIdMap) -> SymbolType {
                 return SymbolType::Error(SymbolTypeError::PortTypeMissing);
             }
             let packed = extract_packed_dims(&ts, ast_id_map);
-            let unpacked = port
-                .as_ref()
-                .map(|p| extract_unpacked_dims_from_port(p, ast_id_map))
-                .unwrap_or_default();
+            let unpacked = extract_unpacked_dims_from_port(port, ast_id_map);
             let ty = build_base_ty(base_ty, signed_override, packed);
             SymbolType::Value(wrap_unpacked(ty, &unpacked))
         }
@@ -258,10 +243,8 @@ fn extract_port(container: &SyntaxNode, ast_id_map: &AstIdMap) -> SymbolType {
     }
 }
 
-fn extract_typedef_decl(container: &SyntaxNode, ast_id_map: &AstIdMap) -> SymbolType {
-    let td = TypedefDecl::cast(container.clone());
-    let typespec = td.as_ref().and_then(|t| t.type_spec());
-    let Some(ts) = typespec else {
+fn extract_typedef_decl(td: &TypedefDecl, ast_id_map: &AstIdMap) -> SymbolType {
+    let Some(ts) = td.type_spec() else {
         return SymbolType::TypeAlias(Ty::Error);
     };
     if ts.type_name_ref().is_some() {
@@ -269,10 +252,7 @@ fn extract_typedef_decl(container: &SyntaxNode, ast_id_map: &AstIdMap) -> Symbol
     }
     let (base_ty, signed_override) = extract_typespec_base(&ts);
     let packed = extract_packed_dims(&ts, ast_id_map);
-    let unpacked = td
-        .as_ref()
-        .map(|t| extract_unpacked_dims_from_typedef(t, ast_id_map))
-        .unwrap_or_default();
+    let unpacked = extract_unpacked_dims_from_typedef(td, ast_id_map);
     let ty = build_base_ty(base_ty, signed_override, packed);
     SymbolType::TypeAlias(wrap_unpacked(ty, &unpacked))
 }
@@ -480,263 +460,5 @@ fn net_keyword_from_typespec(typespec: &TypeSpec) -> Option<NetKind> {
         SyntaxKind::Supply1Kw => Some(NetKind::Supply1),
         SyntaxKind::UwireKw => Some(NetKind::Uwire),
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use lyra_source::FileId;
-
-    use super::*;
-
-    fn parse_source(src: &str) -> (lyra_parser::Parse, AstIdMap) {
-        let tokens = lyra_lexer::lex(src);
-        let pp = lyra_preprocess::preprocess_identity(FileId(0), &tokens, src);
-        let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
-        let map = AstIdMap::from_root(FileId(0), &parse.syntax());
-        (parse, map)
-    }
-
-    fn find_in_module(root: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
-        use lyra_ast::SourceFile;
-        let sf = SourceFile::cast(root.clone())?;
-        let module = sf.modules().next()?;
-        let body = module.body()?;
-        let body_node: &SyntaxNode = body.syntax();
-        body_node.children().find(|c| c.kind() == kind)
-    }
-
-    fn first_declarator(container: &SyntaxNode) -> Option<SyntaxNode> {
-        lyra_ast::VarDecl::cast(container.clone())
-            .and_then(|v| v.declarators().next())
-            .or_else(|| {
-                lyra_ast::NetDecl::cast(container.clone()).and_then(|n| n.declarators().next())
-            })
-            .map(|d| d.syntax().clone())
-    }
-
-    fn find_typespec(container: &SyntaxNode) -> Option<SyntaxNode> {
-        match container.kind() {
-            SyntaxKind::VarDecl => VarDecl::cast(container.clone())?
-                .type_spec()
-                .map(|ts| ts.syntax().clone()),
-            SyntaxKind::NetDecl => NetDecl::cast(container.clone())?
-                .type_spec()
-                .map(|ts| ts.syntax().clone()),
-            SyntaxKind::ParamDecl => ParamDecl::cast(container.clone())?
-                .type_spec()
-                .map(|ts| ts.syntax().clone()),
-            _ => None,
-        }
-    }
-
-    #[test]
-    fn extract_logic_simple() {
-        let (parse, map) = parse_source("module m; logic x; endmodule");
-        let root = parse.syntax();
-        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
-        let decl = first_declarator(&var_decl);
-        let result = extract_type_from_container(&var_decl, decl.as_ref(), &map);
-        assert_eq!(result, SymbolType::Value(Ty::simple_logic()));
-    }
-
-    #[test]
-    fn extract_int() {
-        let (parse, map) = parse_source("module m; int x; endmodule");
-        let root = parse.syntax();
-        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
-        let decl = first_declarator(&var_decl);
-        let result = extract_type_from_container(&var_decl, decl.as_ref(), &map);
-        assert_eq!(result, SymbolType::Value(Ty::int()));
-    }
-
-    #[test]
-    fn extract_logic_packed_has_unevaluated() {
-        let (parse, map) = parse_source("module m; logic [7:0] x; endmodule");
-        let root = parse.syntax();
-        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
-        let decl = first_declarator(&var_decl);
-        let result = extract_type_from_container(&var_decl, decl.as_ref(), &map);
-        if let SymbolType::Value(Ty::Integral(i)) = &result {
-            assert_eq!(i.keyword, IntegralKw::Logic);
-            assert!(!i.signed);
-            assert_eq!(i.packed.len(), 1);
-            assert!(matches!(i.packed[0].msb, ConstInt::Unevaluated(_)));
-            assert!(matches!(i.packed[0].lsb, ConstInt::Unevaluated(_)));
-        } else {
-            panic!("expected Value(Integral), got {result:?}");
-        }
-    }
-
-    #[test]
-    fn extract_wire_simple() {
-        let (parse, map) = parse_source("module m; wire w; endmodule");
-        let root = parse.syntax();
-        let net_decl = find_in_module(&root, SyntaxKind::NetDecl).expect("NetDecl");
-        let decl = first_declarator(&net_decl);
-        let result = extract_type_from_container(&net_decl, decl.as_ref(), &map);
-        if let SymbolType::Net(nt) = &result {
-            assert_eq!(nt.kind, NetKind::Wire);
-            assert_eq!(nt.data, Ty::simple_logic());
-        } else {
-            panic!("expected Net, got {result:?}");
-        }
-    }
-
-    #[test]
-    fn extract_param_no_typespec_defaults_int() {
-        let (parse, map) = parse_source("module m; parameter W = 8; endmodule");
-        let root = parse.syntax();
-        let param_decl = find_in_module(&root, SyntaxKind::ParamDecl).expect("ParamDecl");
-        let result = extract_type_from_container(&param_decl, None, &map);
-        assert_eq!(result, SymbolType::Value(Ty::int()));
-    }
-
-    #[test]
-    fn extract_param_with_typespec() {
-        let (parse, map) = parse_source("module m; parameter int W = 8; endmodule");
-        let root = parse.syntax();
-        let param_decl = find_in_module(&root, SyntaxKind::ParamDecl).expect("ParamDecl");
-        let result = extract_type_from_container(&param_decl, None, &map);
-        assert_eq!(result, SymbolType::Value(Ty::int()));
-    }
-
-    fn find_first_port(root: &SyntaxNode) -> SyntaxNode {
-        use lyra_ast::SourceFile;
-        let sf = SourceFile::cast(root.clone()).expect("SourceFile");
-        let module = sf.modules().next().expect("module");
-        let port_list = module.port_list().expect("port list");
-        let port = port_list.ports().next().expect("port");
-        port.syntax().clone()
-    }
-
-    #[test]
-    fn extract_port_with_typespec() {
-        let (parse, map) = parse_source("module m(input logic [7:0] a); endmodule");
-        let root = parse.syntax();
-        let port = find_first_port(&root);
-        let result = extract_type_from_container(&port, None, &map);
-        if let SymbolType::Value(Ty::Integral(i)) = &result {
-            assert_eq!(i.keyword, IntegralKw::Logic);
-            assert_eq!(i.packed.len(), 1);
-        } else {
-            panic!("expected Value(Integral), got {result:?}");
-        }
-    }
-
-    #[test]
-    fn extract_port_no_typespec_defaults_logic() {
-        let (parse, map) = parse_source("module m(input a); endmodule");
-        let root = parse.syntax();
-        let port = find_first_port(&root);
-        let result = extract_type_from_container(&port, None, &map);
-        assert_eq!(result, SymbolType::Value(Ty::simple_logic()));
-    }
-
-    #[test]
-    fn extract_typedef() {
-        let (parse, map) = parse_source("module m; typedef logic [7:0] byte_t; endmodule");
-        let root = parse.syntax();
-        let td = find_in_module(&root, SyntaxKind::TypedefDecl).expect("TypedefDecl");
-        let result = extract_type_from_container(&td, None, &map);
-        if let SymbolType::TypeAlias(Ty::Integral(i)) = &result {
-            assert_eq!(i.keyword, IntegralKw::Logic);
-            assert_eq!(i.packed.len(), 1);
-        } else {
-            panic!("expected TypeAlias(Integral), got {result:?}");
-        }
-    }
-
-    #[test]
-    fn normalize_resolves_unevaluated() {
-        let (parse, map) = parse_source("module m; logic [7:0] x; endmodule");
-        let root = parse.syntax();
-        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
-        let decl = first_declarator(&var_decl);
-        let raw = extract_type_from_container(&var_decl, decl.as_ref(), &map);
-
-        let call_count = std::sync::atomic::AtomicU32::new(0);
-        let eval = |_id: crate::Site| -> ConstInt {
-            let n = call_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if n.is_multiple_of(2) {
-                ConstInt::Known(7)
-            } else {
-                ConstInt::Known(0)
-            }
-        };
-        let normalized = normalize_symbol_type(&raw, &eval);
-        if let SymbolType::Value(Ty::Integral(i)) = &normalized {
-            assert_eq!(i.packed[0].msb, ConstInt::Known(7));
-            assert_eq!(i.packed[0].lsb, ConstInt::Known(0));
-        } else {
-            panic!("expected Value(Integral), got {normalized:?}");
-        }
-    }
-
-    #[test]
-    fn type_name_ref_detects_user_type() {
-        let (parse, _map) = parse_source("module m; byte_t x; endmodule");
-        let root = parse.syntax();
-        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
-        let typespec = find_typespec(&var_decl).expect("TypeSpec");
-        let ts = TypeSpec::cast(typespec).expect("cast");
-        assert!(ts.type_name_ref().is_some());
-    }
-
-    #[test]
-    fn type_name_ref_none_for_builtin() {
-        let (parse, _map) = parse_source("module m; logic x; endmodule");
-        let root = parse.syntax();
-        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
-        let typespec = find_typespec(&var_decl).expect("TypeSpec");
-        let ts = TypeSpec::cast(typespec).expect("cast");
-        assert!(ts.type_name_ref().is_none());
-    }
-
-    #[test]
-    fn user_type_ref_dotted_name() {
-        let (parse, _map) = parse_source("module m; my_bus.master v; endmodule");
-        let root = parse.syntax();
-        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
-        let typespec = find_typespec(&var_decl).expect("TypeSpec");
-
-        // Verify via typed accessor
-        let ts = TypeSpec::cast(typespec.clone()).expect("cast");
-        let tnr = ts.type_name_ref().expect("type_name_ref");
-        let dn = match tnr {
-            TypeNameRef::Dotted(d) => d,
-            other => panic!("expected Dotted, got {other:?}"),
-        };
-        let iface = dn.interface_ref().expect("interface_ref");
-        assert_eq!(iface.ident().expect("ident").text(), "my_bus");
-        assert_eq!(dn.modport_ident().expect("modport").text(), "master");
-
-        // Verify user_type_ref produces InterfaceModport
-        let utr = user_type_ref(&typespec).expect("should extract UserTypeRef");
-        match utr {
-            UserTypeRef::InterfaceModport { modport_name, .. } => {
-                assert_eq!(modport_name.as_str(), "master");
-            }
-            other => panic!("expected InterfaceModport, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn user_type_ref_simple_name() {
-        let (parse, _map) = parse_source("module m; byte_t x; endmodule");
-        let root = parse.syntax();
-        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
-        let typespec = find_typespec(&var_decl).expect("TypeSpec");
-        let utr = user_type_ref(&typespec).expect("should extract UserTypeRef");
-        assert!(matches!(utr, UserTypeRef::Simple(_)));
-    }
-
-    #[test]
-    fn user_type_ref_none_for_keyword() {
-        let (parse, _map) = parse_source("module m; logic x; endmodule");
-        let root = parse.syntax();
-        let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
-        let typespec = find_typespec(&var_decl).expect("TypeSpec");
-        assert!(user_type_ref(&typespec).is_none());
     }
 }

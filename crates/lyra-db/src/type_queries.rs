@@ -1,3 +1,4 @@
+use lyra_ast::{AstNode, TypeDeclSite};
 use lyra_lexer::SyntaxKind;
 use lyra_semantic::UserTypeRef;
 use lyra_semantic::record::{Packing, RecordKind, SymbolOrigin};
@@ -206,10 +207,10 @@ pub fn type_of_symbol_raw<'db>(
 
     // For Port and TypedefDecl, the decl_site_id points directly to the node.
     // For Variable/Net/Parameter, it points to a Declarator -- find the container.
-    let (container, declarator) = match decl_node.kind() {
-        SyntaxKind::Port | SyntaxKind::TypedefDecl => (decl_node.clone(), None),
-        SyntaxKind::Declarator => {
-            let Some(parent) = closest_decl_container(&decl_node) else {
+    let (container, declarator) = match TypeDeclSite::cast(&decl_node) {
+        Some(site) => (site, None),
+        None if decl_node.kind() == SyntaxKind::Declarator => {
+            let Some(parent) = TypeDeclSite::closest_ancestor(&decl_node) else {
                 return SymbolType::Error(SymbolTypeError::MissingDecl);
             };
             (parent, Some(decl_node.clone()))
@@ -218,10 +219,8 @@ pub fn type_of_symbol_raw<'db>(
     };
 
     // Check for user-defined type (typedef expansion trigger)
-    let typespec = find_typespec(&container);
-
-    if let Some(ref ts) = typespec
-        && let Some(utr) = user_type_ref(ts)
+    if let Some(ts) = container.type_spec()
+        && let Some(utr) = user_type_ref(ts.syntax())
     {
         let dim_source = if decl_node.kind() == SyntaxKind::Port {
             Some(&decl_node)
@@ -443,7 +442,6 @@ fn extract_unpacked_dims_typed(
     node: &lyra_parser::SyntaxNode,
     ast_id_map: &lyra_ast::AstIdMap,
 ) -> Vec<lyra_semantic::types::UnpackedDim> {
-    use lyra_ast::AstNode;
     match node.kind() {
         SyntaxKind::Declarator => lyra_ast::Declarator::cast(node.clone())
             .map(|d| {
@@ -476,30 +474,6 @@ fn type_of_symbol_raw_recover<'db>(
     _sym_ref: SymbolRef<'db>,
 ) -> lyra_semantic::types::SymbolType {
     lyra_semantic::types::SymbolType::Error(lyra_semantic::types::SymbolTypeError::TypedefCycle)
-}
-
-/// Find the `TypeSpec` child of a declaration container using typed accessors.
-fn find_typespec(container: &lyra_parser::SyntaxNode) -> Option<lyra_parser::SyntaxNode> {
-    use lyra_ast::AstNode;
-    let ts = match container.kind() {
-        SyntaxKind::VarDecl => lyra_ast::VarDecl::cast(container.clone())?.type_spec(),
-        SyntaxKind::NetDecl => lyra_ast::NetDecl::cast(container.clone())?.type_spec(),
-        SyntaxKind::ParamDecl => lyra_ast::ParamDecl::cast(container.clone())?.type_spec(),
-        SyntaxKind::Port => lyra_ast::Port::cast(container.clone())?.type_spec(),
-        SyntaxKind::TypedefDecl => lyra_ast::TypedefDecl::cast(container.clone())?.type_spec(),
-        _ => None,
-    };
-    ts.map(|t| t.syntax().clone())
-}
-
-/// Find the closest declaration container above a Declarator.
-fn closest_decl_container(node: &lyra_parser::SyntaxNode) -> Option<lyra_parser::SyntaxNode> {
-    node.ancestors().find(|n| {
-        matches!(
-            n.kind(),
-            SyntaxKind::VarDecl | SyntaxKind::NetDecl | SyntaxKind::ParamDecl
-        )
-    })
 }
 
 /// Extract the normalized type of a symbol (Salsa-tracked).

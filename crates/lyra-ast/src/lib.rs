@@ -4,6 +4,7 @@ mod node;
 mod nodes;
 mod nodes_decl;
 mod support;
+mod type_decl_site;
 mod type_spec;
 
 pub use ast_id::{AstId, AstIdMap, ErasedAstId};
@@ -25,4 +26,5 @@ pub use nodes::{
     VarDecl, WhileStmt,
 };
 pub use support::{AstChildren, expr_children};
+pub use type_decl_site::TypeDeclSite;
 pub use type_spec::{TypeNameRef, UnpackedDimKind};
