@@ -42,7 +42,8 @@ RE_SECTION_HEADER = re.compile(
 )
 
 # Test detection: lines inside #[cfg(test)] mod or #[test] fn
-RE_TEST_ATTR = re.compile(r'#\[(cfg\(test\)|test)\]')
+RE_CFG_TEST = re.compile(r'#\[cfg\(test\)\]')
+RE_TEST_FN = re.compile(r'#\[test\]')
 
 
 def get_repo_root() -> Path:
@@ -90,16 +91,55 @@ def _is_test_filename(name: str) -> bool:
     return name == "tests.rs" or name.endswith("_tests.rs")
 
 
-def is_in_test_context(lines: list[str], lineno: int) -> bool:
-    """Check whether lineno is inside a #[cfg(test)] module or #[test] fn.
+def _find_item_extent(lines: list[str], start: int) -> int:
+    """Find the last line of the item starting at `start`.
 
-    Scans backwards looking for #[cfg(test)] or #[test]. Simple and
-    conservative: any occurrence above the violation line counts.
+    Scans forward from `start`. If a `{` is found before a bare `;`,
+    tracks brace depth and returns the line where depth reaches 0.
+    If a `;` is found first (non-braced item), returns that line.
+    If the file ends without either, returns `start` (defensive).
     """
-    for i in range(lineno - 1, -1, -1):
-        if RE_TEST_ATTR.search(lines[i]):
-            return True
-    return False
+    n = len(lines)
+    depth = 0
+    found_open = False
+    for j in range(start, n):
+        line_j = lines[j]
+        if not found_open and ';' in line_j and '{' not in line_j:
+            return j
+        depth += line_j.count('{') - line_j.count('}')
+        if not found_open and '{' in line_j:
+            found_open = True
+        if found_open and depth <= 0:
+            return j
+    return start
+
+
+def compute_test_lines(lines: list[str]) -> set[int]:
+    """Compute the set of 0-based line indices that are inside test code.
+
+    Handles `#[cfg(test)] mod ... { }` blocks by tracking brace depth,
+    and individual `#[test] fn` blocks. Non-braced items (e.g.
+    `#[cfg(test)] use foo;`) exempt only the item itself.
+    """
+    test_lines: set[int] = set()
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        if RE_CFG_TEST.search(line):
+            end = _find_item_extent(lines, i)
+            for j in range(i, end + 1):
+                test_lines.add(j)
+            i = end + 1
+            continue
+        if RE_TEST_FN.search(line):
+            end = _find_item_extent(lines, i)
+            for j in range(i, end + 1):
+                test_lines.add(j)
+            i = end + 1
+            continue
+        i += 1
+    return test_lines
 
 
 def check_file(filepath: str, repo_root: Path) -> list[str]:
@@ -112,6 +152,7 @@ def check_file(filepath: str, repo_root: Path) -> list[str]:
         return [f"{filepath}: failed to read: {e}"]
 
     lines = content.splitlines()
+    test_lines = compute_test_lines(lines)
 
     for lineno_0, line in enumerate(lines):
         lineno = lineno_0 + 1
@@ -125,15 +166,15 @@ def check_file(filepath: str, repo_root: Path) -> list[str]:
                     f"{filepath}:{lineno}: R005 section-header comment style banned")
             continue
 
-        # Skip string contents (crude: ignore lines that are mostly strings)
+        in_test = lineno_0 in test_lines
 
         # R001: .unwrap() / .expect() in library code
-        if RE_UNWRAP.search(line) and not is_in_test_context(lines, lineno_0):
+        if RE_UNWRAP.search(line) and not in_test:
             errors.append(
                 f"{filepath}:{lineno}: R001 .unwrap()/.expect() banned in library code")
 
         # R002: panic!() in library code
-        if RE_PANIC.search(line) and not is_in_test_context(lines, lineno_0):
+        if RE_PANIC.search(line) and not in_test:
             errors.append(
                 f"{filepath}:{lineno}: R002 panic!() banned in library code")
 
@@ -153,13 +194,101 @@ def check_file(filepath: str, repo_root: Path) -> list[str]:
     return errors
 
 
+def self_test() -> int:
+    """Run built-in tests for test-context detection."""
+    failures = 0
+
+    # Test 1: prod code AFTER #[cfg(test)] block must still be checked
+    lines_1 = [
+        'fn prod_before() { x.unwrap(); }',
+        '#[cfg(test)]',
+        'mod tests {',
+        '    fn test_foo() { x.unwrap(); }',
+        '}',
+        'fn prod_after() { x.unwrap(); }',
+    ]
+    tl = compute_test_lines(lines_1)
+    if 0 in tl:
+        print("FAIL test1: prod code before #[cfg(test)] was exempt")
+        failures += 1
+    if 3 not in tl:
+        print("FAIL test1: code inside #[cfg(test)] was not exempt")
+        failures += 1
+    if 5 in tl:
+        print("FAIL test1: prod code after #[cfg(test)] block was exempt")
+        failures += 1
+
+    # Test 2: #[cfg(test)] use exempts only that item
+    lines_2 = [
+        '#[cfg(test)]',
+        'use some_crate::test_util;',
+        'fn prod() { x.unwrap(); }',
+    ]
+    tl2 = compute_test_lines(lines_2)
+    if 0 not in tl2 or 1 not in tl2:
+        print("FAIL test2: #[cfg(test)] use lines were not exempt")
+        failures += 1
+    if 2 in tl2:
+        print("FAIL test2: prod fn after #[cfg(test)] use was exempt")
+        failures += 1
+
+    # Test 3: #[test] fn exempts only the function body
+    lines_3 = [
+        'fn prod() { x.unwrap(); }',
+        '#[test]',
+        'fn test_foo() {',
+        '    x.unwrap();',
+        '}',
+        'fn prod2() { x.unwrap(); }',
+    ]
+    tl3 = compute_test_lines(lines_3)
+    if 0 in tl3:
+        print("FAIL test3: prod fn before #[test] was exempt")
+        failures += 1
+    if 3 not in tl3:
+        print("FAIL test3: line inside #[test] fn was not exempt")
+        failures += 1
+    if 5 in tl3:
+        print("FAIL test3: prod fn after #[test] fn was exempt")
+        failures += 1
+
+    # Test 4: nested braces inside #[cfg(test)]
+    lines_4 = [
+        '#[cfg(test)]',
+        'mod tests {',
+        '    fn foo() {',
+        '        if true { x.unwrap(); }',
+        '    }',
+        '}',
+        'fn prod() { x.unwrap(); }',
+    ]
+    tl4 = compute_test_lines(lines_4)
+    if 3 not in tl4:
+        print("FAIL test4: nested brace line inside test was not exempt")
+        failures += 1
+    if 6 in tl4:
+        print("FAIL test4: prod fn after nested test block was exempt")
+        failures += 1
+
+    if failures:
+        print(f"\n{failures} self-test(s) FAILED")
+        return 1
+    print("All self-tests passed")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check Rust error policy")
     parser.add_argument(
         "--diff-base", help="Check files changed since git ref")
     parser.add_argument("--staged", action="store_true",
                         help="Check staged files")
+    parser.add_argument("--self-test", action="store_true",
+                        help="Run built-in self-tests")
     args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     repo_root = get_repo_root()
 
