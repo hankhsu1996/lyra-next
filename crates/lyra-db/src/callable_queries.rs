@@ -241,43 +241,28 @@ fn extract_tf_ports(
             continue;
         }
 
-        let has_explicit_dir = child.children_with_tokens().any(|el| {
-            el.as_token().is_some_and(|tok| {
-                matches!(
-                    tok.kind(),
-                    SyntaxKind::InputKw
-                        | SyntaxKind::OutputKw
-                        | SyntaxKind::InoutKw
-                        | SyntaxKind::RefKw
-                )
-            })
-        });
-
-        if has_explicit_dir {
-            current_dir = direction_from_node(&child);
+        let tf_port = lyra_ast::TfPortDecl::cast(child.clone());
+        if let Some(dir_tok) = tf_port.as_ref().and_then(|p| p.direction()) {
+            current_dir = direction_from_token(&dir_tok);
         }
 
-        let base_ty = child
-            .children()
-            .find(|c| c.kind() == SyntaxKind::TypeSpec)
-            .map_or_else(Ty::simple_logic, |ts| resolve_ty(&ts));
+        let base_ty = tf_port
+            .as_ref()
+            .and_then(|p| p.type_spec())
+            .map_or_else(Ty::simple_logic, |ts| resolve_ty(ts.syntax()));
 
         let decl_range = child.text_range();
-        for decl_child in child.children() {
-            if decl_child.kind() != SyntaxKind::Declarator {
+        let declarators = tf_port
+            .as_ref()
+            .map(|p| p.declarators())
+            .into_iter()
+            .flatten();
+        for declarator in declarators {
+            let Some(name_tok) = declarator.name() else {
                 continue;
-            }
-            let name_tok = decl_child
-                .children_with_tokens()
-                .filter_map(lyra_parser::SyntaxElement::into_token)
-                .find(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent));
+            };
 
-            let Some(name_tok) = name_tok else { continue };
-
-            let has_default = decl_child.children_with_tokens().any(|el| {
-                el.as_token()
-                    .is_some_and(|tok| tok.kind() == SyntaxKind::Assign)
-            });
+            let has_default = declarator.init_expr().is_some();
 
             ports.push(TfPortSig {
                 name: SmolStr::new(name_tok.text()),
@@ -293,17 +278,11 @@ fn extract_tf_ports(
     ports
 }
 
-fn direction_from_node(node: &lyra_parser::SyntaxNode) -> PortDirection {
-    for el in node.children_with_tokens() {
-        if let Some(tok) = el.as_token() {
-            match tok.kind() {
-                SyntaxKind::InputKw => return PortDirection::Input,
-                SyntaxKind::OutputKw => return PortDirection::Output,
-                SyntaxKind::InoutKw => return PortDirection::Inout,
-                SyntaxKind::RefKw => return PortDirection::Ref,
-                _ => {}
-            }
-        }
+fn direction_from_token(tok: &lyra_parser::SyntaxToken) -> PortDirection {
+    match tok.kind() {
+        SyntaxKind::OutputKw => PortDirection::Output,
+        SyntaxKind::InoutKw => PortDirection::Inout,
+        SyntaxKind::RefKw => PortDirection::Ref,
+        _ => PortDirection::Input,
     }
-    PortDirection::Input
 }

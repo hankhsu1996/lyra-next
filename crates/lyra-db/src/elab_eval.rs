@@ -353,22 +353,21 @@ pub(crate) fn eval_gen_condition(
 }
 
 pub(crate) fn extract_name_text(name_node: &SyntaxNode) -> Result<String, ConstEvalError> {
-    match name_node.kind() {
-        SyntaxKind::NameRef => name_node
-            .children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .find(|t| t.kind() == SyntaxKind::Ident)
+    use lyra_ast::AstNode;
+    if let Some(name_ref) = lyra_ast::NameRef::cast(name_node.clone()) {
+        return name_ref
+            .ident()
             .map(|t| t.text().to_string())
-            .ok_or(ConstEvalError::Unresolved),
-        SyntaxKind::QualifiedName => name_node
-            .children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .filter(|t| t.kind() == SyntaxKind::Ident)
+            .ok_or(ConstEvalError::Unresolved);
+    }
+    if let Some(qn) = lyra_ast::QualifiedName::cast(name_node.clone()) {
+        return qn
+            .segments()
             .last()
             .map(|t| t.text().to_string())
-            .ok_or(ConstEvalError::Unresolved),
-        _ => Err(ConstEvalError::Unresolved),
+            .ok_or(ConstEvalError::Unresolved);
     }
+    Err(ConstEvalError::Unresolved)
 }
 
 pub(crate) fn cond_site_key(

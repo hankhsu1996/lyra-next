@@ -296,12 +296,22 @@ impl IfStmt {
     pub fn else_body(&self) -> Option<crate::node::StmtNode> {
         support::children::<crate::node::StmtNode>(&self.syntax).nth(1)
     }
+
+    /// Whether this if-statement has an `else` clause.
+    pub fn has_else(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::ElseKw).is_some()
+    }
 }
 
 impl CaseItem {
     /// The body statement of this case item.
     pub fn body(&self) -> Option<crate::node::StmtNode> {
         support::child(&self.syntax)
+    }
+
+    /// Whether this is a `default` case item.
+    pub fn is_default(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::DefaultKw).is_some()
     }
 }
 
@@ -1036,6 +1046,11 @@ impl InstancePort {
         self.syntax.children_with_tokens().any(
             |el| matches!(el, rowan::NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::DotStar),
         )
+    }
+
+    /// Whether the connection has explicit parentheses (`.foo(expr)`).
+    pub fn has_parens(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::LParen).is_some()
     }
 }
 

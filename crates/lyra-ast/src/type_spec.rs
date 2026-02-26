@@ -237,4 +237,9 @@ impl crate::nodes::ParamDecl {
             SyntaxKind::TypeKw,
         )
     }
+
+    /// Whether this is a `parameter type` declaration.
+    pub fn is_type_param(&self) -> bool {
+        self.type_keyword().is_some()
+    }
 }

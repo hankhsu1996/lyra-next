@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use lyra_ast::{AstNode, ErasedAstId};
 use lyra_lexer::SyntaxKind;
-use lyra_parser::{SyntaxElement, SyntaxNode, SyntaxToken};
+use lyra_parser::{SyntaxNode, SyntaxToken};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::ConstInt;
@@ -187,9 +187,7 @@ fn extract_param_sigs(
 
     let mut params = Vec::new();
     for param_decl in param_port_list.params() {
-        let is_type_param = param_decl.syntax().children_with_tokens().any(
-            |el| matches!(el, SyntaxElement::Token(ref tok) if tok.kind() == SyntaxKind::TypeKw),
-        );
+        let is_type_param = param_decl.is_type_param();
 
         for declarator in param_decl.declarators() {
             let param_name = declarator
@@ -200,22 +198,9 @@ fn extract_param_sigs(
                 .name()
                 .map(|t| t.text_range())
                 .unwrap_or_default();
-            let has_default = declarator
-                .syntax()
-                .children_with_tokens()
-                .any(|el| {
-                    matches!(el, SyntaxElement::Token(ref tok) if tok.kind() == SyntaxKind::Assign)
-                });
-
-            let default_expr = if has_default {
-                declarator
-                    .syntax()
-                    .children()
-                    .find(|c| is_expr_kind(c.kind()))
-                    .and_then(|expr_node| id_map.erased_ast_id(&expr_node))
-            } else {
-                None
-            };
+            let init = declarator.init_expr();
+            let has_default = init.is_some();
+            let default_expr = init.and_then(|expr| id_map.erased_ast_id(expr.syntax()));
 
             params.push(crate::module_sig::ParamSig {
                 name: param_name,
@@ -629,10 +614,7 @@ fn add_implicit_port_bindings(
         if !port.is_named() || port.actual_expr().is_some() {
             continue;
         }
-        let has_parens = port
-            .syntax()
-            .children_with_tokens()
-            .any(|c| c.kind() == SyntaxKind::LParen);
+        let has_parens = port.has_parens();
         if has_parens {
             continue;
         }
@@ -729,9 +711,7 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
         return;
     };
 
-    let has_else = node
-        .children_with_tokens()
-        .any(|el| matches!(el, SyntaxElement::Token(ref t) if t.kind() == SyntaxKind::ElseKw));
+    let has_else = lyra_ast::IfStmt::cast(node.clone()).is_some_and(|s| s.has_else());
 
     let true_body = children.get(1);
     let false_body = if has_else { children.get(2) } else { None };
@@ -897,9 +877,8 @@ fn match_case_body(
             continue;
         }
 
-        let is_default = child.children_with_tokens().any(
-            |el| matches!(el, SyntaxElement::Token(ref t) if t.kind() == SyntaxKind::DefaultKw),
-        );
+        let is_default =
+            lyra_ast::CaseItem::cast(child.clone()).is_some_and(|item| item.is_default());
 
         if is_default {
             default_body = child.children().last();
