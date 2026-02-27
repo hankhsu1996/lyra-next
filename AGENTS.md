@@ -223,9 +223,9 @@ python3 tools/policy/check_ascii.py --staged    # staged files only
 
 ## CST Layering Policy
 
-`lyra-semantic` must not perform raw CST traversal (rowan `.children()`, `.descendants()`, etc.) except in allowlisted modules. The semantic layer consumes typed AST accessors; CST walking belongs in the builder phase or thin extraction helpers.
+`lyra-semantic` and `lyra-db` must not perform raw CST traversal (rowan `.children()`, `.descendants()`, etc.) except in allowlisted modules. Consumer layers use typed AST accessors from `lyra-ast`. CST walking belongs in: (1) accessor implementations inside `lyra-ast`, (2) builder-phase modules in `lyra-semantic`, or (3) explicitly allowlisted transitional modules (marked with TODO tags for cleanup).
 
-Allowlisted modules are listed in the script. When adding CST access to a new module, add it to the allowlist with a comment explaining why. Prefer adding a typed AST accessor in `lyra-ast` instead.
+Allowlisted modules are listed in the script per crate. When adding CST access to a new module, add it to the allowlist with a comment explaining why. Prefer adding a typed AST accessor in `lyra-ast` instead.
 
 Run the checker:
 

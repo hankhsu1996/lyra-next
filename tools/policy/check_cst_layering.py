@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check CST layering policy: no raw CST traversal in lyra-semantic producer paths.
+"""Check CST layering policy: no raw CST traversal in lyra-semantic or lyra-db.
 
 Rules:
   C001: No CST traversal calls (.children(), .descendants(), etc.)
@@ -9,10 +9,11 @@ SyntaxNode/SyntaxToken imports are not checked -- many modules legitimately
 use these types in function signatures. The real enforcement is C001 (actual
 CST traversal calls) and C002 (manual wrapper peeling).
 
-The semantic layer should consume typed AST accessors, not raw CST traversal.
-Use `Expr::peel()` instead of matching on `SyntaxKind::Expression` or
-`SyntaxKind::ParenExpr`. Builder-phase modules are permanently allowlisted
-since their job is to walk the CST via direct dot-calls.
+Consumer layers (lyra-semantic, lyra-db) should use typed AST accessors from
+lyra-ast, not raw CST traversal. Use `Expr::peel()` instead of matching on
+`SyntaxKind::Expression` or `SyntaxKind::ParenExpr`. Builder-phase modules
+are permanently allowlisted since their job is to walk the CST via direct
+dot-calls.
 
 Usage:
   python3 tools/policy/check_cst_layering.py                          # All files
@@ -26,18 +27,29 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Only check files under this path (relative to repo root).
-TARGET_PREFIX = "crates/lyra-semantic/src/"
+# Checked crates and their allowlisted modules. Each entry maps a source
+# prefix to a frozenset of module-relative paths (forward-slash, relative to
+# the crate's src/ directory) that are exempt from C001/C002.
+#
+# Permanent entries need no annotation. Transitional entries must have a
+# TODO(<tag>) comment so they can be grepped and cleaned up.
+CHECKED_CRATES: dict[str, frozenset[str]] = {
+    "crates/lyra-semantic/src/": frozenset({
+        "builder.rs",
+        "builder_items.rs",
+        "builder_stmt.rs",
+        "builder_types.rs",
+        "builder_order.rs",
+    }),
+    "crates/lyra-db/src/": frozenset({
+        "facts/modport.rs",  # TODO(typed-walk): remove after modport typed accessors
+    }),
+}
 
-# Allowlisted modules that may use CST traversal (permanent -- their job is
-# to walk the CST).
-ALLOWED_MODULES = frozenset({
-    "builder.rs",
-    "builder_items.rs",
-    "builder_stmt.rs",
-    "builder_types.rs",
-    "builder_order.rs",
-})
+# Derive a human-readable crate label from the prefix for error messages.
+_CRATE_LABELS: dict[str, str] = {
+    prefix: prefix.split("/")[1] for prefix in CHECKED_CRATES
+}
 
 # C001: CST traversal method calls
 RE_CST_TRAVERSAL = re.compile(
@@ -78,8 +90,20 @@ def get_all_files(repo_root: Path) -> list[str]:
     return [f for f in result.stdout.strip().split("\n") if f]
 
 
+# Prefixes sorted longest-first so the most specific match wins.
+_SORTED_PREFIXES = sorted(CHECKED_CRATES.keys(), key=len, reverse=True)
+
+
+def _matching_crate(filepath: str) -> str | None:
+    """Return the crate prefix if filepath belongs to a checked crate."""
+    for prefix in _SORTED_PREFIXES:
+        if filepath.startswith(prefix):
+            return prefix
+    return None
+
+
 def should_check_file(filepath: str) -> bool:
-    if not filepath.startswith(TARGET_PREFIX):
+    if _matching_crate(filepath) is None:
         return False
     if not filepath.endswith(".rs"):
         return False
@@ -96,11 +120,17 @@ def _module_name(filepath: str) -> str:
 
     For example, 'crates/lyra-semantic/src/type_infer/mod.rs' -> 'type_infer/mod.rs'.
     """
-    return filepath.removeprefix(TARGET_PREFIX)
+    prefix = _matching_crate(filepath)
+    if prefix:
+        return filepath.removeprefix(prefix)
+    return filepath
 
 
 def is_allowed(filepath: str) -> bool:
-    return _module_name(filepath) in ALLOWED_MODULES
+    prefix = _matching_crate(filepath)
+    if prefix is None:
+        return False
+    return _module_name(filepath) in CHECKED_CRATES[prefix]
 
 
 # Test detection for files that embed #[cfg(test)] blocks.
@@ -167,6 +197,8 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
     """
     errors = []
     full_path = repo_root / filepath
+    prefix = _matching_crate(filepath)
+    crate_label = _CRATE_LABELS.get(prefix, "unknown") if prefix else "unknown"
 
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
@@ -190,13 +222,12 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
 
         if RE_CST_TRAVERSAL.search(line):
             errors.append(
-                f"{filepath}:{lineno}: C001 CST traversal call in semantic layer"
+                f"{filepath}:{lineno}: C001 CST traversal call ({crate_label})"
             )
 
         if RE_WRAPPER_MATCH.search(line):
             errors.append(
-                f"{filepath}:{lineno}: C002 manual wrapper match "
-                f"(use Expr::peel() instead)"
+                f"{filepath}:{lineno}: C002 manual wrapper match ({crate_label})"
             )
 
     return errors
@@ -366,7 +397,7 @@ def self_test() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Check CST layering policy in lyra-semantic"
+        description="Check CST layering policy in lyra-semantic and lyra-db"
     )
     parser.add_argument(
         "--diff-base", help="Check files changed since git ref"
@@ -394,7 +425,7 @@ def main() -> int:
     files = [f for f in files if should_check_file(f)]
 
     if not files:
-        print("No lyra-semantic files to check")
+        print("No files to check")
         return 0
 
     all_errors = []
@@ -414,7 +445,7 @@ def main() -> int:
         print("  C001: No .children()/.descendants()/etc. CST traversal")
         print("  C002: No SyntaxKind::Expression/ParenExpr matching "
               "(use Expr::peel())")
-        print("Allowlisted modules: see ALLOWED_MODULES in this script")
+        print("Allowlisted modules: see CHECKED_CRATES in this script")
         return 1
 
     checked = len([f for f in files if not is_allowed(f)])
