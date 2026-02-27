@@ -1,5 +1,4 @@
 use lyra_ast::{AstNode, FieldExpr};
-use lyra_lexer::SyntaxKind;
 use lyra_semantic::modport_facts::{FieldAccessFact, FieldAccessFacts, FieldAccessTarget};
 use lyra_semantic::types::{ModportViewTarget, Ty};
 
@@ -19,36 +18,23 @@ pub fn field_access_facts(
     let map = ast_id_map(db, file);
     let mut facts = FieldAccessFacts::new();
 
-    collect_field_exprs(&parse.syntax(), db, unit, map, &mut facts);
+    for field_expr in lyra_ast::field_exprs(&parse.syntax()) {
+        if let Some(fact) = compute_field_fact(&field_expr, db, unit, map)
+            && let Some(ast_id) = map.erased_ast_id(field_expr.syntax())
+        {
+            facts.insert(ast_id, fact);
+        }
+    }
 
     facts
 }
 
-fn collect_field_exprs(
-    node: &lyra_parser::SyntaxNode,
-    db: &dyn salsa::Database,
-    unit: CompilationUnit,
-    map: &lyra_ast::AstIdMap,
-    facts: &mut FieldAccessFacts,
-) {
-    if node.kind() == SyntaxKind::FieldExpr
-        && let Some(fact) = compute_field_fact(node, db, unit, map)
-        && let Some(ast_id) = map.erased_ast_id(node)
-    {
-        facts.insert(ast_id, fact);
-    }
-    for child in node.children() {
-        collect_field_exprs(&child, db, unit, map, facts);
-    }
-}
-
 fn compute_field_fact(
-    node: &lyra_parser::SyntaxNode,
+    field_expr: &FieldExpr,
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     map: &lyra_ast::AstIdMap,
 ) -> Option<FieldAccessFact> {
-    let field_expr = FieldExpr::cast(node.clone())?;
     let base = field_expr.base_expr()?;
     let field_tok = field_expr.field_name()?;
     let member_name = field_tok.text();

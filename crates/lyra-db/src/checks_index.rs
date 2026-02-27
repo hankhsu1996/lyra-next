@@ -1,11 +1,10 @@
 use std::collections::HashSet;
 
 use lyra_ast::{
-    AssignStmt, AstIdMap, AstNode, BlockStmt, CaseStmt, ContinuousAssign, ErasedAstId, ForStmt,
-    ForeverStmt, IfStmt, ModuleBody, RepeatStmt, SourceFile, StmtNode, StreamExpr, TimingControl,
-    WhileStmt, expr_children,
+    AssignStmt, AstIdMap, AstNode, BlockStmt, CaseStmt, ContinuousAssign, ErasedAstId, Expr,
+    ExprKind, ForStmt, ForeverStmt, IfStmt, ModuleBody, RepeatStmt, SourceFile, StmtNode,
+    SystemTfCall, TimingControl, VarDecl, WhileStmt, expr_children,
 };
-use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_semantic::type_check::AccessMode;
 
@@ -108,14 +107,14 @@ impl IndexBuilder<'_> {
     fn collect_continuous_assign(&mut self, ca: &ContinuousAssign) {
         self.push(ca.syntax(), CheckKind::ContinuousAssign, AccessMode::Read);
         if let Some(lhs) = ca.lhs() {
-            self.collect_from_expr(lhs.syntax(), AccessMode::Write);
+            self.collect_from_expr(&lhs, AccessMode::Write);
         }
         if let Some(rhs) = ca.rhs() {
-            self.collect_from_expr(rhs.syntax(), AccessMode::Read);
+            self.collect_from_expr(&rhs, AccessMode::Read);
         }
         if let Some(tc) = ca.timing_control() {
             for expr in expr_children(tc.syntax()) {
-                self.collect_from_expr(expr.syntax(), AccessMode::Read);
+                self.collect_from_expr(&expr, AccessMode::Read);
             }
         }
     }
@@ -129,14 +128,14 @@ impl IndexBuilder<'_> {
         };
         self.push(assign.syntax(), CheckKind::AssignStmt, AccessMode::Read);
         if let Some(lhs) = assign.lhs() {
-            self.collect_from_expr(lhs.syntax(), lhs_access);
+            self.collect_from_expr(&lhs, lhs_access);
         }
         if let Some(rhs) = assign.rhs() {
-            self.collect_from_expr(rhs.syntax(), AccessMode::Read);
+            self.collect_from_expr(&rhs, AccessMode::Read);
         }
         if let Some(tc) = assign.timing_control() {
             for expr in expr_children(tc.syntax()) {
-                self.collect_from_expr(expr.syntax(), AccessMode::Read);
+                self.collect_from_expr(&expr, AccessMode::Read);
             }
         }
     }
@@ -151,7 +150,7 @@ impl IndexBuilder<'_> {
             self.collect_assign_stmt(&assign);
         } else if let Some(if_s) = IfStmt::cast(node.clone()) {
             if let Some(c) = if_s.condition() {
-                self.collect_from_expr(c.syntax(), access);
+                self.collect_from_expr(&c, access);
             }
             if let Some(t) = if_s.then_body() {
                 self.collect_stmt(&t, access);
@@ -162,7 +161,7 @@ impl IndexBuilder<'_> {
         } else if let Some(case) = CaseStmt::cast(node.clone()) {
             for item in case.items() {
                 for expr in expr_children(item.syntax()) {
-                    self.collect_from_expr(expr.syntax(), access);
+                    self.collect_from_expr(&expr, access);
                 }
                 if let Some(b) = item.body() {
                     self.collect_stmt(&b, access);
@@ -188,49 +187,47 @@ impl IndexBuilder<'_> {
             if let Some(b) = tc.body() {
                 self.collect_stmt(&b, access);
             }
-        } else if node.kind() == SyntaxKind::SystemTfCall {
+        } else if SystemTfCall::cast(node.clone()).is_some() {
             self.push(node, CheckKind::SystemTfCall, access);
-        } else if node.kind() == SyntaxKind::VarDecl {
+        } else if VarDecl::cast(node.clone()).is_some() {
             self.push(node, CheckKind::VarDecl, access);
         } else {
             for expr in expr_children(node) {
-                self.collect_from_expr(expr.syntax(), access);
+                self.collect_from_expr(&expr, access);
             }
         }
     }
 
-    fn collect_from_expr(&mut self, node: &SyntaxNode, access: AccessMode) {
-        match node.kind() {
-            SyntaxKind::FieldExpr => {
-                self.push(node, CheckKind::FieldExpr, access);
-            }
-            SyntaxKind::CastExpr => {
-                self.push(node, CheckKind::CastExpr, access);
-            }
-            SyntaxKind::CallExpr => {
-                self.push(node, CheckKind::CallExpr, access);
-            }
-            SyntaxKind::SystemTfCall => {
-                self.push(node, CheckKind::SystemTfCall, access);
-            }
-            SyntaxKind::StreamExpr => {
-                // StreamOperandItem is not an expression kind, so
-                // expr_children won't reach it. Descend via typed API.
-                if let Some(stream) = StreamExpr::cast(node.clone())
-                    && let Some(operands) = stream.stream_operands()
-                {
-                    for item in operands.items() {
-                        self.push(item.syntax(), CheckKind::StreamOperandItem, access);
-                        for e in expr_children(item.syntax()) {
-                            self.collect_from_expr(e.syntax(), access);
+    fn collect_from_expr(&mut self, expr: &Expr, access: AccessMode) {
+        if let Some(ek) = expr.classify() {
+            match ek {
+                ExprKind::FieldExpr(_) => {
+                    self.push(ek.syntax(), CheckKind::FieldExpr, access);
+                }
+                ExprKind::CastExpr(_) => {
+                    self.push(ek.syntax(), CheckKind::CastExpr, access);
+                }
+                ExprKind::CallExpr(_) => {
+                    self.push(ek.syntax(), CheckKind::CallExpr, access);
+                }
+                ExprKind::SystemTfCall(_) => {
+                    self.push(ek.syntax(), CheckKind::SystemTfCall, access);
+                }
+                ExprKind::StreamExpr(stream) => {
+                    if let Some(operands) = stream.stream_operands() {
+                        for item in operands.items() {
+                            self.push(item.syntax(), CheckKind::StreamOperandItem, access);
+                            for e in expr_children(item.syntax()) {
+                                self.collect_from_expr(&e, access);
+                            }
                         }
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
-        for child in expr_children(node) {
-            self.collect_from_expr(child.syntax(), access);
+        for child in expr_children(expr.syntax()) {
+            self.collect_from_expr(&child, access);
         }
     }
 }

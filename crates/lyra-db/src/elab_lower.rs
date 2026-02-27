@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use lyra_ast::{AstNode, ErasedAstId};
-use lyra_lexer::SyntaxKind;
-use lyra_parser::SyntaxNode;
+use lyra_ast::{AstNode, ErasedAstId, Expr, SyntaxBinaryOp};
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::{InterfaceType, Ty};
 use lyra_source::{FileId, Span, TextRange};
@@ -433,16 +431,14 @@ pub(crate) struct ForParts {
 }
 
 pub(crate) fn extract_for_parts(
-    node: &SyntaxNode,
-    eval_expr: &dyn Fn(&SyntaxNode) -> Option<i64>,
+    for_stmt: &lyra_ast::ForStmt,
+    eval_expr: &dyn Fn(&Expr) -> Option<i64>,
 ) -> Option<ForParts> {
-    let for_stmt = lyra_ast::ForStmt::cast(node.clone())?;
-
     let init_name_ref = for_stmt.init_name()?;
     let genvar_name = SmolStr::new(init_name_ref.ident()?.text());
 
     let init_expr = for_stmt.init_value()?;
-    let init = eval_expr(init_expr.syntax())?;
+    let init = eval_expr(&init_expr)?;
 
     let cond_bin = for_stmt.condition_bin()?;
     let (limit, flipped) = extract_condition(&genvar_name, &cond_bin, eval_expr)?;
@@ -462,14 +458,13 @@ pub(crate) fn extract_for_parts(
 fn extract_condition(
     genvar_name: &str,
     cond_bin: &lyra_ast::BinExpr,
-    eval_expr: &dyn Fn(&SyntaxNode) -> Option<i64>,
+    eval_expr: &dyn Fn(&Expr) -> Option<i64>,
 ) -> Option<(ForLimit, bool)> {
     let lhs = cond_bin.lhs()?;
     let rhs = cond_bin.rhs()?;
-    let op_tok = cond_bin.op_token()?;
-    let op_kind = op_tok.kind();
+    let op = cond_bin.binary_op()?;
 
-    if !is_comparison_op(op_kind) {
+    if !op.is_comparison() {
         return None;
     }
 
@@ -477,20 +472,20 @@ fn extract_condition(
     let rhs_is_genvar = expr_is_name(genvar_name, &rhs);
 
     let (limit_expr, effective_op, flipped) = if lhs_is_genvar {
-        (&rhs, op_kind, false)
+        (&rhs, op, false)
     } else if rhs_is_genvar {
-        (&lhs, flip_comparison(op_kind)?, true)
+        (&lhs, op.flip()?, true)
     } else {
         return None;
     };
 
-    let limit_val = eval_expr(limit_expr.syntax())?;
+    let limit_val = eval_expr(limit_expr)?;
     let limit = match effective_op {
-        SyntaxKind::Lt => ForLimit::Lt(limit_val),
-        SyntaxKind::LtEq => ForLimit::Le(limit_val),
-        SyntaxKind::Gt => ForLimit::Gt(limit_val),
-        SyntaxKind::GtEq => ForLimit::Ge(limit_val),
-        SyntaxKind::BangEq => ForLimit::Ne(limit_val),
+        SyntaxBinaryOp::Lt => ForLimit::Lt(limit_val),
+        SyntaxBinaryOp::LtEq => ForLimit::Le(limit_val),
+        SyntaxBinaryOp::Gt => ForLimit::Gt(limit_val),
+        SyntaxBinaryOp::GtEq => ForLimit::Ge(limit_val),
+        SyntaxBinaryOp::Neq => ForLimit::Ne(limit_val),
         _ => return None,
     };
     Some((limit, flipped))
@@ -499,45 +494,26 @@ fn extract_condition(
 fn extract_step(
     genvar_name: &str,
     step_bin: &lyra_ast::BinExpr,
-    eval_expr: &dyn Fn(&SyntaxNode) -> Option<i64>,
+    eval_expr: &dyn Fn(&Expr) -> Option<i64>,
 ) -> Option<i64> {
     let lhs = step_bin.lhs()?;
     let rhs = step_bin.rhs()?;
-    let op_tok = step_bin.op_token()?;
-    let op_kind = op_tok.kind();
+    let op = step_bin.binary_op()?;
 
     if !expr_is_name(genvar_name, &lhs) {
         return None;
     }
 
-    let step_val = eval_expr(rhs.syntax())?;
-    match op_kind {
-        SyntaxKind::Plus => Some(step_val),
-        SyntaxKind::Minus => Some(-step_val),
+    let step_val = eval_expr(&rhs)?;
+    match op {
+        SyntaxBinaryOp::Add => Some(step_val),
+        SyntaxBinaryOp::Sub => Some(-step_val),
         _ => None,
     }
 }
 
-fn expr_is_name(name: &str, expr: &lyra_ast::Expr) -> bool {
+fn expr_is_name(name: &str, expr: &Expr) -> bool {
     lyra_ast::NameRef::cast(expr.syntax().clone())
         .and_then(|nr| nr.ident())
         .is_some_and(|tok| tok.text() == name)
-}
-
-fn is_comparison_op(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Lt | SyntaxKind::LtEq | SyntaxKind::Gt | SyntaxKind::GtEq | SyntaxKind::BangEq
-    )
-}
-
-fn flip_comparison(op: SyntaxKind) -> Option<SyntaxKind> {
-    match op {
-        SyntaxKind::Lt => Some(SyntaxKind::Gt),
-        SyntaxKind::Gt => Some(SyntaxKind::Lt),
-        SyntaxKind::LtEq => Some(SyntaxKind::GtEq),
-        SyntaxKind::GtEq => Some(SyntaxKind::LtEq),
-        SyntaxKind::BangEq => Some(SyntaxKind::BangEq),
-        _ => None,
-    }
 }

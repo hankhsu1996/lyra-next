@@ -10,7 +10,7 @@ mod type_decl_site;
 mod type_spec;
 
 pub use ast_id::{AstId, AstIdMap, ErasedAstId};
-pub use expr::{Expr, LiteralKind, TfArg, TypeRef};
+pub use expr::{Expr, ExprKind, LiteralKind, TfArg, TypeRef};
 pub use generate_item::{GenerateBody, GenerateItem, GenerateScope};
 pub use node::{AstNode, StmtNode, is_expression_kind, is_statement_kind};
 pub use nodes::{
@@ -28,6 +28,6 @@ pub use nodes::{
     SyntaxBinaryOp, SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl, TimingControl, TypeSpec,
     TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
 };
-pub use support::{AstChildren, expr_children};
+pub use support::{AstChildren, expr_children, field_exprs};
 pub use type_decl_site::TypeDeclSite;
 pub use type_spec::{TypeNameRef, UnpackedDimKind};

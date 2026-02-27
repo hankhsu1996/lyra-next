@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
-use lyra_ast::{AstNode, ErasedAstId};
-use lyra_parser::SyntaxNode;
+use lyra_ast::{AstNode, ErasedAstId, Expr, ExprKind};
 use lyra_semantic::const_eval::{ConstLookup, eval_const_expr};
 use lyra_semantic::types::{ConstEvalError, ConstInt};
 use lyra_source::{FileId, Span, TextRange};
@@ -176,33 +175,39 @@ pub(crate) fn build_param_env(
         let val = if let Some(expr_ast_id) = &param.default_expr {
             if let (Some(id_map), Some(parse)) = (&id_map, &parse) {
                 if let Some(expr_node) = id_map.get_node(&parse.syntax(), *expr_ast_id) {
-                    let param_lookup = ParamLookup {
-                        sig,
-                        values: &values,
-                        prefix_len: i,
-                    };
-                    let resolve_name = |name_node: &SyntaxNode| -> Result<i64, ConstEvalError> {
-                        let name_text = extract_name_text(name_node)?;
-                        if let Some(ci) = param_lookup.lookup(&name_text) {
-                            return match ci {
+                    if let Some(expr) = Expr::cast(expr_node) {
+                        let param_lookup = ParamLookup {
+                            sig,
+                            values: &values,
+                            prefix_len: i,
+                        };
+                        let resolve_name = |name_expr: &Expr| -> Result<i64, ConstEvalError> {
+                            let name_text = extract_name_text(name_expr)?;
+                            if let Some(ci) = param_lookup.lookup(&name_text) {
+                                return match ci {
+                                    ConstInt::Known(v) => Ok(v),
+                                    ConstInt::Error(e) => Err(e),
+                                    ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
+                                };
+                            }
+                            let name_ast_id = id_map
+                                .erased_ast_id(name_expr.syntax())
+                                .ok_or(ConstEvalError::Unresolved)?;
+                            let expr_ref =
+                                crate::const_eval::ConstExprRef::new(db, unit, name_ast_id);
+                            match crate::const_eval::eval_const_int(db, expr_ref) {
                                 ConstInt::Known(v) => Ok(v),
                                 ConstInt::Error(e) => Err(e),
                                 ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
-                            };
+                            }
+                        };
+                        match eval_const_expr(&expr, &resolve_name) {
+                            Ok(v) => ConstInt::Known(v),
+                            Err(e) => ConstInt::Error(e),
                         }
-                        let name_ast_id = id_map
-                            .erased_ast_id(name_node)
-                            .ok_or(ConstEvalError::Unresolved)?;
-                        let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, name_ast_id);
-                        match crate::const_eval::eval_const_int(db, expr_ref) {
-                            ConstInt::Known(v) => Ok(v),
-                            ConstInt::Error(e) => Err(e),
-                            ConstInt::Unevaluated(_) => Err(ConstEvalError::Unsupported),
-                        }
-                    };
-                    match eval_const_expr(&expr_node, &resolve_name) {
-                        Ok(v) => ConstInt::Known(v),
-                        Err(e) => ConstInt::Error(e),
+                    } else {
+                        let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, *expr_ast_id);
+                        crate::const_eval::eval_const_int(db, expr_ref)
                     }
                 } else {
                     let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, *expr_ast_id);
@@ -233,8 +238,10 @@ pub(crate) fn extract_param_overrides(
         let name = ip.port_name().map(|t| SmolStr::new(t.text()));
         let span = ip.syntax().text_range();
 
-        let value = if let Some(expr_node) = ip.actual_expr() {
-            match eval_env_expr(db, unit, &expr_node, env) {
+        let value = if let Some(expr_node) = ip.actual_expr()
+            && let Some(expr) = Expr::cast(expr_node)
+        {
+            match eval_env_expr(db, unit, &expr, env) {
                 Ok(v) => ConstInt::Known(v),
                 Err(e) => ConstInt::Error(e),
             }
@@ -251,7 +258,7 @@ pub(crate) fn extract_param_overrides(
 pub(crate) fn eval_env_expr(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
-    expr_node: &SyntaxNode,
+    expr: &Expr,
     env: &EvalEnv<'_>,
 ) -> Result<i64, ConstEvalError> {
     let source_file = source_file_by_id(db, unit, env.file_id).ok_or(ConstEvalError::Unresolved)?;
@@ -259,7 +266,7 @@ pub(crate) fn eval_env_expr(
 
     if env.genvar_values.is_empty()
         && env.sig.params.is_empty()
-        && let Some(expr_ast_id) = id_map.erased_ast_id(expr_node)
+        && let Some(expr_ast_id) = id_map.erased_ast_id(expr.syntax())
     {
         let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, expr_ast_id);
         if let ConstInt::Known(v) = crate::const_eval::eval_const_int(db, expr_ref) {
@@ -274,8 +281,8 @@ pub(crate) fn eval_env_expr(
         prefix_len: env.sig.params.len(),
     };
 
-    let resolve_name = |name_node: &SyntaxNode| -> Result<i64, ConstEvalError> {
-        let name_text = extract_name_text(name_node)?;
+    let resolve_name = |name_expr: &Expr| -> Result<i64, ConstEvalError> {
+        let name_text = extract_name_text(name_expr)?;
 
         for (gn, gv) in env.genvar_values.iter().rev() {
             if name_text == gn.as_str() {
@@ -296,7 +303,7 @@ pub(crate) fn eval_env_expr(
         }
 
         let name_ast_id = id_map
-            .erased_ast_id(name_node)
+            .erased_ast_id(name_expr.syntax())
             .ok_or(ConstEvalError::Unresolved)?;
         let expr_ref = crate::const_eval::ConstExprRef::new(db, unit, name_ast_id);
         match crate::const_eval::eval_const_int(db, expr_ref) {
@@ -306,13 +313,13 @@ pub(crate) fn eval_env_expr(
         }
     };
 
-    eval_const_expr(expr_node, &resolve_name)
+    eval_const_expr(expr, &resolve_name)
 }
 
 pub(crate) fn eval_gen_condition(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
-    expr_node: &SyntaxNode,
+    expr: &Expr,
     env: &EvalEnv<'_>,
     cache: &mut std::collections::HashMap<crate::elaboration::CondCacheKey, ConstInt>,
     cache_key: Option<crate::elaboration::CondCacheKey>,
@@ -326,7 +333,7 @@ pub(crate) fn eval_gen_condition(
         };
     }
 
-    let result = eval_env_expr(db, unit, expr_node, env);
+    let result = eval_env_expr(db, unit, expr, env);
 
     let const_int = match &result {
         Ok(v) => ConstInt::Known(*v),
@@ -340,22 +347,22 @@ pub(crate) fn eval_gen_condition(
     result.ok()
 }
 
-pub(crate) fn extract_name_text(name_node: &SyntaxNode) -> Result<String, ConstEvalError> {
-    use lyra_ast::AstNode;
-    if let Some(name_ref) = lyra_ast::NameRef::cast(name_node.clone()) {
-        return name_ref
+pub(crate) fn extract_name_text(expr: &Expr) -> Result<String, ConstEvalError> {
+    let Some(ek) = expr.classify() else {
+        return Err(ConstEvalError::Unresolved);
+    };
+    match ek {
+        ExprKind::NameRef(nr) => nr
             .ident()
             .map(|t| t.text().to_string())
-            .ok_or(ConstEvalError::Unresolved);
-    }
-    if let Some(qn) = lyra_ast::QualifiedName::cast(name_node.clone()) {
-        return qn
+            .ok_or(ConstEvalError::Unresolved),
+        ExprKind::QualifiedName(qn) => qn
             .segments()
             .last()
             .map(|t| t.text().to_string())
-            .ok_or(ConstEvalError::Unresolved);
+            .ok_or(ConstEvalError::Unresolved),
+        _ => Err(ConstEvalError::Unresolved),
     }
-    Err(ConstEvalError::Unresolved)
 }
 
 pub(crate) fn cond_site_key(

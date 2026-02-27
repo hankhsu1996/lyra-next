@@ -1,5 +1,4 @@
-use lyra_ast::{AstNode, NameRef, QualifiedName, SystemTfCall, TfArg};
-use lyra_lexer::SyntaxKind;
+use lyra_ast::{Expr, ExprKind, TfArg};
 use lyra_parser::SyntaxNode;
 use lyra_semantic::resolve_index::{CoreResolution, CoreResolveResult};
 use lyra_semantic::symbols::{GlobalSymbolId, Namespace};
@@ -14,15 +13,6 @@ use crate::semantic::{
 };
 use crate::type_queries::{SymbolRef, TyRef, bit_width_total, type_of_symbol_raw};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
-
-/// Extract the syntax node from a `TfArg`.
-fn tf_arg_node(arg: &TfArg) -> &SyntaxNode {
-    match arg {
-        TfArg::Expr(e) => e.syntax(),
-        TfArg::Type(t) => t.syntax(),
-        TfArg::Unknown(n) => n,
-    }
-}
 
 /// Identifies a constant expression for evaluation.
 ///
@@ -86,9 +76,13 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
         return ConstInt::Error(ConstEvalError::Unresolved);
     };
 
-    let resolve_name = |name_node: &lyra_parser::SyntaxNode| -> Result<i64, ConstEvalError> {
+    let Some(expr) = Expr::cast(node) else {
+        return ConstInt::Error(ConstEvalError::Unsupported);
+    };
+
+    let resolve_name = |name_expr: &Expr| -> Result<i64, ConstEvalError> {
         let name_site_id = map
-            .erased_ast_id(name_node)
+            .erased_ast_id(name_expr.syntax())
             .ok_or(ConstEvalError::Unresolved)?;
 
         let resolve = base_resolve_index(db, source_file, unit);
@@ -131,8 +125,11 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
         }
     };
 
-    let eval_call = |call_node: &lyra_parser::SyntaxNode| -> Option<Result<i64, ConstEvalError>> {
-        let stf = SystemTfCall::cast(call_node.clone())?;
+    let eval_call = |call_expr: &Expr| -> Option<Result<i64, ConstEvalError>> {
+        let ek = call_expr.classify()?;
+        let ExprKind::SystemTfCall(stf) = ek else {
+            return None;
+        };
         let name_tok = stf.system_name()?;
         let intrinsic = ConstIntrinsic::from_name(name_tok.text())?;
         let al = stf.arg_list()?;
@@ -157,7 +154,7 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
         })
     };
 
-    match lyra_semantic::const_eval::eval_const_expr_full(&node, &resolve_name, &eval_call) {
+    match lyra_semantic::const_eval::eval_const_expr_full(&expr, &resolve_name, &eval_call) {
         Ok(v) => ConstInt::Known(v),
         Err(e) => ConstInt::Error(e),
     }
@@ -190,44 +187,49 @@ fn eval_bits_intrinsic(
     let Some(arg) = args.first() else {
         return ConstInt::Error(ConstEvalError::InvalidArgument);
     };
-    let arg_node = tf_arg_node(arg);
 
-    let ty = classify_bits_arg_for_const(db, unit, source_file, map, arg_node);
+    let ty = classify_bits_arg_for_const(db, unit, source_file, map, arg);
     bits_from_ty(db, unit, &ty)
 }
 
 /// Classify a `$bits` argument and resolve to a `Ty`.
 ///
-/// Type-form: `TypeSpec` or `NameRef`/`QualifiedName` that resolves to a `TypeAlias`.
+/// Type-form: `TfArg::Type` or `NameRef`/`QualifiedName` that resolves to a `TypeAlias`.
 /// Expr-form: everything else -- infer type via `type_of_expr_raw`.
 fn classify_bits_arg_for_const(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     source_file: SourceFile,
     map: &lyra_ast::AstIdMap,
-    arg: &lyra_parser::SyntaxNode,
+    arg: &TfArg,
 ) -> Ty {
-    if arg.kind() == SyntaxKind::TypeSpec {
-        // Check for user-defined type reference
-        if let Some(ty) = resolve_type_from_typespec(db, unit, source_file, map, arg) {
-            return ty;
+    match arg {
+        TfArg::Type(type_ref) => {
+            let typespec_node = type_ref.syntax();
+            if let Some(ty) = resolve_type_from_typespec(db, unit, source_file, map, typespec_node)
+            {
+                return ty;
+            }
+            lyra_semantic::extract_base_ty_from_typespec(typespec_node, map)
         }
-        return lyra_semantic::extract_base_ty_from_typespec(arg, map);
+        TfArg::Expr(expr) => {
+            let Some(ek) = expr.classify() else {
+                return Ty::Error;
+            };
+            if matches!(ek, ExprKind::NameRef(_) | ExprKind::QualifiedName(_))
+                && let Some(ty) = resolve_as_type(db, unit, source_file, map, expr)
+            {
+                return ty;
+            }
+            let Some(ast_id) = map.erased_ast_id(expr.syntax()) else {
+                return Ty::Error;
+            };
+            let expr_ref = ExprRef::new(db, unit, ast_id);
+            let et = type_of_expr_raw(db, expr_ref);
+            et.ty
+        }
+        TfArg::Unknown(_) => Ty::Error,
     }
-
-    if matches!(arg.kind(), SyntaxKind::NameRef | SyntaxKind::QualifiedName)
-        && let Some(ty) = resolve_as_type(db, unit, source_file, map, arg)
-    {
-        return ty;
-    }
-
-    // Expr-form: infer type via type_of_expr_raw
-    let Some(ast_id) = map.erased_ast_id(arg) else {
-        return Ty::Error;
-    };
-    let expr_ref = ExprRef::new(db, unit, ast_id);
-    let et = type_of_expr_raw(db, expr_ref);
-    et.ty
 }
 
 /// Resolve a user-defined type reference inside a `TypeSpec` for `$bits`.
@@ -236,7 +238,7 @@ fn resolve_type_from_typespec(
     unit: CompilationUnit,
     source_file: SourceFile,
     map: &lyra_ast::AstIdMap,
-    typespec: &lyra_parser::SyntaxNode,
+    typespec: &SyntaxNode,
 ) -> Option<Ty> {
     let utr = lyra_semantic::user_type_ref(typespec)?;
     let name_site_id = map.erased_ast_id(utr.resolve_node())?;
@@ -259,7 +261,7 @@ fn resolve_type_from_typespec(
     }
 }
 
-/// Resolve a `NameRef`/`QualifiedName` as a type (`TypeAlias`) for `$bits`.
+/// Resolve a `NameRef`/`QualifiedName` expression as a type (`TypeAlias`) for `$bits`.
 ///
 /// The pre-built resolve index only has Value-namespace entries for bare
 /// `NameRef`s in expression positions. Typedefs live in the Type namespace,
@@ -270,10 +272,9 @@ fn resolve_as_type(
     unit: CompilationUnit,
     source_file: SourceFile,
     map: &lyra_ast::AstIdMap,
-    name_node: &lyra_parser::SyntaxNode,
+    expr: &Expr,
 ) -> Option<Ty> {
-    // First try the pre-built resolve index (handles Value-namespace hits)
-    let ast_id = map.erased_ast_id(name_node)?;
+    let ast_id = map.erased_ast_id(expr.syntax())?;
     let resolve = base_resolve_index(db, source_file, unit);
     if let Some(res) = resolve.resolutions.get(&ast_id) {
         let sym_id = match &res.target {
@@ -293,8 +294,7 @@ fn resolve_as_type(
         return None;
     }
 
-    // Not in pre-built index -- do ad-hoc Type-namespace resolution
-    resolve_name_as_type(db, unit, source_file, map, name_node)
+    resolve_name_as_type(db, unit, source_file, map, expr)
 }
 
 /// Ad-hoc Type-namespace resolution for a `NameRef` or `QualifiedName`.
@@ -306,30 +306,34 @@ fn resolve_name_as_type(
     unit: CompilationUnit,
     source_file: SourceFile,
     map: &lyra_ast::AstIdMap,
-    name_node: &lyra_parser::SyntaxNode,
+    expr: &Expr,
 ) -> Option<Ty> {
     let expected = lyra_semantic::def_index::ExpectedNs::Exact(Namespace::Type);
     let global = global_def_index(db, unit);
     let pkg_scope = package_scope_index(db, unit);
 
-    let result = if let Some(nr) = NameRef::cast(name_node.clone()) {
-        let ident = nr.ident()?;
-        let name = ident.text();
-        let def = def_index_file(db, source_file);
-        let scope = find_use_site_scope(def, name_node, map)?;
-        let graph = name_graph_file(db, source_file);
-        let cu_env = compilation_unit_env(db, unit);
-        lyra_semantic::resolve_name_in_scope(
-            graph, global, pkg_scope, cu_env, scope, name, expected,
-        )
-    } else if let Some(qn) = QualifiedName::cast(name_node.clone()) {
-        let segments: Vec<SmolStr> = qn.segments().map(|t| SmolStr::new(t.text())).collect();
-        if segments.len() < 2 {
-            return None;
+    let ek = expr.classify()?;
+
+    let result = match ek {
+        ExprKind::NameRef(nr) => {
+            let ident = nr.ident()?;
+            let name = ident.text();
+            let def = def_index_file(db, source_file);
+            let scope = find_use_site_scope(def, expr.syntax(), map)?;
+            let graph = name_graph_file(db, source_file);
+            let cu_env = compilation_unit_env(db, unit);
+            lyra_semantic::resolve_name_in_scope(
+                graph, global, pkg_scope, cu_env, scope, name, expected,
+            )
         }
-        lyra_semantic::resolve_qualified_name(&segments, global, pkg_scope, expected)
-    } else {
-        return None;
+        ExprKind::QualifiedName(qn) => {
+            let segments: Vec<SmolStr> = qn.segments().map(|t| SmolStr::new(t.text())).collect();
+            if segments.len() < 2 {
+                return None;
+            }
+            lyra_semantic::resolve_qualified_name(&segments, global, pkg_scope, expected)
+        }
+        _ => return None,
     };
 
     core_resolution_to_ty(db, unit, source_file, &result)
@@ -338,7 +342,7 @@ fn resolve_name_as_type(
 /// Find the scope for a node by looking up its `use_site` in the def index.
 fn find_use_site_scope(
     def: &lyra_semantic::def_index::DefIndex,
-    node: &lyra_parser::SyntaxNode,
+    node: &SyntaxNode,
     map: &lyra_ast::AstIdMap,
 ) -> Option<lyra_semantic::scopes::ScopeId> {
     let ast_id = map.erased_ast_id(node)?;
@@ -392,7 +396,7 @@ fn eval_dim_intrinsic(
     source_file: SourceFile,
     map: &lyra_ast::AstIdMap,
     intrinsic: &ConstIntrinsic,
-    resolve_name: &dyn Fn(&lyra_parser::SyntaxNode) -> Result<i64, ConstEvalError>,
+    resolve_name: &dyn Fn(&Expr) -> Result<i64, ConstEvalError>,
 ) -> ConstInt {
     let arg_count = args.len();
     let is_counting = matches!(
@@ -407,9 +411,8 @@ fn eval_dim_intrinsic(
     let Some(first_arg) = args.first() else {
         return ConstInt::Error(ConstEvalError::InvalidArgument);
     };
-    let first_node = tf_arg_node(first_arg);
 
-    let ty = classify_bits_arg_for_const(db, unit, source_file, map, first_node);
+    let ty = classify_bits_arg_for_const(db, unit, source_file, map, first_arg);
     let normalized = normalize_for_dim(db, unit, &ty);
 
     if matches!(normalized, Ty::Error) {
@@ -430,8 +433,10 @@ fn eval_dim_intrinsic(
         let Some(second_arg) = args.get(1) else {
             return ConstInt::Error(ConstEvalError::InvalidArgument);
         };
-        let dim_node = tf_arg_node(second_arg);
-        match lyra_semantic::const_eval::eval_const_expr_full(dim_node, resolve_name, &|_| None) {
+        let TfArg::Expr(dim_expr) = second_arg else {
+            return ConstInt::Error(ConstEvalError::InvalidArgument);
+        };
+        match lyra_semantic::const_eval::eval_const_expr_full(dim_expr, resolve_name, &|_| None) {
             Ok(v) => match u32::try_from(v) {
                 Ok(0) | Err(_) => {
                     return ConstInt::Error(ConstEvalError::InvalidArgument);

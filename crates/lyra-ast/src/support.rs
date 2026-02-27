@@ -20,6 +20,18 @@ impl<N: AstNode> Iterator for AstChildren<N> {
     }
 }
 
+/// Iterate all descendant nodes of type `N` (depth-first pre-order).
+pub(crate) fn descendants<'a, N: AstNode + 'a>(
+    root: &'a SyntaxNode,
+) -> impl Iterator<Item = N> + 'a {
+    root.descendants().filter_map(N::cast)
+}
+
+/// All `FieldExpr` nodes in a subtree (depth-first pre-order).
+pub fn field_exprs(root: &SyntaxNode) -> impl Iterator<Item = crate::nodes::FieldExpr> + '_ {
+    descendants(root)
+}
+
 /// Get the first child node of type `N`.
 pub(crate) fn child<N: AstNode>(parent: &SyntaxNode) -> Option<N> {
     parent.children().find_map(N::cast)

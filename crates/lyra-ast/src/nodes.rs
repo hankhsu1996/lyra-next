@@ -383,6 +383,28 @@ pub enum SyntaxBinaryOp {
 }
 
 impl SyntaxBinaryOp {
+    /// Flip a relational operator (`Lt` <-> `Gt`, `LtEq` <-> `GtEq`).
+    /// Symmetric operators (`Eq`, `Neq`) return themselves. Non-comparison
+    /// operators return `None`.
+    pub fn flip(&self) -> Option<Self> {
+        match self {
+            Self::Lt => Some(Self::Gt),
+            Self::Gt => Some(Self::Lt),
+            Self::LtEq => Some(Self::GtEq),
+            Self::GtEq => Some(Self::LtEq),
+            Self::Eq | Self::Neq => Some(*self),
+            _ => None,
+        }
+    }
+
+    /// Whether this operator is a comparison (relational or equality).
+    pub fn is_comparison(&self) -> bool {
+        matches!(
+            self,
+            Self::Lt | Self::LtEq | Self::Gt | Self::GtEq | Self::Eq | Self::Neq
+        )
+    }
+
     pub fn from_token(kind: SyntaxKind) -> Option<SyntaxBinaryOp> {
         match kind {
             SyntaxKind::Plus => Some(SyntaxBinaryOp::Add),

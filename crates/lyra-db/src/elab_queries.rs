@@ -709,7 +709,7 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, if_stmt: &lyra_ast::IfStmt, env: &
     let cond_val = eval_gen_condition(
         ctx.db,
         ctx.unit,
-        cond_expr.syntax(),
+        &cond_expr,
         &eval_env,
         ctx.cond_cache,
         cache_key,
@@ -768,10 +768,10 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, if_stmt: &lyra_ast::IfStmt, env: &
 
 fn process_generate_for(ctx: &mut ElabCtx<'_>, for_stmt: &lyra_ast::ForStmt, env: &ScopeEnv<'_>) {
     let eval_env = make_eval_env(ctx, env);
-    let eval_fn = |expr_node: &SyntaxNode| -> Option<i64> {
-        eval_env_expr(ctx.db, ctx.unit, expr_node, &eval_env).ok()
+    let eval_fn = |expr: &lyra_ast::Expr| -> Option<i64> {
+        eval_env_expr(ctx.db, ctx.unit, expr, &eval_env).ok()
     };
-    let for_parts = extract_for_parts(for_stmt.syntax(), &eval_fn);
+    let for_parts = extract_for_parts(for_stmt, &eval_fn);
 
     let Some(parts) = for_parts else {
         ctx.diags.push(ElabDiag::GenvarNotConst {
@@ -899,7 +899,7 @@ fn match_case_body(
 
         let mut label_matched = false;
         for label in item.labels() {
-            let item_val = eval_gen_condition(db, unit, label.syntax(), eval_env, cond_cache, None);
+            let item_val = eval_gen_condition(db, unit, &label, eval_env, cond_cache, None);
             if let Some(v) = item_val
                 && v == case_val
             {
@@ -957,7 +957,7 @@ fn process_generate_case(
     let case_val = eval_gen_condition(
         ctx.db,
         ctx.unit,
-        selector.syntax(),
+        &selector,
         &eval_env,
         ctx.cond_cache,
         cache_key,

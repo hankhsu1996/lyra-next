@@ -41,9 +41,7 @@ CHECKED_CRATES: dict[str, frozenset[str]] = {
         "builder_types.rs",
         "builder_order.rs",
     }),
-    "crates/lyra-db/src/": frozenset({
-        "facts/modport.rs",  # TODO(typed-walk): remove after modport typed accessors
-    }),
+    "crates/lyra-db/src/": frozenset(),
 }
 
 # Derive a human-readable crate label from the prefix for error messages.

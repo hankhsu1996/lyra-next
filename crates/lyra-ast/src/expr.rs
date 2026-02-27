@@ -1,8 +1,12 @@
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxNode, SyntaxToken};
 
-use crate::node::is_expression_kind;
-use crate::nodes::{Expression, ParenExpr, TypeSpec};
+use crate::node::{AstNode, is_expression_kind};
+use crate::nodes::{
+    BinExpr, CallExpr, CastExpr, ConcatExpr, CondExpr, Expression, FieldExpr, IndexExpr, Literal,
+    NameRef, ParenExpr, PrefixExpr, QualifiedName, RangeExpr, ReplicExpr, StreamExpr, SystemTfCall,
+    TypeSpec,
+};
 
 /// Typed handle for any expression-kind syntax node.
 ///
@@ -41,7 +45,6 @@ impl Expr {
     /// child. Returns `None` if `node` is not an expression kind.
     /// If a wrapper has no inner child (malformed), returns the wrapper.
     pub fn peel(node: &SyntaxNode) -> Option<Expr> {
-        use crate::node::AstNode;
         let mut current = Expr::cast(node.clone())?;
         loop {
             let inner = match current.kind() {
@@ -59,6 +62,78 @@ impl Expr {
             }
         }
     }
+
+    /// Peel wrappers and classify into a typed `ExprKind` variant.
+    ///
+    /// Returns `None` for malformed/error nodes or wrapper-only trees
+    /// with no inner content.
+    pub fn classify(&self) -> Option<ExprKind> {
+        let peeled = Expr::peel(self.syntax())?;
+        let node = peeled.syntax().clone();
+        match peeled.kind() {
+            SyntaxKind::Literal => Literal::cast(node).map(ExprKind::Literal),
+            SyntaxKind::BinExpr => BinExpr::cast(node).map(ExprKind::BinExpr),
+            SyntaxKind::PrefixExpr => PrefixExpr::cast(node).map(ExprKind::PrefixExpr),
+            SyntaxKind::CondExpr => CondExpr::cast(node).map(ExprKind::CondExpr),
+            SyntaxKind::ConcatExpr => ConcatExpr::cast(node).map(ExprKind::ConcatExpr),
+            SyntaxKind::ReplicExpr => ReplicExpr::cast(node).map(ExprKind::ReplicExpr),
+            SyntaxKind::IndexExpr => IndexExpr::cast(node).map(ExprKind::IndexExpr),
+            SyntaxKind::RangeExpr => RangeExpr::cast(node).map(ExprKind::RangeExpr),
+            SyntaxKind::FieldExpr => FieldExpr::cast(node).map(ExprKind::FieldExpr),
+            SyntaxKind::CallExpr => CallExpr::cast(node).map(ExprKind::CallExpr),
+            SyntaxKind::SystemTfCall => SystemTfCall::cast(node).map(ExprKind::SystemTfCall),
+            SyntaxKind::NameRef => NameRef::cast(node).map(ExprKind::NameRef),
+            SyntaxKind::QualifiedName => QualifiedName::cast(node).map(ExprKind::QualifiedName),
+            SyntaxKind::StreamExpr => StreamExpr::cast(node).map(ExprKind::StreamExpr),
+            SyntaxKind::CastExpr => CastExpr::cast(node).map(ExprKind::CastExpr),
+            _ => None,
+        }
+    }
+}
+
+/// Typed classification of a post-peel expression.
+///
+/// No `Expression` or `ParenExpr` variants -- those are stripped
+/// by `Expr::classify()` before classification.
+#[derive(Debug, Clone)]
+pub enum ExprKind {
+    Literal(Literal),
+    BinExpr(BinExpr),
+    PrefixExpr(PrefixExpr),
+    CondExpr(CondExpr),
+    ConcatExpr(ConcatExpr),
+    ReplicExpr(ReplicExpr),
+    IndexExpr(IndexExpr),
+    RangeExpr(RangeExpr),
+    FieldExpr(FieldExpr),
+    CallExpr(CallExpr),
+    SystemTfCall(SystemTfCall),
+    NameRef(NameRef),
+    QualifiedName(QualifiedName),
+    StreamExpr(StreamExpr),
+    CastExpr(CastExpr),
+}
+
+impl ExprKind {
+    pub fn syntax(&self) -> &SyntaxNode {
+        match self {
+            Self::Literal(n) => n.syntax(),
+            Self::BinExpr(n) => n.syntax(),
+            Self::PrefixExpr(n) => n.syntax(),
+            Self::CondExpr(n) => n.syntax(),
+            Self::ConcatExpr(n) => n.syntax(),
+            Self::ReplicExpr(n) => n.syntax(),
+            Self::IndexExpr(n) => n.syntax(),
+            Self::RangeExpr(n) => n.syntax(),
+            Self::FieldExpr(n) => n.syntax(),
+            Self::CallExpr(n) => n.syntax(),
+            Self::SystemTfCall(n) => n.syntax(),
+            Self::NameRef(n) => n.syntax(),
+            Self::QualifiedName(n) => n.syntax(),
+            Self::StreamExpr(n) => n.syntax(),
+            Self::CastExpr(n) => n.syntax(),
+        }
+    }
 }
 
 /// Thin newtype over `TypeSpec` for the `TfArg` boundary.
@@ -73,12 +148,10 @@ impl TypeRef {
     }
 
     pub fn cast(node: SyntaxNode) -> Option<TypeRef> {
-        use crate::node::AstNode;
         TypeSpec::cast(node).map(|ts| TypeRef { inner: ts })
     }
 
     pub fn syntax(&self) -> &SyntaxNode {
-        use crate::node::AstNode;
         self.inner.syntax()
     }
 

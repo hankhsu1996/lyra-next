@@ -1,6 +1,8 @@
-use lyra_ast::{AstNode, BinExpr, CastExpr, Expr, LiteralKind, PrefixExpr, SystemTfCall, TfArg};
+use lyra_ast::{
+    BinExpr, CastExpr, Expr, ExprKind, Literal, LiteralKind, PrefixExpr, SyntaxBinaryOp,
+    SystemTfCall, TfArg,
+};
 use lyra_lexer::SyntaxKind;
-use lyra_parser::SyntaxNode;
 
 use crate::literal::{Base, parse_literal_shape};
 use crate::types::{ConstEvalError, ConstInt};
@@ -51,50 +53,53 @@ impl<'a> ConstEnv<'a> {
 /// `resolve_name` is called for `NameRef` and `QualifiedName` nodes.
 /// The DB layer provides a callback that wires name resolution to
 /// recursive `eval_const_int` calls.
-pub fn eval_const_expr(
-    node: &SyntaxNode,
-    resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
-) -> EvalResult {
-    eval_const_expr_full(node, resolve_name, &|_| None)
+pub fn eval_const_expr(expr: &Expr, resolve_name: &dyn Fn(&Expr) -> EvalResult) -> EvalResult {
+    eval_const_expr_full(expr, resolve_name, &|_| None)
 }
 
 /// Extended constant expression evaluator with system-call dispatch.
 ///
 /// `eval_call` handles system function calls that the pure evaluator
-/// cannot (e.g. `$bits`). It receives the call node and returns
+/// cannot (e.g. `$bits`). It receives the expression and returns
 /// `Some(Ok(v))` or `Some(Err(e))` if handled, `None` to fall through
 /// to the built-in handlers (`$clog2`).
 pub fn eval_const_expr_full(
-    node: &SyntaxNode,
-    resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
-    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
+    expr: &Expr,
+    resolve_name: &dyn Fn(&Expr) -> EvalResult,
+    eval_call: &dyn Fn(&Expr) -> Option<EvalResult>,
 ) -> EvalResult {
-    let expr = Expr::peel(node).ok_or(ConstEvalError::Unsupported)?;
-    match expr.kind() {
-        SyntaxKind::Literal => eval_literal(expr.syntax()),
-        SyntaxKind::BinExpr => eval_bin_expr(expr.syntax(), resolve_name, eval_call),
-        SyntaxKind::PrefixExpr => eval_prefix_expr(expr.syntax(), resolve_name, eval_call),
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName => resolve_name(expr.syntax()),
-        SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => {
-            if let Some(result) = eval_call(expr.syntax()) {
+    let Some(ek) = expr.classify() else {
+        return Err(ConstEvalError::Unsupported);
+    };
+    match ek {
+        ExprKind::Literal(lit) => eval_literal(&lit),
+        ExprKind::BinExpr(bin) => eval_bin_expr(&bin, resolve_name, eval_call),
+        ExprKind::PrefixExpr(pre) => eval_prefix_expr(&pre, resolve_name, eval_call),
+        ExprKind::NameRef(_) | ExprKind::QualifiedName(_) => resolve_name(expr),
+        ExprKind::CallExpr(_) | ExprKind::SystemTfCall(_) => {
+            if let Some(result) = eval_call(expr) {
                 return result;
             }
-            eval_call_expr(expr.syntax(), resolve_name, eval_call)
+            if let ExprKind::SystemTfCall(stf) = ek {
+                eval_call_builtin(&stf, resolve_name, eval_call)
+            } else {
+                Err(ConstEvalError::Unsupported)
+            }
         }
-        SyntaxKind::CastExpr => eval_cast_expr(expr.syntax(), resolve_name, eval_call),
+        ExprKind::CastExpr(cast) => eval_cast_expr(&cast, resolve_name, eval_call),
         _ => Err(ConstEvalError::Unsupported),
     }
 }
 
-fn eval_literal(node: &SyntaxNode) -> EvalResult {
-    let shape = parse_literal_shape(node).ok_or(ConstEvalError::Unsupported)?;
+fn eval_literal(lit: &Literal) -> EvalResult {
+    use lyra_ast::AstNode;
+    let shape = parse_literal_shape(lit.syntax()).ok_or(ConstEvalError::Unsupported)?;
 
     if shape.has_xz {
         return Err(ConstEvalError::NonConstant);
     }
 
-    let literal = lyra_ast::Literal::cast(node.clone()).ok_or(ConstEvalError::Unsupported)?;
-    let kind = literal.literal_kind().ok_or(ConstEvalError::Unsupported)?;
+    let kind = lit.literal_kind().ok_or(ConstEvalError::Unsupported)?;
 
     match kind {
         LiteralKind::Int { token } => {
@@ -173,60 +178,58 @@ fn truncate_to_size(value: u128, size: u32) -> EvalResult {
 }
 
 fn eval_bin_expr(
-    node: &SyntaxNode,
-    resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
-    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
+    bin: &BinExpr,
+    resolve_name: &dyn Fn(&Expr) -> EvalResult,
+    eval_call: &dyn Fn(&Expr) -> Option<EvalResult>,
 ) -> EvalResult {
-    let bin = BinExpr::cast(node.clone()).ok_or(ConstEvalError::Unsupported)?;
-    let lhs_node = bin.lhs().ok_or(ConstEvalError::Unsupported)?;
-    let rhs_node = bin.rhs().ok_or(ConstEvalError::Unsupported)?;
-    let op = bin.op_token().ok_or(ConstEvalError::Unsupported)?;
+    let lhs_expr = bin.lhs().ok_or(ConstEvalError::Unsupported)?;
+    let rhs_expr = bin.rhs().ok_or(ConstEvalError::Unsupported)?;
+    let op = bin.binary_op().ok_or(ConstEvalError::Unsupported)?;
 
-    let lhs = eval_const_expr_full(lhs_node.syntax(), resolve_name, eval_call)?;
-    let rhs = eval_const_expr_full(rhs_node.syntax(), resolve_name, eval_call)?;
+    let lhs = eval_const_expr_full(&lhs_expr, resolve_name, eval_call)?;
+    let rhs = eval_const_expr_full(&rhs_expr, resolve_name, eval_call)?;
 
-    match op.kind() {
-        SyntaxKind::Plus => lhs.checked_add(rhs).ok_or(ConstEvalError::Overflow),
-        SyntaxKind::Minus => lhs.checked_sub(rhs).ok_or(ConstEvalError::Overflow),
-        SyntaxKind::Star => lhs.checked_mul(rhs).ok_or(ConstEvalError::Overflow),
-        SyntaxKind::Slash => {
+    match op {
+        SyntaxBinaryOp::Add => lhs.checked_add(rhs).ok_or(ConstEvalError::Overflow),
+        SyntaxBinaryOp::Sub => lhs.checked_sub(rhs).ok_or(ConstEvalError::Overflow),
+        SyntaxBinaryOp::Mul => lhs.checked_mul(rhs).ok_or(ConstEvalError::Overflow),
+        SyntaxBinaryOp::Div => {
             if rhs == 0 {
                 Err(ConstEvalError::DivideByZero)
             } else {
                 lhs.checked_div(rhs).ok_or(ConstEvalError::Overflow)
             }
         }
-        SyntaxKind::Percent => {
+        SyntaxBinaryOp::Mod => {
             if rhs == 0 {
                 Err(ConstEvalError::DivideByZero)
             } else {
                 lhs.checked_rem(rhs).ok_or(ConstEvalError::Overflow)
             }
         }
-        SyntaxKind::LtLt => {
+        SyntaxBinaryOp::Shl => {
             let shift = u32::try_from(rhs).map_err(|_| ConstEvalError::Overflow)?;
             lhs.checked_shl(shift).ok_or(ConstEvalError::Overflow)
         }
-        SyntaxKind::GtGt => {
+        SyntaxBinaryOp::Shr => {
             let shift = u32::try_from(rhs).map_err(|_| ConstEvalError::Overflow)?;
             lhs.checked_shr(shift).ok_or(ConstEvalError::Overflow)
         }
-        SyntaxKind::Amp => Ok(lhs & rhs),
-        SyntaxKind::Pipe => Ok(lhs | rhs),
-        SyntaxKind::Caret => Ok(lhs ^ rhs),
+        SyntaxBinaryOp::BitAnd => Ok(lhs & rhs),
+        SyntaxBinaryOp::BitOr => Ok(lhs | rhs),
+        SyntaxBinaryOp::BitXor => Ok(lhs ^ rhs),
         _ => Err(ConstEvalError::Unsupported),
     }
 }
 
 fn eval_prefix_expr(
-    node: &SyntaxNode,
-    resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
-    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
+    prefix: &PrefixExpr,
+    resolve_name: &dyn Fn(&Expr) -> EvalResult,
+    eval_call: &dyn Fn(&Expr) -> Option<EvalResult>,
 ) -> EvalResult {
-    let prefix = PrefixExpr::cast(node.clone()).ok_or(ConstEvalError::Unsupported)?;
-    let operand_node = prefix.operand().ok_or(ConstEvalError::Unsupported)?;
+    let operand_expr = prefix.operand().ok_or(ConstEvalError::Unsupported)?;
     let op = prefix.op_token().ok_or(ConstEvalError::Unsupported)?;
-    let operand = eval_const_expr_full(operand_node.syntax(), resolve_name, eval_call)?;
+    let operand = eval_const_expr_full(&operand_expr, resolve_name, eval_call)?;
 
     match op.kind() {
         SyntaxKind::Plus => Ok(operand),
@@ -236,12 +239,11 @@ fn eval_prefix_expr(
     }
 }
 
-fn eval_call_expr(
-    node: &SyntaxNode,
-    resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
-    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
+fn eval_call_builtin(
+    stf: &SystemTfCall,
+    resolve_name: &dyn Fn(&Expr) -> EvalResult,
+    eval_call: &dyn Fn(&Expr) -> Option<EvalResult>,
 ) -> EvalResult {
-    let stf = SystemTfCall::cast(node.clone()).ok_or(ConstEvalError::Unsupported)?;
     let name_tok = stf.system_name().ok_or(ConstEvalError::Unsupported)?;
 
     if name_tok.text() != "$clog2" {
@@ -254,18 +256,17 @@ fn eval_call_expr(
         return Err(ConstEvalError::Unsupported);
     };
 
-    let value = eval_const_expr_full(first_arg.syntax(), resolve_name, eval_call)?;
+    let value = eval_const_expr_full(&first_arg, resolve_name, eval_call)?;
     clog2(value)
 }
 
 fn eval_cast_expr(
-    node: &SyntaxNode,
-    resolve_name: &dyn Fn(&SyntaxNode) -> EvalResult,
-    eval_call: &dyn Fn(&SyntaxNode) -> Option<EvalResult>,
+    cast: &CastExpr,
+    resolve_name: &dyn Fn(&Expr) -> EvalResult,
+    eval_call: &dyn Fn(&Expr) -> Option<EvalResult>,
 ) -> EvalResult {
-    let cast = CastExpr::cast(node.clone()).ok_or(ConstEvalError::Unsupported)?;
     let inner = cast.inner_expr().ok_or(ConstEvalError::Unsupported)?;
-    eval_const_expr_full(inner.syntax(), resolve_name, eval_call)
+    eval_const_expr_full(&inner, resolve_name, eval_call)
 }
 
 fn clog2(n: i64) -> EvalResult {
@@ -282,6 +283,7 @@ fn clog2(n: i64) -> EvalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lyra_parser::SyntaxNode;
 
     fn parse_expr(src: &str) -> SyntaxNode {
         // Wrap in a module to get a valid parse, then extract the expression
@@ -289,16 +291,12 @@ mod tests {
         let tokens = lyra_lexer::lex(&full);
         let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, &full);
         let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
-        // Navigate: SourceFile > ModuleDecl > ModuleBody > ParamDecl > Declarator
-        // The expr() call in the parser produces the expression node directly
-        // (e.g. Literal, BinExpr) as a child of Declarator, not wrapped in Expression.
         let root = parse.syntax();
         find_declarator_init(&root).expect("should find init expression in parsed source")
     }
 
     fn find_declarator_init(node: &SyntaxNode) -> Option<SyntaxNode> {
         if node.kind() == SyntaxKind::Declarator {
-            // The initializer expression is the first child node after Ident and '='
             return node.children().find(|c| is_expr_kind(c.kind()));
         }
         for child in node.children() {
@@ -333,12 +331,14 @@ mod tests {
 
     fn eval(src: &str) -> EvalResult {
         let node = parse_expr(src);
-        eval_const_expr(&node, &|_| Err(ConstEvalError::Unresolved))
+        let expr = Expr::cast(node).expect("should be expression");
+        eval_const_expr(&expr, &|_| Err(ConstEvalError::Unresolved))
     }
 
-    fn eval_with_names(src: &str, resolve: &dyn Fn(&SyntaxNode) -> EvalResult) -> EvalResult {
+    fn eval_with_names(src: &str, resolve: &dyn Fn(&Expr) -> EvalResult) -> EvalResult {
         let node = parse_expr(src);
-        eval_const_expr(&node, resolve)
+        let expr = Expr::cast(node).expect("should be expression");
+        eval_const_expr(&expr, resolve)
     }
 
     #[test]
@@ -523,20 +523,18 @@ mod tests {
 
     #[test]
     fn clog2_negative() {
-        // $clog2(-1) should be InvalidArgument
-        // Parse "-1" as PrefixExpr with Minus and 1
         assert_eq!(eval("$clog2(-1)"), Err(ConstEvalError::InvalidArgument));
     }
 
     #[test]
     fn unsupported_concat() {
-        // Concat is not supported for const eval
         let full = "module m; parameter P = {8'h1, 8'h2}; endmodule";
         let tokens = lyra_lexer::lex(full);
         let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, full);
         let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
         let root = parse.syntax();
-        if let Some(expr) = find_declarator_init(&root) {
+        if let Some(expr_node) = find_declarator_init(&root) {
+            let expr = Expr::cast(expr_node).expect("should be expression");
             let result = eval_const_expr(&expr, &|_| Err(ConstEvalError::Unresolved));
             assert_eq!(result, Err(ConstEvalError::Unsupported));
         }
