@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use lyra_ast::{AstNode, ErasedAstId};
-use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use lyra_semantic::const_eval::{ConstLookup, eval_const_expr};
 use lyra_semantic::types::{ConstEvalError, ConstInt};
@@ -228,20 +227,9 @@ pub(crate) fn extract_param_overrides(
     unit: CompilationUnit,
     env: &EvalEnv<'_>,
 ) -> Vec<ParamOverride> {
-    let Some(param_port_list) = inst_node.param_overrides() else {
-        return Vec::new();
-    };
-
     let mut overrides = Vec::new();
 
-    for child in param_port_list.syntax().children() {
-        if child.kind() != SyntaxKind::InstancePort {
-            continue;
-        }
-        let Some(ip) = lyra_ast::InstancePort::cast(child) else {
-            continue;
-        };
-
+    for ip in inst_node.param_override_ports() {
         let name = ip.port_name().map(|t| SmolStr::new(t.text()));
         let span = ip.syntax().text_range();
 

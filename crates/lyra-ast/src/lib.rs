@@ -4,6 +4,7 @@ mod generate_item;
 mod node;
 mod nodes;
 mod nodes_decl;
+mod nodes_stmt;
 mod support;
 mod type_decl_site;
 mod type_spec;

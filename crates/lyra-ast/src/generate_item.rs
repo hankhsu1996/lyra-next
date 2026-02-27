@@ -163,6 +163,14 @@ impl GenerateBody {
             Self::Item(i) => i.syntax(),
         }
     }
+
+    /// The block label identifier if the body is a `BlockStmt` with `begin : name`.
+    pub fn block_name(&self) -> Option<lyra_parser::SyntaxToken> {
+        match self {
+            Self::Scope(GenerateScope::BlockStmt(block)) => block.block_name(),
+            _ => None,
+        }
+    }
 }
 
 /// Find the first node child after a token with the given kind.

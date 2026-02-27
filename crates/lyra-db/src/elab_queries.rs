@@ -744,7 +744,7 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, if_stmt: &lyra_ast::IfStmt, env: &
         iter: None,
     };
 
-    let block_name = extract_block_name(body.syntax());
+    let block_name = body.block_name().map(|t| SmolStr::new(t.text()));
 
     let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
         origin,
@@ -826,7 +826,7 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, for_stmt: &lyra_ast::ForStmt, env
             iter: Some(iter_value.clone()),
         };
 
-        let block_name = extract_block_name(body.syntax());
+        let block_name = body.block_name().map(|t| SmolStr::new(t.text()));
 
         let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
             origin,
@@ -995,7 +995,7 @@ fn process_generate_case(
         iter: None,
     };
 
-    let block_name = extract_block_name(body.syntax());
+    let block_name = body.block_name().map(|t| SmolStr::new(t.text()));
 
     let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
         origin,
@@ -1018,7 +1018,7 @@ fn process_generate_case(
 }
 
 fn process_generate_block(ctx: &mut ElabCtx<'_>, block: &lyra_ast::BlockStmt, env: &ScopeEnv<'_>) {
-    let block_name = extract_block_name(block.syntax());
+    let block_name = extract_block_name(block);
 
     let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
     let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));

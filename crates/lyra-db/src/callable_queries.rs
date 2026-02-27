@@ -212,7 +212,7 @@ fn extract_function_sig(
         .type_spec()
         .map_or_else(implicit_return_ty, |ts| resolve_ty(ts.syntax()));
 
-    let ports = extract_tf_ports(resolve_ty, func.syntax());
+    let ports = extract_tf_ports(resolve_ty, func.tf_port_decls());
     CallableSig::new(name.clone(), CallableKind::Function, return_ty, ports)
 }
 
@@ -221,43 +221,32 @@ fn extract_task_sig(
     node: &lyra_parser::SyntaxNode,
     name: &SmolStr,
 ) -> Arc<CallableSig> {
-    let Some(_task) = TaskDecl::cast(node.clone()) else {
+    let Some(task) = TaskDecl::cast(node.clone()) else {
         return CallableSig::new(name.clone(), CallableKind::Task, Ty::Void, vec![]);
     };
 
-    let ports = extract_tf_ports(resolve_ty, node);
+    let ports = extract_tf_ports(resolve_ty, task.tf_port_decls());
     CallableSig::new(name.clone(), CallableKind::Task, Ty::Void, ports)
 }
 
 fn extract_tf_ports(
     resolve_ty: &dyn Fn(&lyra_parser::SyntaxNode) -> Ty,
-    decl_node: &lyra_parser::SyntaxNode,
+    port_decls: lyra_ast::AstChildren<lyra_ast::TfPortDecl>,
 ) -> Vec<TfPortSig> {
     let mut ports = Vec::new();
     let mut current_dir = PortDirection::Input;
 
-    for child in decl_node.children() {
-        if child.kind() != SyntaxKind::TfPortDecl {
-            continue;
-        }
-
-        let tf_port = lyra_ast::TfPortDecl::cast(child.clone());
-        if let Some(dir_tok) = tf_port.as_ref().and_then(|p| p.direction()) {
+    for tf_port in port_decls {
+        if let Some(dir_tok) = tf_port.direction() {
             current_dir = direction_from_token(&dir_tok);
         }
 
         let base_ty = tf_port
-            .as_ref()
-            .and_then(|p| p.type_spec())
+            .type_spec()
             .map_or_else(Ty::simple_logic, |ts| resolve_ty(ts.syntax()));
 
-        let decl_range = child.text_range();
-        let declarators = tf_port
-            .as_ref()
-            .map(|p| p.declarators())
-            .into_iter()
-            .flatten();
-        for declarator in declarators {
+        let decl_range = tf_port.text_range();
+        for declarator in tf_port.declarators() {
             let Some(name_tok) = declarator.name() else {
                 continue;
             };

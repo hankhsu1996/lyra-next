@@ -38,9 +38,7 @@ ast_nodes! {
         direction: token([InputKw, OutputKw, InoutKw, RefKw]),
     }
 
-    ParamPortList(SyntaxKind::ParamPortList) {
-        params: [ParamDecl],
-    }
+    ParamPortList(SyntaxKind::ParamPortList) { @custom }
 
     ParamDecl(SyntaxKind::ParamDecl) {
         declarators: [Declarator],
@@ -242,6 +240,12 @@ ast_nodes! {
 
 // Custom accessors
 
+impl ParamPortList {
+    pub fn params(&self) -> AstChildren<ParamDecl> {
+        support::children(&self.syntax)
+    }
+}
+
 impl AlwaysBlock {
     pub fn keyword(&self) -> Option<SyntaxToken> {
         support::token_in(
@@ -271,127 +275,6 @@ impl InitialBlock {
     }
 
     /// The body statement.
-    pub fn body(&self) -> Option<crate::node::StmtNode> {
-        support::child(&self.syntax)
-    }
-}
-
-impl BlockStmt {
-    /// Iterate over all statement-kind children.
-    pub fn statements(&self) -> AstChildren<crate::node::StmtNode> {
-        support::children(&self.syntax)
-    }
-}
-
-impl IfStmt {
-    /// The condition expression.
-    pub fn condition(&self) -> Option<crate::expr::Expr> {
-        support::expr_child(&self.syntax, 0)
-    }
-
-    /// The then-branch body (first statement-kind child).
-    pub fn then_body(&self) -> Option<crate::node::StmtNode> {
-        support::children::<crate::node::StmtNode>(&self.syntax).next()
-    }
-
-    /// The else-branch body (second statement-kind child), or `None`.
-    pub fn else_body(&self) -> Option<crate::node::StmtNode> {
-        support::children::<crate::node::StmtNode>(&self.syntax).nth(1)
-    }
-
-    /// Whether this if-statement has an `else` clause.
-    pub fn has_else(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::ElseKw).is_some()
-    }
-}
-
-impl CaseStmt {
-    /// The selector expression (first expression-kind node between parens).
-    pub fn selector(&self) -> Option<crate::expr::Expr> {
-        let mut in_parens = false;
-        for el in self.syntax.children_with_tokens() {
-            match el {
-                rowan::NodeOrToken::Token(tok) => {
-                    if tok.kind() == SyntaxKind::LParen {
-                        in_parens = true;
-                    } else if tok.kind() == SyntaxKind::RParen {
-                        break;
-                    }
-                }
-                rowan::NodeOrToken::Node(node) => {
-                    if in_parens {
-                        return crate::expr::Expr::cast(node);
-                    }
-                }
-            }
-        }
-        None
-    }
-}
-
-impl CaseItem {
-    /// The body statement of this case item.
-    pub fn body(&self) -> Option<crate::node::StmtNode> {
-        support::child(&self.syntax)
-    }
-
-    /// Whether this is a `default` case item.
-    pub fn is_default(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::DefaultKw).is_some()
-    }
-
-    /// Label expressions before the `Colon` token.
-    pub fn labels(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
-        let mut it = self.syntax.children_with_tokens();
-        std::iter::from_fn(move || {
-            loop {
-                match it.next()? {
-                    rowan::NodeOrToken::Token(tok) => {
-                        if tok.kind() == SyntaxKind::Colon {
-                            return None;
-                        }
-                    }
-                    rowan::NodeOrToken::Node(node) => {
-                        if let Some(expr) = crate::expr::Expr::cast(node) {
-                            return Some(expr);
-                        }
-                    }
-                }
-            }
-        })
-    }
-}
-
-impl ForStmt {
-    /// The loop body (last statement-kind child).
-    pub fn body(&self) -> Option<crate::node::StmtNode> {
-        support::children::<crate::node::StmtNode>(&self.syntax).last()
-    }
-}
-
-impl WhileStmt {
-    /// The loop body.
-    pub fn body(&self) -> Option<crate::node::StmtNode> {
-        support::child(&self.syntax)
-    }
-}
-
-impl RepeatStmt {
-    /// The loop body.
-    pub fn body(&self) -> Option<crate::node::StmtNode> {
-        support::child(&self.syntax)
-    }
-}
-
-impl ForeverStmt {
-    /// The loop body.
-    pub fn body(&self) -> Option<crate::node::StmtNode> {
-        support::child(&self.syntax)
-    }
-}
-
-impl TimingControl {
-    /// The body statement following the timing control.
     pub fn body(&self) -> Option<crate::node::StmtNode> {
         support::child(&self.syntax)
     }
@@ -812,47 +695,6 @@ impl Literal {
     }
 }
 
-impl AssignStmt {
-    pub fn op_token(&self) -> Option<SyntaxToken> {
-        self.syntax
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .find(|tok| SyntaxAssignOp::from_token(tok.kind()).is_some())
-    }
-
-    pub fn assign_op(&self) -> Option<SyntaxAssignOp> {
-        SyntaxAssignOp::from_token(self.op_token()?.kind())
-    }
-
-    pub fn lhs(&self) -> Option<crate::expr::Expr> {
-        support::expr_child(&self.syntax, 0)
-    }
-
-    pub fn rhs(&self) -> Option<crate::expr::Expr> {
-        support::expr_child(&self.syntax, 1)
-    }
-
-    /// Optional timing control (intra-assignment delay).
-    pub fn timing_control(&self) -> Option<TimingControl> {
-        support::child(&self.syntax)
-    }
-}
-
-impl ContinuousAssign {
-    pub fn lhs(&self) -> Option<crate::expr::Expr> {
-        support::expr_child(&self.syntax, 0)
-    }
-
-    pub fn rhs(&self) -> Option<crate::expr::Expr> {
-        support::expr_child(&self.syntax, 1)
-    }
-
-    /// Optional timing control (delay) on the assign.
-    pub fn timing_control(&self) -> Option<TimingControl> {
-        support::child(&self.syntax)
-    }
-}
-
 impl Declarator {
     pub fn name(&self) -> Option<SyntaxToken> {
         support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
@@ -1105,6 +947,18 @@ impl ModuleInstantiation {
     /// The parameter override list `#(...)` if present.
     pub fn param_overrides(&self) -> Option<ParamPortList> {
         support::child(&self.syntax)
+    }
+
+    /// Iterate `InstancePort` children in the parameter override list.
+    ///
+    /// In override context (`#(.W(8), .D(16))`), the `ParamPortList` node
+    /// contains `InstancePort` children rather than `ParamDecl`. This
+    /// accessor exposes that grammar-specific iteration from the parent
+    /// that knows which production is in use.
+    pub fn param_override_ports(&self) -> impl Iterator<Item = InstancePort> {
+        self.param_overrides()
+            .into_iter()
+            .flat_map(|ppl| support::children::<InstancePort>(&ppl.syntax))
     }
 }
 
