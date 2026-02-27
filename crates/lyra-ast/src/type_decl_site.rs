@@ -1,7 +1,7 @@
 use lyra_parser::SyntaxNode;
 
 use crate::node::AstNode;
-use crate::nodes::{NetDecl, ParamDecl, Port, TypeSpec, TypedefDecl, VarDecl};
+use crate::nodes::{Declarator, NetDecl, ParamDecl, Port, TypeSpec, TypedefDecl, VarDecl};
 
 /// A declaration node that carries a `TypeSpec`.
 ///
@@ -63,5 +63,21 @@ impl TypeDeclSite {
     /// Walk ancestors of `node` and return the first `TypeDeclSite`.
     pub fn closest_ancestor(node: &SyntaxNode) -> Option<Self> {
         node.ancestors().find_map(|n| Self::cast(&n))
+    }
+
+    /// Resolve a declaration node into its typed container and optional `Declarator`.
+    ///
+    /// If `node` is already a `TypeDeclSite` variant (Port, `TypedefDecl`, etc.),
+    /// returns `(site, None)`. If `node` is a `Declarator`, finds the parent
+    /// container and returns `(parent, Some(declarator))`.
+    pub fn resolve(node: &SyntaxNode) -> Option<(Self, Option<Declarator>)> {
+        if let Some(site) = Self::cast(node) {
+            Some((site, None))
+        } else if let Some(decl) = Declarator::cast(node.clone()) {
+            let parent = Self::closest_ancestor(node)?;
+            Some((parent, Some(decl)))
+        } else {
+            None
+        }
     }
 }

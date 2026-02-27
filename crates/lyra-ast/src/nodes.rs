@@ -35,7 +35,7 @@ ast_nodes! {
     Port(SyntaxKind::Port) {
         name: token([Ident, EscapedIdent]),
         type_spec: TypeSpec,
-        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]) as direction_token,
     }
 
     ParamPortList(SyntaxKind::ParamPortList) { @custom }
@@ -191,12 +191,12 @@ ast_nodes! {
     ModportItem(SyntaxKind::ModportItem) { @custom }
 
     ModportPort(SyntaxKind::ModportPort) {
-        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]) as direction_token,
         name: token([Ident, EscapedIdent]),
     }
 
     ModportExprPort(SyntaxKind::ModportExprPort) {
-        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]) as direction_token,
         port_name: token([Ident, EscapedIdent]),
     }
 
@@ -229,7 +229,7 @@ ast_nodes! {
     TfPortDecl(SyntaxKind::TfPortDecl) {
         type_spec: TypeSpec,
         declarators: [Declarator],
-        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]) as direction_token,
     }
 
     // Streaming `with` clause (LRM 11.4.14.4)

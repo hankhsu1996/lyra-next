@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use lyra_ast::{AstNode, ErasedAstId};
-use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxNode, SyntaxToken};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::symbols::GlobalDefId;
@@ -18,7 +17,7 @@ use crate::elaboration::{
     GenScopeOrigin, GenvarEnvId, GenvarEnvInterner, InstId, InstOrigin, InstanceNode, ParamEnvId,
     ParamEnvInterner,
 };
-use crate::module_sig::{DesignUnitSig, ParamKind, PortDirection, PortSig};
+use crate::module_sig::{DesignUnitSig, ParamKind, PortSig};
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::semantic::{def_index_file, global_def_index};
 use crate::type_queries::{SymbolRef, type_of_symbol};
@@ -138,13 +137,7 @@ fn extract_port_sigs(
             .map(|t| SmolStr::new(t.text()))
             .unwrap_or_default();
 
-        let direction = port.direction().and_then(|tok| match tok.kind() {
-            SyntaxKind::InputKw => Some(PortDirection::Input),
-            SyntaxKind::OutputKw => Some(PortDirection::Output),
-            SyntaxKind::InoutKw => Some(PortDirection::Inout),
-            SyntaxKind::RefKw => Some(PortDirection::Ref),
-            _ => None,
-        });
+        let direction = port.direction();
 
         let port_ast_id = id_map.erased_ast_id(port.syntax());
         let ty = port_ast_id

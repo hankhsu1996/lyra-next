@@ -115,6 +115,28 @@ pub enum ExprKind {
 }
 
 impl ExprKind {
+    /// Whether this expression kind is a valid anchor for `type_at` queries.
+    ///
+    /// Includes kinds that carry a meaningful inferred type at their
+    /// position: arithmetic, concatenation, indexing, calls, literals,
+    /// and name references. Excludes range, stream, cast, field-access,
+    /// and system-task expressions.
+    pub fn is_type_at_anchor(self) -> bool {
+        matches!(
+            self,
+            ExprKind::BinExpr(_)
+                | ExprKind::PrefixExpr(_)
+                | ExprKind::CondExpr(_)
+                | ExprKind::ConcatExpr(_)
+                | ExprKind::ReplicExpr(_)
+                | ExprKind::IndexExpr(_)
+                | ExprKind::CallExpr(_)
+                | ExprKind::Literal(_)
+                | ExprKind::NameRef(_)
+                | ExprKind::QualifiedName(_)
+        )
+    }
+
     pub fn syntax(&self) -> &SyntaxNode {
         match self {
             Self::Literal(n) => n.syntax(),

@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
 use lyra_ast::{AstNode, FunctionDecl, TaskDecl};
-use lyra_lexer::SyntaxKind;
 use lyra_semantic::UserTypeRef;
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::types::{InterfaceType, SymbolType, Ty};
 use smol_str::SmolStr;
 
-use crate::module_sig::{CallableKind, CallableSig, PortDirection, TfPortSig};
+use crate::module_sig::{CallableKind, CallableSig, TfPortSig};
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::semantic::{base_resolve_index, def_index_file, resolve_index_file};
 use crate::type_queries::{SymbolRef, type_of_symbol, type_of_symbol_raw};
@@ -234,11 +233,11 @@ fn extract_tf_ports(
     port_decls: lyra_ast::AstChildren<lyra_ast::TfPortDecl>,
 ) -> Vec<TfPortSig> {
     let mut ports = Vec::new();
-    let mut current_dir = PortDirection::Input;
+    let mut current_dir = lyra_ast::PortDirection::Input;
 
     for tf_port in port_decls {
-        if let Some(dir_tok) = tf_port.direction() {
-            current_dir = direction_from_token(&dir_tok);
+        if let Some(dir) = tf_port.direction() {
+            current_dir = dir;
         }
 
         let base_ty = tf_port
@@ -265,13 +264,4 @@ fn extract_tf_ports(
     }
 
     ports
-}
-
-fn direction_from_token(tok: &lyra_parser::SyntaxToken) -> PortDirection {
-    match tok.kind() {
-        SyntaxKind::OutputKw => PortDirection::Output,
-        SyntaxKind::InoutKw => PortDirection::Inout,
-        SyntaxKind::RefKw => PortDirection::Ref,
-        _ => PortDirection::Input,
-    }
 }

@@ -1,18 +1,10 @@
 use std::sync::Arc;
 
+use lyra_ast::PortDirection;
 use lyra_semantic::types::Ty;
 use lyra_source::TextRange;
 use smol_str::SmolStr;
 use std::collections::HashMap;
-
-/// Port direction in a module signature.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PortDirection {
-    Input,
-    Output,
-    Inout,
-    Ref,
-}
 
 /// A port in a module signature, extracted from the module header.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,5 +1,6 @@
 use lyra_ast::{
-    AstIdMap, AstNode, NetDecl, SourceFile, TypeDeclSite, TypeNameRef, TypeSpec, VarDecl,
+    AstIdMap, AstNode, Declarator, NetDecl, SourceFile, TypeDeclSite, TypeNameRef, TypeSpec,
+    VarDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -25,11 +26,10 @@ fn find_in_module(root: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
     body_node.children().find(|c| c.kind() == kind)
 }
 
-fn first_declarator(container: &SyntaxNode) -> Option<SyntaxNode> {
+fn first_declarator(container: &SyntaxNode) -> Option<Declarator> {
     VarDecl::cast(container.clone())
         .and_then(|v| v.declarators().next())
         .or_else(|| NetDecl::cast(container.clone()).and_then(|n| n.declarators().next()))
-        .map(|d| d.syntax().clone())
 }
 
 fn cast_site(node: &SyntaxNode) -> TypeDeclSite {

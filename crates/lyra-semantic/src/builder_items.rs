@@ -263,7 +263,7 @@ fn collect_modport_entries(
     for port_kind in item.port_items() {
         match port_kind {
             ModportPortKind::Bare(port) => {
-                if let Some(dir_tok) = port.direction() {
+                if let Some(dir_tok) = port.direction_token() {
                     current_dir = parse_direction(dir_tok.kind(), current_dir);
                 }
                 if let Some(dir) = current_dir
@@ -281,7 +281,7 @@ fn collect_modport_entries(
                 }
             }
             ModportPortKind::Expr(port) => {
-                if let Some(dir_tok) = port.direction() {
+                if let Some(dir_tok) = port.direction_token() {
                     current_dir = parse_direction(dir_tok.kind(), current_dir);
                 }
                 if let Some(dir) = current_dir

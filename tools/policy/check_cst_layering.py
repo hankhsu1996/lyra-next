@@ -4,10 +4,12 @@
 Rules:
   C001: No CST traversal calls (.children(), .descendants(), etc.)
   C002: No manual Expression/ParenExpr wrapper matching
+  C003: No SyntaxKind discrimination (use typed AST accessors)
 
 SyntaxNode/SyntaxToken imports are not checked -- many modules legitimately
 use these types in function signatures. The real enforcement is C001 (actual
-CST traversal calls) and C002 (manual wrapper peeling).
+CST traversal calls), C002 (manual wrapper peeling), and C003 (SyntaxKind
+token/kind matching).
 
 Consumer layers (lyra-semantic, lyra-db) should use typed AST accessors from
 lyra-ast, not raw CST traversal. Use `Expr::peel()` instead of matching on
@@ -27,13 +29,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Checked crates and their allowlisted modules. Each entry maps a source
-# prefix to a frozenset of module-relative paths (forward-slash, relative to
-# the crate's src/ directory) that are exempt from C001/C002.
+# Per-rule allowlists for each checked crate. Modules listed here are exempt
+# from the specified rule only.
 #
 # Permanent entries need no annotation. Transitional entries must have a
 # TODO(<tag>) comment so they can be grepped and cleaned up.
-CHECKED_CRATES: dict[str, frozenset[str]] = {
+
+C001_ALLOWED: dict[str, frozenset[str]] = {
     "crates/lyra-semantic/src/": frozenset({
         "builder.rs",
         "builder_items.rs",
@@ -43,6 +45,42 @@ CHECKED_CRATES: dict[str, frozenset[str]] = {
     }),
     "crates/lyra-db/src/": frozenset(),
 }
+
+C002_ALLOWED: dict[str, frozenset[str]] = {
+    "crates/lyra-semantic/src/": frozenset({
+        "builder.rs",
+        "builder_items.rs",
+        "builder_stmt.rs",
+        "builder_types.rs",
+        "builder_order.rs",
+    }),
+    "crates/lyra-db/src/": frozenset(),
+}
+
+C003_ALLOWED: dict[str, frozenset[str]] = {
+    "crates/lyra-semantic/src/": frozenset({
+        # Permanent: builder code walks CST by design
+        "builder.rs",
+        "builder_items.rs",
+        "builder_stmt.rs",
+        "builder_types.rs",
+        # TODO(typed-expr): migrate to typed accessors
+        "const_eval.rs",
+        "literal.rs",
+        "lhs.rs",
+        "system_functions.rs",
+        "type_check.rs",
+        "type_extract.rs",
+        "type_infer/mod.rs",
+        "type_infer/call.rs",
+        "type_infer/aggregate.rs",
+        "type_infer/scalar.rs",
+    }),
+    "crates/lyra-db/src/": frozenset(),
+}
+
+# Combined set of all checked crate prefixes.
+CHECKED_CRATES = set(C001_ALLOWED) | set(C002_ALLOWED) | set(C003_ALLOWED)
 
 # Derive a human-readable crate label from the prefix for error messages.
 _CRATE_LABELS: dict[str, str] = {
@@ -62,6 +100,10 @@ RE_CST_TRAVERSAL = re.compile(
 RE_WRAPPER_MATCH = re.compile(
     r'SyntaxKind::(?:Expression|ParenExpr)\b'
 )
+
+# C003: SyntaxKind discrimination
+RE_SYNTAX_KIND_USE = re.compile(r'SyntaxKind::')
+RE_SYNTAX_KIND_IMPORT = re.compile(r'\buse\s+[\w:]+::SyntaxKind\b')
 
 
 def get_repo_root() -> Path:
@@ -89,7 +131,7 @@ def get_all_files(repo_root: Path) -> list[str]:
 
 
 # Prefixes sorted longest-first so the most specific match wins.
-_SORTED_PREFIXES = sorted(CHECKED_CRATES.keys(), key=len, reverse=True)
+_SORTED_PREFIXES = sorted(CHECKED_CRATES, key=len, reverse=True)
 
 
 def _matching_crate(filepath: str) -> str | None:
@@ -124,11 +166,11 @@ def _module_name(filepath: str) -> str:
     return filepath
 
 
-def is_allowed(filepath: str) -> bool:
+def _is_allowed(filepath: str, allowlist: dict[str, frozenset[str]]) -> bool:
     prefix = _matching_crate(filepath)
     if prefix is None:
         return False
-    return _module_name(filepath) in CHECKED_CRATES[prefix]
+    return _module_name(filepath) in allowlist.get(prefix, frozenset())
 
 
 # Test detection for files that embed #[cfg(test)] blocks.
@@ -188,8 +230,45 @@ def compute_test_lines(lines: list[str]) -> set[int]:
     return test_lines
 
 
+def strip_comments(lines: list[str]) -> list[str]:
+    """Strip Rust comments from lines, preserving line count.
+
+    Handles // line comments and /* */ block comments (including
+    multi-line). Returns a list of the same length with comment
+    content replaced by spaces.
+    """
+    result = []
+    in_block = False
+    for line in lines:
+        out = []
+        i = 0
+        n = len(line)
+        while i < n:
+            if in_block:
+                end = line.find("*/", i)
+                if end == -1:
+                    out.append(" " * (n - i))
+                    i = n
+                else:
+                    out.append(" " * (end - i + 2))
+                    i = end + 2
+                    in_block = False
+            elif i + 1 < n and line[i] == '/' and line[i + 1] == '/':
+                out.append(" " * (n - i))
+                i = n
+            elif i + 1 < n and line[i] == '/' and line[i + 1] == '*':
+                in_block = True
+                out.append("  ")
+                i += 2
+            else:
+                out.append(line[i])
+                i += 1
+        result.append("".join(out))
+    return result
+
+
 def check_violations(filepath: str, repo_root: Path) -> list[str]:
-    """Check a file for C001/C002 violations.
+    """Check a file for C001/C002/C003 violations.
 
     Returns list of violation messages.
     """
@@ -198,6 +277,10 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
     prefix = _matching_crate(filepath)
     crate_label = _CRATE_LABELS.get(prefix, "unknown") if prefix else "unknown"
 
+    c001_ok = _is_allowed(filepath, C001_ALLOWED)
+    c002_ok = _is_allowed(filepath, C002_ALLOWED)
+    c003_ok = _is_allowed(filepath, C003_ALLOWED)
+
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
@@ -205,28 +288,31 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
 
     lines = content.splitlines()
     test_lines = compute_test_lines(lines)
+    stripped_lines = strip_comments(lines)
 
-    for lineno_0, line in enumerate(lines):
+    for lineno_0, stripped in enumerate(stripped_lines):
         lineno = lineno_0 + 1
-        stripped = line.lstrip()
-
-        # Skip comments.
-        if stripped.startswith("//"):
-            continue
 
         # Skip test code.
         if lineno_0 in test_lines:
             continue
 
-        if RE_CST_TRAVERSAL.search(line):
+        if not c001_ok and RE_CST_TRAVERSAL.search(stripped):
             errors.append(
                 f"{filepath}:{lineno}: C001 CST traversal call ({crate_label})"
             )
 
-        if RE_WRAPPER_MATCH.search(line):
+        if not c002_ok and RE_WRAPPER_MATCH.search(stripped):
             errors.append(
                 f"{filepath}:{lineno}: C002 manual wrapper match ({crate_label})"
             )
+
+        if not c003_ok:
+            if RE_SYNTAX_KIND_USE.search(stripped) or RE_SYNTAX_KIND_IMPORT.search(stripped):
+                errors.append(
+                    f"{filepath}:{lineno}: C003 SyntaxKind discrimination"
+                    f" ({crate_label})"
+                )
 
     return errors
 
@@ -386,6 +472,58 @@ def self_test() -> int:
             print("FAIL: C002 fired inside #[cfg(test)] block")
             failures += 1
 
+    # Test 11 (C003): SyntaxKind::Literal should fire C003 (not just C002)
+    for line in c003_ok:
+        if RE_SYNTAX_KIND_USE.search(line):
+            break
+    else:
+        print("FAIL: C003 did not catch SyntaxKind::Literal")
+        failures += 1
+
+    # Test 12 (C003): `use lyra_lexer::SyntaxKind;` should fire C003
+    if not RE_SYNTAX_KIND_IMPORT.search('use lyra_lexer::SyntaxKind;'):
+        print("FAIL: C003 did not catch SyntaxKind import")
+        failures += 1
+
+    # Test 13 (comment stripping): inline comment stripped
+    stripped_13 = strip_comments(['let x = foo; // SyntaxKind::Bar'])
+    if RE_SYNTAX_KIND_USE.search(stripped_13[0]):
+        print("FAIL: SyntaxKind in inline comment was not stripped")
+        failures += 1
+
+    # Test 14 (comment stripping): block comment stripped
+    stripped_14 = strip_comments(['let x = /* SyntaxKind::Foo */ bar;'])
+    if RE_SYNTAX_KIND_USE.search(stripped_14[0]):
+        print("FAIL: SyntaxKind in block comment was not stripped")
+        failures += 1
+
+    # Test 15 (comment stripping): multi-line block comment
+    stripped_15 = strip_comments([
+        'let x = /* start',
+        'SyntaxKind::Foo',
+        '*/ bar;',
+    ])
+    if RE_SYNTAX_KIND_USE.search(stripped_15[1]):
+        print("FAIL: SyntaxKind in multi-line block comment was not stripped")
+        failures += 1
+    if 'bar' not in stripped_15[2]:
+        print("FAIL: code after block comment end was stripped")
+        failures += 1
+
+    # Test 16 (comment stripping): code before comment preserved
+    stripped_16 = strip_comments(['SyntaxKind::Foo; // comment'])
+    if not RE_SYNTAX_KIND_USE.search(stripped_16[0]):
+        print("FAIL: code before inline comment was incorrectly stripped")
+        failures += 1
+
+    # Test 17 (tightened import regex): broad pattern should not match
+    if RE_SYNTAX_KIND_IMPORT.search('// use lyra_lexer::SyntaxKind;'):
+        # OK in raw regex -- but strip_comments handles this.
+        pass
+    if RE_SYNTAX_KIND_IMPORT.search('use foo::SyntaxKindExt;'):
+        print("FAIL: C003 import regex matched SyntaxKindExt")
+        failures += 1
+
     if failures:
         print(f"\n{failures} self-test(s) FAILED")
         return 1
@@ -430,9 +568,7 @@ def main() -> int:
     for filepath in sorted(set(files)):
         if not (repo_root / filepath).exists():
             continue
-        if not is_allowed(filepath):
-            errors = check_violations(filepath, repo_root)
-            all_errors.extend(errors)
+        all_errors.extend(check_violations(filepath, repo_root))
 
     if all_errors:
         print("CST layering violations:\n")
@@ -443,13 +579,13 @@ def main() -> int:
         print("  C001: No .children()/.descendants()/etc. CST traversal")
         print("  C002: No SyntaxKind::Expression/ParenExpr matching "
               "(use Expr::peel())")
-        print("Allowlisted modules: see CHECKED_CRATES in this script")
+        print("  C003: No SyntaxKind discrimination "
+              "(use typed AST accessors)")
+        print("Allowlisted modules: see C001/C002/C003_ALLOWED in this script")
         return 1
 
-    checked = len([f for f in files if not is_allowed(f)])
-    allowlisted = len(files) - checked
-    print(f"Checked {checked} files ({len(files)} total, "
-          f"{allowlisted} allowlisted), no violations")
+    checked = len(files)
+    print(f"Checked {checked} files, no violations")
     return 0
 
 

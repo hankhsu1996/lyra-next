@@ -14,13 +14,13 @@ use crate::types::{
 
 /// Extract a `SymbolType` from a typed declaration container.
 ///
-/// `declarator` is the `Declarator` child node (for unpacked dims). Pass `None`
+/// `declarator` is the typed `Declarator` (for unpacked dims). Pass `None`
 /// for `Port` and `TypedefDecl` nodes where the declarator is not separate.
 ///
 /// This function never calls `parent()` or `ancestors()` on any node.
 pub fn extract_type_from_container(
     container: &TypeDeclSite,
-    declarator: Option<&SyntaxNode>,
+    declarator: Option<&Declarator>,
     ast_id_map: &AstIdMap,
 ) -> SymbolType {
     match container {
@@ -145,7 +145,7 @@ fn normalize_const_int(c: &ConstInt, eval: &dyn Fn(crate::Site) -> ConstInt) -> 
 
 fn extract_var_decl(
     var: &VarDecl,
-    declarator: Option<&SyntaxNode>,
+    declarator: Option<&Declarator>,
     ast_id_map: &AstIdMap,
 ) -> SymbolType {
     let Some(typespec) = var.type_spec() else {
@@ -157,8 +157,7 @@ fn extract_var_decl(
     let (base_ty, signed_override) = extract_typespec_base(&typespec);
     let packed = extract_packed_dims(&typespec, ast_id_map);
     let unpacked = declarator
-        .and_then(|d| Declarator::cast(d.clone()))
-        .map(|d| extract_unpacked_dims_from_declarator(&d, ast_id_map))
+        .map(|d| extract_unpacked_dims_from_declarator(d, ast_id_map))
         .unwrap_or_default();
     let ty = build_base_ty(base_ty, signed_override, packed);
     SymbolType::Value(wrap_unpacked(ty, &unpacked))
@@ -166,7 +165,7 @@ fn extract_var_decl(
 
 fn extract_net_decl(
     net: &NetDecl,
-    declarator: Option<&SyntaxNode>,
+    declarator: Option<&Declarator>,
     ast_id_map: &AstIdMap,
 ) -> SymbolType {
     let net_kind = net
@@ -191,8 +190,7 @@ fn extract_net_decl(
     let (_base, signed_override) = extract_typespec_base(&typespec);
     let packed = extract_packed_dims(&typespec, ast_id_map);
     let unpacked = declarator
-        .and_then(|d| Declarator::cast(d.clone()))
-        .map(|d| extract_unpacked_dims_from_declarator(&d, ast_id_map))
+        .map(|d| extract_unpacked_dims_from_declarator(d, ast_id_map))
         .unwrap_or_default();
     let signed = signed_override.unwrap_or(IntegralKw::Logic.default_signed());
     let ty = Ty::Integral(Integral {

@@ -344,8 +344,10 @@ pub fn type_at(
     // Priority 2: Smallest enclosing "real" expression
     let token = parse.syntax().token_at_offset(offset).right_biased()?;
     for ancestor in token.parent_ancestors() {
-        if is_real_expression_kind(ancestor.kind()) {
-            let expr_ast_id = ast_map.erased_ast_id(&ancestor)?;
+        if let Some(expr) = lyra_ast::Expr::cast(ancestor)
+            && expr.classify().is_some_and(|k| k.is_type_at_anchor())
+        {
+            let expr_ast_id = ast_map.erased_ast_id(expr.syntax())?;
             let expr_ref = ExprRef::new(db, unit, expr_ast_id);
             let et = crate::expr_queries::type_of_expr(db, expr_ref);
             return Some(TypeAtResult::Expr(et));
@@ -353,22 +355,4 @@ pub fn type_at(
     }
 
     None
-}
-
-/// Expression kinds that are "real" (not transparent wrappers).
-fn is_real_expression_kind(kind: lyra_lexer::SyntaxKind) -> bool {
-    use lyra_lexer::SyntaxKind;
-    matches!(
-        kind,
-        SyntaxKind::BinExpr
-            | SyntaxKind::PrefixExpr
-            | SyntaxKind::CondExpr
-            | SyntaxKind::ConcatExpr
-            | SyntaxKind::ReplicExpr
-            | SyntaxKind::IndexExpr
-            | SyntaxKind::CallExpr
-            | SyntaxKind::Literal
-            | SyntaxKind::NameRef
-            | SyntaxKind::QualifiedName
-    )
 }
