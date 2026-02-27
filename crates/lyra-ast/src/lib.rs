@@ -10,7 +10,7 @@ mod type_spec;
 
 pub use ast_id::{AstId, AstIdMap, ErasedAstId};
 pub use expr::{Expr, LiteralKind, TfArg, TypeRef};
-pub use generate_item::GenerateItem;
+pub use generate_item::{GenerateBody, GenerateItem, GenerateScope};
 pub use node::{AstNode, StmtNode, is_expression_kind, is_statement_kind};
 pub use nodes::{
     AlwaysBlock, ArgList, AssignStmt, BinExpr, BlockStmt, CallExpr, CaseItem, CaseStmt, CastExpr,

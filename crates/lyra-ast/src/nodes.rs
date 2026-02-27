@@ -305,6 +305,30 @@ impl IfStmt {
     }
 }
 
+impl CaseStmt {
+    /// The selector expression (first expression-kind node between parens).
+    pub fn selector(&self) -> Option<crate::expr::Expr> {
+        let mut in_parens = false;
+        for el in self.syntax.children_with_tokens() {
+            match el {
+                rowan::NodeOrToken::Token(tok) => {
+                    if tok.kind() == SyntaxKind::LParen {
+                        in_parens = true;
+                    } else if tok.kind() == SyntaxKind::RParen {
+                        break;
+                    }
+                }
+                rowan::NodeOrToken::Node(node) => {
+                    if in_parens {
+                        return crate::expr::Expr::cast(node);
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
 impl CaseItem {
     /// The body statement of this case item.
     pub fn body(&self) -> Option<crate::node::StmtNode> {
@@ -314,6 +338,27 @@ impl CaseItem {
     /// Whether this is a `default` case item.
     pub fn is_default(&self) -> bool {
         support::token(&self.syntax, SyntaxKind::DefaultKw).is_some()
+    }
+
+    /// Label expressions before the `Colon` token.
+    pub fn labels(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
+        let mut it = self.syntax.children_with_tokens();
+        std::iter::from_fn(move || {
+            loop {
+                match it.next()? {
+                    rowan::NodeOrToken::Token(tok) => {
+                        if tok.kind() == SyntaxKind::Colon {
+                            return None;
+                        }
+                    }
+                    rowan::NodeOrToken::Node(node) => {
+                        if let Some(expr) = crate::expr::Expr::cast(node) {
+                            return Some(expr);
+                        }
+                    }
+                }
+            }
+        })
     }
 }
 
