@@ -1,4 +1,4 @@
-use lyra_ast::{AstNode, TypeNameRef, TypeSpec, UnpackedDimKind};
+use lyra_ast::{AstNode, HasSyntax, TypeNameRef, TypeSpec, UnpackedDimKind};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 

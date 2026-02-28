@@ -1,6 +1,6 @@
 use lyra_parser::SyntaxNode;
 
-use crate::node::AstNode;
+use crate::node::{AstNode, HasSyntax};
 use crate::nodes::{Declarator, NetDecl, ParamDecl, Port, TypeSpec, TypedefDecl, VarDecl};
 
 /// A declaration node that carries a `TypeSpec`.

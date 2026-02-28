@@ -5,6 +5,7 @@
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxToken;
 
+use crate::node::StmtNode;
 use crate::nodes::{
     ExportItem, FunctionDecl, ImportDecl, ImportItem, NetDecl, PackageBody, PackageDecl, ParamDecl,
     QualifiedName, TaskDecl, TfPortDecl, VarDecl,
@@ -150,6 +151,10 @@ impl FunctionDecl {
     pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
         support::children(&self.syntax)
     }
+
+    pub fn statements(&self) -> AstChildren<StmtNode> {
+        support::children(&self.syntax)
+    }
 }
 
 impl TaskDecl {
@@ -158,6 +163,10 @@ impl TaskDecl {
     }
 
     pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn statements(&self) -> AstChildren<StmtNode> {
         support::children(&self.syntax)
     }
 }

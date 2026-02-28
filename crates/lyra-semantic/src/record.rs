@@ -1,7 +1,6 @@
-use lyra_ast::{AstIdMap, AstNode, TypeNameRef, TypeSpec};
+use lyra_ast::{AstIdMap, TypeNameRef, TypeSpec};
 
 use crate::Site;
-use lyra_parser::SyntaxNode;
 use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
@@ -141,16 +140,9 @@ pub enum SymbolOrigin {
     Error,
 }
 
-// Extract a TypeRef from a TypeSpec syntax node.
-pub(crate) fn extract_typeref_from_typespec(
-    typespec: &SyntaxNode,
-    ast_id_map: &AstIdMap,
-) -> TypeRef {
-    let Some(ts) = TypeSpec::cast(typespec.clone()) else {
-        return TypeRef::Resolved(Ty::Error);
-    };
-
-    match ts.type_name_ref() {
+// Extract a TypeRef from a `TypeSpec`.
+pub(crate) fn extract_typeref_from_typespec(typespec: &TypeSpec, ast_id_map: &AstIdMap) -> TypeRef {
+    match typespec.type_name_ref() {
         Some(TypeNameRef::Simple(name_ref)) => {
             if let Some(ident) = name_ref.ident()
                 && let Some(ast_id) = ast_id_map.ast_id(&name_ref)

@@ -1,3 +1,4 @@
+use lyra_ast::{AstIdMap, AstNode, Expr, HasSyntax};
 use lyra_semantic::coerce::IntegralCtx;
 use lyra_semantic::modport_def::PortDirection;
 use lyra_semantic::type_check::{AccessKind, TypeCheckCtx, TypeCheckItem};
@@ -127,36 +128,56 @@ pub fn type_diagnostics(
         let fallback = entry.site;
         match entry.kind {
             CheckKind::ContinuousAssign => {
-                lyra_semantic::type_check::check_continuous_assign(
-                    &node, &ctx, fallback, &mut items,
-                );
+                if let Some(ca) = lyra_ast::ContinuousAssign::cast(node) {
+                    lyra_semantic::type_check::check_continuous_assign(
+                        &ca, &ctx, fallback, &mut items,
+                    );
+                }
             }
             CheckKind::AssignStmt => {
-                lyra_semantic::type_check::check_assign_stmt(&node, &ctx, fallback, &mut items);
+                if let Some(assign) = lyra_ast::AssignStmt::cast(node) {
+                    lyra_semantic::type_check::check_assign_stmt(
+                        &assign, &ctx, fallback, &mut items,
+                    );
+                }
             }
             CheckKind::VarDecl => {
-                lyra_semantic::type_check::check_var_decl(&node, &ctx, fallback, &mut items);
+                if let Some(vd) = lyra_ast::VarDecl::cast(node) {
+                    lyra_semantic::type_check::check_var_decl(&vd, &ctx, fallback, &mut items);
+                }
             }
             CheckKind::SystemTfCall => {
-                lyra_semantic::type_check::check_system_call(&node, &ctx, fallback, &mut items);
+                if let Some(stf) = lyra_ast::SystemTfCall::cast(node) {
+                    lyra_semantic::type_check::check_system_call(&stf, &ctx, fallback, &mut items);
+                }
             }
             CheckKind::FieldExpr => {
-                lyra_semantic::type_check::check_field_direction(
-                    &node,
-                    &ctx,
-                    facts,
-                    entry.access,
-                    &mut items,
-                );
+                if let Some(field) = lyra_ast::FieldExpr::cast(node) {
+                    lyra_semantic::type_check::check_field_direction(
+                        &field,
+                        &ctx,
+                        facts,
+                        entry.access,
+                        &mut items,
+                    );
+                }
             }
             CheckKind::CastExpr => {
-                lyra_semantic::type_check::check_cast_expr(&node, &ctx, fallback, &mut items);
+                if let Some(cast) = lyra_ast::CastExpr::cast(node) {
+                    lyra_semantic::type_check::check_cast_expr(&cast, &ctx, fallback, &mut items);
+                }
             }
             CheckKind::StreamOperandItem => {
-                lyra_semantic::type_check::check_stream_operand(&node, &ctx, fallback, &mut items);
+                if let Some(soi) = lyra_ast::StreamOperandItem::cast(node) {
+                    lyra_semantic::type_check::check_stream_operand(
+                        &soi, &ctx, fallback, &mut items,
+                    );
+                }
             }
             CheckKind::CallExpr => {
-                lyra_semantic::type_check::check_method_call(&node, &ctx, &mut items);
+                if let Some(call) = lyra_ast::CallExpr::cast(node) {
+                    lyra_semantic::type_check::check_method_call(&call, &ctx, &mut items);
+                }
             }
         }
     }
@@ -900,16 +921,20 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         self.source_file.file_id(self.db)
     }
 
-    fn expr_type(&self, node: &lyra_parser::SyntaxNode) -> ExprType {
-        let Some(ast_id) = self.ast_id_map.erased_ast_id(node) else {
+    fn ast_id_map(&self) -> &AstIdMap {
+        self.ast_id_map
+    }
+
+    fn expr_type(&self, expr: &Expr) -> ExprType {
+        let Some(ast_id) = self.ast_id_map.erased_ast_id(expr.syntax()) else {
             return ExprType::error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
         };
         let expr_ref = ExprRef::new(self.db, self.unit, ast_id);
         crate::expr_queries::type_of_expr(self.db, expr_ref)
     }
 
-    fn expr_type_in_ctx(&self, node: &lyra_parser::SyntaxNode, ctx: &IntegralCtx) -> ExprType {
-        let Some(ast_id) = self.ast_id_map.erased_ast_id(node) else {
+    fn expr_type_in_ctx(&self, expr: &Expr, ctx: &IntegralCtx) -> ExprType {
+        let Some(ast_id) = self.ast_id_map.erased_ast_id(expr.syntax()) else {
             return ExprType::error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
         };
         let expr_ref = ExprRef::new(self.db, self.unit, ast_id);
@@ -917,19 +942,16 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         crate::expr_queries::type_of_expr_in_ctx(self.db, expr_ref, ctx_key)
     }
 
-    fn expr_type_stmt(&self, node: &lyra_parser::SyntaxNode) -> ExprType {
-        let Some(ast_id) = self.ast_id_map.erased_ast_id(node) else {
+    fn expr_type_stmt(&self, expr: &Expr) -> ExprType {
+        let Some(ast_id) = self.ast_id_map.erased_ast_id(expr.syntax()) else {
             return ExprType::error(lyra_semantic::type_infer::ExprTypeErrorKind::Unresolved);
         };
         let expr_ref = ExprRef::new(self.db, self.unit, ast_id);
         crate::expr_queries::type_of_expr_stmt(self.db, expr_ref)
     }
 
-    fn symbol_type_of_declarator(
-        &self,
-        declarator: &lyra_parser::SyntaxNode,
-    ) -> Option<SymbolType> {
-        let ast_id = self.ast_id_map.erased_ast_id(declarator)?;
+    fn symbol_type_of_declarator(&self, declarator: &lyra_ast::Declarator) -> Option<SymbolType> {
+        let ast_id = self.ast_id_map.id_of(declarator)?;
         let def = def_index_file(self.db, self.source_file);
         let sym_id = def.name_site_to_symbol.get(&ast_id).copied()?;
         let gsym = lyra_semantic::symbols::GlobalSymbolId {
@@ -942,23 +964,19 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
 
     fn resolve_type_arg(
         &self,
-        name_node: &lyra_parser::SyntaxNode,
+        utr: &lyra_semantic::UserTypeRef,
     ) -> Option<lyra_semantic::types::Ty> {
         crate::resolve_helpers::resolve_type_arg_impl(
             self.db,
             self.unit,
             self.source_file,
             self.ast_id_map,
-            name_node,
+            utr,
         )
     }
 
-    fn node_id(&self, node: &lyra_parser::SyntaxNode) -> Option<lyra_ast::ErasedAstId> {
-        self.ast_id_map.erased_ast_id(node)
-    }
-
-    fn const_eval_int(&self, node: &lyra_parser::SyntaxNode) -> Option<i64> {
-        let ast_id = self.ast_id_map.erased_ast_id(node)?;
+    fn const_eval_int(&self, expr: &Expr) -> Option<i64> {
+        let ast_id = self.ast_id_map.erased_ast_id(expr.syntax())?;
         let expr_ref = crate::const_eval::ConstExprRef::new(self.db, self.unit, ast_id);
         match crate::const_eval::eval_const_int(self.db, expr_ref) {
             lyra_semantic::types::ConstInt::Known(v) => Some(v),
@@ -995,7 +1013,10 @@ fn expr_is_assignable_ref(
     let Some(node) = map.get_node(&parse.syntax(), expr_id) else {
         return false;
     };
-    lyra_semantic::lhs::is_assignable_ref(&node)
+    let Some(expr) = Expr::cast(node) else {
+        return false;
+    };
+    lyra_semantic::lhs::is_assignable_ref(&expr)
 }
 
 /// Unit-level diagnostics: duplicate definitions in the definitions namespace.

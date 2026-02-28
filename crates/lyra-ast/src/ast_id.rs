@@ -7,7 +7,7 @@ use lyra_parser::SyntaxNode;
 use lyra_source::{FileId, TextRange, TextSize};
 use smallvec::SmallVec;
 
-use crate::node::AstNode;
+use crate::node::{AstNode, HasSyntax};
 
 /// Opaque, typed identity for an AST node within a file.
 ///
@@ -201,6 +201,11 @@ impl AstIdMap {
             raw,
             _ph: PhantomData,
         })
+    }
+
+    /// Get the erased AST ID of any typed wrapper (`AstNode` or `Expr`).
+    pub fn id_of<T: HasSyntax>(&self, node: &T) -> Option<ErasedAstId> {
+        self.erased_ast_id(node.syntax())
     }
 
     /// Resolve an `AstId` back to its node. O(depth) walk from root.

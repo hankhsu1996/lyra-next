@@ -1,7 +1,7 @@
 use lyra_ast::{FieldExpr, IndexExpr};
 
 use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx};
-use super::infer_expr_type;
+use super::infer_expr;
 use crate::member::{MemberKind, MemberLookupError};
 use crate::types::Ty;
 
@@ -32,12 +32,12 @@ pub(super) fn infer_index(idx_expr: &IndexExpr, ctx: &dyn InferCtx) -> ExprType 
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    let base = infer_expr_type(base_node.syntax(), ctx, None);
+    let base = infer_expr(&base_node, ctx, None);
     if matches!(base.view, ExprView::Error(_)) {
         return base;
     }
 
-    let idx = infer_expr_type(index_node.syntax(), ctx, None);
+    let idx = infer_expr(&index_node, ctx, None);
     if matches!(idx.view, ExprView::Error(_)) {
         return idx;
     }
@@ -72,7 +72,7 @@ pub(super) fn infer_field_access(field_expr: &FieldExpr, ctx: &dyn InferCtx) -> 
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    let lhs_type = infer_expr_type(lhs.syntax(), ctx, None);
+    let lhs_type = infer_expr(&lhs, ctx, None);
     if let ExprView::Error(_) = &lhs_type.view {
         return lhs_type;
     }

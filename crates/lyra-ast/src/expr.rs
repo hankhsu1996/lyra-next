@@ -1,7 +1,7 @@
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxNode, SyntaxToken};
 
-use crate::node::{AstNode, is_expression_kind};
+use crate::node::{AstNode, HasSyntax, is_expression_kind};
 use crate::nodes::{
     BinExpr, CallExpr, CastExpr, ConcatExpr, CondExpr, Expression, FieldExpr, IndexExpr, Literal,
     NameRef, ParenExpr, PrefixExpr, QualifiedName, RangeExpr, ReplicExpr, StreamExpr, SystemTfCall,
@@ -17,6 +17,12 @@ pub struct Expr {
     syntax: SyntaxNode,
 }
 
+impl HasSyntax for Expr {
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
 impl Expr {
     pub fn can_cast(kind: SyntaxKind) -> bool {
         is_expression_kind(kind)
@@ -30,21 +36,28 @@ impl Expr {
         }
     }
 
-    pub fn syntax(&self) -> &SyntaxNode {
-        &self.syntax
+    /// Wrap an `AstNode` that is known to be an expression kind.
+    ///
+    /// Returns `None` if the node's kind is not an expression kind.
+    pub fn from_ast<T: AstNode>(node: &T) -> Option<Expr> {
+        let syntax = node.syntax();
+        if Self::can_cast(syntax.kind()) {
+            Some(Expr {
+                syntax: syntax.clone(),
+            })
+        } else {
+            None
+        }
     }
 
     pub fn kind(&self) -> SyntaxKind {
         self.syntax.kind()
     }
 
-    /// Strip `Expression` and `ParenExpr` syntactic wrappers.
+    /// Strip `Expression` and `ParenExpr` syntactic wrappers from a raw node.
     ///
-    /// Casts `node` to `Expr`, then loops: if the current expression is
-    /// an `Expression` or `ParenExpr` wrapper, replaces with its inner
-    /// child. Returns `None` if `node` is not an expression kind.
-    /// If a wrapper has no inner child (malformed), returns the wrapper.
-    pub fn peel(node: &SyntaxNode) -> Option<Expr> {
+    /// Prefer `peeled()` when you already have an `Expr`.
+    pub(crate) fn peel(node: &SyntaxNode) -> Option<Expr> {
         let mut current = Expr::cast(node.clone())?;
         loop {
             let inner = match current.kind() {
@@ -63,12 +76,23 @@ impl Expr {
         }
     }
 
+    /// Strip `Expression` and `ParenExpr` syntactic wrappers.
+    ///
+    /// If the current expression is an `Expression` or `ParenExpr`
+    /// wrapper, recursively unwraps to the inner expression. Returns
+    /// `None` only if the node is not an expression kind (should not
+    /// happen on a valid `Expr`). If a wrapper has no inner child
+    /// (malformed), returns the wrapper itself.
+    pub fn peeled(&self) -> Option<Expr> {
+        Self::peel(&self.syntax)
+    }
+
     /// Peel wrappers and classify into a typed `ExprKind` variant.
     ///
     /// Returns `None` for malformed/error nodes or wrapper-only trees
     /// with no inner content.
     pub fn classify(&self) -> Option<ExprKind> {
-        let peeled = Expr::peel(self.syntax())?;
+        let peeled = self.peeled()?;
         let node = peeled.syntax().clone();
         match peeled.kind() {
             SyntaxKind::Literal => Literal::cast(node).map(ExprKind::Literal),
@@ -164,6 +188,12 @@ pub struct TypeRef {
     inner: TypeSpec,
 }
 
+impl HasSyntax for TypeRef {
+    fn syntax(&self) -> &SyntaxNode {
+        self.inner.syntax()
+    }
+}
+
 impl TypeRef {
     pub fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::TypeSpec
@@ -173,8 +203,9 @@ impl TypeRef {
         TypeSpec::cast(node).map(|ts| TypeRef { inner: ts })
     }
 
-    pub fn syntax(&self) -> &SyntaxNode {
-        self.inner.syntax()
+    /// The inner `TypeSpec`. Always succeeds since `TypeRef` wraps a `TypeSpec`.
+    pub fn type_spec(&self) -> TypeSpec {
+        self.inner.clone()
     }
 
     pub fn into_type_spec(self) -> TypeSpec {
@@ -191,6 +222,16 @@ pub enum TfArg {
     Expr(Expr),
     Type(TypeRef),
     Unknown(SyntaxNode),
+}
+
+impl HasSyntax for TfArg {
+    fn syntax(&self) -> &SyntaxNode {
+        match self {
+            TfArg::Expr(e) => e.syntax(),
+            TfArg::Type(tr) => tr.syntax(),
+            TfArg::Unknown(n) => n,
+        }
+    }
 }
 
 /// Structured classification of a `Literal` node's token content.

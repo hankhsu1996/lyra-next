@@ -1,7 +1,7 @@
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 
-use crate::node::AstNode;
+use crate::node::{AstNode, HasSyntax};
 use crate::nodes::{
     BlockStmt, CaseItem, CaseStmt, ForStmt, GenerateRegion, IfStmt, InterfaceBody, ModuleBody,
     ModuleInstantiation,

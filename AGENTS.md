@@ -73,10 +73,11 @@ Design docs live in `docs/`. Read these before making architectural changes:
 `lyra-ast` is the only crate that walks CST structure (rowan children, token kinds). `lyra-db` and `lyra-semantic` consume typed AST accessors exclusively. Classification is typed (enums, accessors), not `SyntaxKind` matching.
 
 - **No dual-meaning wrappers.** If an AST node appears in multiple grammar contexts, expose grammar-specific iterators or a typed sum, not two same-shaped accessors with different names.
-- **No raw `SyntaxNode` in db/semantic helpers.** Functions accept typed wrappers (`&BinExpr`, `&TypeSpec`), not `&SyntaxNode`. Use `.syntax()` only at legacy API call sites.
+- **No raw `SyntaxNode` in db/semantic helpers.** Functions accept typed wrappers (`&BinExpr`, `&TypeSpec`), not `&SyntaxNode`.
+- **No `.syntax()` in `lyra-semantic` (non-builder).** If a semantic change needs `.syntax()`, add or extend a typed accessor in `lyra-ast` or move the conversion glue into `lyra-db`. `.syntax()` is allowed in `lyra-db` (orchestration) and `lyra-ast` (typed accessor layer).
 - **Structure assumptions live in lyra-ast.** If a consumer assumes a node has a specific child structure, the accessor returns the typed result directly (e.g. `Option<BinExpr>`). Consumer layers never cast typed results into narrower types.
 
-Enforced by `tools/policy/check_cst_layering.py`.
+Enforced by `tools/policy/check_cst_layering.py` (rules C001-C005).
 
 ## Semantic API Discipline
 
@@ -86,6 +87,8 @@ Enforced by `tools/policy/check_cst_layering.py`.
 - **Single choke point for shared classification.** If two call sites need the same "what is this?" logic, it becomes one typed accessor or classifier, usually in `lyra-ast`.
 - **Performance boundary.** No per-call expensive infrastructure (maps, whole-tree scans, allocations) in hot paths. Build once per query/file and pass in (`&AstIdMap`, `&ResolveCtx`).
 - **Behavior locks.** Any refactor that changes classification paths must include a small test that would fail if the accept/reject contract regresses.
+- **No special-case escape hatches.** Do not introduce local helpers (e.g. `expr_site_of`) because a wrapper "doesn't implement X". Fix the infrastructure so the common path works (e.g. add a trait or method in `lyra-ast`).
+- **No silent downgrade.** Do not return `Unsupported`/`Ty::Error` to satisfy a type mismatch (e.g. `TfArg::Type` mapped to `UnsupportedExprKind`). Use `Option`, split the helper by kind, or handle the kind correctly.
 
 ## Crate Dependency Graph
 

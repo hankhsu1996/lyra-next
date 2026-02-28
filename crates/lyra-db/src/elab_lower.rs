@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use lyra_ast::{AstNode, ErasedAstId, Expr, SyntaxBinaryOp};
+use lyra_ast::{AstNode, ErasedAstId, Expr, HasSyntax, SyntaxBinaryOp};
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::{InterfaceType, Ty};
 use lyra_source::{FileId, Span, TextRange};

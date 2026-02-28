@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use lyra_ast::{AstNode, FunctionDecl, TaskDecl};
+use lyra_ast::{AstNode, FunctionDecl, HasSyntax, TaskDecl, TypeSpec};
 use lyra_semantic::UserTypeRef;
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::types::{InterfaceType, SymbolType, Ty};
@@ -29,14 +29,14 @@ fn resolve_typespec_ty_with(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     id_map: &lyra_ast::AstIdMap,
-    ts: &lyra_parser::SyntaxNode,
+    ts: &TypeSpec,
     resolve: &lyra_semantic::resolve_index::ResolveIndex,
     type_of_sym: &dyn Fn(&dyn salsa::Database, CompilationUnit, GlobalSymbolId) -> SymbolType,
 ) -> Ty {
     let Some(utr) = lyra_semantic::user_type_ref(ts) else {
         return lyra_semantic::extract_base_ty_from_typespec(ts, id_map);
     };
-    let Some(name_site_id) = id_map.erased_ast_id(utr.resolve_node()) else {
+    let Some(name_site_id) = id_map.erased_ast_id(crate::resolve_helpers::utr_syntax(&utr)) else {
         return Ty::Error;
     };
     let Some(res) = resolve.resolutions.get(&name_site_id) else {
@@ -100,13 +100,11 @@ pub fn callable_signature<'db>(
 ) -> Arc<CallableSig> {
     let unit = callable_ref.unit(db);
     let gsym = callable_ref.symbol(db);
-    let resolve_ty = |ts: &lyra_parser::SyntaxNode,
-                      source_file: crate::SourceFile,
-                      id_map: &lyra_ast::AstIdMap|
-     -> Ty {
-        let resolve = resolve_index_file(db, source_file, unit);
-        resolve_typespec_ty_with(db, unit, id_map, ts, resolve, &normal_type_of_sym)
-    };
+    let resolve_ty =
+        |ts: &TypeSpec, source_file: crate::SourceFile, id_map: &lyra_ast::AstIdMap| -> Ty {
+            let resolve = resolve_index_file(db, source_file, unit);
+            resolve_typespec_ty_with(db, unit, id_map, ts, resolve, &normal_type_of_sym)
+        };
     extract_callable_sig_impl(db, unit, gsym, &resolve_ty)
 }
 
@@ -120,13 +118,11 @@ pub(crate) fn callable_signature_raw(
     unit: CompilationUnit,
     gsym: GlobalSymbolId,
 ) -> Arc<CallableSig> {
-    let resolve_ty = |ts: &lyra_parser::SyntaxNode,
-                      source_file: crate::SourceFile,
-                      id_map: &lyra_ast::AstIdMap|
-     -> Ty {
-        let resolve = base_resolve_index(db, source_file, unit);
-        resolve_typespec_ty_with(db, unit, id_map, ts, resolve, &raw_type_of_sym)
-    };
+    let resolve_ty =
+        |ts: &TypeSpec, source_file: crate::SourceFile, id_map: &lyra_ast::AstIdMap| -> Ty {
+            let resolve = base_resolve_index(db, source_file, unit);
+            resolve_typespec_ty_with(db, unit, id_map, ts, resolve, &raw_type_of_sym)
+        };
     extract_callable_sig_impl(db, unit, gsym, &resolve_ty)
 }
 
@@ -153,7 +149,7 @@ fn extract_callable_sig_impl(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     gsym: GlobalSymbolId,
-    resolve_ty: &dyn Fn(&lyra_parser::SyntaxNode, crate::SourceFile, &lyra_ast::AstIdMap) -> Ty,
+    resolve_ty: &dyn Fn(&TypeSpec, crate::SourceFile, &lyra_ast::AstIdMap) -> Ty,
 ) -> Arc<CallableSig> {
     let Some(source_file) = source_file_by_id(db, unit, gsym.file) else {
         return CallableSig::new(
@@ -184,8 +180,7 @@ fn extract_callable_sig_impl(
         return CallableSig::new(sym.name.clone(), kind, Ty::Error, vec![]);
     };
 
-    let typespec_resolver =
-        |ts: &lyra_parser::SyntaxNode| -> Ty { resolve_ty(ts, source_file, map) };
+    let typespec_resolver = |ts: &TypeSpec| -> Ty { resolve_ty(ts, source_file, map) };
 
     match kind {
         CallableKind::Function => extract_function_sig(&typespec_resolver, &decl_node, &sym.name),
@@ -199,7 +194,7 @@ fn implicit_return_ty() -> Ty {
 }
 
 fn extract_function_sig(
-    resolve_ty: &dyn Fn(&lyra_parser::SyntaxNode) -> Ty,
+    resolve_ty: &dyn Fn(&TypeSpec) -> Ty,
     node: &lyra_parser::SyntaxNode,
     name: &SmolStr,
 ) -> Arc<CallableSig> {
@@ -209,14 +204,14 @@ fn extract_function_sig(
 
     let return_ty = func
         .type_spec()
-        .map_or_else(implicit_return_ty, |ts| resolve_ty(ts.syntax()));
+        .map_or_else(implicit_return_ty, |ts| resolve_ty(&ts));
 
     let ports = extract_tf_ports(resolve_ty, func.tf_port_decls());
     CallableSig::new(name.clone(), CallableKind::Function, return_ty, ports)
 }
 
 fn extract_task_sig(
-    resolve_ty: &dyn Fn(&lyra_parser::SyntaxNode) -> Ty,
+    resolve_ty: &dyn Fn(&TypeSpec) -> Ty,
     node: &lyra_parser::SyntaxNode,
     name: &SmolStr,
 ) -> Arc<CallableSig> {
@@ -229,7 +224,7 @@ fn extract_task_sig(
 }
 
 fn extract_tf_ports(
-    resolve_ty: &dyn Fn(&lyra_parser::SyntaxNode) -> Ty,
+    resolve_ty: &dyn Fn(&TypeSpec) -> Ty,
     port_decls: lyra_ast::AstChildren<lyra_ast::TfPortDecl>,
 ) -> Vec<TfPortSig> {
     let mut ports = Vec::new();
@@ -242,7 +237,7 @@ fn extract_tf_ports(
 
         let base_ty = tf_port
             .type_spec()
-            .map_or_else(Ty::simple_logic, |ts| resolve_ty(ts.syntax()));
+            .map_or_else(Ty::simple_logic, |ts| resolve_ty(&ts));
 
         let decl_range = tf_port.text_range();
         for declarator in tf_port.declarators() {

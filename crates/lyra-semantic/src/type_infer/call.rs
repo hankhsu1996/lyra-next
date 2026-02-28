@@ -1,11 +1,10 @@
-use lyra_ast::{AstNode, CallExpr, Expr, ExprKind, FieldExpr, SystemTfCall};
-use lyra_parser::SyntaxNode;
+use lyra_ast::{CallExpr, Expr, ExprKind, FieldExpr, SystemTfCall};
 
 use super::expr_type::{
     CallableKind, CallableSigRef, CalleeFormKind, ExprType, ExprTypeErrorKind, ExprView, InferCtx,
     ResolveCallableError,
 };
-use super::infer_expr_type;
+use super::infer_expr;
 use crate::coerce::IntegralCtx;
 use crate::member::{MemberInfo, MemberKind, MemberLookupError};
 
@@ -22,8 +21,8 @@ pub(super) fn infer_call(call: &CallExpr, ctx: &dyn InferCtx) -> ExprType {
 
     match callee_kind {
         ExprKind::NameRef(_) | ExprKind::QualifiedName(_) => {}
-        ExprKind::FieldExpr(_) => {
-            return infer_method_call(call.syntax(), callee_expr.syntax(), ctx);
+        ExprKind::FieldExpr(field_expr) => {
+            return infer_method_call(call, &field_expr, ctx);
         }
         _ => {
             return ExprType::error(ExprTypeErrorKind::UnsupportedCalleeForm(
@@ -32,10 +31,8 @@ pub(super) fn infer_call(call: &CallExpr, ctx: &dyn InferCtx) -> ExprType {
         }
     }
 
-    let callee_node = callee_expr.syntax().clone();
-
     // Resolve callee to a callable symbol
-    let sym_id = match ctx.resolve_callable(&callee_node) {
+    let sym_id = match ctx.resolve_callable(&callee_expr) {
         Ok(id) => id,
         Err(ResolveCallableError::NotFound) => {
             return ExprType::error(ExprTypeErrorKind::UnresolvedCall);
@@ -60,7 +57,7 @@ pub(super) fn infer_call(call: &CallExpr, ctx: &dyn InferCtx) -> ExprType {
 }
 
 pub(super) fn infer_system_call(stf: &SystemTfCall, ctx: &dyn InferCtx) -> ExprType {
-    crate::system_functions::infer_system_call(stf.syntax(), ctx)
+    crate::system_functions::infer_system_call(stf, ctx)
 }
 
 /// Check call arguments against the callable signature.
@@ -83,18 +80,11 @@ fn check_call_args(call: &CallExpr, sig: &CallableSigRef, ctx: &dyn InferCtx) {
                 _ => None,
             }
         });
-        infer_expr_type(arg.syntax(), ctx, expected_ctx.as_ref());
+        infer_expr(arg, ctx, expected_ctx.as_ref());
     }
 }
 
-fn infer_method_call(
-    call_node: &SyntaxNode,
-    callee_node: &SyntaxNode,
-    ctx: &dyn InferCtx,
-) -> ExprType {
-    let Some(field_expr) = FieldExpr::cast(callee_node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx) -> ExprType {
     let Some(field_tok) = field_expr.field_name() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -102,7 +92,7 @@ fn infer_method_call(
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    let lhs_type = infer_expr_type(lhs_node.syntax(), ctx, None);
+    let lhs_type = infer_expr(&lhs_node, ctx, None);
     if let ExprView::Error(_) = &lhs_type.view {
         return lhs_type;
     }
@@ -112,13 +102,9 @@ fn infer_method_call(
             kind: MemberKind::BuiltinMethod(bm),
             ty,
             receiver,
-        }) => crate::builtin_methods::infer_builtin_method_call(
-            call_node,
-            bm,
-            &ty,
-            receiver.as_ref(),
-            ctx,
-        ),
+        }) => {
+            crate::builtin_methods::infer_builtin_method_call(call, bm, &ty, receiver.as_ref(), ctx)
+        }
         Ok(_) | Err(MemberLookupError::NoMembersOnType) => ExprType::error(
             ExprTypeErrorKind::UnsupportedCalleeForm(CalleeFormKind::MethodCall),
         ),

@@ -1,3 +1,4 @@
+use lyra_ast::HasSyntax;
 use lyra_semantic::resolve_index::ResolvedTarget;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::ExprType;

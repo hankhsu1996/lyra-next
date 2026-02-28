@@ -1,6 +1,6 @@
 use lyra_ast::{
-    AstIdMap, AstNode, Declarator, NetDecl, SourceFile, TypeDeclSite, TypeNameRef, TypeSpec,
-    VarDecl,
+    AstIdMap, AstNode, Declarator, HasSyntax, NetDecl, SourceFile, TypeDeclSite, TypeNameRef,
+    TypeSpec, VarDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -230,7 +230,7 @@ fn user_type_ref_dotted_name() {
     assert_eq!(iface.ident().expect("ident").text(), "my_bus");
     assert_eq!(dn.modport_ident().expect("modport").text(), "master");
 
-    let utr = user_type_ref(&typespec).expect("should extract UserTypeRef");
+    let utr = user_type_ref(&ts).expect("should extract UserTypeRef");
     match utr {
         UserTypeRef::InterfaceModport { modport_name, .. } => {
             assert_eq!(modport_name.as_str(), "master");
@@ -245,7 +245,8 @@ fn user_type_ref_simple_name() {
     let root = parse.syntax();
     let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
     let typespec = find_typespec(&var_decl).expect("TypeSpec");
-    let utr = user_type_ref(&typespec).expect("should extract UserTypeRef");
+    let ts = TypeSpec::cast(typespec).expect("cast");
+    let utr = user_type_ref(&ts).expect("should extract UserTypeRef");
     assert!(matches!(utr, UserTypeRef::Simple(_)));
 }
 
@@ -255,5 +256,6 @@ fn user_type_ref_none_for_keyword() {
     let root = parse.syntax();
     let var_decl = find_in_module(&root, SyntaxKind::VarDecl).expect("VarDecl");
     let typespec = find_typespec(&var_decl).expect("TypeSpec");
-    assert!(user_type_ref(&typespec).is_none());
+    let ts = TypeSpec::cast(typespec).expect("cast");
+    assert!(user_type_ref(&ts).is_none());
 }

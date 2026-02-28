@@ -1,5 +1,5 @@
 use lyra_ast::{
-    AstNode, Declarator, ExportDecl, ExportItem, FunctionDecl, ImportItem, ModportDecl,
+    AstNode, Declarator, ExportDecl, ExportItem, FunctionDecl, HasSyntax, ImportItem, ModportDecl,
     ModportPortKind, ModuleInstantiation, TaskDecl, TfPortDecl, TypeSpec,
 };
 use lyra_lexer::SyntaxKind;

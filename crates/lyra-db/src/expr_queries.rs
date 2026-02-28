@@ -1,3 +1,4 @@
+use lyra_ast::{AstIdMap, Expr, HasSyntax};
 use lyra_semantic::coerce::IntegralCtx;
 use lyra_semantic::member::{
     ArrayMethodKind, BuiltinMethodKind, EnumMethodKind, MemberInfo, MemberKind, MemberLookupError,
@@ -6,7 +7,7 @@ use lyra_semantic::member::{
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::type_infer::{
     CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx,
-    ResolveCallableError, Signedness, infer_expr_type_stmt,
+    ResolveCallableError, Signedness,
 };
 use lyra_semantic::types::{ConstInt, Ty};
 
@@ -54,7 +55,10 @@ pub fn type_of_expr<'db>(db: &'db dyn salsa::Database, expr_ref: ExprRef<'db>) -
         ast_id_map: map,
     };
 
-    lyra_semantic::type_infer::infer_expr_type(&node, &ctx, None)
+    let Some(expr) = Expr::cast(node) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    lyra_semantic::type_infer::infer_expr(&expr, &ctx, None)
 }
 
 /// Infer the type of an expression in statement context (Salsa-tracked).
@@ -84,7 +88,10 @@ pub fn type_of_expr_stmt<'db>(db: &'db dyn salsa::Database, expr_ref: ExprRef<'d
         ast_id_map: map,
     };
 
-    infer_expr_type_stmt(&node, &ctx)
+    let Some(expr) = Expr::cast(node) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    lyra_semantic::type_infer::infer_expr_stmt(&expr, &ctx)
 }
 
 /// Salsa-interned key for an integral context (width, signedness, four-state).
@@ -135,7 +142,10 @@ pub fn type_of_expr_in_ctx<'db>(
     };
 
     let integral_ctx = ctx_key.to_ctx(db);
-    lyra_semantic::type_infer::infer_expr_type(&node, &ctx, Some(&integral_ctx))
+    let Some(expr) = Expr::cast(node) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    lyra_semantic::type_infer::infer_expr(&expr, &ctx, Some(&integral_ctx))
 }
 
 /// Const-eval-safe expression typing (Salsa-tracked with cycle recovery).
@@ -171,7 +181,10 @@ pub fn type_of_expr_raw<'db>(db: &'db dyn salsa::Database, expr_ref: ExprRef<'db
         ast_id_map: map,
     };
 
-    lyra_semantic::type_infer::infer_expr_type(&node, &ctx, None)
+    let Some(expr) = Expr::cast(node) else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    lyra_semantic::type_infer::infer_expr(&expr, &ctx, None)
 }
 
 fn type_of_expr_raw_recover<'db>(
@@ -195,12 +208,16 @@ impl InferCtx for DbInferCtx<'_> {
         self.source_file.file_id(self.db)
     }
 
-    fn type_of_name(&self, name_node: &lyra_parser::SyntaxNode) -> ExprType {
+    fn ast_id_map(&self) -> &AstIdMap {
+        self.ast_id_map
+    }
+
+    fn type_of_name(&self, name_expr: &Expr) -> ExprType {
         type_of_name_impl(
             self.db,
             self.unit,
             self.ast_id_map,
-            name_node,
+            name_expr.syntax(),
             resolve_index_file(self.db, self.source_file, self.unit),
             &|db, unit, sym_id| {
                 let sym_ref = SymbolRef::new(db, unit, sym_id);
@@ -209,16 +226,19 @@ impl InferCtx for DbInferCtx<'_> {
         )
     }
 
-    fn const_eval(&self, expr_node: &lyra_parser::SyntaxNode) -> ConstInt {
-        const_eval_impl(self.db, self.unit, self.ast_id_map, expr_node)
+    fn const_eval(&self, expr: &Expr) -> ConstInt {
+        const_eval_impl(self.db, self.unit, self.ast_id_map, expr.syntax())
     }
 
-    fn resolve_callable(
-        &self,
-        callee_node: &lyra_parser::SyntaxNode,
-    ) -> Result<GlobalSymbolId, ResolveCallableError> {
+    fn resolve_callable(&self, callee: &Expr) -> Result<GlobalSymbolId, ResolveCallableError> {
         let resolve = resolve_index_file(self.db, self.source_file, self.unit);
-        resolve_callable_impl(self.db, self.unit, self.ast_id_map, callee_node, resolve)
+        resolve_callable_impl(
+            self.db,
+            self.unit,
+            self.ast_id_map,
+            callee.syntax(),
+            resolve,
+        )
     }
 
     fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef> {
@@ -289,13 +309,13 @@ impl InferCtx for DbInferCtx<'_> {
         }
     }
 
-    fn resolve_type_arg(&self, name_node: &lyra_parser::SyntaxNode) -> Option<Ty> {
+    fn resolve_type_arg(&self, utr: &lyra_semantic::UserTypeRef) -> Option<Ty> {
         crate::resolve_helpers::resolve_type_arg_impl(
             self.db,
             self.unit,
             self.source_file,
             self.ast_id_map,
-            name_node,
+            utr,
         )
     }
 }
@@ -317,12 +337,16 @@ impl InferCtx for DbInferCtxRaw<'_> {
         self.source_file.file_id(self.db)
     }
 
-    fn type_of_name(&self, name_node: &lyra_parser::SyntaxNode) -> ExprType {
+    fn ast_id_map(&self) -> &AstIdMap {
+        self.ast_id_map
+    }
+
+    fn type_of_name(&self, name_expr: &Expr) -> ExprType {
         type_of_name_impl(
             self.db,
             self.unit,
             self.ast_id_map,
-            name_node,
+            name_expr.syntax(),
             base_resolve_index(self.db, self.source_file, self.unit),
             &|db, unit, sym_id| {
                 let sym_ref = SymbolRef::new(db, unit, sym_id);
@@ -335,16 +359,19 @@ impl InferCtx for DbInferCtxRaw<'_> {
         )
     }
 
-    fn const_eval(&self, expr_node: &lyra_parser::SyntaxNode) -> ConstInt {
-        const_eval_impl(self.db, self.unit, self.ast_id_map, expr_node)
+    fn const_eval(&self, expr: &Expr) -> ConstInt {
+        const_eval_impl(self.db, self.unit, self.ast_id_map, expr.syntax())
     }
 
-    fn resolve_callable(
-        &self,
-        callee_node: &lyra_parser::SyntaxNode,
-    ) -> Result<GlobalSymbolId, ResolveCallableError> {
+    fn resolve_callable(&self, callee: &Expr) -> Result<GlobalSymbolId, ResolveCallableError> {
         let resolve = base_resolve_index(self.db, self.source_file, self.unit);
-        resolve_callable_impl(self.db, self.unit, self.ast_id_map, callee_node, resolve)
+        resolve_callable_impl(
+            self.db,
+            self.unit,
+            self.ast_id_map,
+            callee.syntax(),
+            resolve,
+        )
     }
 
     fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef> {
@@ -409,14 +436,8 @@ impl InferCtx for DbInferCtxRaw<'_> {
         }
     }
 
-    fn resolve_type_arg(&self, name_node: &lyra_parser::SyntaxNode) -> Option<Ty> {
-        resolve_type_arg_raw_impl(
-            self.db,
-            self.unit,
-            self.source_file,
-            self.ast_id_map,
-            name_node,
-        )
+    fn resolve_type_arg(&self, utr: &lyra_semantic::UserTypeRef) -> Option<Ty> {
+        resolve_type_arg_raw_impl(self.db, self.unit, self.source_file, self.ast_id_map, utr)
     }
 }
 
@@ -749,14 +770,15 @@ fn db_to_infer_callable_kind(kind: DbCallableKind) -> CallableKind {
     }
 }
 
-/// Resolve a NameRef/QualifiedName as a type using raw (base) resolution.
+/// Resolve a `UserTypeRef` as a type using raw (base) resolution.
 fn resolve_type_arg_raw_impl(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     source_file: crate::SourceFile,
     ast_id_map: &lyra_ast::AstIdMap,
-    name_node: &lyra_parser::SyntaxNode,
+    utr: &lyra_semantic::UserTypeRef,
 ) -> Option<Ty> {
+    let name_node = crate::resolve_helpers::utr_syntax(utr);
     let ast_id = ast_id_map.erased_ast_id(name_node)?;
     let resolve = base_resolve_index(db, source_file, unit);
     let resolution = resolve.resolutions.get(&ast_id)?;

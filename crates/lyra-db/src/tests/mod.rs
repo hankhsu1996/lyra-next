@@ -9,7 +9,7 @@ mod type_at;
 mod type_diag;
 mod type_of;
 
-use lyra_ast::AstNode;
+use lyra_ast::HasSyntax;
 
 use super::*;
 

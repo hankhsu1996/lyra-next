@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use lyra_ast::{AstNode, ErasedAstId, Expr, ExprKind};
+use lyra_ast::{ErasedAstId, Expr, ExprKind, HasSyntax};
 use lyra_semantic::const_eval::{ConstLookup, eval_const_expr};
 use lyra_semantic::types::{ConstEvalError, ConstInt};
 use lyra_source::{FileId, Span, TextRange};

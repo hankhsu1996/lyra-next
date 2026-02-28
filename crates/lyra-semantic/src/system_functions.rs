@@ -1,7 +1,6 @@
-use lyra_ast::{AstNode, ExprKind, SystemTfCall, TfArg};
-use lyra_parser::SyntaxNode;
+use lyra_ast::{AstIdMap, ExprKind, SystemTfCall, TfArg};
 
-use crate::type_infer::{ExprType, ExprTypeErrorKind, InferCtx, infer_expr_type};
+use crate::type_infer::{ExprType, ExprTypeErrorKind, InferCtx, infer_expr};
 
 pub(crate) enum SystemFnKind {
     Clog2,
@@ -298,15 +297,6 @@ static BUILTINS: &[SystemFnEntry] = &[
     },
 ];
 
-/// Get the syntax node from a `TfArg` (the node for expr or type or unknown).
-pub(crate) fn tf_arg_node(arg: &TfArg) -> &SyntaxNode {
-    match arg {
-        TfArg::Expr(e) => e.syntax(),
-        TfArg::Type(t) => t.syntax(),
-        TfArg::Unknown(n) => n,
-    }
-}
-
 fn check_arity(args: &[TfArg], entry: &SystemFnEntry) -> Option<ExprType> {
     let count = args.len();
     if count < entry.min_args as usize {
@@ -325,10 +315,7 @@ pub(crate) fn lookup_builtin(name: &str) -> Option<&'static SystemFnEntry> {
     BUILTINS.iter().find(|e| e.name == name)
 }
 
-pub(crate) fn infer_system_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let Some(stf) = SystemTfCall::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+pub(crate) fn infer_system_call(stf: &SystemTfCall, ctx: &dyn InferCtx) -> ExprType {
     let Some(tok) = stf.system_name() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -366,8 +353,8 @@ pub(crate) fn infer_system_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprTy
 
 fn infer_clog2(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::type_infer::{BitVecType, BitWidth, Signedness};
-    if let Some(arg) = args.first() {
-        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
+    if let Some(TfArg::Expr(e)) = args.first() {
+        let _ = infer_expr(e, ctx, None);
     }
     ExprType::bitvec(BitVecType {
         width: BitWidth::Known(32),
@@ -385,10 +372,10 @@ fn infer_signedness_cast(args: &[TfArg], ctx: &dyn InferCtx, target_signed: bool
     use crate::type_infer::ExprView;
     use crate::types::{Integral, Ty};
 
-    let Some(first) = args.first() else {
+    let Some(TfArg::Expr(e)) = args.first() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let arg = infer_expr_type(tf_arg_node(first), ctx, None);
+    let arg = infer_expr(e, ctx, None);
     if let ExprView::Error(_) = &arg.view {
         return arg;
     }
@@ -405,43 +392,43 @@ fn infer_signedness_cast(args: &[TfArg], ctx: &dyn InferCtx, target_signed: bool
 
 fn infer_one_arg_returns_real(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::types::{RealKw, Ty};
-    if let Some(arg) = args.first() {
-        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
+    if let Some(TfArg::Expr(e)) = args.first() {
+        let _ = infer_expr(e, ctx, None);
     }
     ExprType::from_ty(&Ty::Real(RealKw::Real))
 }
 
 fn infer_two_arg_returns_real(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::types::{RealKw, Ty};
-    if let Some(arg) = args.first() {
-        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
+    if let Some(TfArg::Expr(e)) = args.first() {
+        let _ = infer_expr(e, ctx, None);
     }
-    if let Some(arg) = args.get(1) {
-        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
+    if let Some(TfArg::Expr(e)) = args.get(1) {
+        let _ = infer_expr(e, ctx, None);
     }
     ExprType::from_ty(&Ty::Real(RealKw::Real))
 }
 
 fn infer_one_arg_returns_int(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::types::Ty;
-    if let Some(arg) = args.first() {
-        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
+    if let Some(TfArg::Expr(e)) = args.first() {
+        let _ = infer_expr(e, ctx, None);
     }
     ExprType::from_ty(&Ty::int())
 }
 
 fn infer_one_arg_returns_bits(args: &[TfArg], ctx: &dyn InferCtx, width: u32) -> ExprType {
     use crate::types::Ty;
-    if let Some(arg) = args.first() {
-        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
+    if let Some(TfArg::Expr(e)) = args.first() {
+        let _ = infer_expr(e, ctx, None);
     }
     ExprType::from_ty(&Ty::bit_n(width))
 }
 
 fn infer_one_arg_returns_shortreal(args: &[TfArg], ctx: &dyn InferCtx) -> ExprType {
     use crate::types::{RealKw, Ty};
-    if let Some(arg) = args.first() {
-        let _ = infer_expr_type(tf_arg_node(arg), ctx, None);
+    if let Some(TfArg::Expr(e)) = args.first() {
+        let _ = infer_expr(e, ctx, None);
     }
     ExprType::from_ty(&Ty::Real(RealKw::Short))
 }
@@ -458,23 +445,24 @@ pub(crate) enum BitsArgKind {
 /// both `InferCtx` (inference) and `TypeCheckCtx` (validation) callers.
 pub(crate) fn classify_bits_arg(
     arg: &TfArg,
-    file_id: lyra_source::FileId,
-    resolve_type: &dyn Fn(&SyntaxNode) -> Option<crate::types::Ty>,
+    ast_id_map: &AstIdMap,
+    resolve_type: &dyn Fn(&crate::type_extract::UserTypeRef) -> Option<crate::types::Ty>,
 ) -> BitsArgKind {
     match arg {
         TfArg::Type(tr) => {
-            let node = tr.syntax();
-            if let Some(ty) = resolve_type(node) {
+            if let Some(utr) = crate::type_extract::user_type_ref_from_type_ref(tr)
+                && let Some(ty) = resolve_type(&utr)
+            {
                 return BitsArgKind::Type(ty);
             }
-            let map = lyra_ast::AstIdMap::from_root(file_id, node);
-            let ty = crate::extract_base_ty_from_typespec(node, &map);
+            let ty = crate::extract_base_ty_from_type_ref(tr, ast_id_map);
             BitsArgKind::Type(ty)
         }
         TfArg::Expr(e) => {
             if let Some(ek) = e.classify()
                 && matches!(ek, ExprKind::NameRef(_) | ExprKind::QualifiedName(_))
-                && let Some(ty) = resolve_type(ek.syntax())
+                && let Some(utr) = crate::type_extract::user_type_ref_from_expr(e)
+                && let Some(ty) = resolve_type(&utr)
             {
                 return BitsArgKind::Type(ty);
             }
@@ -488,7 +476,9 @@ pub(crate) fn classify_bits_arg(
 mod tests {
     use super::*;
     use crate::types::Ty;
+    use lyra_ast::AstNode;
     use lyra_lexer::SyntaxKind;
+    use lyra_parser::SyntaxNode;
 
     fn parse_system_call(src: &str) -> SyntaxNode {
         let tokens = lyra_lexer::lex(src);

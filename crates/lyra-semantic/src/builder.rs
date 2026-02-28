@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lyra_ast::{AstIdMap, AstNode, ExportDecl, Port, TypeSpec};
+use lyra_ast::{AstIdMap, AstNode, ExportDecl, HasSyntax, Port, TypeSpec};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode};
 use lyra_source::{FileId, NameSpan};

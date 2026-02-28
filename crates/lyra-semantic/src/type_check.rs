@@ -1,15 +1,15 @@
 use crate::Site;
-use lyra_ast::{AstNode, ExprKind, SystemTfCall, TfArg};
-use lyra_parser::SyntaxNode;
+use lyra_ast::{
+    AssignStmt, AstIdMap, CallExpr, CastExpr, ContinuousAssign, Declarator, Expr, ExprKind,
+    HasSyntax, StreamOperandItem, SystemTfCall, TfArg, VarDecl,
+};
 use lyra_source::NameSpan;
 
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
 use crate::modport_def::PortDirection;
 use crate::modport_facts::FieldAccessFacts;
-use crate::system_functions::{
-    BitsArgKind, SystemFnKind, classify_bits_arg, lookup_builtin, tf_arg_node,
-};
+use crate::system_functions::{BitsArgKind, SystemFnKind, classify_bits_arg, lookup_builtin};
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
 use crate::types::{SymbolType, Ty};
 
@@ -112,44 +112,44 @@ pub enum TypeCheckItem {
 pub trait TypeCheckCtx {
     /// The file being analyzed.
     fn file_id(&self) -> lyra_source::FileId;
+    /// Per-file AST ID map, enabling `Site`/ID computation from typed nodes.
+    fn ast_id_map(&self) -> &AstIdMap;
     /// Infer the type of an expression node (self-determined).
-    fn expr_type(&self, node: &SyntaxNode) -> ExprType;
+    fn expr_type(&self, expr: &Expr) -> ExprType;
     /// Infer the type of an expression node under an integral context.
-    fn expr_type_in_ctx(&self, node: &SyntaxNode, ctx: &IntegralCtx) -> ExprType;
+    fn expr_type_in_ctx(&self, expr: &Expr, ctx: &IntegralCtx) -> ExprType;
     /// Infer the type of an expression in statement context.
-    fn expr_type_stmt(&self, node: &SyntaxNode) -> ExprType;
-    /// Get the declared type of a symbol via its Declarator node.
-    fn symbol_type_of_declarator(&self, declarator: &SyntaxNode) -> Option<SymbolType>;
-    /// Resolve a `NameRef` node as a type (typedef/enum/struct name).
-    fn resolve_type_arg(&self, name_node: &SyntaxNode) -> Option<crate::types::Ty>;
-    /// Pure identity lookup -- returns the stable ID for a syntax node.
-    /// O(1) map lookup, no DB calls, no allocations.
-    /// Returns None for nodes without stable IDs (e.g. error-recovered trees).
-    fn node_id(&self, node: &SyntaxNode) -> Option<Site>;
+    fn expr_type_stmt(&self, expr: &Expr) -> ExprType;
+    /// Get the declared type of a symbol via its `Declarator` node.
+    fn symbol_type_of_declarator(&self, decl: &Declarator) -> Option<SymbolType>;
+    /// Resolve a `UserTypeRef` as a type (typedef/enum/struct name).
+    fn resolve_type_arg(&self, utr: &crate::type_extract::UserTypeRef) -> Option<crate::types::Ty>;
     /// Evaluate a constant integer expression. Returns None if non-const.
-    fn const_eval_int(&self, node: &SyntaxNode) -> Option<i64>;
+    fn const_eval_int(&self, expr: &Expr) -> Option<i64>;
     /// Get sorted set of known enum member values. None if any value unknown.
     fn enum_known_value_set(&self, id: &EnumId) -> Option<std::sync::Arc<[i64]>>;
     /// Check whether a modport expression target is an lvalue.
     fn is_modport_target_lvalue(&self, expr_id: Site) -> bool;
 }
 
-/// Resolve a syntax node to its stable `Site` anchor.
+const MISSING_AST_ID: &str = "missing_ast_id in type checker";
+
+/// Resolve any typed AST node to its stable `Site` anchor.
 ///
-/// On failure (error-recovered tree), emits `InternalError` anchored at
-/// `fallback` and returns the fallback. Callers must not silently skip
-/// findings when `node_id` returns `None`.
-fn require_site(
-    ctx: &dyn TypeCheckCtx,
-    node: &SyntaxNode,
+/// Works for both `AstNode` wrappers and `Expr` via the shared `HasSyntax`
+/// trait. On failure (error-recovered tree), emits `InternalError` anchored
+/// at `fallback` and returns the fallback.
+fn site_of<T: HasSyntax>(
+    map: &AstIdMap,
+    node: &T,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) -> Site {
-    if let Some(site) = ctx.node_id(node) {
+    if let Some(site) = map.id_of(node) {
         return site;
     }
     items.push(TypeCheckItem::InternalError {
-        detail: smol_str::SmolStr::new_static("node_id returned None in type checker"),
+        detail: smol_str::SmolStr::new_static(MISSING_AST_ID),
         site: fallback,
     });
     fallback
@@ -161,17 +161,17 @@ fn require_site(
 /// validity). Does not recurse into children -- the `ChecksIndex` ensures
 /// nested expression sites are checked separately.
 pub fn check_continuous_assign(
-    node: &SyntaxNode,
+    ca: &ContinuousAssign,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let self_site = ctx.node_id(node).unwrap_or(fallback);
-    let ca = lyra_ast::ContinuousAssign::cast(node.clone());
-    let lhs = ca.as_ref().and_then(|c| c.lhs());
-    let rhs = ca.as_ref().and_then(|c| c.rhs());
+    let map = ctx.ast_id_map();
+    let self_site = map.id_of(ca).unwrap_or(fallback);
+    let lhs = ca.lhs();
+    let rhs = ca.rhs();
     if let (Some(l), Some(r)) = (&lhs, &rhs) {
-        check_assignment_pair(node, l.syntax(), r.syntax(), ctx, self_site, items);
+        check_assignment_pair(self_site, l, r, ctx, items);
     }
 }
 
@@ -179,72 +179,69 @@ pub fn check_continuous_assign(
 ///
 /// Performs only the local assignment check. Does not recurse.
 pub fn check_assign_stmt(
-    node: &SyntaxNode,
+    assign: &AssignStmt,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let self_site = ctx.node_id(node).unwrap_or(fallback);
-    let assign = lyra_ast::AssignStmt::cast(node.clone());
-    let lhs = assign.as_ref().and_then(|a| a.lhs());
-    let rhs = assign.as_ref().and_then(|a| a.rhs());
-    let has_op = assign.as_ref().and_then(|a| a.assign_op()).is_some();
+    let map = ctx.ast_id_map();
+    let self_site = map.id_of(assign).unwrap_or(fallback);
+    let lhs = assign.lhs();
+    let rhs = assign.rhs();
+    let has_op = assign.assign_op().is_some();
 
     if let (Some(l), Some(r)) = (&lhs, &rhs) {
-        check_assignment_pair(node, l.syntax(), r.syntax(), ctx, self_site, items);
+        check_assignment_pair(self_site, l, r, ctx, items);
     } else if rhs.is_none()
         && !has_op
         && let Some(l) = &lhs
     {
-        let _result = ctx.expr_type_stmt(l.syntax());
+        let _result = ctx.expr_type_stmt(l);
     }
 }
 
 /// Check a `VarDecl` node for initializer type compatibility.
 pub fn check_var_decl(
-    node: &SyntaxNode,
+    var_decl: &VarDecl,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let decl_site = require_site(ctx, node, fallback, items);
-    let Some(var_decl) = lyra_ast::VarDecl::cast(node.clone()) else {
-        return;
-    };
+    let map = ctx.ast_id_map();
+    let decl_site = site_of(map, var_decl, fallback, items);
     for decl in var_decl.declarators() {
         let Some(init_expr) = decl.init_expr() else {
             continue;
         };
 
-        let Some(sym_type) = ctx.symbol_type_of_declarator(decl.syntax()) else {
+        let Some(sym_type) = ctx.symbol_type_of_declarator(&decl) else {
             continue;
         };
 
-        let lhs_site = require_site(ctx, decl.syntax(), decl_site, items);
-        let rhs_site = require_site(ctx, init_expr.syntax(), decl_site, items);
+        let lhs_site = site_of(map, &decl, decl_site, items);
+        let rhs_site = site_of(map, &init_expr, decl_site, items);
 
         let lhs_type = ExprType::from_symbol_type(&sym_type);
-        let rhs_type = ctx.expr_type(init_expr.syntax());
+        let rhs_type = ctx.expr_type(&init_expr);
 
         check_assignment_compat(&lhs_type, &rhs_type, decl_site, lhs_site, rhs_site, items);
     }
 }
 
 fn check_assignment_pair(
-    stmt_node: &SyntaxNode,
-    lhs: &SyntaxNode,
-    rhs: &SyntaxNode,
+    stmt_site: Site,
+    lhs: &Expr,
+    rhs: &Expr,
     ctx: &dyn TypeCheckCtx,
-    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let stmt_site = require_site(ctx, stmt_node, fallback, items);
-    let lhs_site = require_site(ctx, lhs, stmt_site, items);
-    let rhs_site = require_site(ctx, rhs, stmt_site, items);
+    let map = ctx.ast_id_map();
+    let lhs_site = site_of(map, lhs, stmt_site, items);
+    let rhs_site = site_of(map, rhs, stmt_site, items);
 
     match crate::lhs::classify_lhs(lhs) {
-        crate::lhs::LhsClass::Assignable(lhs_node) => {
-            let lhs_type = ctx.expr_type(&lhs_node);
+        crate::lhs::LhsClass::Assignable(lhs_expr) => {
+            let lhs_type = ctx.expr_type(&lhs_expr);
             let rhs_type = ctx.expr_type(rhs);
             check_assignment_compat(&lhs_type, &rhs_type, stmt_site, lhs_site, rhs_site, items);
         }
@@ -315,22 +312,18 @@ fn check_assignment_compat(
 
 /// Check a `CastExpr` for enum cast-out-of-range.
 pub fn check_cast_expr(
-    node: &SyntaxNode,
+    cast: &CastExpr,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    use lyra_ast::{AstNode, CastExpr};
-    let Some(cast) = CastExpr::cast(node.clone()) else {
-        return;
-    };
     let Some(typespec) = cast.cast_type() else {
         return;
     };
-    let Some(utr) = crate::type_extract::user_type_ref(typespec.syntax()) else {
+    let Some(utr) = crate::type_extract::user_type_ref(&typespec) else {
         return;
     };
-    let Some(ty) = ctx.resolve_type_arg(utr.resolve_node()) else {
+    let Some(ty) = ctx.resolve_type_arg(&utr) else {
         return;
     };
     let Ty::Enum(ref enum_id) = ty else {
@@ -339,14 +332,15 @@ pub fn check_cast_expr(
     let Some(inner) = cast.inner_expr() else {
         return;
     };
-    let Some(value) = ctx.const_eval_int(inner.syntax()) else {
+    let Some(value) = ctx.const_eval_int(&inner) else {
         return;
     };
     let Some(value_set) = ctx.enum_known_value_set(enum_id) else {
         return;
     };
     if value_set.binary_search(&value).is_err() {
-        let cast_site = require_site(ctx, node, fallback, items);
+        let map = ctx.ast_id_map();
+        let cast_site = site_of(map, cast, fallback, items);
         items.push(TypeCheckItem::EnumCastOutOfRange {
             cast_site,
             enum_id: *enum_id,
@@ -356,16 +350,9 @@ pub fn check_cast_expr(
 }
 
 /// Check a `CallExpr` for method-call errors.
-pub fn check_method_call(
-    node: &SyntaxNode,
-    ctx: &dyn TypeCheckCtx,
-    items: &mut Vec<TypeCheckItem>,
-) {
+pub fn check_method_call(call: &CallExpr, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
     use crate::type_infer::ExprTypeErrorKind;
 
-    let Some(call) = lyra_ast::CallExpr::cast(node.clone()) else {
-        return;
-    };
     let Some(callee) = call.callee() else {
         return;
     };
@@ -376,7 +363,10 @@ pub fn check_method_call(
         return;
     };
 
-    let result = ctx.expr_type_stmt(node);
+    let Some(expr) = Expr::from_ast(call) else {
+        return;
+    };
+    let result = ctx.expr_type_stmt(&expr);
     let ExprView::Error(error_kind) = &result.view else {
         return;
     };
@@ -400,7 +390,7 @@ pub fn check_method_call(
 
 /// Check a `FieldExpr` for modport direction violations.
 pub fn check_field_direction(
-    node: &SyntaxNode,
+    field: &lyra_ast::FieldExpr,
     ctx: &dyn TypeCheckCtx,
     facts: &FieldAccessFacts,
     access: AccessMode,
@@ -408,7 +398,8 @@ pub fn check_field_direction(
 ) {
     use crate::modport_facts::FieldAccessTarget;
 
-    let Some(ast_id) = ctx.node_id(node) else {
+    let map = ctx.ast_id_map();
+    let Some(ast_id) = map.id_of(field) else {
         return;
     };
     let Some(fact) = facts.get(&ast_id) else {
@@ -489,14 +480,11 @@ fn direction_permits(dir: PortDirection, access: AccessKind) -> bool {
 
 /// Check a `SystemTfCall` for argument type errors.
 pub fn check_system_call(
-    node: &SyntaxNode,
+    stf: &SystemTfCall,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(stf) = SystemTfCall::cast(node.clone()) else {
-        return;
-    };
     let Some(tok) = stf.system_name() else {
         return;
     };
@@ -508,27 +496,40 @@ pub fn check_system_call(
         return;
     };
     let args: Vec<TfArg> = al.args().collect();
+    let map = ctx.ast_id_map();
     match entry.kind {
-        SystemFnKind::Bits => check_bits_call(node, &args, ctx, fallback, items),
+        SystemFnKind::Bits => check_bits_call(stf, &args, map, ctx, fallback, items),
         SystemFnKind::IntToReal => {
-            check_conversion_arg_integral(node, &args, name, ctx, fallback, items);
+            check_conversion_arg_integral(stf, &args, name, map, ctx, fallback, items);
         }
         SystemFnKind::RealToInt | SystemFnKind::RealToBits | SystemFnKind::ShortRealToBits => {
-            check_conversion_arg_real(node, &args, name, ctx, fallback, items);
+            check_conversion_arg_real(stf, &args, name, map, ctx, fallback, items);
         }
         SystemFnKind::BitsToReal => {
-            check_conversion_bits_to_real(node, &args, name, 64, ctx, fallback, items);
+            check_conversion_bits_to_real(stf, &args, name, 64, ctx, fallback, items);
         }
         SystemFnKind::BitsToShortReal => {
-            check_conversion_bits_to_real(node, &args, name, 32, ctx, fallback, items);
+            check_conversion_bits_to_real(stf, &args, name, 32, ctx, fallback, items);
         }
         _ => {}
     }
 }
 
+fn tf_arg_expr(arg: &TfArg) -> Option<&Expr> {
+    match arg {
+        TfArg::Expr(e) => Some(e),
+        _ => None,
+    }
+}
+
+fn tf_arg_site(arg: &TfArg, map: &AstIdMap, fallback: Site) -> Site {
+    map.id_of(arg).unwrap_or(fallback)
+}
+
 fn check_bits_call(
-    node: &SyntaxNode,
+    stf: &SystemTfCall,
     args: &[TfArg],
+    map: &AstIdMap,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
@@ -536,13 +537,12 @@ fn check_bits_call(
     let Some(first) = args.first() else {
         return;
     };
-    let kind = classify_bits_arg(first, ctx.file_id(), &|n| ctx.resolve_type_arg(n));
+    let kind = classify_bits_arg(first, map, &|utr| ctx.resolve_type_arg(utr));
     if let BitsArgKind::Type(ty) = kind
         && !ty.is_data_type()
     {
-        let first_node = tf_arg_node(first);
-        let call_site = require_site(ctx, node, fallback, items);
-        let arg_site = require_site(ctx, first_node, call_site, items);
+        let call_site = site_of(map, stf, fallback, items);
+        let arg_site = tf_arg_site(first, map, call_site);
         items.push(TypeCheckItem::BitsNonDataType {
             call_site,
             arg_site,
@@ -551,9 +551,10 @@ fn check_bits_call(
 }
 
 fn check_conversion_arg_integral(
-    node: &SyntaxNode,
+    stf: &SystemTfCall,
     args: &[TfArg],
     fn_name: &str,
+    map: &AstIdMap,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
@@ -561,14 +562,16 @@ fn check_conversion_arg_integral(
     let Some(first) = args.first() else {
         return;
     };
-    let first_node = tf_arg_node(first);
-    let arg_ty = ctx.expr_type(first_node);
+    let Some(first_expr) = tf_arg_expr(first) else {
+        return;
+    };
+    let arg_ty = ctx.expr_type(first_expr);
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
     if !matches!(arg_ty.ty, Ty::Integral(_) | Ty::Enum(_)) {
-        let call_site = require_site(ctx, node, fallback, items);
-        let arg_site = require_site(ctx, first_node, call_site, items);
+        let call_site = site_of(map, stf, fallback, items);
+        let arg_site = tf_arg_site(first, map, call_site);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -579,9 +582,10 @@ fn check_conversion_arg_integral(
 }
 
 fn check_conversion_arg_real(
-    node: &SyntaxNode,
+    stf: &SystemTfCall,
     args: &[TfArg],
     fn_name: &str,
+    map: &AstIdMap,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
@@ -589,14 +593,16 @@ fn check_conversion_arg_real(
     let Some(first) = args.first() else {
         return;
     };
-    let first_node = tf_arg_node(first);
-    let arg_ty = ctx.expr_type(first_node);
+    let Some(first_expr) = tf_arg_expr(first) else {
+        return;
+    };
+    let arg_ty = ctx.expr_type(first_expr);
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
     if !arg_ty.ty.is_real() {
-        let call_site = require_site(ctx, node, fallback, items);
-        let arg_site = require_site(ctx, first_node, call_site, items);
+        let call_site = site_of(map, stf, fallback, items);
+        let arg_site = tf_arg_site(first, map, call_site);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -607,7 +613,7 @@ fn check_conversion_arg_real(
 }
 
 fn check_conversion_bits_to_real(
-    node: &SyntaxNode,
+    stf: &SystemTfCall,
     args: &[TfArg],
     fn_name: &str,
     expected_width: u32,
@@ -615,16 +621,19 @@ fn check_conversion_bits_to_real(
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
+    let map = ctx.ast_id_map();
     let Some(first) = args.first() else {
         return;
     };
-    let first_node = tf_arg_node(first);
-    let arg_ty = ctx.expr_type(first_node);
+    let Some(first_expr) = tf_arg_expr(first) else {
+        return;
+    };
+    let arg_ty = ctx.expr_type(first_expr);
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
-    let call_site = require_site(ctx, node, fallback, items);
-    let arg_site = require_site(ctx, first_node, call_site, items);
+    let call_site = site_of(map, stf, fallback, items);
+    let arg_site = tf_arg_site(first, map, call_site);
     if !matches!(arg_ty.ty, Ty::Integral(_)) {
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
@@ -649,28 +658,24 @@ fn check_conversion_bits_to_real(
 
 /// Check a `StreamOperandItem` for non-array `with` clause.
 pub fn check_stream_operand(
-    node: &SyntaxNode,
+    item: &StreamOperandItem,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    use lyra_ast::{AstNode, StreamOperandItem};
-
-    let Some(item) = StreamOperandItem::cast(node.clone()) else {
-        return;
-    };
     let Some(with_clause) = item.with_clause() else {
         return;
     };
     let Some(expr_node) = item.expr() else {
         return;
     };
-    let operand_ty = ctx.expr_type(expr_node.syntax());
+    let operand_ty = ctx.expr_type(&expr_node);
     if matches!(operand_ty.view, ExprView::Error(_)) {
         return;
     }
     if !matches!(operand_ty.ty, Ty::Array { .. }) {
-        let with_site = require_site(ctx, with_clause.syntax(), fallback, items);
+        let map = ctx.ast_id_map();
+        let with_site = site_of(map, &with_clause, fallback, items);
         items.push(TypeCheckItem::StreamWithNonArray { with_site });
     }
 }

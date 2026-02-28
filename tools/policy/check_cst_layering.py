@@ -5,14 +5,11 @@ Rules:
   C001: No CST traversal calls (.children(), .descendants(), etc.)
   C002: No manual Expression/ParenExpr wrapper matching
   C003: No SyntaxKind discrimination (use typed AST accessors)
-
-SyntaxNode/SyntaxToken imports are not checked -- many modules legitimately
-use these types in function signatures. The real enforcement is C001 (actual
-CST traversal calls), C002 (manual wrapper peeling), and C003 (SyntaxKind
-token/kind matching).
+  C004: No SyntaxNode/SyntaxToken in lyra-semantic non-builder code
+  C005: No .syntax() calls in lyra-semantic non-builder code
 
 Consumer layers (lyra-semantic, lyra-db) should use typed AST accessors from
-lyra-ast, not raw CST traversal. Use `Expr::peel()` instead of matching on
+lyra-ast, not raw CST traversal. Use `Expr::peeled()` instead of matching on
 `SyntaxKind::Expression` or `SyntaxKind::ParenExpr`. Builder-phase modules
 are permanently allowlisted since their job is to walk the CST via direct
 dot-calls.
@@ -68,8 +65,36 @@ C003_ALLOWED: dict[str, frozenset[str]] = {
     "crates/lyra-db/src/": frozenset(),
 }
 
+# C004: Ban raw SyntaxNode/SyntaxToken names in lyra-semantic non-builder code.
+# lyra-db is allowed to use SyntaxNode (it orchestrates CST-to-typed conversion).
+C004_ALLOWED: dict[str, frozenset[str]] = {
+    "crates/lyra-semantic/src/": frozenset({
+        "builder.rs",
+        "builder_items.rs",
+        "builder_stmt.rs",
+        "builder_types.rs",
+        "builder_order.rs",
+    }),
+}
+
+# C005: Ban .syntax() calls in lyra-semantic non-builder code.
+# lyra-db and lyra-ast may call .syntax() freely.
+C005_ALLOWED: dict[str, frozenset[str]] = {
+    "crates/lyra-semantic/src/": frozenset({
+        "builder.rs",
+        "builder_items.rs",
+        "builder_stmt.rs",
+        "builder_types.rs",
+        "builder_order.rs",
+    }),
+}
+
 # Combined set of all checked crate prefixes.
-CHECKED_CRATES = set(C001_ALLOWED) | set(C002_ALLOWED) | set(C003_ALLOWED)
+CHECKED_CRATES = (
+    set(C001_ALLOWED) | set(C002_ALLOWED)
+    | set(C003_ALLOWED) | set(C004_ALLOWED)
+    | set(C005_ALLOWED)
+)
 
 # Derive a human-readable crate label from the prefix for error messages.
 _CRATE_LABELS: dict[str, str] = {
@@ -85,7 +110,7 @@ RE_CST_TRAVERSAL = re.compile(
     r')\s*\('
 )
 
-# C002: Manual wrapper-kind matching (use Expr::peel() instead)
+# C002: Manual wrapper-kind matching (use Expr::peeled() instead)
 RE_WRAPPER_MATCH = re.compile(
     r'SyntaxKind::(?:Expression|ParenExpr)\b'
 )
@@ -93,6 +118,16 @@ RE_WRAPPER_MATCH = re.compile(
 # C003: SyntaxKind discrimination
 RE_SYNTAX_KIND_USE = re.compile(r'SyntaxKind::')
 RE_SYNTAX_KIND_IMPORT = re.compile(r'\buse\s+[\w:]+::SyntaxKind\b')
+
+# C004: Raw SyntaxNode/SyntaxToken usage (imports + qualified paths).
+# Matches `::SyntaxNode`, `{SyntaxNode`, `, SyntaxNode` (group import).
+# Bare unqualified uses are caught transitively via the import line.
+RE_SYNTAX_NODE_TOKEN = re.compile(
+    r'(?:::|\{|,)\s*(?:SyntaxNode|SyntaxToken)\b'
+)
+
+# C005: .syntax() calls (raw CST escape hatch)
+RE_DOT_SYNTAX = re.compile(r'\.syntax\(\)')
 
 
 def get_repo_root() -> Path:
@@ -257,7 +292,7 @@ def strip_comments(lines: list[str]) -> list[str]:
 
 
 def check_violations(filepath: str, repo_root: Path) -> list[str]:
-    """Check a file for C001/C002/C003 violations.
+    """Check a file for C001-C005 violations.
 
     Returns list of violation messages.
     """
@@ -269,6 +304,12 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
     c001_ok = _is_allowed(filepath, C001_ALLOWED)
     c002_ok = _is_allowed(filepath, C002_ALLOWED)
     c003_ok = _is_allowed(filepath, C003_ALLOWED)
+    # C004 only applies to crates listed in C004_ALLOWED (lyra-semantic).
+    c004_applies = prefix is not None and prefix in C004_ALLOWED
+    c004_ok = not c004_applies or _is_allowed(filepath, C004_ALLOWED)
+    # C005 only applies to crates listed in C005_ALLOWED (lyra-semantic).
+    c005_applies = prefix is not None and prefix in C005_ALLOWED
+    c005_ok = not c005_applies or _is_allowed(filepath, C005_ALLOWED)
 
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
@@ -302,6 +343,18 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
                     f"{filepath}:{lineno}: C003 SyntaxKind discrimination"
                     f" ({crate_label})"
                 )
+
+        if not c004_ok and RE_SYNTAX_NODE_TOKEN.search(stripped):
+            errors.append(
+                f"{filepath}:{lineno}: C004 raw SyntaxNode/SyntaxToken"
+                f" ({crate_label})"
+            )
+
+        if not c005_ok and RE_DOT_SYNTAX.search(stripped):
+            errors.append(
+                f"{filepath}:{lineno}: C005 .syntax() call"
+                f" ({crate_label})"
+            )
 
     return errors
 
@@ -513,6 +566,61 @@ def self_test() -> int:
         print("FAIL: C003 import regex matched SyntaxKindExt")
         failures += 1
 
+    # Test 18 (C004): qualified SyntaxNode should fire
+    if not RE_SYNTAX_NODE_TOKEN.search('let n: lyra_parser::SyntaxNode = x;'):
+        print("FAIL: C004 did not catch qualified SyntaxNode")
+        failures += 1
+
+    # Test 19 (C004): import of SyntaxToken should fire
+    if not RE_SYNTAX_NODE_TOKEN.search('use lyra_parser::SyntaxToken;'):
+        print("FAIL: C004 did not catch SyntaxToken import")
+        failures += 1
+
+    # Test 20 (C004): unrelated identifier should not fire
+    if RE_SYNTAX_NODE_TOKEN.search('let syntax_node_count = 42;'):
+        print("FAIL: C004 false positive on syntax_node_count")
+        failures += 1
+
+    # Test 21 (C004): group import should fire
+    if not RE_SYNTAX_NODE_TOKEN.search('use lyra_parser::{SyntaxNode, Parse};'):
+        print("FAIL: C004 did not catch group import of SyntaxNode")
+        failures += 1
+
+    # Test 22 (C004): group import second position should fire
+    if not RE_SYNTAX_NODE_TOKEN.search('use lyra_parser::{Parse, SyntaxToken};'):
+        print("FAIL: C004 did not catch second-position group import")
+        failures += 1
+
+    # Test 23 (C004): bare unqualified ref should not fire (import catches)
+    if RE_SYNTAX_NODE_TOKEN.search('fn foo(node: &SyntaxNode) {}'):
+        print("FAIL: C004 false positive on bare unqualified SyntaxNode")
+        failures += 1
+
+    # Test 24 (C004): string literal should not fire
+    if RE_SYNTAX_NODE_TOKEN.search('"SyntaxNode is a CST handle"'):
+        print("FAIL: C004 false positive on string literal")
+        failures += 1
+
+    # Test 25 (C005): .syntax() call should fire
+    if not RE_DOT_SYNTAX.search('let n = expr.syntax();'):
+        print("FAIL: C005 did not catch .syntax() call")
+        failures += 1
+
+    # Test 26 (C005): .syntax() in method chain should fire
+    if not RE_DOT_SYNTAX.search('map.erased_ast_id(node.syntax())'):
+        print("FAIL: C005 did not catch .syntax() in method chain")
+        failures += 1
+
+    # Test 27 (C005): syntax() without dot should not fire
+    if RE_DOT_SYNTAX.search('fn syntax() -> &SyntaxNode {'):
+        print("FAIL: C005 false positive on fn syntax()")
+        failures += 1
+
+    # Test 28 (C005): .syntax_node() should not fire
+    if RE_DOT_SYNTAX.search('node.syntax_node()'):
+        print("FAIL: C005 false positive on .syntax_node()")
+        failures += 1
+
     if failures:
         print(f"\n{failures} self-test(s) FAILED")
         return 1
@@ -567,10 +675,14 @@ def main() -> int:
         print("\nRules:")
         print("  C001: No .children()/.descendants()/etc. CST traversal")
         print("  C002: No SyntaxKind::Expression/ParenExpr matching "
-              "(use Expr::peel())")
+              "(use Expr::peeled())")
         print("  C003: No SyntaxKind discrimination "
               "(use typed AST accessors)")
-        print("Allowlisted modules: see C001/C002/C003_ALLOWED in this script")
+        print("  C004: No raw SyntaxNode/SyntaxToken in lyra-semantic "
+              "(use typed wrappers)")
+        print("  C005: No .syntax() calls in lyra-semantic "
+              "(add typed accessor in lyra-ast)")
+        print("Allowlisted modules: see C00x_ALLOWED in this script")
         return 1
 
     checked = len(files)

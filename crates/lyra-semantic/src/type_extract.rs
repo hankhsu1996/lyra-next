@@ -1,9 +1,8 @@
 use lyra_ast::{
-    AstIdMap, AstNode, Declarator, NameRef, NetDecl, PackedDimension, ParamDecl, Port,
+    AstIdMap, Declarator, Expr, ExprKind, NameRef, NetDecl, PackedDimension, ParamDecl, Port,
     QualifiedName, Signing, TypeDeclSite, TypeNameRef, TypeSpec, TypeSpecKeyword, TypedefDecl,
     UnpackedDimKind, UnpackedDimension, VarDecl,
 };
-use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
 
 use crate::types::{
@@ -43,19 +42,27 @@ pub enum UserTypeRef {
 }
 
 impl UserTypeRef {
-    /// The AST node whose `Site` has a resolution in the resolve index.
-    pub fn resolve_node(&self) -> &SyntaxNode {
+    /// The simple `NameRef` for `Simple` and `InterfaceModport` variants.
+    /// Returns `None` for `Qualified`.
+    pub fn name_ref(&self) -> Option<&NameRef> {
         match self {
-            Self::Simple(nr) | Self::InterfaceModport { iface: nr, .. } => nr.syntax(),
-            Self::Qualified(qn) => qn.syntax(),
+            Self::Simple(nr) | Self::InterfaceModport { iface: nr, .. } => Some(nr),
+            Self::Qualified(_) => None,
+        }
+    }
+
+    /// The `QualifiedName` for the `Qualified` variant. Returns `None` for others.
+    pub fn qualified_name(&self) -> Option<&QualifiedName> {
+        match self {
+            Self::Qualified(qn) => Some(qn),
+            _ => None,
         }
     }
 }
 
 /// Extract the user-defined type reference from a `TypeSpec`, if any.
-pub fn user_type_ref(typespec: &SyntaxNode) -> Option<UserTypeRef> {
-    let ts = TypeSpec::cast(typespec.clone())?;
-    match ts.type_name_ref()? {
+pub fn user_type_ref(typespec: &TypeSpec) -> Option<UserTypeRef> {
+    match typespec.type_name_ref()? {
         TypeNameRef::Simple(nr) => Some(UserTypeRef::Simple(nr)),
         TypeNameRef::Qualified(qn) => Some(UserTypeRef::Qualified(qn)),
         TypeNameRef::Dotted(dn) => {
@@ -67,6 +74,21 @@ pub fn user_type_ref(typespec: &SyntaxNode) -> Option<UserTypeRef> {
             })
         }
     }
+}
+
+/// Extract a `UserTypeRef` from an expression that is a name reference.
+pub fn user_type_ref_from_expr(expr: &Expr) -> Option<UserTypeRef> {
+    let ek = expr.classify()?;
+    match ek {
+        ExprKind::NameRef(nr) => Some(UserTypeRef::Simple(nr)),
+        ExprKind::QualifiedName(qn) => Some(UserTypeRef::Qualified(qn)),
+        _ => None,
+    }
+}
+
+/// Extract a `UserTypeRef` from an `lyra_ast::TypeRef` (system-call type argument).
+pub fn user_type_ref_from_type_ref(tr: &lyra_ast::TypeRef) -> Option<UserTypeRef> {
+    user_type_ref(&tr.type_spec())
 }
 
 /// Normalize all `ConstInt` values inside a `SymbolType`.
@@ -254,17 +276,20 @@ fn extract_typedef_decl(td: &TypedefDecl, ast_id_map: &AstIdMap) -> SymbolType {
     SymbolType::TypeAlias(wrap_unpacked(ty, &unpacked))
 }
 
-/// Extract the base `Ty` from a `TypeSpec` node, including signing and packed dims.
+/// Extract the base `Ty` from a `TypeSpec`, including signing and packed dims.
 ///
 /// Used by callable signature extraction (in `lyra-db`) to type TF port parameters
 /// without going through the full `extract_type_from_container` path.
-pub fn extract_base_ty_from_typespec(typespec: &SyntaxNode, ast_id_map: &AstIdMap) -> Ty {
-    let Some(ts) = TypeSpec::cast(typespec.clone()) else {
-        return Ty::Error;
-    };
-    let (base_ty, signed_override) = extract_typespec_base(&ts);
-    let packed = extract_packed_dims(&ts, ast_id_map);
+pub fn extract_base_ty_from_typespec(typespec: &TypeSpec, ast_id_map: &AstIdMap) -> Ty {
+    let (base_ty, signed_override) = extract_typespec_base(typespec);
+    let packed = extract_packed_dims(typespec, ast_id_map);
     build_base_ty(base_ty, signed_override, packed)
+}
+
+/// Extract the base `Ty` from a `lyra_ast::TypeRef` (system-call type argument).
+pub fn extract_base_ty_from_type_ref(tr: &lyra_ast::TypeRef, ast_id_map: &AstIdMap) -> Ty {
+    let ts = tr.type_spec();
+    extract_base_ty_from_typespec(&ts, ast_id_map)
 }
 
 /// Extract the base type keyword and optional signing override from a `TypeSpec`.
@@ -284,8 +309,8 @@ fn extract_packed_dims(typespec: &TypeSpec, ast_id_map: &AstIdMap) -> Vec<Packed
 fn extract_single_packed_dim(dim: &PackedDimension, ast_id_map: &AstIdMap) -> PackedDim {
     match (dim.msb(), dim.lsb()) {
         (Some(msb), Some(lsb)) => PackedDim {
-            msb: expr_to_const_int(msb.syntax(), ast_id_map),
-            lsb: expr_to_const_int(lsb.syntax(), ast_id_map),
+            msb: expr_to_const_int(&msb, ast_id_map),
+            lsb: expr_to_const_int(&lsb, ast_id_map),
         },
         _ => PackedDim {
             msb: ConstInt::Error(ConstEvalError::Unsupported),
@@ -299,7 +324,7 @@ pub fn extract_unpacked_dim(dim: &UnpackedDimension, ast_id_map: &AstIdMap) -> U
     match dim.classify() {
         UnpackedDimKind::Wildcard => UnpackedDim::Assoc(AssocIndex::Wildcard),
         UnpackedDimKind::Queue { bound } => UnpackedDim::Queue {
-            bound: bound.map(|e| expr_to_const_int(e.syntax(), ast_id_map)),
+            bound: bound.map(|e| expr_to_const_int(&e, ast_id_map)),
         },
         UnpackedDimKind::Assoc => {
             let ts = dim.assoc_type_spec();
@@ -309,12 +334,10 @@ pub fn extract_unpacked_dim(dim: &UnpackedDimension, ast_id_map: &AstIdMap) -> U
             }
         }
         UnpackedDimKind::Range { msb, lsb } => UnpackedDim::Range {
-            msb: expr_to_const_int(msb.syntax(), ast_id_map),
-            lsb: expr_to_const_int(lsb.syntax(), ast_id_map),
+            msb: expr_to_const_int(&msb, ast_id_map),
+            lsb: expr_to_const_int(&lsb, ast_id_map),
         },
-        UnpackedDimKind::Size { expr } => {
-            UnpackedDim::Size(expr_to_const_int(expr.syntax(), ast_id_map))
-        }
+        UnpackedDimKind::Size { expr } => UnpackedDim::Size(expr_to_const_int(&expr, ast_id_map)),
         UnpackedDimKind::Unsized => UnpackedDim::Unsized,
     }
 }
@@ -362,8 +385,8 @@ fn extract_assoc_from_typespec(ts: &TypeSpec, _ast_id_map: &AstIdMap) -> Unpacke
     }
 }
 
-fn expr_to_const_int(expr: &SyntaxNode, ast_id_map: &AstIdMap) -> ConstInt {
-    match ast_id_map.erased_ast_id(expr) {
+fn expr_to_const_int(expr: &Expr, ast_id_map: &AstIdMap) -> ConstInt {
+    match ast_id_map.id_of(expr) {
         Some(id) => ConstInt::Unevaluated(id),
         None => ConstInt::Error(ConstEvalError::Unsupported),
     }

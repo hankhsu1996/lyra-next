@@ -1,5 +1,4 @@
-use lyra_ast::{AstNode, Expr, ExprKind, LiteralKind};
-use lyra_parser::SyntaxNode;
+use lyra_ast::{Expr, ExprKind, Literal, LiteralKind};
 
 /// Numeric base for a literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,17 +28,16 @@ pub(crate) struct LiteralShape {
     pub has_xz: bool,
 }
 
-/// Extract the bit width of a sized literal from an expression node.
+/// Extract the bit width of a sized literal from an expression.
 ///
 /// Strips `Expression` and `ParenExpr` wrappers recursively to find a
 /// `Literal` node, then checks if it is sized. Returns `Some(width)` for
 /// sized literals, `None` for unsized, non-literal, or malformed expressions.
-pub(crate) fn extract_sized_literal_width(expr_node: &SyntaxNode) -> Option<u32> {
-    let peeled = Expr::peel(expr_node)?;
-    let ExprKind::Literal(lit) = peeled.classify()? else {
+pub(crate) fn extract_sized_literal_width(expr: &Expr) -> Option<u32> {
+    let ExprKind::Literal(lit) = expr.classify()? else {
         return None;
     };
-    let shape = parse_literal_shape(lit.syntax())?;
+    let shape = parse_literal_shape(&lit)?;
     if shape.is_unsized {
         None
     } else {
@@ -47,13 +45,11 @@ pub(crate) fn extract_sized_literal_width(expr_node: &SyntaxNode) -> Option<u32>
     }
 }
 
-/// Parse a Literal syntax node into its shape.
+/// Parse a `Literal` into its shape.
 ///
-/// Accepts the Literal AST node directly and uses the typed `literal_kind()`
-/// accessor to classify the literal. Returns None for malformed or
-/// non-numeric literal forms (real, string).
-pub(crate) fn parse_literal_shape(literal_node: &SyntaxNode) -> Option<LiteralShape> {
-    let literal = lyra_ast::Literal::cast(literal_node.clone())?;
+/// Uses the typed `literal_kind()` accessor to classify the literal.
+/// Returns None for malformed or non-numeric literal forms (real, string).
+pub(crate) fn parse_literal_shape(literal: &Literal) -> Option<LiteralShape> {
     let kind = literal.literal_kind()?;
     match kind {
         LiteralKind::Int { .. } => Some(LiteralShape {
@@ -140,6 +136,7 @@ fn parse_based_shape(size_text: Option<&str>, based_text: &str) -> Option<Litera
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lyra_ast::AstNode;
     use lyra_lexer::SyntaxKind;
 
     fn parse_shape(src: &str) -> Option<LiteralShape> {
@@ -147,12 +144,13 @@ mod tests {
         let tokens = lyra_lexer::lex(&full);
         let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, &full);
         let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
-        find_literal(&parse.syntax()).and_then(|n| parse_literal_shape(&n))
+        let lit = find_literal(&parse.syntax())?;
+        parse_literal_shape(&lit)
     }
 
-    fn find_literal(node: &SyntaxNode) -> Option<SyntaxNode> {
+    fn find_literal(node: &lyra_parser::SyntaxNode) -> Option<Literal> {
         if node.kind() == SyntaxKind::Literal {
-            return Some(node.clone());
+            return Literal::cast(node.clone());
         }
         for child in node.children() {
             if let Some(found) = find_literal(&child) {

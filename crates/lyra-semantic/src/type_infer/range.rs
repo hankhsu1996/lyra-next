@@ -1,7 +1,7 @@
 use lyra_ast::RangeKind;
 
 use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx};
-use super::infer_expr_type;
+use super::infer_expr;
 use crate::types::{ConstInt, Ty, UnpackedDim};
 
 /// Compute the constant width of a range select from const-eval results.
@@ -41,7 +41,7 @@ pub(super) fn infer_range(range: &lyra_ast::RangeExpr, ctx: &dyn InferCtx) -> Ex
     let Some(base_node) = range.base_expr() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let base = infer_expr_type(base_node.syntax(), ctx, None);
+    let base = infer_expr(&base_node, ctx, None);
     if matches!(base.view, ExprView::Error(_)) {
         return base;
     }
@@ -62,24 +62,21 @@ pub(super) fn infer_range(range: &lyra_ast::RangeExpr, ctx: &dyn InferCtx) -> Ex
     let Some((op1_node, op2_node)) = range.operand_exprs() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let op1_et = infer_expr_type(op1_node.syntax(), ctx, None);
+    let op1_et = infer_expr(&op1_node, ctx, None);
     if matches!(op1_et.view, ExprView::Error(_)) {
         return op1_et;
     }
-    let op2_et = infer_expr_type(op2_node.syntax(), ctx, None);
+    let op2_et = infer_expr(&op2_node, ctx, None);
     if matches!(op2_et.view, ExprView::Error(_)) {
         return op2_et;
     }
 
     // 3. Const-eval and compute width
-    let width = match compute_slice_width(
-        kind,
-        ctx.const_eval(op1_node.syntax()),
-        ctx.const_eval(op2_node.syntax()),
-    ) {
-        Ok(w) => w,
-        Err(e) => return ExprType::error(e),
-    };
+    let width =
+        match compute_slice_width(kind, ctx.const_eval(&op1_node), ctx.const_eval(&op2_node)) {
+            Ok(w) => w,
+            Err(e) => return ExprType::error(e),
+        };
 
     // 4. Construct result type
     match &base.ty {

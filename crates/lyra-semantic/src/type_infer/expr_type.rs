@@ -1,9 +1,10 @@
-use lyra_parser::SyntaxNode;
+use lyra_ast::{AstIdMap, Expr};
 use smol_str::SmolStr;
 
 use crate::enum_def::EnumId;
 use crate::member::{MemberInfo, MemberLookupError, MethodInvalidReason};
 use crate::symbols::{GlobalSymbolId, SymbolKind};
+use crate::type_extract::UserTypeRef;
 use crate::types::{
     ConstEvalError, ConstInt, Integral, IntegralKw, PackedDim, PackedDims, SymbolType, Ty,
 };
@@ -295,24 +296,23 @@ pub struct CallablePort {
 pub trait InferCtx {
     /// The file being analyzed.
     fn file_id(&self) -> lyra_source::FileId;
+    /// Per-file AST ID map, enabling `Site`/ID computation from typed nodes.
+    fn ast_id_map(&self) -> &AstIdMap;
     /// Resolve a `NameRef`/`QualifiedName` to its type.
-    fn type_of_name(&self, name_node: &SyntaxNode) -> ExprType;
+    fn type_of_name(&self, name_expr: &Expr) -> ExprType;
     /// Evaluate a constant expression (for replication count).
-    fn const_eval(&self, expr_node: &SyntaxNode) -> ConstInt;
+    fn const_eval(&self, expr: &Expr) -> ConstInt;
     /// Resolve a callee name node to a callable symbol.
-    fn resolve_callable(
-        &self,
-        callee_node: &SyntaxNode,
-    ) -> Result<GlobalSymbolId, ResolveCallableError>;
+    fn resolve_callable(&self, callee: &Expr) -> Result<GlobalSymbolId, ResolveCallableError>;
     /// Get the signature of a callable symbol.
     fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef>;
     /// Look up a member (field) on a type.
     fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError>;
     /// Get the integral view of an enum's base type.
     fn enum_integral_view(&self, id: &EnumId) -> Option<BitVecType>;
-    /// Resolve a `NameRef` node as a type (typedef/enum/struct name).
+    /// Resolve a `UserTypeRef` as a type (typedef/enum/struct name).
     /// Used by system functions like `$bits` that accept type arguments.
-    fn resolve_type_arg(&self, name_node: &SyntaxNode) -> Option<Ty>;
+    fn resolve_type_arg(&self, utr: &UserTypeRef) -> Option<Ty>;
 }
 
 /// Extract an integral view from an `ExprType`, auto-casting enums to

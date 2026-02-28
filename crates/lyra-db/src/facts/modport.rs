@@ -1,4 +1,4 @@
-use lyra_ast::{AstNode, FieldExpr};
+use lyra_ast::{FieldExpr, HasSyntax};
 use lyra_semantic::modport_facts::{FieldAccessFact, FieldAccessFacts, FieldAccessTarget};
 use lyra_semantic::types::{ModportViewTarget, Ty};
 

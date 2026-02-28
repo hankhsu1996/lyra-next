@@ -26,6 +26,8 @@ ast_nodes! {
         net_decls: [NetDecl],
         param_decls: [ParamDecl],
         module_instantiations: [ModuleInstantiation],
+        function_decls: [FunctionDecl],
+        task_decls: [TaskDecl],
     }
 
     PortList(SyntaxKind::PortList) {
@@ -284,6 +286,16 @@ impl Expression {
     /// The single wrapped expression child.
     pub fn inner(&self) -> Option<crate::expr::Expr> {
         support::expr_child(&self.syntax, 0)
+    }
+
+    /// The wrapped expression as an `Expr` handle (alias for `inner`).
+    pub fn expr(&self) -> Option<crate::expr::Expr> {
+        self.inner()
+    }
+
+    /// Unwrap the wrapper and peel any remaining wrapper forms.
+    pub fn peeled_expr(&self) -> Option<crate::expr::Expr> {
+        self.inner().and_then(|e| e.peeled())
     }
 }
 

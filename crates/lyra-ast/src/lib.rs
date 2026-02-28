@@ -15,7 +15,7 @@ pub use ast_id::{AstId, AstIdMap, ErasedAstId};
 pub use dims::UnpackedDimSource;
 pub use expr::{Expr, ExprKind, LiteralKind, TfArg, TypeRef};
 pub use generate_item::{GenerateBody, GenerateItem, GenerateScope};
-pub use node::{AstNode, StmtNode, is_expression_kind, is_statement_kind};
+pub use node::{AstNode, HasSyntax, StmtNode, is_expression_kind, is_statement_kind};
 pub use nodes::{
     AlwaysBlock, ArgList, AssignStmt, BinExpr, BlockStmt, CallExpr, CaseItem, CaseStmt, CastExpr,
     ConcatExpr, CondExpr, ConfigDecl, ContinuousAssign, Declarator, DottedName, EnumMember,

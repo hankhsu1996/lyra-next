@@ -6,7 +6,7 @@ use super::expr_type::{
     BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView, InferCtx, Signedness,
     try_integral_view,
 };
-use super::infer_expr_type;
+use super::infer_expr;
 use crate::types::{ConstInt, Ty};
 
 pub(super) fn infer_concat(concat: &ConcatExpr, ctx: &dyn InferCtx) -> ExprType {
@@ -15,7 +15,7 @@ pub(super) fn infer_concat(concat: &ConcatExpr, ctx: &dyn InferCtx) -> ExprType 
     let mut any_four_state = false;
 
     for child in concat.operands() {
-        let child_ty = infer_expr_type(child.syntax(), ctx, None);
+        let child_ty = infer_expr(&child, ctx, None);
         if let ExprView::Error(_) = &child_ty.view {
             return child_ty;
         }
@@ -112,7 +112,7 @@ pub(super) fn infer_stream(stream: &StreamExpr, ctx: &dyn InferCtx) -> ExprType 
             continue;
         };
 
-        let child_ty = infer_expr_type(expr_node.syntax(), ctx, None);
+        let child_ty = infer_expr(&expr_node, ctx, None);
         if let ExprView::Error(_) = &child_ty.view {
             width = width.add(StreamWidth::Error);
             continue;
@@ -183,7 +183,7 @@ fn infer_stream_with_operand(
             let Some(width_node) = range.rhs() else {
                 return StreamWidth::Error;
             };
-            match ctx.const_eval(width_node.syntax()) {
+            match ctx.const_eval(&width_node) {
                 ConstInt::Known(w) if w > 0 => match u32::try_from(w) {
                     Ok(v) => StreamWidth::Known(v),
                     Err(_) => StreamWidth::Dynamic,
@@ -197,10 +197,7 @@ fn infer_stream_with_operand(
             let (Some(lo_node), Some(hi_node)) = (range.lhs(), range.rhs()) else {
                 return StreamWidth::Error;
             };
-            match (
-                ctx.const_eval(lo_node.syntax()),
-                ctx.const_eval(hi_node.syntax()),
-            ) {
+            match (ctx.const_eval(&lo_node), ctx.const_eval(&hi_node)) {
                 (ConstInt::Known(lo), ConstInt::Known(hi)) => {
                     let diff = (i128::from(hi) - i128::from(lo)).unsigned_abs() + 1;
                     match u32::try_from(diff) {
@@ -224,7 +221,7 @@ pub(super) fn infer_replic(replic: &ReplicExpr, ctx: &dyn InferCtx) -> ExprType 
     let Some(count_expr) = replic.count() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let count = ctx.const_eval(count_expr.syntax());
+    let count = ctx.const_eval(&count_expr);
 
     let replic_count = match count {
         ConstInt::Known(n) => {
@@ -267,7 +264,7 @@ pub(super) fn infer_replic(replic: &ReplicExpr, ctx: &dyn InferCtx) -> ExprType 
         let mut all_known = true;
         let mut any_four_state = false;
         for item in &body {
-            let item_ty = infer_expr_type(item.syntax(), ctx, None);
+            let item_ty = infer_expr(item, ctx, None);
             if let ExprView::Error(_) = &item_ty.view {
                 return item_ty;
             }

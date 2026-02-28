@@ -11,30 +11,24 @@ pub use expr_type::{
     ExprTypeErrorKind, ExprView, InferCtx, ResolveCallableError, Signedness,
 };
 
-use lyra_ast::{AstNode, Expr, ExprKind};
-use lyra_parser::SyntaxNode;
+use lyra_ast::{Expr, ExprKind};
 
 use crate::coerce::IntegralCtx;
 use crate::types::Ty;
 
-/// Infer the type of an expression node, optionally in a context.
+/// Infer the type of an expression, optionally in a context.
 ///
 /// When `expected` is `None`, returns the self-determined type.
 /// When `expected` is `Some(ctx)`, propagates context sizing per LRM 11.6.
-pub fn infer_expr_type(
-    expr: &SyntaxNode,
-    ctx: &dyn InferCtx,
-    expected: Option<&IntegralCtx>,
-) -> ExprType {
-    let Some(peeled) = Expr::peel(expr) else {
+pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx>) -> ExprType {
+    let Some(peeled) = expr.peeled() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
     let Some(ek) = peeled.classify() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
     match ek {
-        ExprKind::NameRef(n) => ctx.type_of_name(n.syntax()),
-        ExprKind::QualifiedName(n) => ctx.type_of_name(n.syntax()),
+        ExprKind::NameRef(_) | ExprKind::QualifiedName(_) => ctx.type_of_name(&peeled),
         ExprKind::Literal(l) => scalar::infer_literal(&l, expected),
         ExprKind::PrefixExpr(p) => scalar::infer_prefix(&p, ctx, expected),
         ExprKind::BinExpr(b) => scalar::infer_binary(&b, ctx, expected),
@@ -55,8 +49,8 @@ pub fn infer_expr_type(
 ///
 /// Void methods are legal in statement context; `VoidUsedAsExpr` is
 /// replaced with a successful `Ty::Void` result.
-pub fn infer_expr_type_stmt(expr: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let result = infer_expr_type(expr, ctx, None);
+pub fn infer_expr_stmt(expr: &Expr, ctx: &dyn InferCtx) -> ExprType {
+    let result = infer_expr(expr, ctx, None);
     if matches!(
         result.view,
         ExprView::Error(ExprTypeErrorKind::VoidUsedAsExpr)

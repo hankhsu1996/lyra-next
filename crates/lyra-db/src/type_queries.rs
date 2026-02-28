@@ -1,4 +1,4 @@
-use lyra_ast::{AstNode, TypeDeclSite, UnpackedDimSource};
+use lyra_ast::{TypeDeclSite, UnpackedDimSource};
 use lyra_semantic::UserTypeRef;
 use lyra_semantic::record::{Packing, RecordKind, SymbolOrigin};
 use lyra_semantic::resolve_index::CoreResolveResult;
@@ -210,7 +210,7 @@ pub fn type_of_symbol_raw<'db>(
 
     // Check for user-defined type (typedef expansion trigger)
     if let Some(ts) = container.type_spec()
-        && let Some(utr) = user_type_ref(ts.syntax())
+        && let Some(utr) = user_type_ref(&ts)
     {
         let dim_owner = match &container {
             TypeDeclSite::Port(port) => Some(UnpackedDimSource::Port(port.clone())),
@@ -364,7 +364,7 @@ fn expand_typedef(
 ) -> lyra_semantic::types::SymbolType {
     use lyra_semantic::types::{SymbolType, SymbolTypeError, UnpackedDim};
 
-    let resolve_node = user_type.resolve_node();
+    let resolve_node = crate::resolve_helpers::utr_syntax(user_type);
 
     // Look up the name in the resolve index
     let resolve = resolve_index_file(db, source_file, unit);

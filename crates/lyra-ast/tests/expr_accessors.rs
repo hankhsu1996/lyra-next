@@ -216,7 +216,8 @@ fn literal_kind_int() {
 #[test]
 fn expr_peel_parens() {
     let node = parse_expr("((x))");
-    let peeled = Expr::peel(&node).expect("should peel");
+    let expr = Expr::cast(node).expect("should cast");
+    let peeled = expr.peeled().expect("should peel");
     assert_eq!(peeled.kind(), SyntaxKind::NameRef);
 }
 
@@ -227,7 +228,8 @@ fn expr_peel_expression_wrapper() {
     let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, src);
     let root = lyra_parser::parse(&pp.tokens, &pp.expanded_text).syntax();
     let expr_node = find_expression_wrapper(&root).expect("should find Expression wrapper");
-    let peeled = Expr::peel(&expr_node).expect("should peel");
+    let expr = Expr::cast(expr_node).expect("should cast");
+    let peeled = expr.peeled().expect("should peel");
     assert_eq!(peeled.kind(), SyntaxKind::Literal);
 }
 

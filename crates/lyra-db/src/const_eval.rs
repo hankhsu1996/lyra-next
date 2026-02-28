@@ -1,4 +1,4 @@
-use lyra_ast::{Expr, ExprKind, TfArg};
+use lyra_ast::{Expr, ExprKind, HasSyntax, TfArg};
 use lyra_parser::SyntaxNode;
 use lyra_semantic::resolve_index::{CoreResolution, CoreResolveResult};
 use lyra_semantic::symbols::{GlobalSymbolId, Namespace};
@@ -205,12 +205,11 @@ fn classify_bits_arg_for_const(
 ) -> Ty {
     match arg {
         TfArg::Type(type_ref) => {
-            let typespec_node = type_ref.syntax();
-            if let Some(ty) = resolve_type_from_typespec(db, unit, source_file, map, typespec_node)
-            {
+            let ts = type_ref.type_spec();
+            if let Some(ty) = resolve_type_from_typespec(db, unit, source_file, map, &ts) {
                 return ty;
             }
-            lyra_semantic::extract_base_ty_from_typespec(typespec_node, map)
+            lyra_semantic::extract_base_ty_from_typespec(&ts, map)
         }
         TfArg::Expr(expr) => {
             let Some(ek) = expr.classify() else {
@@ -238,10 +237,10 @@ fn resolve_type_from_typespec(
     unit: CompilationUnit,
     source_file: SourceFile,
     map: &lyra_ast::AstIdMap,
-    typespec: &SyntaxNode,
+    typespec: &lyra_ast::TypeSpec,
 ) -> Option<Ty> {
     let utr = lyra_semantic::user_type_ref(typespec)?;
-    let name_site_id = map.erased_ast_id(utr.resolve_node())?;
+    let name_site_id = map.erased_ast_id(crate::resolve_helpers::utr_syntax(&utr))?;
     let resolve = base_resolve_index(db, source_file, unit);
     let res = resolve.resolutions.get(&name_site_id)?;
     let sym_id = match &res.target {

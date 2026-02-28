@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lyra_ast::{AstNode, ErasedAstId};
+use lyra_ast::{AstNode, ErasedAstId, HasSyntax};
 use lyra_parser::{SyntaxNode, SyntaxToken};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::symbols::GlobalDefId;

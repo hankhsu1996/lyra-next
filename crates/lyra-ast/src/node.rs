@@ -1,27 +1,29 @@
 use lyra_parser::SyntaxNode;
 use lyra_source::TextRange;
 
+/// Access to the underlying `SyntaxNode`.
+///
+/// Implemented by both single-kind `AstNode` wrappers and multi-kind union
+/// wrappers like `Expr`. This is the shared contract for `AstIdMap` lookups
+/// and range queries, without requiring `AstNode`'s `can_cast`/`cast`.
+pub trait HasSyntax {
+    fn syntax(&self) -> &SyntaxNode;
+
+    fn text_range(&self) -> TextRange {
+        self.syntax().text_range()
+    }
+}
+
 /// Trait for typed AST node wrappers.
 ///
 /// Each wrapper corresponds to a single `SyntaxKind` node variant and provides
 /// typed accessors for children and tokens.
-pub trait AstNode: Sized {
+pub trait AstNode: HasSyntax + Sized {
     /// Returns `true` if the given `SyntaxKind` can be cast to this type.
     fn can_cast(kind: lyra_lexer::SyntaxKind) -> bool;
 
     /// Try to cast a raw `SyntaxNode` into this typed wrapper.
     fn cast(node: SyntaxNode) -> Option<Self>;
-
-    /// Access the underlying `SyntaxNode`.
-    ///
-    /// Prefer typed accessors and `text_range()` for routine use.
-    /// Direct `SyntaxNode` access is for internal/tooling use only.
-    fn syntax(&self) -> &SyntaxNode;
-
-    /// Source range of this node.
-    fn text_range(&self) -> TextRange {
-        self.syntax().text_range()
-    }
 
     /// Full source text of this node (including trivia).
     fn text(&self) -> String {
@@ -60,6 +62,12 @@ pub struct StmtNode {
     pub(crate) syntax: lyra_parser::SyntaxNode,
 }
 
+impl HasSyntax for StmtNode {
+    fn syntax(&self) -> &lyra_parser::SyntaxNode {
+        &self.syntax
+    }
+}
+
 impl AstNode for StmtNode {
     fn can_cast(kind: lyra_lexer::SyntaxKind) -> bool {
         is_statement_kind(kind)
@@ -71,10 +79,6 @@ impl AstNode for StmtNode {
         } else {
             None
         }
-    }
-
-    fn syntax(&self) -> &lyra_parser::SyntaxNode {
-        &self.syntax
     }
 }
 
@@ -105,8 +109,8 @@ pub fn is_expression_kind(kind: lyra_lexer::SyntaxKind) -> bool {
 
 /// Declare typed AST node wrappers with optional generated accessors.
 ///
-/// Each entry declares a struct, its `AstNode` impl, and (optionally)
-/// typed accessor methods for child nodes and tokens.
+/// Each entry declares a struct, its `HasSyntax` + `AstNode` impls, and
+/// (optionally) typed accessor methods for child nodes and tokens.
 ///
 /// # Field forms
 ///
@@ -131,11 +135,17 @@ macro_rules! ast_nodes {
         )*
     };
 
-    // Struct + AstNode impl
+    // Struct + HasSyntax + AstNode impl
     (@node $name:ident, $kind:path) => {
         #[derive(Debug, Clone)]
         pub struct $name {
             pub(crate) syntax: lyra_parser::SyntaxNode,
+        }
+
+        impl $crate::node::HasSyntax for $name {
+            fn syntax(&self) -> &lyra_parser::SyntaxNode {
+                &self.syntax
+            }
         }
 
         impl $crate::node::AstNode for $name {
@@ -149,10 +159,6 @@ macro_rules! ast_nodes {
                 } else {
                     None
                 }
-            }
-
-            fn syntax(&self) -> &lyra_parser::SyntaxNode {
-                &self.syntax
             }
         }
     };

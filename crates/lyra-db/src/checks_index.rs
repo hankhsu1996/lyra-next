@@ -2,8 +2,9 @@ use std::collections::HashSet;
 
 use lyra_ast::{
     AssignStmt, AstIdMap, AstNode, BlockStmt, CaseStmt, ContinuousAssign, ErasedAstId, Expr,
-    ExprKind, ForStmt, ForeverStmt, IfStmt, ModuleBody, RepeatStmt, SourceFile, StmtNode,
-    SystemTfCall, TimingControl, VarDecl, WhileStmt, expr_children,
+    ExprKind, ForStmt, ForeverStmt, FunctionDecl, GenerateItem, GenerateRegion, HasSyntax, IfStmt,
+    ModuleBody, RepeatStmt, SourceFile, StmtNode, SystemTfCall, TaskDecl, TimingControl, VarDecl,
+    WhileStmt, expr_children,
 };
 use lyra_parser::SyntaxNode;
 use lyra_semantic::type_check::AccessMode;
@@ -102,6 +103,76 @@ impl IndexBuilder<'_> {
                 self.collect_stmt(&stmt, AccessMode::Read);
             }
         }
+        for func in body.function_decls() {
+            self.collect_function_body(&func);
+        }
+        for task in body.task_decls() {
+            self.collect_task_body(&task);
+        }
+        for gi in body.generate_items() {
+            self.collect_generate_item(&gi);
+        }
+    }
+
+    fn collect_function_body(&mut self, func: &FunctionDecl) {
+        for stmt in func.statements() {
+            self.collect_stmt(&stmt, AccessMode::Read);
+        }
+    }
+
+    fn collect_task_body(&mut self, task: &TaskDecl) {
+        for stmt in task.statements() {
+            self.collect_stmt(&stmt, AccessMode::Read);
+        }
+    }
+
+    fn collect_generate_item(&mut self, item: &GenerateItem) {
+        match item {
+            GenerateItem::ModuleInstantiation(_) => {}
+            GenerateItem::IfStmt(if_s) => {
+                if let Some(c) = if_s.condition() {
+                    self.collect_from_expr(&c, AccessMode::Read);
+                }
+                if let Some(t) = if_s.then_body() {
+                    self.collect_stmt(&t, AccessMode::Read);
+                }
+                if let Some(e) = if_s.else_body() {
+                    self.collect_stmt(&e, AccessMode::Read);
+                }
+            }
+            GenerateItem::ForStmt(for_s) => {
+                for expr in expr_children(for_s.syntax()) {
+                    self.collect_from_expr(&expr, AccessMode::Read);
+                }
+                if let Some(b) = for_s.body() {
+                    self.collect_stmt(&b, AccessMode::Read);
+                }
+            }
+            GenerateItem::CaseStmt(case) => {
+                for ci in case.items() {
+                    for expr in expr_children(ci.syntax()) {
+                        self.collect_from_expr(&expr, AccessMode::Read);
+                    }
+                    if let Some(b) = ci.body() {
+                        self.collect_stmt(&b, AccessMode::Read);
+                    }
+                }
+            }
+            GenerateItem::GenerateRegion(region) => {
+                self.collect_generate_region(region);
+            }
+            GenerateItem::BlockStmt(block) => {
+                for s in block.statements() {
+                    self.collect_stmt(&s, AccessMode::Read);
+                }
+            }
+        }
+    }
+
+    fn collect_generate_region(&mut self, region: &GenerateRegion) {
+        for gi in region.generate_items() {
+            self.collect_generate_item(&gi);
+        }
     }
 
     fn collect_continuous_assign(&mut self, ca: &ContinuousAssign) {
@@ -168,14 +239,23 @@ impl IndexBuilder<'_> {
                 }
             }
         } else if let Some(for_s) = ForStmt::cast(node.clone()) {
+            for expr in expr_children(for_s.syntax()) {
+                self.collect_from_expr(&expr, access);
+            }
             if let Some(b) = for_s.body() {
                 self.collect_stmt(&b, access);
             }
         } else if let Some(while_s) = WhileStmt::cast(node.clone()) {
+            for expr in expr_children(while_s.syntax()) {
+                self.collect_from_expr(&expr, access);
+            }
             if let Some(b) = while_s.body() {
                 self.collect_stmt(&b, access);
             }
         } else if let Some(repeat_s) = RepeatStmt::cast(node.clone()) {
+            for expr in expr_children(repeat_s.syntax()) {
+                self.collect_from_expr(&expr, access);
+            }
             if let Some(b) = repeat_s.body() {
                 self.collect_stmt(&b, access);
             }
@@ -184,9 +264,14 @@ impl IndexBuilder<'_> {
                 self.collect_stmt(&b, access);
             }
         } else if let Some(tc) = TimingControl::cast(node.clone()) {
+            for expr in expr_children(tc.syntax()) {
+                self.collect_from_expr(&expr, access);
+            }
             if let Some(b) = tc.body() {
                 self.collect_stmt(&b, access);
             }
+        } else if let Some(ca) = ContinuousAssign::cast(node.clone()) {
+            self.collect_continuous_assign(&ca);
         } else if SystemTfCall::cast(node.clone()).is_some() {
             self.push(node, CheckKind::SystemTfCall, access);
         } else if VarDecl::cast(node.clone()).is_some() {
@@ -229,5 +314,119 @@ impl IndexBuilder<'_> {
         for child in expr_children(expr.syntax()) {
             self.collect_from_expr(&child, access);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lyra_source::FileId;
+
+    fn parse_and_index(src: &str) -> ChecksIndex {
+        let file = FileId(0);
+        let tokens = lyra_lexer::lex(src);
+        let pp = lyra_preprocess::preprocess_identity(file, &tokens, src);
+        let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
+        let root = parse.syntax();
+        let map = AstIdMap::from_root(file, &root);
+        build_checks_index(&root, &map)
+    }
+
+    fn has_kind(index: &ChecksIndex, kind: CheckKind) -> bool {
+        index.entries.iter().any(|e| e.kind == kind)
+    }
+
+    #[test]
+    fn function_body_var_decl_and_assign() {
+        let idx =
+            parse_and_index("module m; function void foo(); logic x; x = 1; endfunction endmodule");
+        assert!(
+            has_kind(&idx, CheckKind::VarDecl),
+            "VarDecl inside function body"
+        );
+        assert!(
+            has_kind(&idx, CheckKind::AssignStmt),
+            "AssignStmt inside function body"
+        );
+    }
+
+    #[test]
+    fn task_body_system_call() {
+        let idx = parse_and_index("module m; task t(); $display(\"hi\"); endtask endmodule");
+        assert!(
+            has_kind(&idx, CheckKind::SystemTfCall),
+            "SystemTfCall inside task body"
+        );
+    }
+
+    #[test]
+    fn generate_if_with_assign() {
+        let idx = parse_and_index("module m; if (1) begin : g logic x; end endmodule");
+        assert!(
+            has_kind(&idx, CheckKind::VarDecl),
+            "VarDecl inside generate if"
+        );
+    }
+
+    #[test]
+    fn generate_for_with_nested_region() {
+        let idx = parse_and_index(
+            "module m;\n\
+             generate\n\
+               genvar i;\n\
+               for (i = 0; i < 4; i = i + 1) begin : gen\n\
+                 assign x = i;\n\
+               end\n\
+             endgenerate\n\
+             endmodule",
+        );
+        assert!(
+            has_kind(&idx, CheckKind::ContinuousAssign),
+            "ContinuousAssign inside generate for"
+        );
+    }
+
+    #[test]
+    fn while_condition_system_call() {
+        let idx =
+            parse_and_index("module m; initial begin while ($bits(logic)) begin end end endmodule");
+        assert!(
+            has_kind(&idx, CheckKind::SystemTfCall),
+            "$bits in while condition"
+        );
+    }
+
+    #[test]
+    fn for_stmt_condition_system_call() {
+        let idx = parse_and_index(
+            "module m; initial begin\n\
+             integer i;\n\
+             for (i = 0; i < $bits(logic); i = i + 1) begin end\n\
+             end endmodule",
+        );
+        assert!(
+            has_kind(&idx, CheckKind::SystemTfCall),
+            "$bits in for-loop condition"
+        );
+    }
+
+    #[test]
+    fn repeat_condition_collected() {
+        let idx = parse_and_index(
+            "module m; initial begin repeat ($bits(logic)) begin end end endmodule",
+        );
+        assert!(
+            has_kind(&idx, CheckKind::SystemTfCall),
+            "$bits in repeat count"
+        );
+    }
+
+    #[test]
+    fn timing_control_expr_collected() {
+        let idx = parse_and_index("module m; initial begin #($bits(logic)) x = 1; end endmodule");
+        assert!(
+            has_kind(&idx, CheckKind::SystemTfCall),
+            "$bits in timing control delay"
+        );
     }
 }

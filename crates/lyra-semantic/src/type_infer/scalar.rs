@@ -1,12 +1,10 @@
-use lyra_ast::{
-    AstNode, BinExpr, CastExpr, CondExpr, Literal, LiteralKind, PrefixExpr, SyntaxPrefixOp,
-};
+use lyra_ast::{BinExpr, CastExpr, CondExpr, Literal, LiteralKind, PrefixExpr, SyntaxPrefixOp};
 
 use super::expr_type::{
     BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView, InferCtx, Signedness,
     try_integral_view,
 };
-use super::infer_expr_type;
+use super::infer_expr;
 use crate::coerce::{
     IntegralCtx, OpCategory, apply_outer_context, coerce_integral, comparison_context, op_spec,
     operator_result_self,
@@ -38,7 +36,7 @@ pub(super) fn infer_literal(lit: &Literal, expected: Option<&IntegralCtx>) -> Ex
                 ExprType::bitvec(self_ty)
             }
         }
-        _ => match parse_literal_shape(lit.syntax()) {
+        _ => match parse_literal_shape(lit) {
             Some(shape) => {
                 let signed = if shape.signed {
                     Signedness::Signed
@@ -68,18 +66,17 @@ pub(super) fn infer_prefix(
     let Some(operand_expr) = pfx.operand() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let operand_node = operand_expr.syntax().clone();
 
     if op == SyntaxPrefixOp::LogNot || op.is_reduction() {
         // Logical negation / reduction: always 1-bit unsigned, operand self-determined
-        let _operand = infer_expr_type(&operand_node, ctx, None);
+        let _operand = infer_expr(&operand_expr, ctx, None);
         ExprType::one_bit()
     } else if matches!(
         op,
         SyntaxPrefixOp::BitNot | SyntaxPrefixOp::Plus | SyntaxPrefixOp::Minus
     ) {
         // Bitwise NOT or unary +/-: pass context to operand
-        let operand = infer_expr_type(&operand_node, ctx, expected);
+        let operand = infer_expr(&operand_expr, ctx, expected);
         match &operand.view {
             ExprView::BitVec(_) | ExprView::Error(_) => operand,
             ExprView::Plain => {
@@ -114,8 +111,8 @@ pub(super) fn infer_binary(
     };
 
     // Step 1-2: self-determined types of both operands
-    let lhs_self = infer_expr_type(lhs_node.syntax(), ctx, None);
-    let rhs_self = infer_expr_type(rhs_node.syntax(), ctx, None);
+    let lhs_self = infer_expr(&lhs_node, ctx, None);
+    let rhs_self = infer_expr(&rhs_node, ctx, None);
 
     let spec = op_spec(op);
 
@@ -142,17 +139,17 @@ pub(super) fn infer_binary(
     // Step 5: re-infer operands with context (branched by category)
     match spec.category {
         OpCategory::ContextBoth => {
-            infer_expr_type(lhs_node.syntax(), ctx, Some(&result_ctx));
-            infer_expr_type(rhs_node.syntax(), ctx, Some(&result_ctx));
+            infer_expr(&lhs_node, ctx, Some(&result_ctx));
+            infer_expr(&rhs_node, ctx, Some(&result_ctx));
         }
         OpCategory::ShiftLike => {
-            infer_expr_type(lhs_node.syntax(), ctx, Some(&result_ctx));
+            infer_expr(&lhs_node, ctx, Some(&result_ctx));
             // RHS is self-determined
         }
         OpCategory::Comparison => {
             let cmp_ctx = comparison_context(&lhs_bv, &rhs_bv);
-            infer_expr_type(lhs_node.syntax(), ctx, Some(&cmp_ctx));
-            infer_expr_type(rhs_node.syntax(), ctx, Some(&cmp_ctx));
+            infer_expr(&lhs_node, ctx, Some(&cmp_ctx));
+            infer_expr(&rhs_node, ctx, Some(&cmp_ctx));
         }
         OpCategory::Logical => {
             // Both operands are self-determined
@@ -179,11 +176,11 @@ pub(super) fn infer_cond(
     };
 
     // Condition is always self-determined
-    let _cond = infer_expr_type(cond_node.syntax(), ctx, None);
+    let _cond = infer_expr(&cond_node, ctx, None);
 
     // Self-determined types of both arms
-    let then_ty = infer_expr_type(then_node.syntax(), ctx, None);
-    let else_ty = infer_expr_type(else_node.syntax(), ctx, None);
+    let then_ty = infer_expr(&then_node, ctx, None);
+    let else_ty = infer_expr(&else_node, ctx, None);
 
     match (&then_ty.view, &else_ty.view) {
         (ExprView::BitVec(a), ExprView::BitVec(b)) => {
@@ -215,8 +212,8 @@ pub(super) fn infer_cond(
             };
 
             // Re-infer arms with context
-            infer_expr_type(then_node.syntax(), ctx, Some(&arm_ctx));
-            infer_expr_type(else_node.syntax(), ctx, Some(&arm_ctx));
+            infer_expr(&then_node, ctx, Some(&arm_ctx));
+            infer_expr(&else_node, ctx, Some(&arm_ctx));
 
             ExprType::bitvec(coerce_integral(&merged, &arm_ctx))
         }
@@ -230,25 +227,23 @@ pub(super) fn infer_cond(
 pub(super) fn infer_cast(cast: &CastExpr, ctx: &dyn InferCtx) -> ExprType {
     // Infer the inner expression (for side effects / context propagation)
     if let Some(inner) = cast.inner_expr() {
-        let _ = infer_expr_type(inner.syntax(), ctx, None);
+        let _ = infer_expr(&inner, ctx, None);
     }
 
     // Resolve the target type from the TypeSpec child
     let Some(typespec) = cast.cast_type() else {
         return ExprType::error(ExprTypeErrorKind::CastTargetNotAType);
     };
-    let ts_node = typespec.syntax();
 
     // Try user-defined type (enum/typedef name) via resolve_type_arg
-    if let Some(utr) = crate::user_type_ref(ts_node)
-        && let Some(ty) = ctx.resolve_type_arg(utr.resolve_node())
+    if let Some(utr) = crate::user_type_ref(&typespec)
+        && let Some(ty) = ctx.resolve_type_arg(&utr)
     {
         return ExprType::from_ty(&ty);
     }
 
     // Keyword type: extract from TypeSpec directly
-    let map = lyra_ast::AstIdMap::from_root(ctx.file_id(), ts_node);
-    let ty = crate::extract_base_ty_from_typespec(ts_node, &map);
+    let ty = crate::extract_base_ty_from_typespec(&typespec, ctx.ast_id_map());
     if matches!(ty, Ty::Error) {
         return ExprType::error(ExprTypeErrorKind::CastTargetNotAType);
     }

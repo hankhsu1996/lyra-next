@@ -91,8 +91,7 @@ pub fn eval_const_expr_full(
 }
 
 fn eval_literal(lit: &Literal) -> EvalResult {
-    use lyra_ast::AstNode;
-    let shape = parse_literal_shape(lit.syntax()).ok_or(ConstEvalError::Unsupported)?;
+    let shape = parse_literal_shape(lit).ok_or(ConstEvalError::Unsupported)?;
 
     if shape.has_xz {
         return Err(ConstEvalError::NonConstant);
