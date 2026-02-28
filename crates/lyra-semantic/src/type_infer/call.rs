@@ -1,5 +1,4 @@
-use lyra_ast::{AstNode, CallExpr, Expr, FieldExpr, SystemTfCall};
-use lyra_lexer::SyntaxKind;
+use lyra_ast::{AstNode, CallExpr, Expr, ExprKind, FieldExpr, SystemTfCall};
 use lyra_parser::SyntaxNode;
 
 use super::expr_type::{
@@ -10,28 +9,21 @@ use super::infer_expr_type;
 use crate::coerce::IntegralCtx;
 use crate::member::{MemberInfo, MemberKind, MemberLookupError};
 
-pub(super) fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    // System task/function calls: $clog2, $signed, $bits, etc.
-    if SystemTfCall::cast(node.clone())
-        .and_then(|s| s.system_name())
-        .is_some()
-    {
-        return crate::system_functions::infer_system_call(node, ctx);
-    }
-
-    // User-defined call: classify callee form
-    let Some(call) = CallExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+pub(super) fn infer_call(call: &CallExpr, ctx: &dyn InferCtx) -> ExprType {
     let Some(callee_expr) = call.callee() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let callee_node = callee_expr.syntax().clone();
 
-    match callee_node.kind() {
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName => {}
-        SyntaxKind::FieldExpr => {
-            return infer_method_call(node, &callee_node, ctx);
+    let Some(callee_kind) = callee_expr.classify() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedCalleeForm(
+            CalleeFormKind::Other,
+        ));
+    };
+
+    match callee_kind {
+        ExprKind::NameRef(_) | ExprKind::QualifiedName(_) => {}
+        ExprKind::FieldExpr(_) => {
+            return infer_method_call(call.syntax(), callee_expr.syntax(), ctx);
         }
         _ => {
             return ExprType::error(ExprTypeErrorKind::UnsupportedCalleeForm(
@@ -39,6 +31,8 @@ pub(super) fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
             ));
         }
     }
+
+    let callee_node = callee_expr.syntax().clone();
 
     // Resolve callee to a callable symbol
     let sym_id = match ctx.resolve_callable(&callee_node) {
@@ -61,15 +55,16 @@ pub(super) fn infer_call(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
         return ExprType::error(ExprTypeErrorKind::TaskInExprContext);
     }
 
-    check_call_args(node, &sig, ctx);
+    check_call_args(call, &sig, ctx);
     ExprType::from_ty(&sig.return_ty)
 }
 
+pub(super) fn infer_system_call(stf: &SystemTfCall, ctx: &dyn InferCtx) -> ExprType {
+    crate::system_functions::infer_system_call(stf.syntax(), ctx)
+}
+
 /// Check call arguments against the callable signature.
-fn check_call_args(call_node: &SyntaxNode, sig: &CallableSigRef, ctx: &dyn InferCtx) {
-    let Some(call) = CallExpr::cast(call_node.clone()) else {
-        return;
-    };
+fn check_call_args(call: &CallExpr, sig: &CallableSigRef, ctx: &dyn InferCtx) {
     let args: Vec<Expr> = call
         .arg_list()
         .map(|al| al.args().collect())

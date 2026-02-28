@@ -1,5 +1,4 @@
 use lyra_ast::RangeKind;
-use lyra_parser::SyntaxNode;
 
 use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx};
 use super::infer_expr_type;
@@ -35,12 +34,7 @@ fn compute_slice_width(
 ///
 /// Supports packed integral part-select (LRM 11.5.1) and unpacked fixed-size
 /// array slicing (LRM 7.4.6).
-pub(super) fn infer_range(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    use lyra_ast::{AstNode, RangeExpr};
-
-    let Some(range) = RangeExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+pub(super) fn infer_range(range: &lyra_ast::RangeExpr, ctx: &dyn InferCtx) -> ExprType {
     let kind = range.range_kind();
 
     // 1. Infer base expression and reject non-sliceable types early

@@ -1,9 +1,8 @@
 use lyra_ast::{
     AstIdMap, AstNode, Declarator, NameRef, NetDecl, PackedDimension, ParamDecl, Port,
-    QualifiedName, TypeDeclSite, TypeNameRef, TypeSpec, TypedefDecl, UnpackedDimKind,
-    UnpackedDimension, VarDecl,
+    QualifiedName, Signing, TypeDeclSite, TypeNameRef, TypeSpec, TypeSpecKeyword, TypedefDecl,
+    UnpackedDimKind, UnpackedDimension, VarDecl,
 };
-use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
 
@@ -187,12 +186,12 @@ fn extract_net_decl(
             data: Ty::Error,
         });
     }
-    let (_base, signed_override) = extract_typespec_base(&typespec);
+    let (_base, signing) = extract_typespec_base(&typespec);
     let packed = extract_packed_dims(&typespec, ast_id_map);
     let unpacked = declarator
         .map(|d| extract_unpacked_dims_from_declarator(d, ast_id_map))
         .unwrap_or_default();
-    let signed = signed_override.unwrap_or(IntegralKw::Logic.default_signed());
+    let signed = signing.map_or(IntegralKw::Logic.default_signed(), |s| s.is_signed());
     let ty = Ty::Integral(Integral {
         keyword: IntegralKw::Logic,
         signed,
@@ -268,13 +267,11 @@ pub fn extract_base_ty_from_typespec(typespec: &SyntaxNode, ast_id_map: &AstIdMa
     build_base_ty(base_ty, signed_override, packed)
 }
 
-/// Extract the base type keyword and optional signed/unsigned override from a `TypeSpec`.
-fn extract_typespec_base(typespec: &TypeSpec) -> (Option<Ty>, Option<bool>) {
-    let base_ty = typespec.keyword().and_then(|tok| keyword_to_ty(tok.kind()));
-    let signed_override = typespec
-        .signed_token()
-        .map(|tok| tok.kind() == SyntaxKind::SignedKw);
-    (base_ty, signed_override)
+/// Extract the base type keyword and optional signing override from a `TypeSpec`.
+fn extract_typespec_base(typespec: &TypeSpec) -> (Option<Ty>, Option<Signing>) {
+    let base_ty = typespec.type_keyword().and_then(keyword_to_ty);
+    let signing = typespec.signing();
+    (base_ty, signing)
 }
 
 fn extract_packed_dims(typespec: &TypeSpec, ast_id_map: &AstIdMap) -> Vec<PackedDim> {
@@ -347,40 +344,22 @@ fn extract_unpacked_dims_from_typedef(td: &TypedefDecl, ast_id_map: &AstIdMap) -
 }
 
 fn extract_assoc_from_typespec(ts: &TypeSpec, _ast_id_map: &AstIdMap) -> UnpackedDim {
-    let Some(token) = ts.keyword() else {
+    let Some(kw) = ts.type_keyword() else {
         return UnpackedDim::Assoc(AssocIndex::Typed(Box::new(Ty::Error)));
     };
 
+    if !kw.is_data_type() {
+        return UnpackedDim::Assoc(AssocIndex::Typed(Box::new(Ty::Error)));
+    }
+
     let has_extra = ts.type_name_ref().is_some() || ts.packed_dimensions().next().is_some();
 
-    if is_scalar_type_token(token.kind()) && !has_extra {
-        let key_ty = keyword_to_ty(token.kind()).unwrap_or(Ty::Error);
-        UnpackedDim::Assoc(AssocIndex::Typed(Box::new(key_ty)))
-    } else {
+    if has_extra {
         UnpackedDim::Assoc(AssocIndex::Typed(Box::new(Ty::Error)))
+    } else {
+        let key_ty = keyword_to_ty(kw).unwrap_or(Ty::Error);
+        UnpackedDim::Assoc(AssocIndex::Typed(Box::new(key_ty)))
     }
-}
-
-fn is_scalar_type_token(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::LogicKw
-            | SyntaxKind::RegKw
-            | SyntaxKind::BitKw
-            | SyntaxKind::IntegerKw
-            | SyntaxKind::IntKw
-            | SyntaxKind::ShortintKw
-            | SyntaxKind::LongintKw
-            | SyntaxKind::ByteKw
-            | SyntaxKind::TimeKw
-            | SyntaxKind::RealtimeKw
-            | SyntaxKind::RealKw
-            | SyntaxKind::ShortRealKw
-            | SyntaxKind::StringKw
-            | SyntaxKind::ChandleKw
-            | SyntaxKind::EventKw
-            | SyntaxKind::VoidKw
-    )
 }
 
 fn expr_to_const_int(expr: &SyntaxNode, ast_id_map: &AstIdMap) -> ConstInt {
@@ -394,11 +373,11 @@ fn expr_to_const_int(expr: &SyntaxNode, ast_id_map: &AstIdMap) -> ConstInt {
 ///
 /// For integrals: applies signing and packed dims.
 /// For non-integrals (real, string, etc.): returns as-is (signing/packed are inapplicable).
-fn build_base_ty(base: Option<Ty>, signed_override: Option<bool>, packed: Vec<PackedDim>) -> Ty {
+fn build_base_ty(base: Option<Ty>, signing: Option<Signing>, packed: Vec<PackedDim>) -> Ty {
     match base {
         Some(Ty::Integral(mut i)) => {
-            if let Some(s) = signed_override {
-                i.signed = s;
+            if let Some(s) = signing {
+                i.signed = s.is_signed();
             }
             i.packed = PackedDims::from(packed);
             Ty::Integral(i)
@@ -408,55 +387,53 @@ fn build_base_ty(base: Option<Ty>, signed_override: Option<bool>, packed: Vec<Pa
     }
 }
 
-fn keyword_to_ty(kind: SyntaxKind) -> Option<Ty> {
-    let kw = keyword_to_integral_kw(kind);
-    if let Some(kw) = kw {
+fn keyword_to_ty(kw: TypeSpecKeyword) -> Option<Ty> {
+    if let Some(ikw) = keyword_to_integral_kw(kw) {
         return Some(Ty::Integral(Integral {
-            keyword: kw,
-            signed: kw.default_signed(),
+            keyword: ikw,
+            signed: ikw.default_signed(),
             packed: PackedDims::empty(),
         }));
     }
-    match kind {
-        SyntaxKind::RealKw => Some(Ty::Real(RealKw::Real)),
-        SyntaxKind::ShortRealKw => Some(Ty::Real(RealKw::Short)),
-        SyntaxKind::RealtimeKw => Some(Ty::Real(RealKw::Time)),
-        SyntaxKind::StringKw => Some(Ty::String),
-        SyntaxKind::ChandleKw => Some(Ty::Chandle),
-        SyntaxKind::EventKw => Some(Ty::Event),
-        SyntaxKind::VoidKw => Some(Ty::Void),
+    match kw {
+        TypeSpecKeyword::Real => Some(Ty::Real(RealKw::Real)),
+        TypeSpecKeyword::ShortReal => Some(Ty::Real(RealKw::Short)),
+        TypeSpecKeyword::Realtime => Some(Ty::Real(RealKw::Time)),
+        TypeSpecKeyword::String => Some(Ty::String),
+        TypeSpecKeyword::Chandle => Some(Ty::Chandle),
+        TypeSpecKeyword::Event => Some(Ty::Event),
+        TypeSpecKeyword::Void => Some(Ty::Void),
         _ => None,
     }
 }
 
-fn keyword_to_integral_kw(kind: SyntaxKind) -> Option<IntegralKw> {
-    match kind {
-        SyntaxKind::LogicKw => Some(IntegralKw::Logic),
-        SyntaxKind::RegKw => Some(IntegralKw::Reg),
-        SyntaxKind::BitKw => Some(IntegralKw::Bit),
-        SyntaxKind::IntegerKw => Some(IntegralKw::Integer),
-        SyntaxKind::IntKw => Some(IntegralKw::Int),
-        SyntaxKind::ShortintKw => Some(IntegralKw::Shortint),
-        SyntaxKind::LongintKw => Some(IntegralKw::Longint),
-        SyntaxKind::ByteKw => Some(IntegralKw::Byte),
-        SyntaxKind::TimeKw => Some(IntegralKw::Time),
+fn keyword_to_integral_kw(kw: TypeSpecKeyword) -> Option<IntegralKw> {
+    match kw {
+        TypeSpecKeyword::Logic => Some(IntegralKw::Logic),
+        TypeSpecKeyword::Reg => Some(IntegralKw::Reg),
+        TypeSpecKeyword::Bit => Some(IntegralKw::Bit),
+        TypeSpecKeyword::Integer => Some(IntegralKw::Integer),
+        TypeSpecKeyword::Int => Some(IntegralKw::Int),
+        TypeSpecKeyword::Shortint => Some(IntegralKw::Shortint),
+        TypeSpecKeyword::Longint => Some(IntegralKw::Longint),
+        TypeSpecKeyword::Byte => Some(IntegralKw::Byte),
+        TypeSpecKeyword::Time => Some(IntegralKw::Time),
         _ => None,
     }
 }
 
 fn net_keyword_from_typespec(typespec: &TypeSpec) -> Option<NetKind> {
-    let tok = typespec.keyword()?;
-    match tok.kind() {
-        SyntaxKind::WireKw => Some(NetKind::Wire),
-        SyntaxKind::TriKw => Some(NetKind::Tri),
-        SyntaxKind::WandKw => Some(NetKind::Wand),
-        SyntaxKind::WorKw => Some(NetKind::Wor),
-        SyntaxKind::Tri0Kw => Some(NetKind::Tri0),
-        SyntaxKind::Tri1Kw => Some(NetKind::Tri1),
-        SyntaxKind::TriregKw => Some(NetKind::Trireg),
-        SyntaxKind::Supply0Kw => Some(NetKind::Supply0),
-        SyntaxKind::Supply1Kw => Some(NetKind::Supply1),
-        SyntaxKind::UwireKw => Some(NetKind::Uwire),
+    match typespec.type_keyword()? {
+        TypeSpecKeyword::Wire => Some(NetKind::Wire),
+        TypeSpecKeyword::Tri => Some(NetKind::Tri),
+        TypeSpecKeyword::Wand => Some(NetKind::Wand),
+        TypeSpecKeyword::Wor => Some(NetKind::Wor),
+        TypeSpecKeyword::Tri0 => Some(NetKind::Tri0),
+        TypeSpecKeyword::Tri1 => Some(NetKind::Tri1),
+        TypeSpecKeyword::Trireg => Some(NetKind::Trireg),
+        TypeSpecKeyword::Supply0 => Some(NetKind::Supply0),
+        TypeSpecKeyword::Supply1 => Some(NetKind::Supply1),
+        TypeSpecKeyword::Uwire => Some(NetKind::Uwire),
         _ => None,
     }
 }

@@ -1,5 +1,4 @@
-use lyra_ast::{AstNode, Expr, LiteralKind};
-use lyra_lexer::SyntaxKind;
+use lyra_ast::{AstNode, Expr, ExprKind, LiteralKind};
 use lyra_parser::SyntaxNode;
 
 /// Numeric base for a literal.
@@ -37,10 +36,10 @@ pub(crate) struct LiteralShape {
 /// sized literals, `None` for unsized, non-literal, or malformed expressions.
 pub(crate) fn extract_sized_literal_width(expr_node: &SyntaxNode) -> Option<u32> {
     let peeled = Expr::peel(expr_node)?;
-    if peeled.kind() != SyntaxKind::Literal {
+    let ExprKind::Literal(lit) = peeled.classify()? else {
         return None;
-    }
-    let shape = parse_literal_shape(peeled.syntax())?;
+    };
+    let shape = parse_literal_shape(lit.syntax())?;
     if shape.is_unsized {
         None
     } else {
@@ -141,6 +140,7 @@ fn parse_based_shape(size_text: Option<&str>, based_text: &str) -> Option<Litera
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lyra_lexer::SyntaxKind;
 
     fn parse_shape(src: &str) -> Option<LiteralShape> {
         let full = format!("module m; parameter P = {src}; endmodule");

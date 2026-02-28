@@ -28,10 +28,10 @@ pub use nodes::{
     PrimitiveDecl, ProgramBody, ProgramDecl, QualifiedName, RangeExpr, RangeKind, RepeatStmt,
     ReplicExpr, SourceFile, StreamExpr, StreamOperandItem, StreamOperands, StreamRange,
     StreamRangeOp, StreamSliceSize, StreamWithClause, StructMember, StructType, SyntaxAssignOp,
-    SyntaxBinaryOp, SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl, TimingControl, TypeSpec,
-    TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
+    SyntaxBinaryOp, SyntaxPrefixOp, SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl,
+    TimingControl, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
 };
 pub use port::PortDirection;
 pub use support::{AstChildren, expr_children, field_exprs};
 pub use type_decl_site::TypeDeclSite;
-pub use type_spec::{TypeNameRef, UnpackedDimKind};
+pub use type_spec::{Signing, TypeNameRef, TypeSpecKeyword, UnpackedDimKind};

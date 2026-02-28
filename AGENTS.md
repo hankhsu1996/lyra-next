@@ -68,6 +68,25 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - **Lowering depends only on anchor data, not producer-layer services** --semantic anchors are self-describing; lowering extracts presentation data (ranges, spans) from the anchor's own stored fields. Injecting producer-layer services (AST maps, syntax trees) into lowering breaks layering and hides producer bugs.
 - **Producers must not silently drop findings** --when a producer encounters an unexpected state (failed lookup, missing data), it must emit an internal diagnostic with a deterministic fallback and continue. Never `return`/`continue` to skip producing a finding. Thread required (non-optional) fallbacks through the call stack so no code path can silently bail.
 
+## Typed AST Boundary
+
+`lyra-ast` is the only crate that walks CST structure (rowan children, token kinds). `lyra-db` and `lyra-semantic` consume typed AST accessors exclusively. Classification is typed (enums, accessors), not `SyntaxKind` matching.
+
+- **No dual-meaning wrappers.** If an AST node appears in multiple grammar contexts, expose grammar-specific iterators or a typed sum, not two same-shaped accessors with different names.
+- **No raw `SyntaxNode` in db/semantic helpers.** Functions accept typed wrappers (`&BinExpr`, `&TypeSpec`), not `&SyntaxNode`. Use `.syntax()` only at legacy API call sites.
+- **Structure assumptions live in lyra-ast.** If a consumer assumes a node has a specific child structure, the accessor returns the typed result directly (e.g. `Option<BinExpr>`). Consumer layers never cast typed results into narrower types.
+
+Enforced by `tools/policy/check_cst_layering.py`.
+
+## Semantic API Discipline
+
+- **Contract-preserving changes.** When replacing a classifier or guard, preserve the accepted/rejected set exactly. Any intentional behavior change requires an explicit note and a test.
+- **No boolean-meaning public APIs.** Do not encode meaning in `bool` or `Option<bool>` across crate boundaries. Use small enums (`Signing`, `Direction`, `Polarity`).
+- **No silent fallback to `Error`.** Do not use `unwrap_or(Ty::Error)` as control flow. Return `Option`/`Result` and force callers to decide deliberately.
+- **Single choke point for shared classification.** If two call sites need the same "what is this?" logic, it becomes one typed accessor or classifier, usually in `lyra-ast`.
+- **Performance boundary.** No per-call expensive infrastructure (maps, whole-tree scans, allocations) in hot paths. Build once per query/file and pass in (`&AstIdMap`, `&ResolveCtx`).
+- **Behavior locks.** Any refactor that changes classification paths must include a small test that would fail if the accept/reject contract regresses.
+
 ## Crate Dependency Graph
 
 ```

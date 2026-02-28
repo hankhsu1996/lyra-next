@@ -528,6 +528,64 @@ impl PrefixExpr {
     pub fn operand(&self) -> Option<crate::expr::Expr> {
         support::expr_child(&self.syntax, 0)
     }
+
+    pub fn prefix_op(&self) -> Option<SyntaxPrefixOp> {
+        self.op_token()
+            .and_then(|tok| SyntaxPrefixOp::from_token_kind(tok.kind()))
+    }
+}
+
+/// Syntactic prefix operator classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SyntaxPrefixOp {
+    Plus,
+    Minus,
+    LogNot,
+    BitNot,
+    RedAnd,
+    RedOr,
+    RedXor,
+    RedNand,
+    RedNor,
+    RedXnor,
+    Inc,
+    Dec,
+}
+
+impl SyntaxPrefixOp {
+    pub fn from_token_kind(kind: SyntaxKind) -> Option<Self> {
+        match kind {
+            SyntaxKind::Plus => Some(Self::Plus),
+            SyntaxKind::Minus => Some(Self::Minus),
+            SyntaxKind::Bang => Some(Self::LogNot),
+            SyntaxKind::Tilde => Some(Self::BitNot),
+            SyntaxKind::Amp => Some(Self::RedAnd),
+            SyntaxKind::Pipe => Some(Self::RedOr),
+            SyntaxKind::Caret => Some(Self::RedXor),
+            SyntaxKind::TildeAmp => Some(Self::RedNand),
+            SyntaxKind::TildePipe => Some(Self::RedNor),
+            SyntaxKind::TildeCaret | SyntaxKind::CaretTilde => Some(Self::RedXnor),
+            SyntaxKind::PlusPlus => Some(Self::Inc),
+            SyntaxKind::MinusMinus => Some(Self::Dec),
+            _ => None,
+        }
+    }
+
+    pub fn is_reduction(self) -> bool {
+        matches!(
+            self,
+            Self::RedAnd
+                | Self::RedOr
+                | Self::RedXor
+                | Self::RedNand
+                | Self::RedNor
+                | Self::RedXnor
+        )
+    }
+
+    pub fn is_inc_dec(self) -> bool {
+        matches!(self, Self::Inc | Self::Dec)
+    }
 }
 
 impl IndexExpr {

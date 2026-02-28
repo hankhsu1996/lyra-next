@@ -63,6 +63,152 @@ impl TypeSpec {
             &[SyntaxKind::SignedKw, SyntaxKind::UnsignedKw],
         )
     }
+
+    /// Typed classification of the base type keyword.
+    pub fn type_keyword(&self) -> Option<TypeSpecKeyword> {
+        self.keyword()
+            .and_then(|tok| TypeSpecKeyword::from_token_kind(tok.kind()))
+    }
+
+    /// Signing modifier, if an explicit `signed` or `unsigned` keyword is present.
+    pub fn signing(&self) -> Option<Signing> {
+        self.signed_token().map(|tok| {
+            if tok.kind() == SyntaxKind::SignedKw {
+                Signing::Signed
+            } else {
+                Signing::Unsigned
+            }
+        })
+    }
+}
+
+/// Explicit signing modifier on a `TypeSpec`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Signing {
+    Signed,
+    Unsigned,
+}
+
+impl Signing {
+    /// Convert to the boolean convention used by `Integral::signed`
+    /// (`true` = signed).
+    pub fn is_signed(self) -> bool {
+        self == Self::Signed
+    }
+}
+
+/// Typed classification of a `TypeSpec` base type keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TypeSpecKeyword {
+    // Integral
+    Logic,
+    Reg,
+    Bit,
+    Integer,
+    Int,
+    Shortint,
+    Longint,
+    Byte,
+    Time,
+    // Real
+    Realtime,
+    Real,
+    ShortReal,
+    // Other
+    String,
+    Chandle,
+    Event,
+    Void,
+    // Net
+    Wire,
+    Tri,
+    Wand,
+    Wor,
+    Tri0,
+    Tri1,
+    Trireg,
+    Supply0,
+    Supply1,
+    Uwire,
+}
+
+impl TypeSpecKeyword {
+    /// Whether this keyword names a net type (`wire`, `tri`, etc.).
+    pub fn is_net(self) -> bool {
+        matches!(
+            self,
+            Self::Wire
+                | Self::Tri
+                | Self::Wand
+                | Self::Wor
+                | Self::Tri0
+                | Self::Tri1
+                | Self::Trireg
+                | Self::Supply0
+                | Self::Supply1
+                | Self::Uwire
+        )
+    }
+
+    /// Whether this keyword names an integral data type.
+    pub fn is_integral(self) -> bool {
+        matches!(
+            self,
+            Self::Logic
+                | Self::Reg
+                | Self::Bit
+                | Self::Integer
+                | Self::Int
+                | Self::Shortint
+                | Self::Longint
+                | Self::Byte
+                | Self::Time
+        )
+    }
+
+    /// Whether this keyword names a real data type.
+    pub fn is_real(self) -> bool {
+        matches!(self, Self::Real | Self::ShortReal | Self::Realtime)
+    }
+
+    /// Whether this keyword names a data type (valid as an associative
+    /// array key type, cast target, etc.). Excludes net types, `void`,
+    /// and `event`.
+    pub fn is_data_type(self) -> bool {
+        self.is_integral() || self.is_real() || matches!(self, Self::String | Self::Chandle)
+    }
+
+    pub fn from_token_kind(kind: SyntaxKind) -> Option<Self> {
+        match kind {
+            SyntaxKind::LogicKw => Some(Self::Logic),
+            SyntaxKind::RegKw => Some(Self::Reg),
+            SyntaxKind::BitKw => Some(Self::Bit),
+            SyntaxKind::IntegerKw => Some(Self::Integer),
+            SyntaxKind::IntKw => Some(Self::Int),
+            SyntaxKind::ShortintKw => Some(Self::Shortint),
+            SyntaxKind::LongintKw => Some(Self::Longint),
+            SyntaxKind::ByteKw => Some(Self::Byte),
+            SyntaxKind::TimeKw => Some(Self::Time),
+            SyntaxKind::RealtimeKw => Some(Self::Realtime),
+            SyntaxKind::RealKw => Some(Self::Real),
+            SyntaxKind::ShortRealKw => Some(Self::ShortReal),
+            SyntaxKind::StringKw => Some(Self::String),
+            SyntaxKind::ChandleKw => Some(Self::Chandle),
+            SyntaxKind::EventKw => Some(Self::Event),
+            SyntaxKind::VoidKw => Some(Self::Void),
+            SyntaxKind::WireKw => Some(Self::Wire),
+            SyntaxKind::TriKw => Some(Self::Tri),
+            SyntaxKind::WandKw => Some(Self::Wand),
+            SyntaxKind::WorKw => Some(Self::Wor),
+            SyntaxKind::Tri0Kw => Some(Self::Tri0),
+            SyntaxKind::Tri1Kw => Some(Self::Tri1),
+            SyntaxKind::TriregKw => Some(Self::Trireg),
+            SyntaxKind::Supply0Kw => Some(Self::Supply0),
+            SyntaxKind::Supply1Kw => Some(Self::Supply1),
+            SyntaxKind::UwireKw => Some(Self::Uwire),
+            _ => None,
+        }
+    }
 }
 
 /// A user-defined type name reference inside a `TypeSpec`.

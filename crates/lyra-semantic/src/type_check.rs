@@ -1,6 +1,5 @@
 use crate::Site;
-use lyra_ast::{AstNode, SystemTfCall, TfArg};
-use lyra_lexer::SyntaxKind;
+use lyra_ast::{AstNode, ExprKind, SystemTfCall, TfArg};
 use lyra_parser::SyntaxNode;
 use lyra_source::NameSpan;
 
@@ -363,7 +362,6 @@ pub fn check_method_call(
     items: &mut Vec<TypeCheckItem>,
 ) {
     use crate::type_infer::ExprTypeErrorKind;
-    use lyra_ast::{AstNode, FieldExpr};
 
     let Some(call) = lyra_ast::CallExpr::cast(node.clone()) else {
         return;
@@ -371,10 +369,7 @@ pub fn check_method_call(
     let Some(callee) = call.callee() else {
         return;
     };
-    if callee.kind() != SyntaxKind::FieldExpr {
-        return;
-    }
-    let Some(field_expr) = FieldExpr::cast(callee.syntax().clone()) else {
+    let Some(ExprKind::FieldExpr(field_expr)) = callee.classify() else {
         return;
     };
     let Some(field_tok) = field_expr.field_name() else {
@@ -541,11 +536,11 @@ fn check_bits_call(
     let Some(first) = args.first() else {
         return;
     };
-    let first_node = tf_arg_node(first);
-    let kind = classify_bits_arg(first_node, ctx.file_id(), &|n| ctx.resolve_type_arg(n));
+    let kind = classify_bits_arg(first, ctx.file_id(), &|n| ctx.resolve_type_arg(n));
     if let BitsArgKind::Type(ty) = kind
         && !ty.is_data_type()
     {
+        let first_node = tf_arg_node(first);
         let call_site = require_site(ctx, node, fallback, items);
         let arg_site = require_site(ctx, first_node, call_site, items);
         items.push(TypeCheckItem::BitsNonDataType {

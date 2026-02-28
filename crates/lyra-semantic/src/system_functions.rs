@@ -1,5 +1,4 @@
-use lyra_ast::{AstNode, SystemTfCall, TfArg};
-use lyra_lexer::SyntaxKind;
+use lyra_ast::{AstNode, ExprKind, SystemTfCall, TfArg};
 use lyra_parser::SyntaxNode;
 
 use crate::type_infer::{ExprType, ExprTypeErrorKind, InferCtx, infer_expr_type};
@@ -455,35 +454,41 @@ pub(crate) enum BitsArgKind {
 
 /// Classify a `$bits` argument as type-form or expr-form.
 ///
-/// Takes a closure for type-namespace resolution so it works from both
-/// `InferCtx` (inference) and `TypeCheckCtx` (validation) callers.
+/// Takes a `TfArg` and a closure for type-namespace resolution so it works from
+/// both `InferCtx` (inference) and `TypeCheckCtx` (validation) callers.
 pub(crate) fn classify_bits_arg(
-    first: &SyntaxNode,
+    arg: &TfArg,
     file_id: lyra_source::FileId,
     resolve_type: &dyn Fn(&SyntaxNode) -> Option<crate::types::Ty>,
 ) -> BitsArgKind {
-    if first.kind() == SyntaxKind::TypeSpec {
-        if let Some(ty) = resolve_type(first) {
-            return BitsArgKind::Type(ty);
+    match arg {
+        TfArg::Type(tr) => {
+            let node = tr.syntax();
+            if let Some(ty) = resolve_type(node) {
+                return BitsArgKind::Type(ty);
+            }
+            let map = lyra_ast::AstIdMap::from_root(file_id, node);
+            let ty = crate::extract_base_ty_from_typespec(node, &map);
+            BitsArgKind::Type(ty)
         }
-        let map = lyra_ast::AstIdMap::from_root(file_id, first);
-        let ty = crate::extract_base_ty_from_typespec(first, &map);
-        return BitsArgKind::Type(ty);
+        TfArg::Expr(e) => {
+            if let Some(ek) = e.classify()
+                && matches!(ek, ExprKind::NameRef(_) | ExprKind::QualifiedName(_))
+                && let Some(ty) = resolve_type(ek.syntax())
+            {
+                return BitsArgKind::Type(ty);
+            }
+            BitsArgKind::Expr
+        }
+        TfArg::Unknown(_) => BitsArgKind::Expr,
     }
-    if matches!(
-        first.kind(),
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName
-    ) && let Some(ty) = resolve_type(first)
-    {
-        return BitsArgKind::Type(ty);
-    }
-    BitsArgKind::Expr
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::Ty;
+    use lyra_lexer::SyntaxKind;
 
     fn parse_system_call(src: &str) -> SyntaxNode {
         let tokens = lyra_lexer::lex(src);

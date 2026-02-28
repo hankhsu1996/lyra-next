@@ -64,17 +64,6 @@ C003_ALLOWED: dict[str, frozenset[str]] = {
         "builder_items.rs",
         "builder_stmt.rs",
         "builder_types.rs",
-        # TODO(typed-expr): migrate to typed accessors
-        "const_eval.rs",
-        "literal.rs",
-        "lhs.rs",
-        "system_functions.rs",
-        "type_check.rs",
-        "type_extract.rs",
-        "type_infer/mod.rs",
-        "type_infer/call.rs",
-        "type_infer/aggregate.rs",
-        "type_infer/scalar.rs",
     }),
     "crates/lyra-db/src/": frozenset(),
 }

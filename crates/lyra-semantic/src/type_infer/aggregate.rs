@@ -1,8 +1,6 @@
 use lyra_ast::{
-    AstNode, ConcatExpr, Expr, ReplicExpr, StreamExpr, StreamRangeOp, StreamWithClause,
+    ConcatExpr, Expr, ExprKind, ReplicExpr, StreamExpr, StreamRangeOp, StreamWithClause,
 };
-use lyra_lexer::SyntaxKind;
-use lyra_parser::SyntaxNode;
 
 use super::expr_type::{
     BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView, InferCtx, Signedness,
@@ -11,10 +9,7 @@ use super::expr_type::{
 use super::infer_expr_type;
 use crate::types::{ConstInt, Ty};
 
-pub(super) fn infer_concat(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let Some(concat) = ConcatExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+pub(super) fn infer_concat(concat: &ConcatExpr, ctx: &dyn InferCtx) -> ExprType {
     let mut total_width: Option<u32> = Some(0);
     let mut all_known = true;
     let mut any_four_state = false;
@@ -103,10 +98,7 @@ fn stream_elem_view(elem_ty: &Ty, ctx: &dyn InferCtx) -> Option<StreamElemView> 
     }
 }
 
-pub(super) fn infer_stream(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let Some(stream) = StreamExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+pub(super) fn infer_stream(stream: &StreamExpr, ctx: &dyn InferCtx) -> ExprType {
     let Some(operands) = stream.stream_operands() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -228,10 +220,7 @@ fn infer_stream_with_operand(
     }
 }
 
-pub(super) fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let Some(replic) = ReplicExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+pub(super) fn infer_replic(replic: &ReplicExpr, ctx: &dyn InferCtx) -> ExprType {
     let Some(count_expr) = replic.count() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -253,48 +242,55 @@ pub(super) fn infer_replic(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     // Body expressions after count (typically a single ConcatExpr)
     let body: Vec<Expr> = replic.body_exprs().collect();
 
-    let (inner_width, inner_four_state) =
-        if body.len() == 1 && body[0].kind() == SyntaxKind::ConcatExpr {
-            let inner = infer_concat(body[0].syntax(), ctx);
-            if let ExprView::Error(_) = &inner.view {
-                return inner;
+    let body_concat = if body.len() == 1 {
+        body[0].classify().and_then(|ek| match ek {
+            ExprKind::ConcatExpr(c) => Some(c),
+            _ => None,
+        })
+    } else {
+        None
+    };
+    let (inner_width, inner_four_state) = if let Some(ref c) = body_concat {
+        let inner = infer_concat(c, ctx);
+        if let ExprView::Error(_) = &inner.view {
+            return inner;
+        }
+        let Some(bv) = try_integral_view(&inner, ctx) else {
+            return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
+        };
+        (bv.width, bv.four_state)
+    } else if body.is_empty() {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    } else {
+        // Sum widths of inner items
+        let mut total: Option<u32> = Some(0);
+        let mut all_known = true;
+        let mut any_four_state = false;
+        for item in &body {
+            let item_ty = infer_expr_type(item.syntax(), ctx, None);
+            if let ExprView::Error(_) = &item_ty.view {
+                return item_ty;
             }
-            let Some(bv) = try_integral_view(&inner, ctx) else {
+            let Some(bv) = try_integral_view(&item_ty, ctx) else {
                 return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
             };
-            (bv.width, bv.four_state)
-        } else if body.is_empty() {
-            return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-        } else {
-            // Sum widths of inner items
-            let mut total: Option<u32> = Some(0);
-            let mut all_known = true;
-            let mut any_four_state = false;
-            for item in &body {
-                let item_ty = infer_expr_type(item.syntax(), ctx, None);
-                if let ExprView::Error(_) = &item_ty.view {
-                    return item_ty;
-                }
-                let Some(bv) = try_integral_view(&item_ty, ctx) else {
-                    return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
-                };
-                any_four_state = any_four_state || bv.four_state;
-                match bv.width.self_determined() {
-                    Some(w) => {
-                        if let Some(ref mut t) = total {
-                            *t = t.saturating_add(w);
-                        }
+            any_four_state = any_four_state || bv.four_state;
+            match bv.width.self_determined() {
+                Some(w) => {
+                    if let Some(ref mut t) = total {
+                        *t = t.saturating_add(w);
                     }
-                    None => all_known = false,
                 }
+                None => all_known = false,
             }
-            let width = if all_known {
-                BitWidth::Known(total.unwrap_or(0))
-            } else {
-                BitWidth::Unknown
-            };
-            (width, any_four_state)
+        }
+        let width = if all_known {
+            BitWidth::Known(total.unwrap_or(0))
+        } else {
+            BitWidth::Unknown
         };
+        (width, any_four_state)
+    };
 
     let result_width = match (replic_count, inner_width.self_determined()) {
         (Some(n), Some(w)) => BitWidth::Known(n.saturating_mul(w)),

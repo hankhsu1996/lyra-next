@@ -112,6 +112,7 @@ pub enum ExprTypeErrorKind {
     VoidUsedAsExpr,
     CastTargetNotAType,
     InternalStreamOperandError,
+    UnsupportedIncDec,
 }
 
 /// How an expression's type is viewed for operations.

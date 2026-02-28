@@ -1,8 +1,7 @@
 use lyra_ast::{
     BinExpr, CastExpr, Expr, ExprKind, Literal, LiteralKind, PrefixExpr, SyntaxBinaryOp,
-    SystemTfCall, TfArg,
+    SyntaxPrefixOp, SystemTfCall, TfArg,
 };
-use lyra_lexer::SyntaxKind;
 
 use crate::literal::{Base, parse_literal_shape};
 use crate::types::{ConstEvalError, ConstInt};
@@ -228,13 +227,13 @@ fn eval_prefix_expr(
     eval_call: &dyn Fn(&Expr) -> Option<EvalResult>,
 ) -> EvalResult {
     let operand_expr = prefix.operand().ok_or(ConstEvalError::Unsupported)?;
-    let op = prefix.op_token().ok_or(ConstEvalError::Unsupported)?;
+    let op = prefix.prefix_op().ok_or(ConstEvalError::Unsupported)?;
     let operand = eval_const_expr_full(&operand_expr, resolve_name, eval_call)?;
 
-    match op.kind() {
-        SyntaxKind::Plus => Ok(operand),
-        SyntaxKind::Minus => operand.checked_neg().ok_or(ConstEvalError::Overflow),
-        SyntaxKind::Tilde => Ok(!operand),
+    match op {
+        SyntaxPrefixOp::Plus => Ok(operand),
+        SyntaxPrefixOp::Minus => operand.checked_neg().ok_or(ConstEvalError::Overflow),
+        SyntaxPrefixOp::BitNot => Ok(!operand),
         _ => Err(ConstEvalError::Unsupported),
     }
 }
@@ -283,6 +282,7 @@ fn clog2(n: i64) -> EvalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lyra_lexer::SyntaxKind;
     use lyra_parser::SyntaxNode;
 
     fn parse_expr(src: &str) -> SyntaxNode {

@@ -11,8 +11,7 @@ pub use expr_type::{
     ExprTypeErrorKind, ExprView, InferCtx, ResolveCallableError, Signedness,
 };
 
-use lyra_ast::Expr;
-use lyra_lexer::SyntaxKind;
+use lyra_ast::{AstNode, Expr, ExprKind};
 use lyra_parser::SyntaxNode;
 
 use crate::coerce::IntegralCtx;
@@ -30,21 +29,25 @@ pub fn infer_expr_type(
     let Some(peeled) = Expr::peel(expr) else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    match peeled.kind() {
-        SyntaxKind::NameRef | SyntaxKind::QualifiedName => ctx.type_of_name(peeled.syntax()),
-        SyntaxKind::Literal => scalar::infer_literal(peeled.syntax(), expected),
-        SyntaxKind::PrefixExpr => scalar::infer_prefix(peeled.syntax(), ctx, expected),
-        SyntaxKind::BinExpr => scalar::infer_binary(peeled.syntax(), ctx, expected),
-        SyntaxKind::CondExpr => scalar::infer_cond(peeled.syntax(), ctx, expected),
-        SyntaxKind::ConcatExpr => aggregate::infer_concat(peeled.syntax(), ctx),
-        SyntaxKind::ReplicExpr => aggregate::infer_replic(peeled.syntax(), ctx),
-        SyntaxKind::IndexExpr => access::infer_index(peeled.syntax(), ctx),
-        SyntaxKind::RangeExpr => range::infer_range(peeled.syntax(), ctx),
-        SyntaxKind::FieldExpr => access::infer_field_access(peeled.syntax(), ctx),
-        SyntaxKind::CallExpr | SyntaxKind::SystemTfCall => call::infer_call(peeled.syntax(), ctx),
-        SyntaxKind::StreamExpr => aggregate::infer_stream(peeled.syntax(), ctx),
-        SyntaxKind::CastExpr => scalar::infer_cast(peeled.syntax(), ctx),
-        _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
+    let Some(ek) = peeled.classify() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    match ek {
+        ExprKind::NameRef(n) => ctx.type_of_name(n.syntax()),
+        ExprKind::QualifiedName(n) => ctx.type_of_name(n.syntax()),
+        ExprKind::Literal(l) => scalar::infer_literal(&l, expected),
+        ExprKind::PrefixExpr(p) => scalar::infer_prefix(&p, ctx, expected),
+        ExprKind::BinExpr(b) => scalar::infer_binary(&b, ctx, expected),
+        ExprKind::CondExpr(c) => scalar::infer_cond(&c, ctx, expected),
+        ExprKind::ConcatExpr(c) => aggregate::infer_concat(&c, ctx),
+        ExprKind::ReplicExpr(r) => aggregate::infer_replic(&r, ctx),
+        ExprKind::IndexExpr(i) => access::infer_index(&i, ctx),
+        ExprKind::RangeExpr(r) => range::infer_range(&r, ctx),
+        ExprKind::FieldExpr(f) => access::infer_field_access(&f, ctx),
+        ExprKind::CallExpr(c) => call::infer_call(&c, ctx),
+        ExprKind::SystemTfCall(s) => call::infer_system_call(&s, ctx),
+        ExprKind::StreamExpr(s) => aggregate::infer_stream(&s, ctx),
+        ExprKind::CastExpr(c) => scalar::infer_cast(&c, ctx),
     }
 }
 

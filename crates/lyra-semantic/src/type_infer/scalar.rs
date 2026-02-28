@@ -1,6 +1,6 @@
-use lyra_ast::{AstNode, BinExpr, CastExpr, CondExpr, LiteralKind, PrefixExpr};
-use lyra_lexer::SyntaxKind;
-use lyra_parser::SyntaxNode;
+use lyra_ast::{
+    AstNode, BinExpr, CastExpr, CondExpr, Literal, LiteralKind, PrefixExpr, SyntaxPrefixOp,
+};
 
 use super::expr_type::{
     BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView, InferCtx, Signedness,
@@ -14,11 +14,8 @@ use crate::coerce::{
 use crate::literal::parse_literal_shape;
 use crate::types::{RealKw, Ty};
 
-pub(super) fn infer_literal(node: &SyntaxNode, expected: Option<&IntegralCtx>) -> ExprType {
-    let Some(literal) = lyra_ast::Literal::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedLiteralKind);
-    };
-    let Some(kind) = literal.literal_kind() else {
+pub(super) fn infer_literal(lit: &Literal, expected: Option<&IntegralCtx>) -> ExprType {
+    let Some(kind) = lit.literal_kind() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedLiteralKind);
     };
     match kind {
@@ -41,7 +38,7 @@ pub(super) fn infer_literal(node: &SyntaxNode, expected: Option<&IntegralCtx>) -
                 ExprType::bitvec(self_ty)
             }
         }
-        _ => match parse_literal_shape(node) {
+        _ => match parse_literal_shape(lit.syntax()) {
             Some(shape) => {
                 let signed = if shape.signed {
                     Signedness::Signed
@@ -60,63 +57,51 @@ pub(super) fn infer_literal(node: &SyntaxNode, expected: Option<&IntegralCtx>) -
 }
 
 pub(super) fn infer_prefix(
-    node: &SyntaxNode,
+    pfx: &PrefixExpr,
     ctx: &dyn InferCtx,
     expected: Option<&IntegralCtx>,
 ) -> ExprType {
-    let Some(pfx) = PrefixExpr::cast(node.clone()) else {
+    let Some(op) = pfx.prefix_op() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let Some(op_tok) = pfx.op_token() else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
-    let op = op_tok.kind();
 
-    let Some(operand_node) = pfx.operand() else {
+    let Some(operand_expr) = pfx.operand() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let operand_node = operand_node.syntax().clone();
+    let operand_node = operand_expr.syntax().clone();
 
-    match op {
-        // Logical negation: always 1-bit unsigned, operand self-determined
-        SyntaxKind::Bang
-        // Reduction operators: always 1-bit unsigned, operand self-determined
-        | SyntaxKind::Amp
-        | SyntaxKind::Pipe
-        | SyntaxKind::Caret
-        | SyntaxKind::TildeAmp
-        | SyntaxKind::TildePipe
-        | SyntaxKind::TildeCaret
-        | SyntaxKind::CaretTilde => {
-            let _operand = infer_expr_type(&operand_node, ctx, None);
-            ExprType::one_bit()
-        }
+    if op == SyntaxPrefixOp::LogNot || op.is_reduction() {
+        // Logical negation / reduction: always 1-bit unsigned, operand self-determined
+        let _operand = infer_expr_type(&operand_node, ctx, None);
+        ExprType::one_bit()
+    } else if matches!(
+        op,
+        SyntaxPrefixOp::BitNot | SyntaxPrefixOp::Plus | SyntaxPrefixOp::Minus
+    ) {
         // Bitwise NOT or unary +/-: pass context to operand
-        SyntaxKind::Tilde | SyntaxKind::Plus | SyntaxKind::Minus => {
-            let operand = infer_expr_type(&operand_node, ctx, expected);
-            match &operand.view {
-                ExprView::BitVec(_) | ExprView::Error(_) => operand,
-                ExprView::Plain => {
-                    if let Some(bv) = try_integral_view(&operand, ctx) {
-                        ExprType::bitvec(bv)
-                    } else {
-                        ExprType::error(ExprTypeErrorKind::NonBitOperand)
-                    }
+        let operand = infer_expr_type(&operand_node, ctx, expected);
+        match &operand.view {
+            ExprView::BitVec(_) | ExprView::Error(_) => operand,
+            ExprView::Plain => {
+                if let Some(bv) = try_integral_view(&operand, ctx) {
+                    ExprType::bitvec(bv)
+                } else {
+                    ExprType::error(ExprTypeErrorKind::NonBitOperand)
                 }
             }
         }
-        _ => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
+    } else if op.is_inc_dec() {
+        ExprType::error(ExprTypeErrorKind::UnsupportedIncDec)
+    } else {
+        ExprType::error(ExprTypeErrorKind::UnsupportedExprKind)
     }
 }
 
 pub(super) fn infer_binary(
-    node: &SyntaxNode,
+    bin: &BinExpr,
     ctx: &dyn InferCtx,
     expected: Option<&IntegralCtx>,
 ) -> ExprType {
-    let Some(bin) = BinExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
     let Some(lhs_node) = bin.lhs() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -179,13 +164,10 @@ pub(super) fn infer_binary(
 }
 
 pub(super) fn infer_cond(
-    node: &SyntaxNode,
+    cond_expr: &CondExpr,
     ctx: &dyn InferCtx,
     expected: Option<&IntegralCtx>,
 ) -> ExprType {
-    let Some(cond_expr) = CondExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
     let Some(cond_node) = cond_expr.condition() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -245,11 +227,7 @@ pub(super) fn infer_cond(
     }
 }
 
-pub(super) fn infer_cast(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let Some(cast) = CastExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
-
+pub(super) fn infer_cast(cast: &CastExpr, ctx: &dyn InferCtx) -> ExprType {
     // Infer the inner expression (for side effects / context propagation)
     if let Some(inner) = cast.inner_expr() {
         let _ = infer_expr_type(inner.syntax(), ctx, None);

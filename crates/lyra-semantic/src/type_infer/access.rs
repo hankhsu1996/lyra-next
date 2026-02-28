@@ -1,5 +1,4 @@
-use lyra_ast::{AstNode, FieldExpr, IndexExpr};
-use lyra_parser::SyntaxNode;
+use lyra_ast::{FieldExpr, IndexExpr};
 
 use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx};
 use super::infer_expr_type;
@@ -25,10 +24,7 @@ fn classify_index(ty: &Ty) -> Result<IndexKind, ExprTypeErrorKind> {
     }
 }
 
-pub(super) fn infer_index(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let Some(idx_expr) = IndexExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+pub(super) fn infer_index(idx_expr: &IndexExpr, ctx: &dyn InferCtx) -> ExprType {
     let Some(base_node) = idx_expr.base_expr() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -68,10 +64,7 @@ fn apply_index(base: &ExprType) -> ExprType {
     }
 }
 
-pub(super) fn infer_field_access(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    let Some(field_expr) = FieldExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+pub(super) fn infer_field_access(field_expr: &FieldExpr, ctx: &dyn InferCtx) -> ExprType {
     let Some(lhs) = field_expr.base_expr() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
