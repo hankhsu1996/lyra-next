@@ -500,4 +500,38 @@ mod tests {
             "assign inside generate block is not AssignStmt"
         );
     }
+
+    #[test]
+    fn entries_strictly_ordered_and_deterministic() {
+        let src = "module m;\n\
+                    assign a = b;\n\
+                    assign c = d;\n\
+                    always @(*) begin\n\
+                      if ($bits(logic)) x = 1;\n\
+                      case (y) 1: z = 2; endcase\n\
+                    end\n\
+                    function void f(); w = 3; endfunction\n\
+                    endmodule";
+        let idx1 = parse_and_index(src);
+
+        assert!(
+            idx1.entries.len() >= 4,
+            "expected multiple entries, got {}",
+            idx1.entries.len()
+        );
+
+        // Strictly increasing order by ErasedAstId.
+        for pair in idx1.entries.windows(2) {
+            assert!(
+                pair[0].site < pair[1].site,
+                "entries not strictly ordered: {:?} >= {:?}",
+                pair[0].site,
+                pair[1].site
+            );
+        }
+
+        // Identical output on second build.
+        let idx2 = parse_and_index(src);
+        assert_eq!(idx1, idx2, "non-deterministic: two builds differ");
+    }
 }

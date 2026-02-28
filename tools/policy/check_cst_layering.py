@@ -128,7 +128,12 @@ RE_SYNTAX_NODE_TOKEN = re.compile(
 
 # C005: .syntax() calls (raw CST escape hatch).
 # Handles optional whitespace: `.syntax ()`, `.syntax(  )`.
-RE_DOT_SYNTAX = re.compile(r'\.syntax\s*\(\s*\)')
+# Also catches UFCS: `HasSyntax::syntax(` and `<T as HasSyntax>::syntax(`.
+RE_DOT_SYNTAX = re.compile(
+    r'\.syntax\s*\(\s*\)'
+    r'|HasSyntax\s*::\s*syntax\s*\('
+    r'|<[^>]*HasSyntax[^>]*>\s*::\s*syntax\s*\('
+)
 
 
 def get_repo_root() -> Path:
@@ -630,6 +635,21 @@ def self_test() -> int:
     # Test 30 (C005): .syntax(  ) with inner spaces should fire
     if not RE_DOT_SYNTAX.search('node.syntax(  )'):
         print("FAIL: C005 did not catch .syntax(  ) with inner spaces")
+        failures += 1
+
+    # Test 31 (C005): UFCS HasSyntax::syntax(&x) should fire
+    if not RE_DOT_SYNTAX.search('let n = HasSyntax::syntax(&x);'):
+        print("FAIL: C005 did not catch UFCS HasSyntax::syntax()")
+        failures += 1
+
+    # Test 32 (C005): turbofish UFCS <T as HasSyntax>::syntax(&x) should fire
+    if not RE_DOT_SYNTAX.search('let n = <Expr as HasSyntax>::syntax(&x);'):
+        print("FAIL: C005 did not catch turbofish UFCS")
+        failures += 1
+
+    # Test 33 (C005): non-HasSyntax trait method should not fire
+    if RE_DOT_SYNTAX.search('OtherTrait::syntax(&x)'):
+        print("FAIL: C005 false positive on OtherTrait::syntax()")
         failures += 1
 
     if failures:
