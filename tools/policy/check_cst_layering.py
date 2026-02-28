@@ -7,6 +7,7 @@ Rules:
   C003: No SyntaxKind discrimination (use typed AST accessors)
   C004: No SyntaxNode/SyntaxToken in lyra-semantic non-builder code
   C005: No .syntax() calls in lyra-semantic non-builder code
+  C006: No HasSyntax/id_of outside site.rs in lyra-semantic non-builder code
 
 Consumer layers (lyra-semantic, lyra-db) should use typed AST accessors from
 lyra-ast, not raw CST traversal. Use `Expr::peeled()` instead of matching on
@@ -89,11 +90,25 @@ C005_ALLOWED: dict[str, frozenset[str]] = {
     }),
 }
 
+# C006: Ban HasSyntax trait and AstIdMap::id_of() calls in lyra-semantic
+# non-builder code outside site.rs. All anchor extraction must go through
+# the site.rs choke-point.
+C006_ALLOWED: dict[str, frozenset[str]] = {
+    "crates/lyra-semantic/src/": frozenset({
+        "site.rs",
+        "builder.rs",
+        "builder_items.rs",
+        "builder_stmt.rs",
+        "builder_types.rs",
+        "builder_order.rs",
+    }),
+}
+
 # Combined set of all checked crate prefixes.
 CHECKED_CRATES = (
     set(C001_ALLOWED) | set(C002_ALLOWED)
     | set(C003_ALLOWED) | set(C004_ALLOWED)
-    | set(C005_ALLOWED)
+    | set(C005_ALLOWED) | set(C006_ALLOWED)
 )
 
 # Derive a human-readable crate label from the prefix for error messages.
@@ -119,11 +134,12 @@ RE_WRAPPER_MATCH = re.compile(
 RE_SYNTAX_KIND_USE = re.compile(r'SyntaxKind::')
 RE_SYNTAX_KIND_IMPORT = re.compile(r'\buse\s+[\w:]+::SyntaxKind\b')
 
-# C004: Raw SyntaxNode/SyntaxToken usage (imports + qualified paths).
-# Matches `::SyntaxNode`, `{SyntaxNode`, `, SyntaxNode` (group import).
-# Bare unqualified uses are caught transitively via the import line.
+# C004: Raw SyntaxNode/SyntaxToken usage.
+# Catches all forms: imports, qualified paths, aliases, bare type names.
+# After comment stripping, any occurrence of these PascalCase type names
+# in non-builder semantic code is a violation.
 RE_SYNTAX_NODE_TOKEN = re.compile(
-    r'(?:::|\{|,)\s*(?:SyntaxNode|SyntaxToken)\b'
+    r'\bSyntaxNode\b|\bSyntaxToken\b'
 )
 
 # C005: .syntax() calls (raw CST escape hatch).
@@ -134,6 +150,12 @@ RE_DOT_SYNTAX = re.compile(
     r'|HasSyntax\s*::\s*syntax\s*\('
     r'|<[^>]*HasSyntax[^>]*>\s*::\s*syntax\s*\('
 )
+
+# C006a: HasSyntax trait name (word-bounded).
+RE_HAS_SYNTAX = re.compile(r'\bHasSyntax\b')
+
+# C006b: AstIdMap::id_of() call (word-bounded, allows optional whitespace).
+RE_ID_OF_CALL = re.compile(r'\.\s*id_of\s*\(')
 
 
 def get_repo_root() -> Path:
@@ -298,7 +320,7 @@ def strip_comments(lines: list[str]) -> list[str]:
 
 
 def check_violations(filepath: str, repo_root: Path) -> list[str]:
-    """Check a file for C001-C005 violations.
+    """Check a file for C001-C006 violations.
 
     Returns list of violation messages.
     """
@@ -316,6 +338,9 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
     # C005 only applies to crates listed in C005_ALLOWED (lyra-semantic).
     c005_applies = prefix is not None and prefix in C005_ALLOWED
     c005_ok = not c005_applies or _is_allowed(filepath, C005_ALLOWED)
+    # C006 only applies to crates listed in C006_ALLOWED (lyra-semantic).
+    c006_applies = prefix is not None and prefix in C006_ALLOWED
+    c006_ok = not c006_applies or _is_allowed(filepath, C006_ALLOWED)
 
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
@@ -361,6 +386,18 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
                 f"{filepath}:{lineno}: C005 .syntax() call"
                 f" ({crate_label})"
             )
+
+        if not c006_ok:
+            if RE_HAS_SYNTAX.search(stripped):
+                errors.append(
+                    f"{filepath}:{lineno}: C006 HasSyntax outside site.rs"
+                    f" ({crate_label})"
+                )
+            if RE_ID_OF_CALL.search(stripped):
+                errors.append(
+                    f"{filepath}:{lineno}: C006 id_of() outside site.rs"
+                    f" ({crate_label})"
+                )
 
     return errors
 
@@ -597,14 +634,14 @@ def self_test() -> int:
         print("FAIL: C004 did not catch second-position group import")
         failures += 1
 
-    # Test 23 (C004): bare unqualified ref should not fire (import catches)
-    if RE_SYNTAX_NODE_TOKEN.search('fn foo(node: &SyntaxNode) {}'):
-        print("FAIL: C004 false positive on bare unqualified SyntaxNode")
+    # Test 23 (C004): bare SyntaxNode in signature should fire
+    if not RE_SYNTAX_NODE_TOKEN.search('fn foo(node: &SyntaxNode) {}'):
+        print("FAIL: C004 did not catch bare SyntaxNode in signature")
         failures += 1
 
-    # Test 24 (C004): string literal should not fire
-    if RE_SYNTAX_NODE_TOKEN.search('"SyntaxNode is a CST handle"'):
-        print("FAIL: C004 false positive on string literal")
+    # Test 24 (C004): bare SyntaxToken in return type should fire
+    if not RE_SYNTAX_NODE_TOKEN.search('fn bar() -> SyntaxToken {'):
+        print("FAIL: C004 did not catch bare SyntaxToken in return type")
         failures += 1
 
     # Test 25 (C005): .syntax() call should fire
@@ -650,6 +687,87 @@ def self_test() -> int:
     # Test 33 (C005): non-HasSyntax trait method should not fire
     if RE_DOT_SYNTAX.search('OtherTrait::syntax(&x)'):
         print("FAIL: C005 false positive on OtherTrait::syntax()")
+        failures += 1
+
+    # Test 34 (C004): alias import should fire (SyntaxNode in import line)
+    if not RE_SYNTAX_NODE_TOKEN.search('use lyra_parser::SyntaxNode as N;'):
+        print("FAIL: C004 did not catch aliased SyntaxNode import")
+        failures += 1
+
+    # Test 35 (C004): similar-but-different type should not fire
+    if RE_SYNTAX_NODE_TOKEN.search('let count: SyntaxNodeRef = x;'):
+        print("FAIL: C004 false positive on SyntaxNodeRef")
+        failures += 1
+
+    # Test 36 (C004): snake_case variable should not fire
+    if RE_SYNTAX_NODE_TOKEN.search('let syntax_node = foo();'):
+        print("FAIL: C004 false positive on snake_case syntax_node")
+        failures += 1
+
+    # Test 37 (allowlist): builder.rs is allowed for C004 and C005
+    if not _is_allowed("crates/lyra-semantic/src/builder.rs", C004_ALLOWED):
+        print("FAIL: builder.rs not allowed for C004")
+        failures += 1
+    if not _is_allowed("crates/lyra-semantic/src/builder.rs", C005_ALLOWED):
+        print("FAIL: builder.rs not allowed for C005")
+        failures += 1
+
+    # Test 38 (allowlist): non-builder semantic files are NOT allowed
+    if _is_allowed("crates/lyra-semantic/src/type_check.rs", C004_ALLOWED):
+        print("FAIL: type_check.rs incorrectly allowed for C004")
+        failures += 1
+    if _is_allowed("crates/lyra-semantic/src/lhs.rs", C005_ALLOWED):
+        print("FAIL: lhs.rs incorrectly allowed for C005")
+        failures += 1
+
+    # Test 39 (allowlist): lyra-db files are NOT checked by C004
+    if "crates/lyra-db/src/" in C004_ALLOWED:
+        print("FAIL: lyra-db should not be in C004 scope")
+        failures += 1
+
+    # Test 40 (C006a): `use lyra_ast::HasSyntax;` should fire
+    if not RE_HAS_SYNTAX.search('use lyra_ast::HasSyntax;'):
+        print("FAIL: C006a did not catch HasSyntax import")
+        failures += 1
+
+    # Test 41 (C006a): `fn foo<T: HasSyntax>(t: T)` should fire
+    if not RE_HAS_SYNTAX.search('fn foo<T: HasSyntax>(t: T)'):
+        print("FAIL: C006a did not catch HasSyntax trait bound")
+        failures += 1
+
+    # Test 42 (C006a): `HasSyntaxExt` should NOT fire (word boundary)
+    if RE_HAS_SYNTAX.search('HasSyntaxExt'):
+        print("FAIL: C006a false positive on HasSyntaxExt")
+        failures += 1
+
+    # Test 43 (C006b): `map.id_of(x)` should fire
+    if not RE_ID_OF_CALL.search('map.id_of(x)'):
+        print("FAIL: C006b did not catch map.id_of(x)")
+        failures += 1
+
+    # Test 44 (C006b): `map . id_of (x)` with whitespace should fire
+    if not RE_ID_OF_CALL.search('map . id_of (x)'):
+        print("FAIL: C006b did not catch map . id_of (x) with whitespace")
+        failures += 1
+
+    # Test 45 (C006b): `identifier_of(x)` should NOT fire (word boundary)
+    if RE_ID_OF_CALL.search('identifier_of(x)'):
+        print("FAIL: C006b false positive on identifier_of(x)")
+        failures += 1
+
+    # Test 48 (C006b): `fn id_of(x: i32)` should NOT fire (no dot-call)
+    if RE_ID_OF_CALL.search('fn id_of(x: i32) {}'):
+        print("FAIL: C006b false positive on fn id_of(x: i32)")
+        failures += 1
+
+    # Test 46 (C006 allowlist): site.rs is in C006 allowlist
+    if not _is_allowed("crates/lyra-semantic/src/site.rs", C006_ALLOWED):
+        print("FAIL: site.rs not allowed for C006")
+        failures += 1
+
+    # Test 47 (C006 allowlist): type_check.rs is NOT in C006 allowlist
+    if _is_allowed("crates/lyra-semantic/src/type_check.rs", C006_ALLOWED):
+        print("FAIL: type_check.rs incorrectly allowed for C006")
         failures += 1
 
     if failures:
@@ -713,6 +831,8 @@ def main() -> int:
               "(use typed wrappers)")
         print("  C005: No .syntax() calls in lyra-semantic "
               "(add typed accessor in lyra-ast)")
+        print("  C006: No HasSyntax/id_of() in lyra-semantic outside site.rs "
+              "(use site:: helpers)")
         print("Allowlisted modules: see C00x_ALLOWED in this script")
         return 1
 

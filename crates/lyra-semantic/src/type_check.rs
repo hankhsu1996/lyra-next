@@ -1,7 +1,8 @@
 use crate::Site;
+use crate::site;
 use lyra_ast::{
     AssignStmt, AstIdMap, CallExpr, CastExpr, ContinuousAssign, Declarator, Expr, ExprKind,
-    HasSyntax, StreamOperandItem, SystemTfCall, TfArg, VarDecl,
+    StreamOperandItem, SystemTfCall, TfArg, VarDecl,
 };
 use lyra_source::NameSpan;
 
@@ -134,19 +135,13 @@ pub trait TypeCheckCtx {
 
 const MISSING_AST_ID: &str = "missing_ast_id in type checker";
 
-/// Resolve any typed AST node to its stable `Site` anchor.
+/// Require a `Site` anchor, emitting `InternalError` on failure.
 ///
-/// Works for both `AstNode` wrappers and `Expr` via the shared `HasSyntax`
-/// trait. On failure (error-recovered tree), emits `InternalError` anchored
-/// at `fallback` and returns the fallback.
-fn site_of<T: HasSyntax>(
-    map: &AstIdMap,
-    node: &T,
-    fallback: Site,
-    items: &mut Vec<TypeCheckItem>,
-) -> Site {
-    if let Some(site) = map.id_of(node) {
-        return site;
+/// Type-check-specific: when anchor extraction yields `None` (error-recovered
+/// tree), emits a diagnostic anchored at `fallback` and returns the fallback.
+fn require_site(anchor: Option<Site>, fallback: Site, items: &mut Vec<TypeCheckItem>) -> Site {
+    if let Some(s) = anchor {
+        return s;
     }
     items.push(TypeCheckItem::InternalError {
         detail: smol_str::SmolStr::new_static(MISSING_AST_ID),
@@ -167,7 +162,7 @@ pub fn check_continuous_assign(
     items: &mut Vec<TypeCheckItem>,
 ) {
     let map = ctx.ast_id_map();
-    let self_site = map.id_of(ca).unwrap_or(fallback);
+    let self_site = site::site_of(map, ca, fallback);
     let lhs = ca.lhs();
     let rhs = ca.rhs();
     if let (Some(l), Some(r)) = (&lhs, &rhs) {
@@ -185,7 +180,7 @@ pub fn check_assign_stmt(
     items: &mut Vec<TypeCheckItem>,
 ) {
     let map = ctx.ast_id_map();
-    let self_site = map.id_of(assign).unwrap_or(fallback);
+    let self_site = site::site_of(map, assign, fallback);
     let lhs = assign.lhs();
     let rhs = assign.rhs();
     let has_op = assign.assign_op().is_some();
@@ -208,7 +203,7 @@ pub fn check_var_decl(
     items: &mut Vec<TypeCheckItem>,
 ) {
     let map = ctx.ast_id_map();
-    let decl_site = site_of(map, var_decl, fallback, items);
+    let decl_site = require_site(site::opt_site_of(map, var_decl), fallback, items);
     for decl in var_decl.declarators() {
         let Some(init_expr) = decl.init_expr() else {
             continue;
@@ -218,8 +213,8 @@ pub fn check_var_decl(
             continue;
         };
 
-        let lhs_site = site_of(map, &decl, decl_site, items);
-        let rhs_site = site_of(map, &init_expr, decl_site, items);
+        let lhs_site = require_site(site::opt_site_of(map, &decl), decl_site, items);
+        let rhs_site = require_site(site::opt_site_of(map, &init_expr), decl_site, items);
 
         let lhs_type = ExprType::from_symbol_type(&sym_type);
         let rhs_type = ctx.expr_type(&init_expr);
@@ -236,8 +231,8 @@ fn check_assignment_pair(
     items: &mut Vec<TypeCheckItem>,
 ) {
     let map = ctx.ast_id_map();
-    let lhs_site = site_of(map, lhs, stmt_site, items);
-    let rhs_site = site_of(map, rhs, stmt_site, items);
+    let lhs_site = require_site(site::opt_site_of(map, lhs), stmt_site, items);
+    let rhs_site = require_site(site::opt_site_of(map, rhs), stmt_site, items);
 
     match crate::lhs::classify_lhs(lhs) {
         crate::lhs::LhsClass::Assignable(lhs_expr) => {
@@ -340,7 +335,7 @@ pub fn check_cast_expr(
     };
     if value_set.binary_search(&value).is_err() {
         let map = ctx.ast_id_map();
-        let cast_site = site_of(map, cast, fallback, items);
+        let cast_site = require_site(site::opt_site_of(map, cast), fallback, items);
         items.push(TypeCheckItem::EnumCastOutOfRange {
             cast_site,
             enum_id: *enum_id,
@@ -399,7 +394,7 @@ pub fn check_field_direction(
     use crate::modport_facts::FieldAccessTarget;
 
     let map = ctx.ast_id_map();
-    let Some(ast_id) = map.id_of(field) else {
+    let Some(ast_id) = site::opt_site_of(map, field) else {
         return;
     };
     let Some(fact) = facts.get(&ast_id) else {
@@ -522,10 +517,6 @@ fn tf_arg_expr(arg: &TfArg) -> Option<&Expr> {
     }
 }
 
-fn tf_arg_site(arg: &TfArg, map: &AstIdMap, fallback: Site) -> Site {
-    map.id_of(arg).unwrap_or(fallback)
-}
-
 fn check_bits_call(
     stf: &SystemTfCall,
     args: &[TfArg],
@@ -541,8 +532,8 @@ fn check_bits_call(
     if let BitsArgKind::Type(ty) = kind
         && !ty.is_data_type()
     {
-        let call_site = site_of(map, stf, fallback, items);
-        let arg_site = tf_arg_site(first, map, call_site);
+        let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
+        let arg_site = site::site_of(map, first, call_site);
         items.push(TypeCheckItem::BitsNonDataType {
             call_site,
             arg_site,
@@ -570,8 +561,8 @@ fn check_conversion_arg_integral(
         return;
     }
     if !matches!(arg_ty.ty, Ty::Integral(_) | Ty::Enum(_)) {
-        let call_site = site_of(map, stf, fallback, items);
-        let arg_site = tf_arg_site(first, map, call_site);
+        let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
+        let arg_site = site::site_of(map, first, call_site);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -601,8 +592,8 @@ fn check_conversion_arg_real(
         return;
     }
     if !arg_ty.ty.is_real() {
-        let call_site = site_of(map, stf, fallback, items);
-        let arg_site = tf_arg_site(first, map, call_site);
+        let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
+        let arg_site = site::site_of(map, first, call_site);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -632,8 +623,8 @@ fn check_conversion_bits_to_real(
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
-    let call_site = site_of(map, stf, fallback, items);
-    let arg_site = tf_arg_site(first, map, call_site);
+    let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
+    let arg_site = site::site_of(map, first, call_site);
     if !matches!(arg_ty.ty, Ty::Integral(_)) {
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
@@ -675,7 +666,7 @@ pub fn check_stream_operand(
     }
     if !matches!(operand_ty.ty, Ty::Array { .. }) {
         let map = ctx.ast_id_map();
-        let with_site = site_of(map, &with_clause, fallback, items);
+        let with_site = require_site(site::opt_site_of(map, &with_clause), fallback, items);
         items.push(TypeCheckItem::StreamWithNonArray { with_site });
     }
 }
