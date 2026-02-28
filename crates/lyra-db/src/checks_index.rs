@@ -149,6 +149,9 @@ impl IndexBuilder<'_> {
                 }
             }
             GenerateItem::CaseStmt(case) => {
+                if let Some(sel) = case.selector() {
+                    self.collect_from_expr(&sel, AccessMode::Read);
+                }
                 for ci in case.items() {
                     for expr in expr_children(ci.syntax()) {
                         self.collect_from_expr(&expr, AccessMode::Read);
@@ -230,6 +233,9 @@ impl IndexBuilder<'_> {
                 self.collect_stmt(&e, access);
             }
         } else if let Some(case) = CaseStmt::cast(node.clone()) {
+            if let Some(sel) = case.selector() {
+                self.collect_from_expr(&sel, access);
+            }
             for item in case.items() {
                 for expr in expr_children(item.syntax()) {
                     self.collect_from_expr(&expr, access);
@@ -427,6 +433,71 @@ mod tests {
         assert!(
             has_kind(&idx, CheckKind::SystemTfCall),
             "$bits in timing control delay"
+        );
+    }
+
+    #[test]
+    fn generate_for_genvar_init_expr() {
+        let idx = parse_and_index(
+            "module m;\n\
+             generate\n\
+               genvar i;\n\
+               for (i = $bits(logic); i < 4; i = i + 1) begin : g end\n\
+             endgenerate\n\
+             endmodule",
+        );
+        assert!(
+            has_kind(&idx, CheckKind::SystemTfCall),
+            "$bits in generate-for init expression"
+        );
+    }
+
+    #[test]
+    fn generate_case_with_condition() {
+        let idx = parse_and_index(
+            "module m;\n\
+             case ($bits(logic))\n\
+               1: logic x;\n\
+             endcase\n\
+             endmodule",
+        );
+        assert!(
+            has_kind(&idx, CheckKind::SystemTfCall),
+            "$bits in generate case condition"
+        );
+    }
+
+    #[test]
+    fn procedural_case_selector_collected() {
+        let idx = parse_and_index(
+            "module m; initial begin case ($bits(logic)) default: ; endcase end endmodule",
+        );
+        assert!(
+            has_kind(&idx, CheckKind::SystemTfCall),
+            "$bits in procedural case selector"
+        );
+    }
+
+    #[test]
+    fn continuous_assign_inside_generate_block() {
+        // Verify the parser produces ContinuousAssign (not AssignStmt)
+        // inside generate blocks, and checks_index indexes it.
+        let idx = parse_and_index(
+            "module m;\n\
+             generate\n\
+               begin : g\n\
+                 assign x = 1;\n\
+               end\n\
+             endgenerate\n\
+             endmodule",
+        );
+        assert!(
+            has_kind(&idx, CheckKind::ContinuousAssign),
+            "assign inside generate block is ContinuousAssign"
+        );
+        assert!(
+            !has_kind(&idx, CheckKind::AssignStmt),
+            "assign inside generate block is not AssignStmt"
         );
     }
 }

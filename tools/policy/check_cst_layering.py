@@ -126,8 +126,9 @@ RE_SYNTAX_NODE_TOKEN = re.compile(
     r'(?:::|\{|,)\s*(?:SyntaxNode|SyntaxToken)\b'
 )
 
-# C005: .syntax() calls (raw CST escape hatch)
-RE_DOT_SYNTAX = re.compile(r'\.syntax\(\)')
+# C005: .syntax() calls (raw CST escape hatch).
+# Handles optional whitespace: `.syntax ()`, `.syntax(  )`.
+RE_DOT_SYNTAX = re.compile(r'\.syntax\s*\(\s*\)')
 
 
 def get_repo_root() -> Path:
@@ -619,6 +620,16 @@ def self_test() -> int:
     # Test 28 (C005): .syntax_node() should not fire
     if RE_DOT_SYNTAX.search('node.syntax_node()'):
         print("FAIL: C005 false positive on .syntax_node()")
+        failures += 1
+
+    # Test 29 (C005): .syntax () with space before paren should fire
+    if not RE_DOT_SYNTAX.search('let n = expr.syntax ();'):
+        print("FAIL: C005 did not catch .syntax () with space")
+        failures += 1
+
+    # Test 30 (C005): .syntax(  ) with inner spaces should fire
+    if not RE_DOT_SYNTAX.search('node.syntax(  )'):
+        print("FAIL: C005 did not catch .syntax(  ) with inner spaces")
         failures += 1
 
     if failures:
