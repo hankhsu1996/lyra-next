@@ -83,7 +83,7 @@ pub(crate) fn lower_file_diagnostics(
     }
 
     for (site_opt, detail) in &*def.internal_errors {
-        let (span, extra) = match site_opt {
+        let (span, suffix) = match site_opt {
             Some(site) => map_span_or_fallback(file_id, &pp.source_map, site.text_range()),
             None => (
                 Span {
@@ -93,20 +93,11 @@ pub(crate) fn lower_file_diagnostics(
                 Some(" [unanchored]"),
             ),
         };
-        let text = freeform_text(&format!("internal error: {detail}"), extra);
-        diags.push(
-            Diagnostic::new(
-                Severity::Error,
-                DiagnosticCode::INTERNAL_ERROR,
-                Message::new(MessageId::InternalError, vec![Arg::Name(text.clone())]),
-            )
-            .with_label(Label {
-                kind: LabelKind::Primary,
-                span,
-                message: Message::new(MessageId::InternalError, vec![Arg::Name(text)]),
-            })
-            .with_origin(DiagnosticOrigin::Internal),
-        );
+        let qualified = match suffix {
+            Some(s) => SmolStr::new(format!("{detail}{s}")),
+            None => detail.clone(),
+        };
+        diags.push(internal_error_diag(&qualified, span));
     }
 
     diags
@@ -208,7 +199,7 @@ pub(crate) fn lower_semantic_diag(
             vec![Arg::Name(SmolStr::new(format!("{count}")))],
             primary_span,
         ),
-        SemanticDiagKind::InternalError { detail } => lower_internal_error(detail, primary_span),
+        SemanticDiagKind::InternalError { detail } => internal_error_diag(detail, primary_span),
     }
 }
 
@@ -426,17 +417,19 @@ fn lower_ambiguous_wildcard(name: &SmolStr, candidates: &[SmolStr], span: Span) 
     })
 }
 
-fn lower_internal_error(detail: &SmolStr, span: Span) -> Diagnostic {
+/// Construct an internal-error diagnostic with consistent severity, code, arg kind, and origin.
+pub(crate) fn internal_error_diag(detail: &str, span: Span) -> Diagnostic {
     let text = SmolStr::new(format!("internal error: {detail}"));
+    let msg_args = vec![Arg::Detail(text)];
     Diagnostic::new(
         Severity::Error,
         DiagnosticCode::INTERNAL_ERROR,
-        Message::new(MessageId::InternalError, vec![Arg::Name(text.clone())]),
+        Message::new(MessageId::InternalError, msg_args.clone()),
     )
     .with_label(Label {
         kind: LabelKind::Primary,
         span,
-        message: Message::new(MessageId::InternalError, vec![Arg::Name(text)]),
+        message: Message::new(MessageId::InternalError, msg_args),
     })
     .with_origin(DiagnosticOrigin::Internal)
 }

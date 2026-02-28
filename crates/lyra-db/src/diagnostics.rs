@@ -93,6 +93,21 @@ pub fn file_diagnostics(
         diags.extend(record_diagnostics(db, rref).iter().cloned());
     }
 
+    // Type-extraction internal errors (MissingSite in normalized types)
+    for (sym_id, _sym) in def.symbols.iter() {
+        let gsym = lyra_semantic::symbols::GlobalSymbolId {
+            file: file_id,
+            local: sym_id,
+        };
+        let sym_ref = SymbolRef::new(db, unit, gsym);
+        let errors = crate::type_queries::type_of_symbol_internal_errors(db, sym_ref);
+        for fact in errors {
+            if let Some(span) = pp.source_map.map_span(fact.site.text_range()) {
+                diags.push(crate::lower_diag::internal_error_diag(&fact.detail, span));
+            }
+        }
+    }
+
     diags
 }
 
@@ -340,20 +355,7 @@ fn lower_internal_type_check_error(
     let Some(span) = source_map.map_span(site.text_range()) else {
         return;
     };
-    let msg_args = vec![lyra_diag::Arg::Name(detail.clone())];
-    diags.push(
-        lyra_diag::Diagnostic::new(
-            lyra_diag::Severity::Warning,
-            lyra_diag::DiagnosticCode::INTERNAL_ERROR,
-            lyra_diag::Message::new(lyra_diag::MessageId::InternalError, msg_args.clone()),
-        )
-        .with_label(lyra_diag::Label {
-            kind: lyra_diag::LabelKind::Primary,
-            span,
-            message: lyra_diag::Message::new(lyra_diag::MessageId::InternalError, msg_args),
-        })
-        .with_origin(lyra_diag::DiagnosticOrigin::Internal),
-    );
+    diags.push(crate::lower_diag::internal_error_diag(detail, span));
 }
 
 fn lower_modport_item(

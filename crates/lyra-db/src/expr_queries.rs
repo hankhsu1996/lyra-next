@@ -714,7 +714,9 @@ fn const_eval_impl(
     expr_node: &lyra_parser::SyntaxNode,
 ) -> ConstInt {
     let Some(ast_id) = ast_id_map.erased_ast_id(expr_node) else {
-        return ConstInt::Error(lyra_semantic::types::ConstEvalError::Unsupported);
+        return ConstInt::Error(lyra_semantic::types::ConstEvalError::MissingSite(
+            lyra_semantic::types::MissingSiteOrigin::ConstEval,
+        ));
     };
     let expr_ref = ConstExprRef::new(db, unit, ast_id);
     eval_const_int(db, expr_ref)

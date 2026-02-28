@@ -29,6 +29,37 @@ pub enum ConstEvalError {
     Cycle,
     Unsupported,
     AutoIncrementAfterUnknown,
+    /// AST anchor lookup failed; carries the producing layer for diagnostics.
+    MissingSite(MissingSiteOrigin),
+}
+
+/// Where a `MissingSite` error originated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MissingSiteOrigin {
+    /// `type_extract::expr_to_const_int` -- expression had no `AstId`.
+    TypeExtract,
+    /// `expr_queries::const_eval_impl` -- expression node had no `AstId`.
+    ConstEval,
+}
+
+impl MissingSiteOrigin {
+    /// Diagnostic detail string identifying the producing layer.
+    pub fn detail(self) -> smol_str::SmolStr {
+        match self {
+            Self::TypeExtract => smol_str::SmolStr::new_static("missing AST anchor (type_extract)"),
+            Self::ConstEval => smol_str::SmolStr::new_static("missing AST anchor (const_eval)"),
+        }
+    }
+}
+
+impl ConstInt {
+    /// If this value is `Error(MissingSite(origin))`, return the origin.
+    pub fn missing_site_origin(&self) -> Option<MissingSiteOrigin> {
+        match self {
+            Self::Error(ConstEvalError::MissingSite(origin)) => Some(*origin),
+            _ => None,
+        }
+    }
 }
 
 /// A packed dimension with msb and lsb bounds, e.g. `[7:0]`.

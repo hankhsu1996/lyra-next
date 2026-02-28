@@ -4,7 +4,7 @@ use lyra_semantic::record::{Packing, RecordKind, SymbolOrigin};
 use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::BitWidth;
-use lyra_semantic::types::{ConstInt, InterfaceType, Ty};
+use lyra_semantic::types::{ConstInt, InterfaceType, SymbolType, Ty, UnpackedDim};
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::enum_queries::{EnumRef, enum_sem};
@@ -458,4 +458,97 @@ pub fn type_of_symbol<'db>(
         let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
         eval_const_int(db, expr_ref)
     })
+}
+
+/// An internal-error fact produced by type extraction.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InternalErrorFact {
+    pub site: lyra_semantic::Site,
+    pub detail: smol_str::SmolStr,
+}
+
+/// Derived query: extract `MissingSite` errors from a symbol's normalized type.
+///
+/// Depends on `type_of_symbol` (no re-extraction). Cached by Salsa.
+#[salsa::tracked(return_ref)]
+pub fn type_of_symbol_internal_errors<'db>(
+    db: &'db dyn salsa::Database,
+    sym_ref: SymbolRef<'db>,
+) -> Vec<InternalErrorFact> {
+    let sym_type = type_of_symbol(db, sym_ref);
+    let gsym = sym_ref.symbol(db);
+    let unit = sym_ref.unit(db);
+    let Some(source_file) = source_file_by_id(db, unit, gsym.file) else {
+        return Vec::new();
+    };
+    let def = def_index_file(db, source_file);
+    let fallback = def.symbols.get(gsym.local).name_site;
+    collect_missing_site_errors(&sym_type, fallback)
+}
+
+fn collect_missing_site_errors(
+    sym: &SymbolType,
+    fallback: lyra_semantic::Site,
+) -> Vec<InternalErrorFact> {
+    let ty = match sym {
+        SymbolType::Value(ty) | SymbolType::TypeAlias(ty) => ty,
+        SymbolType::Net(net) => &net.data,
+        SymbolType::Error(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    collect_missing_site_ty(ty, fallback, &mut out);
+    out
+}
+
+fn collect_missing_site_ty(
+    ty: &Ty,
+    fallback: lyra_semantic::Site,
+    out: &mut Vec<InternalErrorFact>,
+) {
+    match ty {
+        Ty::Integral(i) => {
+            for d in i.packed.iter() {
+                collect_missing_site_const(&d.msb, fallback, out);
+                collect_missing_site_const(&d.lsb, fallback, out);
+            }
+        }
+        Ty::Array { elem, dim } => {
+            collect_missing_site_dim(dim, fallback, out);
+            collect_missing_site_ty(elem, fallback, out);
+        }
+        _ => {}
+    }
+}
+
+fn collect_missing_site_dim(
+    dim: &UnpackedDim,
+    fallback: lyra_semantic::Site,
+    out: &mut Vec<InternalErrorFact>,
+) {
+    match dim {
+        UnpackedDim::Range { msb, lsb } => {
+            collect_missing_site_const(msb, fallback, out);
+            collect_missing_site_const(lsb, fallback, out);
+        }
+        UnpackedDim::Size(c) => collect_missing_site_const(c, fallback, out),
+        UnpackedDim::Queue { bound } => {
+            if let Some(c) = bound {
+                collect_missing_site_const(c, fallback, out);
+            }
+        }
+        UnpackedDim::Assoc(_) | UnpackedDim::Unsized => {}
+    }
+}
+
+fn collect_missing_site_const(
+    c: &ConstInt,
+    fallback: lyra_semantic::Site,
+    out: &mut Vec<InternalErrorFact>,
+) {
+    if let Some(origin) = c.missing_site_origin() {
+        out.push(InternalErrorFact {
+            site: fallback,
+            detail: origin.detail(),
+        });
+    }
 }

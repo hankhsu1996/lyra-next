@@ -388,7 +388,9 @@ fn extract_assoc_from_typespec(ts: &TypeSpec, _ast_id_map: &AstIdMap) -> Unpacke
 fn expr_to_const_int(expr: &Expr, ast_id_map: &AstIdMap) -> ConstInt {
     match crate::site::opt_site_of(ast_id_map, expr) {
         Some(id) => ConstInt::Unevaluated(id),
-        None => ConstInt::Error(ConstEvalError::Unsupported),
+        None => ConstInt::Error(ConstEvalError::MissingSite(
+            crate::types::MissingSiteOrigin::TypeExtract,
+        )),
     }
 }
 

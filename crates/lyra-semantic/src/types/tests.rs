@@ -106,6 +106,8 @@ fn const_eval_error_variants() {
     let _ = ConstEvalError::Unresolved;
     let _ = ConstEvalError::Cycle;
     let _ = ConstEvalError::Unsupported;
+    let _ = ConstEvalError::MissingSite(MissingSiteOrigin::TypeExtract);
+    let _ = ConstEvalError::MissingSite(MissingSiteOrigin::ConstEval);
 }
 
 #[test]

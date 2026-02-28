@@ -89,6 +89,7 @@ Enforced by `tools/policy/check_cst_layering.py` (rules C001-C005).
 - **Behavior locks.** Any refactor that changes classification paths must include a small test that would fail if the accept/reject contract regresses.
 - **No special-case escape hatches.** Do not introduce local helpers (e.g. `expr_site_of`) because a wrapper "doesn't implement X". Fix the infrastructure so the common path works (e.g. add a trait or method in `lyra-ast`).
 - **No silent downgrade.** Do not return `Unsupported`/`Ty::Error` to satisfy a type mismatch (e.g. `TfArg::Type` mapped to `UnsupportedExprKind`). Use `Option`, split the helper by kind, or handle the kind correctly.
+- **No global scans for internal invariants.** Surface invariant failures at creation with a fallback anchor already in hand. Do not add later-stage sweeps over all symbols/defs/types to rediscover errors; prefer structured errors lowered once.
 
 ## Crate Dependency Graph
 
