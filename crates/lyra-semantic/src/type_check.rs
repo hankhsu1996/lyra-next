@@ -140,14 +140,12 @@ const MISSING_AST_ID: &str = "missing_ast_id in type checker";
 /// Type-check-specific: when anchor extraction yields `None` (error-recovered
 /// tree), emits a diagnostic anchored at `fallback` and returns the fallback.
 fn require_site(anchor: Option<Site>, fallback: Site, items: &mut Vec<TypeCheckItem>) -> Site {
-    if let Some(s) = anchor {
-        return s;
-    }
-    items.push(TypeCheckItem::InternalError {
-        detail: smol_str::SmolStr::new_static(MISSING_AST_ID),
-        site: fallback,
-    });
-    fallback
+    site::require_site(anchor, fallback, || {
+        items.push(TypeCheckItem::InternalError {
+            detail: smol_str::SmolStr::new_static(MISSING_AST_ID),
+            site: fallback,
+        });
+    })
 }
 
 /// Check a `ContinuousAssign` node for type errors.
@@ -162,7 +160,7 @@ pub fn check_continuous_assign(
     items: &mut Vec<TypeCheckItem>,
 ) {
     let map = ctx.ast_id_map();
-    let self_site = site::site_of(map, ca, fallback);
+    let self_site = require_site(site::opt_site_of(map, ca), fallback, items);
     let lhs = ca.lhs();
     let rhs = ca.rhs();
     if let (Some(l), Some(r)) = (&lhs, &rhs) {
@@ -180,7 +178,7 @@ pub fn check_assign_stmt(
     items: &mut Vec<TypeCheckItem>,
 ) {
     let map = ctx.ast_id_map();
-    let self_site = site::site_of(map, assign, fallback);
+    let self_site = require_site(site::opt_site_of(map, assign), fallback, items);
     let lhs = assign.lhs();
     let rhs = assign.rhs();
     let has_op = assign.assign_op().is_some();
@@ -533,7 +531,7 @@ fn check_bits_call(
         && !ty.is_data_type()
     {
         let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
-        let arg_site = site::site_of(map, first, call_site);
+        let arg_site = require_site(site::opt_site_of(map, first), call_site, items);
         items.push(TypeCheckItem::BitsNonDataType {
             call_site,
             arg_site,
@@ -562,7 +560,7 @@ fn check_conversion_arg_integral(
     }
     if !matches!(arg_ty.ty, Ty::Integral(_) | Ty::Enum(_)) {
         let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
-        let arg_site = site::site_of(map, first, call_site);
+        let arg_site = require_site(site::opt_site_of(map, first), call_site, items);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -593,7 +591,7 @@ fn check_conversion_arg_real(
     }
     if !arg_ty.ty.is_real() {
         let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
-        let arg_site = site::site_of(map, first, call_site);
+        let arg_site = require_site(site::opt_site_of(map, first), call_site, items);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -624,7 +622,7 @@ fn check_conversion_bits_to_real(
         return;
     }
     let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
-    let arg_site = site::site_of(map, first, call_site);
+    let arg_site = require_site(site::opt_site_of(map, first), call_site, items);
     if !matches!(arg_ty.ty, Ty::Integral(_)) {
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,

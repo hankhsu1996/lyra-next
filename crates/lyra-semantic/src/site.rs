@@ -13,9 +13,15 @@ pub(crate) fn opt_site_of<T: HasSyntax>(map: &AstIdMap, node: &T) -> Option<Site
     map.id_of(node)
 }
 
-/// Get a stable site anchor, falling back on failure.
-pub(crate) fn site_of<T: HasSyntax>(map: &AstIdMap, node: &T, fallback: Site) -> Site {
-    map.id_of(node).unwrap_or(fallback)
+/// Require a `Site` anchor, calling `emit` on failure.
+///
+/// Returns `anchor` if `Some`, otherwise calls `emit()` and returns `fallback`.
+pub(crate) fn require_site(anchor: Option<Site>, fallback: Site, emit: impl FnOnce()) -> Site {
+    if let Some(s) = anchor {
+        return s;
+    }
+    emit();
+    fallback
 }
 
 #[cfg(test)]
