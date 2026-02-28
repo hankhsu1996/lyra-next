@@ -82,22 +82,22 @@ pub(crate) fn lower_file_diagnostics(
         diags.push(lower_semantic_diag(diag, primary_span, &pp.source_map));
     }
 
-    for (range, detail) in &*def.internal_errors {
-        let (span, extra) = map_span_or_fallback(file_id, &pp.source_map, *range);
-        let text = freeform_text(&format!("internal error: {detail}"), extra);
-        diags.push(
-            Diagnostic::new(
-                Severity::Error,
-                DiagnosticCode::INTERNAL_ERROR,
-                Message::new(MessageId::InternalError, vec![Arg::Name(text.clone())]),
-            )
-            .with_label(Label {
-                kind: LabelKind::Primary,
-                span,
-                message: Message::new(MessageId::InternalError, vec![Arg::Name(text)]),
-            })
-            .with_origin(DiagnosticOrigin::Internal),
-        );
+    for (site_opt, detail) in &*def.internal_errors {
+        let (span, suffix) = match site_opt {
+            Some(site) => map_span_or_fallback(file_id, &pp.source_map, site.text_range()),
+            None => (
+                Span {
+                    file: file_id,
+                    range: TextRange::empty(TextSize::new(0)),
+                },
+                Some(" [unanchored]"),
+            ),
+        };
+        let qualified = match suffix {
+            Some(s) => SmolStr::new(format!("{detail}{s}")),
+            None => detail.clone(),
+        };
+        diags.push(internal_error_diag(&qualified, span));
     }
 
     diags
@@ -199,7 +199,7 @@ pub(crate) fn lower_semantic_diag(
             vec![Arg::Name(SmolStr::new(format!("{count}")))],
             primary_span,
         ),
-        SemanticDiagKind::InternalError { detail } => lower_internal_error(detail, primary_span),
+        SemanticDiagKind::InternalError { detail } => internal_error_diag(detail, primary_span),
     }
 }
 
@@ -417,17 +417,19 @@ fn lower_ambiguous_wildcard(name: &SmolStr, candidates: &[SmolStr], span: Span) 
     })
 }
 
-fn lower_internal_error(detail: &SmolStr, span: Span) -> Diagnostic {
+/// Construct an internal-error diagnostic with consistent severity, code, arg kind, and origin.
+pub(crate) fn internal_error_diag(detail: &str, span: Span) -> Diagnostic {
     let text = SmolStr::new(format!("internal error: {detail}"));
+    let msg_args = vec![Arg::Detail(text)];
     Diagnostic::new(
         Severity::Error,
         DiagnosticCode::INTERNAL_ERROR,
-        Message::new(MessageId::InternalError, vec![Arg::Name(text.clone())]),
+        Message::new(MessageId::InternalError, msg_args.clone()),
     )
     .with_label(Label {
         kind: LabelKind::Primary,
         span,
-        message: Message::new(MessageId::InternalError, vec![Arg::Name(text)]),
+        message: Message::new(MessageId::InternalError, msg_args),
     })
     .with_origin(DiagnosticOrigin::Internal)
 }
@@ -506,11 +508,9 @@ mod tests {
         let map = lyra_ast::AstIdMap::from_root(FileId(0), &parse.syntax());
         let mut def = lyra_semantic::build_def_index(FileId(0), &parse, &map);
         // Inject a synthetic internal error to test the lowering path
+        let module_site = map.erased_ast_id(&parse.syntax().first_child().unwrap());
         let mut errors = def.internal_errors.to_vec();
-        errors.push((
-            TextRange::new(TextSize::new(0), TextSize::new(6)),
-            SmolStr::new("test invariant violation"),
-        ));
+        errors.push((module_site, SmolStr::new("test invariant violation")));
         def.internal_errors = errors.into_boxed_slice();
 
         let resolve = lyra_semantic::resolve_index::ResolveIndex {

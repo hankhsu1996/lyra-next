@@ -1,10 +1,10 @@
-use lyra_lexer::SyntaxKind;
+use lyra_ast::{TypeDeclSite, UnpackedDimSource};
 use lyra_semantic::UserTypeRef;
 use lyra_semantic::record::{Packing, RecordKind, SymbolOrigin};
 use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::BitWidth;
-use lyra_semantic::types::{ConstInt, InterfaceType, Ty};
+use lyra_semantic::types::{ConstInt, InterfaceType, SymbolType, Ty, UnpackedDim};
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::enum_queries::{EnumRef, enum_sem};
@@ -169,8 +169,8 @@ pub fn type_of_symbol_raw<'db>(
             let ty = Ty::Enum(id);
             let parse = parse_file(db, source_file);
             let map = ast_id_map(db, source_file);
-            let decl_node = map.get_node(&parse.syntax(), sym.name_site);
-            let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
+            let dim_src = UnpackedDimSource::from_name_site(&parse.syntax(), map, sym.name_site);
+            let ty = wrap_unpacked_dims(ty, dim_src.as_ref(), map);
             return classify(ty, sym.kind);
         }
         SymbolOrigin::Record(idx) => {
@@ -178,8 +178,8 @@ pub fn type_of_symbol_raw<'db>(
             let ty = Ty::Record(id);
             let parse = parse_file(db, source_file);
             let map = ast_id_map(db, source_file);
-            let decl_node = map.get_node(&parse.syntax(), sym.name_site);
-            let ty = wrap_unpacked_dims_from_node(ty, decl_node.as_ref(), map);
+            let dim_src = UnpackedDimSource::from_name_site(&parse.syntax(), map, sym.name_site);
+            let ty = wrap_unpacked_dims(ty, dim_src.as_ref(), map);
             return classify(ty, sym.kind);
         }
         SymbolOrigin::EnumVariant(enum_idx) => {
@@ -204,33 +204,27 @@ pub fn type_of_symbol_raw<'db>(
         return SymbolType::Error(SymbolTypeError::MissingDecl);
     };
 
-    // For Port and TypedefDecl, the decl_site_id points directly to the node.
-    // For Variable/Net/Parameter, it points to a Declarator -- find the container.
-    let (container, declarator) = match decl_node.kind() {
-        SyntaxKind::Port | SyntaxKind::TypedefDecl => (decl_node.clone(), None),
-        SyntaxKind::Declarator => {
-            let Some(parent) = closest_decl_container(&decl_node) else {
-                return SymbolType::Error(SymbolTypeError::MissingDecl);
-            };
-            (parent, Some(decl_node.clone()))
-        }
-        _ => return SymbolType::Error(SymbolTypeError::MissingDecl),
+    let Some((container, declarator)) = TypeDeclSite::resolve(&decl_node) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
     };
 
     // Check for user-defined type (typedef expansion trigger)
-    let typespec = container
-        .children()
-        .find(|c| c.kind() == SyntaxKind::TypeSpec);
-
-    if let Some(ref ts) = typespec
-        && let Some(utr) = user_type_ref(ts)
+    if let Some(ts) = container.type_spec()
+        && let Some(utr) = user_type_ref(&ts)
     {
-        let dim_source = if decl_node.kind() == SyntaxKind::Port {
-            Some(&decl_node)
-        } else {
-            declarator.as_ref()
+        let dim_owner = match &container {
+            TypeDeclSite::Port(port) => Some(UnpackedDimSource::Port(port.clone())),
+            _ => declarator.clone().map(UnpackedDimSource::Declarator),
         };
-        return expand_typedef(db, unit, source_file, &utr, dim_source, map, sym.kind);
+        return expand_typedef(
+            db,
+            unit,
+            source_file,
+            &utr,
+            dim_owner.as_ref(),
+            map,
+            sym.kind,
+        );
     }
 
     // No user-defined type -- pure extraction
@@ -355,8 +349,8 @@ fn resolve_symbol_base_ty(
     }
 }
 
-/// `dim_source` is the node whose children contain unpacked dims to merge
-/// (Declarator for variables, Port node for ports, None for typedefs).
+/// `dim_owner` carries unpacked dims to merge (Declarator for variables,
+/// Port for ports, None for typedefs).
 /// `caller_kind` is the symbol kind of the declaration being typed, used
 /// to preserve `TypeAlias` classification for typedef symbols.
 fn expand_typedef(
@@ -364,13 +358,13 @@ fn expand_typedef(
     unit: CompilationUnit,
     source_file: SourceFile,
     user_type: &UserTypeRef,
-    dim_source: Option<&lyra_parser::SyntaxNode>,
+    dim_owner: Option<&UnpackedDimSource>,
     id_map: &lyra_ast::AstIdMap,
     caller_kind: lyra_semantic::symbols::SymbolKind,
 ) -> lyra_semantic::types::SymbolType {
     use lyra_semantic::types::{SymbolType, SymbolTypeError, UnpackedDim};
 
-    let resolve_node = user_type.resolve_node();
+    let resolve_node = crate::resolve_helpers::utr_syntax(user_type);
 
     // Look up the name in the resolve index
     let resolve = resolve_index_file(db, source_file, unit);
@@ -401,8 +395,13 @@ fn expand_typedef(
     };
 
     // Apply use-site unpacked dims uniformly
-    let use_site_unpacked: Vec<UnpackedDim> = dim_source
-        .map(|d| lyra_semantic::extract_unpacked_dims(d, id_map))
+    let use_site_unpacked: Vec<UnpackedDim> = dim_owner
+        .map(|owner| {
+            owner
+                .unpacked_dimensions()
+                .map(|dim| lyra_semantic::extract_unpacked_dim(&dim, id_map))
+                .collect()
+        })
         .unwrap_or_default();
 
     classify(
@@ -420,20 +419,16 @@ fn classify(ty: Ty, kind: lyra_semantic::symbols::SymbolKind) -> lyra_semantic::
     }
 }
 
-// Extract unpacked dims from a declaration node and wrap a type.
-fn wrap_unpacked_dims_from_node(
+fn wrap_unpacked_dims(
     ty: Ty,
-    node: Option<&lyra_parser::SyntaxNode>,
+    owner: Option<&UnpackedDimSource>,
     ast_id_map: &lyra_ast::AstIdMap,
 ) -> Ty {
-    let Some(node) = node else { return ty };
-    if !matches!(
-        node.kind(),
-        SyntaxKind::Declarator | SyntaxKind::TypedefDecl
-    ) {
-        return ty;
-    }
-    let dims = lyra_semantic::extract_unpacked_dims(node, ast_id_map);
+    let Some(owner) = owner else { return ty };
+    let dims: Vec<lyra_semantic::types::UnpackedDim> = owner
+        .unpacked_dimensions()
+        .map(|dim| lyra_semantic::extract_unpacked_dim(&dim, ast_id_map))
+        .collect();
     if dims.is_empty() {
         return ty;
     }
@@ -446,16 +441,6 @@ fn type_of_symbol_raw_recover<'db>(
     _sym_ref: SymbolRef<'db>,
 ) -> lyra_semantic::types::SymbolType {
     lyra_semantic::types::SymbolType::Error(lyra_semantic::types::SymbolTypeError::TypedefCycle)
-}
-
-/// Find the closest declaration container above a Declarator.
-fn closest_decl_container(node: &lyra_parser::SyntaxNode) -> Option<lyra_parser::SyntaxNode> {
-    node.ancestors().find(|n| {
-        matches!(
-            n.kind(),
-            SyntaxKind::VarDecl | SyntaxKind::NetDecl | SyntaxKind::ParamDecl
-        )
-    })
 }
 
 /// Extract the normalized type of a symbol (Salsa-tracked).
@@ -473,4 +458,97 @@ pub fn type_of_symbol<'db>(
         let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
         eval_const_int(db, expr_ref)
     })
+}
+
+/// An internal-error fact produced by type extraction.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InternalErrorFact {
+    pub site: lyra_semantic::Site,
+    pub detail: smol_str::SmolStr,
+}
+
+/// Derived query: extract `MissingSite` errors from a symbol's normalized type.
+///
+/// Depends on `type_of_symbol` (no re-extraction). Cached by Salsa.
+#[salsa::tracked(return_ref)]
+pub fn type_of_symbol_internal_errors<'db>(
+    db: &'db dyn salsa::Database,
+    sym_ref: SymbolRef<'db>,
+) -> Vec<InternalErrorFact> {
+    let sym_type = type_of_symbol(db, sym_ref);
+    let gsym = sym_ref.symbol(db);
+    let unit = sym_ref.unit(db);
+    let Some(source_file) = source_file_by_id(db, unit, gsym.file) else {
+        return Vec::new();
+    };
+    let def = def_index_file(db, source_file);
+    let fallback = def.symbols.get(gsym.local).name_site;
+    collect_missing_site_errors(&sym_type, fallback)
+}
+
+fn collect_missing_site_errors(
+    sym: &SymbolType,
+    fallback: lyra_semantic::Site,
+) -> Vec<InternalErrorFact> {
+    let ty = match sym {
+        SymbolType::Value(ty) | SymbolType::TypeAlias(ty) => ty,
+        SymbolType::Net(net) => &net.data,
+        SymbolType::Error(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    collect_missing_site_ty(ty, fallback, &mut out);
+    out
+}
+
+fn collect_missing_site_ty(
+    ty: &Ty,
+    fallback: lyra_semantic::Site,
+    out: &mut Vec<InternalErrorFact>,
+) {
+    match ty {
+        Ty::Integral(i) => {
+            for d in i.packed.iter() {
+                collect_missing_site_const(&d.msb, fallback, out);
+                collect_missing_site_const(&d.lsb, fallback, out);
+            }
+        }
+        Ty::Array { elem, dim } => {
+            collect_missing_site_dim(dim, fallback, out);
+            collect_missing_site_ty(elem, fallback, out);
+        }
+        _ => {}
+    }
+}
+
+fn collect_missing_site_dim(
+    dim: &UnpackedDim,
+    fallback: lyra_semantic::Site,
+    out: &mut Vec<InternalErrorFact>,
+) {
+    match dim {
+        UnpackedDim::Range { msb, lsb } => {
+            collect_missing_site_const(msb, fallback, out);
+            collect_missing_site_const(lsb, fallback, out);
+        }
+        UnpackedDim::Size(c) => collect_missing_site_const(c, fallback, out),
+        UnpackedDim::Queue { bound } => {
+            if let Some(c) = bound {
+                collect_missing_site_const(c, fallback, out);
+            }
+        }
+        UnpackedDim::Assoc(_) | UnpackedDim::Unsized => {}
+    }
+}
+
+fn collect_missing_site_const(
+    c: &ConstInt,
+    fallback: lyra_semantic::Site,
+    out: &mut Vec<InternalErrorFact>,
+) {
+    if let Some(origin) = c.missing_site_origin() {
+        out.push(InternalErrorFact {
+            site: fallback,
+            detail: origin.detail(),
+        });
+    }
 }

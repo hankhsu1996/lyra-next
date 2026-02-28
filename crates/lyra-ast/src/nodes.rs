@@ -26,6 +26,8 @@ ast_nodes! {
         net_decls: [NetDecl],
         param_decls: [ParamDecl],
         module_instantiations: [ModuleInstantiation],
+        function_decls: [FunctionDecl],
+        task_decls: [TaskDecl],
     }
 
     PortList(SyntaxKind::PortList) {
@@ -35,26 +37,19 @@ ast_nodes! {
     Port(SyntaxKind::Port) {
         name: token([Ident, EscapedIdent]),
         type_spec: TypeSpec,
-        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]) as direction_token,
     }
 
-    ParamPortList(SyntaxKind::ParamPortList) {
-        params: [ParamDecl],
-    }
+    ParamPortList(SyntaxKind::ParamPortList) { @custom }
 
     ParamDecl(SyntaxKind::ParamDecl) {
         declarators: [Declarator],
         type_spec: TypeSpec,
     }
 
-    AlwaysBlock(SyntaxKind::AlwaysBlock) {
-        keyword: token([AlwaysKw, AlwaysCombKw, AlwaysFfKw, AlwaysLatchKw]),
-        block_stmt: BlockStmt,
-    }
+    AlwaysBlock(SyntaxKind::AlwaysBlock) { @custom }
 
-    InitialBlock(SyntaxKind::InitialBlock) {
-        block_stmt: BlockStmt,
-    }
+    InitialBlock(SyntaxKind::InitialBlock) { @custom }
 
     VarDecl(SyntaxKind::VarDecl) {
         type_spec: TypeSpec,
@@ -66,26 +61,26 @@ ast_nodes! {
         declarators: [Declarator],
     }
 
-    ContinuousAssign(SyntaxKind::ContinuousAssign) {}
+    ContinuousAssign(SyntaxKind::ContinuousAssign) { @custom }
 
     PackedDimension(SyntaxKind::PackedDimension) {}
     UnpackedDimension(SyntaxKind::UnpackedDimension) {}
 
     // Statements
-    BlockStmt(SyntaxKind::BlockStmt) {}
-    IfStmt(SyntaxKind::IfStmt) {}
+    BlockStmt(SyntaxKind::BlockStmt) { @custom }
+    IfStmt(SyntaxKind::IfStmt) { @custom }
 
     CaseStmt(SyntaxKind::CaseStmt) {
         items: [CaseItem],
     }
 
-    CaseItem(SyntaxKind::CaseItem) {}
-    ForStmt(SyntaxKind::ForStmt) {}
-    WhileStmt(SyntaxKind::WhileStmt) {}
-    RepeatStmt(SyntaxKind::RepeatStmt) {}
-    ForeverStmt(SyntaxKind::ForeverStmt) {}
-    AssignStmt(SyntaxKind::AssignStmt) {}
-    TimingControl(SyntaxKind::TimingControl) {}
+    CaseItem(SyntaxKind::CaseItem) { @custom }
+    ForStmt(SyntaxKind::ForStmt) { @custom }
+    WhileStmt(SyntaxKind::WhileStmt) { @custom }
+    RepeatStmt(SyntaxKind::RepeatStmt) { @custom }
+    ForeverStmt(SyntaxKind::ForeverStmt) { @custom }
+    AssignStmt(SyntaxKind::AssignStmt) { @custom }
+    TimingControl(SyntaxKind::TimingControl) { @custom }
     EventExpr(SyntaxKind::EventExpr) {}
     EventItem(SyntaxKind::EventItem) {}
 
@@ -94,45 +89,34 @@ ast_nodes! {
     BinExpr(SyntaxKind::BinExpr) { @custom }
     PrefixExpr(SyntaxKind::PrefixExpr) { @custom }
     ParenExpr(SyntaxKind::ParenExpr) { @custom }
-    CondExpr(SyntaxKind::CondExpr) {}
-    ConcatExpr(SyntaxKind::ConcatExpr) {}
-    ReplicExpr(SyntaxKind::ReplicExpr) {}
-    StreamExpr(SyntaxKind::StreamExpr) {}
+    CondExpr(SyntaxKind::CondExpr) { @custom }
+    ConcatExpr(SyntaxKind::ConcatExpr) { @custom }
+    ReplicExpr(SyntaxKind::ReplicExpr) { @custom }
+    StreamExpr(SyntaxKind::StreamExpr) { @custom }
     StreamSliceSize(SyntaxKind::StreamSliceSize) {}
-    StreamOperands(SyntaxKind::StreamOperands) {}
+    StreamOperands(SyntaxKind::StreamOperands) { @custom }
     CastExpr(SyntaxKind::CastExpr) { @custom }
     IndexExpr(SyntaxKind::IndexExpr) { @custom }
     RangeExpr(SyntaxKind::RangeExpr) {}
     FieldExpr(SyntaxKind::FieldExpr) { @custom }
 
-    CallExpr(SyntaxKind::CallExpr) {
-        arg_list: ArgList,
-    }
+    CallExpr(SyntaxKind::CallExpr) { @custom }
 
     ArgList(SyntaxKind::ArgList) { @custom }
 
-    SystemTfCall(SyntaxKind::SystemTfCall) {
-        arg_list: SystemTfArgList,
-    }
+    SystemTfCall(SyntaxKind::SystemTfCall) { @custom }
 
-    SystemTfArgList(SyntaxKind::SystemTfArgList) {}
+    SystemTfArgList(SyntaxKind::SystemTfArgList) { @custom }
 
     NameRef(SyntaxKind::NameRef) {
         ident: token([Ident, EscapedIdent]),
     }
 
-    Literal(SyntaxKind::Literal) {
-        token: token([
-            IntLiteral, RealLiteral, BasedLiteral,
-            UnbasedUnsizedLiteral, StringLiteral,
-        ]),
-    }
+    Literal(SyntaxKind::Literal) { @custom }
 
     ErrorNode(SyntaxKind::ErrorNode) {}
 
-    Declarator(SyntaxKind::Declarator) {
-        name: token([Ident, EscapedIdent]),
-    }
+    Declarator(SyntaxKind::Declarator) { @custom }
 
     ModuleInstantiation(SyntaxKind::ModuleInstantiation) {
         module_name: token([Ident, EscapedIdent]),
@@ -200,6 +184,8 @@ ast_nodes! {
 
     InterfaceBody(SyntaxKind::InterfaceBody) {}
 
+    GenerateRegion(SyntaxKind::GenerateRegion) {}
+
     ModportDecl(SyntaxKind::ModportDecl) {
         items: [ModportItem],
     }
@@ -207,12 +193,12 @@ ast_nodes! {
     ModportItem(SyntaxKind::ModportItem) { @custom }
 
     ModportPort(SyntaxKind::ModportPort) {
-        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]) as direction_token,
         name: token([Ident, EscapedIdent]),
     }
 
     ModportExprPort(SyntaxKind::ModportExprPort) {
-        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]) as direction_token,
         port_name: token([Ident, EscapedIdent]),
     }
 
@@ -245,7 +231,7 @@ ast_nodes! {
     TfPortDecl(SyntaxKind::TfPortDecl) {
         type_spec: TypeSpec,
         declarators: [Declarator],
-        direction: token([InputKw, OutputKw, InoutKw, RefKw]),
+        direction: token([InputKw, OutputKw, InoutKw, RefKw]) as direction_token,
     }
 
     // Streaming `with` clause (LRM 11.4.14.4)
@@ -256,21 +242,67 @@ ast_nodes! {
 
 // Custom accessors
 
+impl ParamPortList {
+    pub fn params(&self) -> AstChildren<ParamDecl> {
+        support::children(&self.syntax)
+    }
+}
+
+impl AlwaysBlock {
+    pub fn keyword(&self) -> Option<SyntaxToken> {
+        support::token_in(
+            &self.syntax,
+            &[
+                SyntaxKind::AlwaysKw,
+                SyntaxKind::AlwaysCombKw,
+                SyntaxKind::AlwaysFfKw,
+                SyntaxKind::AlwaysLatchKw,
+            ],
+        )
+    }
+
+    pub fn block_stmt(&self) -> Option<BlockStmt> {
+        support::child(&self.syntax)
+    }
+
+    /// The body statement (first statement-kind child after keyword).
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
+
+impl InitialBlock {
+    pub fn block_stmt(&self) -> Option<BlockStmt> {
+        support::child(&self.syntax)
+    }
+
+    /// The body statement.
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
+
 impl Expression {
     /// The single wrapped expression child.
-    pub fn inner(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn inner(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    /// The wrapped expression as an `Expr` handle (alias for `inner`).
+    pub fn expr(&self) -> Option<crate::expr::Expr> {
+        self.inner()
+    }
+
+    /// Unwrap the wrapper and peel any remaining wrapper forms.
+    pub fn peeled_expr(&self) -> Option<crate::expr::Expr> {
+        self.inner().and_then(|e| e.peeled())
     }
 }
 
 impl ParenExpr {
     /// The expression inside the parentheses.
-    pub fn inner(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn inner(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 }
 
@@ -317,6 +349,150 @@ impl BinExpr {
         }
         None
     }
+
+    pub fn lhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    pub fn rhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 1)
+    }
+
+    pub fn binary_op(&self) -> Option<SyntaxBinaryOp> {
+        SyntaxBinaryOp::from_token(self.op_token()?.kind())
+    }
+}
+
+/// Syntactic binary operator classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxBinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitXnor,
+    Shl,
+    Shr,
+    Ashl,
+    Ashr,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+    Eq,
+    Neq,
+    CaseEq,
+    CaseNeq,
+    WildEq,
+    WildNeq,
+    LogAnd,
+    LogOr,
+    Power,
+}
+
+impl SyntaxBinaryOp {
+    /// Flip a relational operator (`Lt` <-> `Gt`, `LtEq` <-> `GtEq`).
+    /// Symmetric operators (`Eq`, `Neq`) return themselves. Non-comparison
+    /// operators return `None`.
+    pub fn flip(&self) -> Option<Self> {
+        match self {
+            Self::Lt => Some(Self::Gt),
+            Self::Gt => Some(Self::Lt),
+            Self::LtEq => Some(Self::GtEq),
+            Self::GtEq => Some(Self::LtEq),
+            Self::Eq | Self::Neq => Some(*self),
+            _ => None,
+        }
+    }
+
+    /// Whether this operator is a comparison (relational or equality).
+    pub fn is_comparison(&self) -> bool {
+        matches!(
+            self,
+            Self::Lt | Self::LtEq | Self::Gt | Self::GtEq | Self::Eq | Self::Neq
+        )
+    }
+
+    pub fn from_token(kind: SyntaxKind) -> Option<SyntaxBinaryOp> {
+        match kind {
+            SyntaxKind::Plus => Some(SyntaxBinaryOp::Add),
+            SyntaxKind::Minus => Some(SyntaxBinaryOp::Sub),
+            SyntaxKind::Star => Some(SyntaxBinaryOp::Mul),
+            SyntaxKind::Slash => Some(SyntaxBinaryOp::Div),
+            SyntaxKind::Percent => Some(SyntaxBinaryOp::Mod),
+            SyntaxKind::Amp => Some(SyntaxBinaryOp::BitAnd),
+            SyntaxKind::Pipe => Some(SyntaxBinaryOp::BitOr),
+            SyntaxKind::Caret => Some(SyntaxBinaryOp::BitXor),
+            SyntaxKind::TildeCaret | SyntaxKind::CaretTilde => Some(SyntaxBinaryOp::BitXnor),
+            SyntaxKind::LtLt => Some(SyntaxBinaryOp::Shl),
+            SyntaxKind::GtGt => Some(SyntaxBinaryOp::Shr),
+            SyntaxKind::LtLtLt => Some(SyntaxBinaryOp::Ashl),
+            SyntaxKind::GtGtGt => Some(SyntaxBinaryOp::Ashr),
+            SyntaxKind::Lt => Some(SyntaxBinaryOp::Lt),
+            SyntaxKind::LtEq => Some(SyntaxBinaryOp::LtEq),
+            SyntaxKind::Gt => Some(SyntaxBinaryOp::Gt),
+            SyntaxKind::GtEq => Some(SyntaxBinaryOp::GtEq),
+            SyntaxKind::EqEq => Some(SyntaxBinaryOp::Eq),
+            SyntaxKind::BangEq => Some(SyntaxBinaryOp::Neq),
+            SyntaxKind::EqEqEq => Some(SyntaxBinaryOp::CaseEq),
+            SyntaxKind::BangEqEq => Some(SyntaxBinaryOp::CaseNeq),
+            SyntaxKind::EqEqQuestion => Some(SyntaxBinaryOp::WildEq),
+            SyntaxKind::BangEqQuestion => Some(SyntaxBinaryOp::WildNeq),
+            SyntaxKind::AmpAmp => Some(SyntaxBinaryOp::LogAnd),
+            SyntaxKind::PipePipe => Some(SyntaxBinaryOp::LogOr),
+            SyntaxKind::StarStar => Some(SyntaxBinaryOp::Power),
+            _ => None,
+        }
+    }
+}
+
+/// Syntactic assignment operator classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxAssignOp {
+    Blocking,
+    NonBlocking,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    ModAssign,
+    AndAssign,
+    OrAssign,
+    XorAssign,
+    ShlAssign,
+    ShrAssign,
+    AshlAssign,
+    AshrAssign,
+}
+
+impl SyntaxAssignOp {
+    pub fn from_token(kind: SyntaxKind) -> Option<SyntaxAssignOp> {
+        match kind {
+            SyntaxKind::Assign => Some(SyntaxAssignOp::Blocking),
+            SyntaxKind::LtEq => Some(SyntaxAssignOp::NonBlocking),
+            SyntaxKind::PlusEq => Some(SyntaxAssignOp::AddAssign),
+            SyntaxKind::MinusEq => Some(SyntaxAssignOp::SubAssign),
+            SyntaxKind::StarEq => Some(SyntaxAssignOp::MulAssign),
+            SyntaxKind::SlashEq => Some(SyntaxAssignOp::DivAssign),
+            SyntaxKind::PercentEq => Some(SyntaxAssignOp::ModAssign),
+            SyntaxKind::AmpEq => Some(SyntaxAssignOp::AndAssign),
+            SyntaxKind::PipeEq => Some(SyntaxAssignOp::OrAssign),
+            SyntaxKind::CaretEq => Some(SyntaxAssignOp::XorAssign),
+            SyntaxKind::LtLtEq => Some(SyntaxAssignOp::ShlAssign),
+            SyntaxKind::GtGtEq => Some(SyntaxAssignOp::ShrAssign),
+            SyntaxKind::LtLtLtEq => Some(SyntaxAssignOp::AshlAssign),
+            SyntaxKind::GtGtGtEq => Some(SyntaxAssignOp::AshrAssign),
+            _ => None,
+        }
+    }
+
+    pub fn is_compound(&self) -> bool {
+        !matches!(self, SyntaxAssignOp::Blocking | SyntaxAssignOp::NonBlocking)
+    }
 }
 
 /// Either a bare `ModportPort` or an expression `ModportExprPort`.
@@ -348,10 +524,8 @@ impl ModportItem {
 }
 
 impl ModportExprPort {
-    pub fn target_expr(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn target_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 }
 
@@ -362,16 +536,75 @@ impl PrefixExpr {
             .filter_map(rowan::NodeOrToken::into_token)
             .find(|tok| tok.kind() != SyntaxKind::Whitespace)
     }
+
+    pub fn operand(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    pub fn prefix_op(&self) -> Option<SyntaxPrefixOp> {
+        self.op_token()
+            .and_then(|tok| SyntaxPrefixOp::from_token_kind(tok.kind()))
+    }
+}
+
+/// Syntactic prefix operator classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SyntaxPrefixOp {
+    Plus,
+    Minus,
+    LogNot,
+    BitNot,
+    RedAnd,
+    RedOr,
+    RedXor,
+    RedNand,
+    RedNor,
+    RedXnor,
+    Inc,
+    Dec,
+}
+
+impl SyntaxPrefixOp {
+    pub fn from_token_kind(kind: SyntaxKind) -> Option<Self> {
+        match kind {
+            SyntaxKind::Plus => Some(Self::Plus),
+            SyntaxKind::Minus => Some(Self::Minus),
+            SyntaxKind::Bang => Some(Self::LogNot),
+            SyntaxKind::Tilde => Some(Self::BitNot),
+            SyntaxKind::Amp => Some(Self::RedAnd),
+            SyntaxKind::Pipe => Some(Self::RedOr),
+            SyntaxKind::Caret => Some(Self::RedXor),
+            SyntaxKind::TildeAmp => Some(Self::RedNand),
+            SyntaxKind::TildePipe => Some(Self::RedNor),
+            SyntaxKind::TildeCaret | SyntaxKind::CaretTilde => Some(Self::RedXnor),
+            SyntaxKind::PlusPlus => Some(Self::Inc),
+            SyntaxKind::MinusMinus => Some(Self::Dec),
+            _ => None,
+        }
+    }
+
+    pub fn is_reduction(self) -> bool {
+        matches!(
+            self,
+            Self::RedAnd
+                | Self::RedOr
+                | Self::RedXor
+                | Self::RedNand
+                | Self::RedNor
+                | Self::RedXnor
+        )
+    }
+
+    pub fn is_inc_dec(self) -> bool {
+        matches!(self, Self::Inc | Self::Dec)
+    }
 }
 
 impl IndexExpr {
     /// The (base, index) expression pair. Returns None if not exactly 2
     /// expression children (error recovery).
-    fn expr_pair(&self) -> Option<(lyra_parser::SyntaxNode, lyra_parser::SyntaxNode)> {
-        let mut iter = self
-            .syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()));
+    fn expr_pair(&self) -> Option<(crate::expr::Expr, crate::expr::Expr)> {
+        let mut iter = support::expr_children(&self.syntax);
         let first = iter.next()?;
         let second = iter.next()?;
         if iter.next().is_some() {
@@ -381,22 +614,20 @@ impl IndexExpr {
     }
 
     /// The base expression (left of the brackets).
-    pub fn base_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+    pub fn base_expr(&self) -> Option<crate::expr::Expr> {
         self.expr_pair().map(|(base, _)| base)
     }
 
     /// The index expression (inside the brackets).
-    pub fn index_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+    pub fn index_expr(&self) -> Option<crate::expr::Expr> {
         self.expr_pair().map(|(_, idx)| idx)
     }
 }
 
 impl FieldExpr {
     /// The base expression before the dot.
-    pub fn base_expr(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn base_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 
     pub fn field_name(&self) -> Option<SyntaxToken> {
@@ -409,12 +640,184 @@ impl FieldExpr {
     }
 }
 
+impl CondExpr {
+    pub fn condition(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    pub fn then_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 1)
+    }
+
+    pub fn else_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 2)
+    }
+}
+
+impl ConcatExpr {
+    pub fn operands(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
+        support::expr_children(&self.syntax)
+    }
+}
+
+impl ReplicExpr {
+    pub fn count(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    pub fn body_exprs(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
+        support::expr_children(&self.syntax).skip(1)
+    }
+}
+
+impl CallExpr {
+    pub fn arg_list(&self) -> Option<ArgList> {
+        support::child(&self.syntax)
+    }
+
+    pub fn callee(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+}
+
+impl StreamExpr {
+    pub fn stream_operands(&self) -> Option<StreamOperands> {
+        support::child(&self.syntax)
+    }
+}
+
+impl StreamOperands {
+    pub fn items(&self) -> AstChildren<StreamOperandItem> {
+        support::children(&self.syntax)
+    }
+}
+
+impl SystemTfCall {
+    pub fn arg_list(&self) -> Option<SystemTfArgList> {
+        support::child(&self.syntax)
+    }
+
+    pub fn system_name(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::SystemIdent)
+    }
+}
+
+impl SystemTfArgList {
+    pub fn args(&self) -> impl Iterator<Item = crate::expr::TfArg> + '_ {
+        self.syntax.children().map(|child| {
+            if let Some(t) = crate::expr::TypeRef::cast(child.clone()) {
+                crate::expr::TfArg::Type(t)
+            } else if let Some(e) = crate::expr::Expr::cast(child.clone()) {
+                crate::expr::TfArg::Expr(e)
+            } else {
+                crate::expr::TfArg::Unknown(child)
+            }
+        })
+    }
+}
+
+impl Literal {
+    pub fn token(&self) -> Option<SyntaxToken> {
+        support::token_in(
+            &self.syntax,
+            &[
+                SyntaxKind::IntLiteral,
+                SyntaxKind::RealLiteral,
+                SyntaxKind::BasedLiteral,
+                SyntaxKind::UnbasedUnsizedLiteral,
+                SyntaxKind::StringLiteral,
+            ],
+        )
+    }
+
+    pub fn literal_kind(&self) -> Option<crate::expr::LiteralKind> {
+        let tokens: Vec<SyntaxToken> = self
+            .syntax
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .filter(|t| {
+                !matches!(
+                    t.kind(),
+                    SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
+                )
+            })
+            .collect();
+
+        if tokens.is_empty() {
+            return None;
+        }
+
+        // Check for BasedLiteral anywhere
+        let based_pos = tokens
+            .iter()
+            .position(|t| t.kind() == SyntaxKind::BasedLiteral);
+        if let Some(bp) = based_pos {
+            let size_token = if bp > 0 && tokens[bp - 1].kind() == SyntaxKind::IntLiteral {
+                Some(tokens[bp - 1].clone())
+            } else {
+                None
+            };
+            return Some(crate::expr::LiteralKind::Based {
+                size_token,
+                base_token: tokens[bp].clone(),
+            });
+        }
+
+        let first = &tokens[0];
+        match first.kind() {
+            SyntaxKind::IntLiteral => Some(crate::expr::LiteralKind::Int {
+                token: first.clone(),
+            }),
+            SyntaxKind::UnbasedUnsizedLiteral => Some(crate::expr::LiteralKind::UnbasedUnsized {
+                token: first.clone(),
+            }),
+            SyntaxKind::RealLiteral => Some(crate::expr::LiteralKind::Real {
+                token: first.clone(),
+            }),
+            SyntaxKind::StringLiteral => Some(crate::expr::LiteralKind::String {
+                token: first.clone(),
+            }),
+            SyntaxKind::TimeLiteral => Some(crate::expr::LiteralKind::Time {
+                token: first.clone(),
+            }),
+            _ => Some(crate::expr::LiteralKind::Unknown {
+                token: first.clone(),
+            }),
+        }
+    }
+}
+
+impl Declarator {
+    pub fn name(&self) -> Option<SyntaxToken> {
+        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
+    }
+
+    /// The initializer expression after `=`, if present.
+    pub fn init_expr(&self) -> Option<crate::expr::Expr> {
+        let mut seen_assign = false;
+        for child in self.syntax.children_with_tokens() {
+            if child
+                .as_token()
+                .is_some_and(|t| t.kind() == SyntaxKind::Assign)
+            {
+                seen_assign = true;
+                continue;
+            }
+            if seen_assign
+                && let Some(node) = child.as_node()
+                && crate::node::is_expression_kind(node.kind())
+            {
+                return crate::expr::Expr::cast(node.clone());
+            }
+        }
+        None
+    }
+}
+
 impl ArgList {
     /// Iterate over argument expression nodes.
-    pub fn args(&self) -> impl Iterator<Item = lyra_parser::SyntaxNode> + '_ {
-        self.syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn args(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
+        support::expr_children(&self.syntax)
     }
 }
 
@@ -445,27 +848,18 @@ impl RangeExpr {
         }
     }
 
-    /// Filtered iterator over expression children (deterministic order).
-    fn expr_children(&self) -> impl Iterator<Item = lyra_parser::SyntaxNode> + '_ {
-        self.syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()))
-    }
-
     /// The base object expression (before the brackets).
     /// For `a[hi:lo]` or `a[idx+:w]`, returns `a`.
-    pub fn base_expr(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.expr_children().next()
+    pub fn base_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 
     /// The two operand expressions inside the brackets.
     /// Fixed `[hi:lo]`: returns (hi, lo).
     /// Indexed `[idx+:w]` / `[idx-:w]`: returns (idx, w).
-    pub fn operand_exprs(&self) -> Option<(lyra_parser::SyntaxNode, lyra_parser::SyntaxNode)> {
-        let mut iter = self.expr_children();
-        let _base = iter.next()?;
-        let first = iter.next()?;
-        let second = iter.next()?;
+    pub fn operand_exprs(&self) -> Option<(crate::expr::Expr, crate::expr::Expr)> {
+        let first = support::expr_child(&self.syntax, 1)?;
+        let second = support::expr_child(&self.syntax, 2)?;
         Some((first, second))
     }
 }
@@ -490,30 +884,6 @@ impl EnumMemberRange {
     }
 }
 
-impl EnumType {
-    pub fn base_type_spec(&self) -> Option<TypeSpec> {
-        support::child(&self.syntax)
-    }
-}
-
-impl StructType {
-    pub fn is_packed(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::PackedKw).is_some()
-    }
-
-    pub fn is_union(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::UnionKw).is_some()
-    }
-
-    pub fn is_tagged(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::TaggedKw).is_some()
-    }
-
-    pub fn is_soft(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::SoftKw).is_some()
-    }
-}
-
 impl CastExpr {
     pub fn cast_type(&self) -> Option<TypeSpec> {
         support::child(&self.syntax)
@@ -521,182 +891,11 @@ impl CastExpr {
 
     /// The inner expression of the cast (the operand inside parentheses).
     /// Returns the first expression-kind direct child that is not a `TypeSpec`.
-    pub fn inner_expr(&self) -> Option<lyra_parser::SyntaxNode> {
+    pub fn inner_expr(&self) -> Option<crate::expr::Expr> {
         self.syntax
             .children()
             .find(|c| c.kind() != SyntaxKind::TypeSpec && crate::node::is_expression_kind(c.kind()))
-    }
-}
-
-impl TypeSpec {
-    pub fn keyword(&self) -> Option<SyntaxToken> {
-        // First token that is a keyword or ident
-        self.syntax
-            .children_with_tokens()
-            .find_map(rowan::NodeOrToken::into_token)
-    }
-
-    pub fn packed_dimensions(&self) -> AstChildren<PackedDimension> {
-        support::children(&self.syntax)
-    }
-
-    pub fn enum_type(&self) -> Option<EnumType> {
-        support::child(&self.syntax)
-    }
-
-    pub fn struct_type(&self) -> Option<StructType> {
-        support::child(&self.syntax)
-    }
-}
-
-impl PackageDecl {
-    pub fn name(&self) -> Option<SyntaxToken> {
-        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
-    }
-
-    pub fn body(&self) -> Option<PackageBody> {
-        support::child(&self.syntax)
-    }
-}
-
-impl PackageBody {
-    pub fn var_decls(&self) -> AstChildren<VarDecl> {
-        support::children(&self.syntax)
-    }
-
-    pub fn net_decls(&self) -> AstChildren<NetDecl> {
-        support::children(&self.syntax)
-    }
-
-    pub fn param_decls(&self) -> AstChildren<ParamDecl> {
-        support::children(&self.syntax)
-    }
-
-    pub fn import_decls(&self) -> AstChildren<ImportDecl> {
-        support::children(&self.syntax)
-    }
-}
-
-impl ImportDecl {
-    pub fn items(&self) -> AstChildren<ImportItem> {
-        support::children(&self.syntax)
-    }
-}
-
-impl ImportItem {
-    pub fn qualified_name(&self) -> Option<QualifiedName> {
-        support::child(&self.syntax)
-    }
-
-    pub fn package_name(&self) -> Option<SyntaxToken> {
-        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
-    }
-
-    pub fn is_wildcard(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::Star).is_some()
-    }
-}
-
-impl ExportItem {
-    /// Returns the package name token (first Ident), or None for *::*
-    pub fn package_name(&self) -> Option<SyntaxToken> {
-        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
-    }
-
-    /// True if this item contains a wildcard (* after ::)
-    pub fn is_wildcard(&self) -> bool {
-        support::token(&self.syntax, SyntaxKind::Star).is_some()
-    }
-
-    /// True if this is *::* (re-export all)
-    pub fn is_all_wildcard(&self) -> bool {
-        let stars: Vec<_> = self
-            .syntax
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|tok| tok.kind() == SyntaxKind::Star)
-            .collect();
-        stars.len() >= 2
-    }
-
-    /// Returns the member name token (Ident after ::), or None for wildcards
-    pub fn member_name(&self) -> Option<SyntaxToken> {
-        let mut past_colon_colon = false;
-        for el in self.syntax.children_with_tokens() {
-            if let Some(tok) = el.into_token() {
-                if tok.kind() == SyntaxKind::ColonColon {
-                    past_colon_colon = true;
-                } else if past_colon_colon
-                    && matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
-                {
-                    return Some(tok);
-                }
-            }
-        }
-        None
-    }
-}
-
-impl QualifiedName {
-    pub fn segments(&self) -> impl Iterator<Item = SyntaxToken> + '_ {
-        self.syntax
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
-    }
-}
-
-impl FunctionDecl {
-    pub fn name(&self) -> Option<SyntaxToken> {
-        // The function name is the Ident that follows either:
-        //   (a) the TypeSpec child (explicit return type), or
-        //   (b) the `function` keyword + optional lifetime (implicit return type).
-        // In case (b), no TypeSpec exists, so we find the first Ident after
-        // skipping `function` and optional `automatic`/`static`.
-        let has_type_spec = self
-            .syntax
-            .children()
-            .any(|n| n.kind() == SyntaxKind::TypeSpec);
-
-        if has_type_spec {
-            let mut past_type_spec = false;
-            for el in self.syntax.children_with_tokens() {
-                match el {
-                    rowan::NodeOrToken::Node(ref n) if n.kind() == SyntaxKind::TypeSpec => {
-                        past_type_spec = true;
-                    }
-                    rowan::NodeOrToken::Token(tok) => {
-                        if past_type_spec
-                            && matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
-                        {
-                            return Some(tok);
-                        }
-                    }
-                    rowan::NodeOrToken::Node(_) => {}
-                }
-            }
-            None
-        } else {
-            // No TypeSpec -- first Ident after FunctionKw and optional lifetime
-            self.syntax
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .find(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
-        }
-    }
-
-    pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
-        support::children(&self.syntax)
-    }
-}
-
-impl TaskDecl {
-    pub fn name(&self) -> Option<SyntaxToken> {
-        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
-    }
-
-    pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
-        support::children(&self.syntax)
+            .and_then(crate::expr::Expr::cast)
     }
 }
 
@@ -715,10 +914,8 @@ pub enum StreamRangeOp {
 
 impl StreamOperandItem {
     /// The operand expression (first expression-kind child).
-    pub fn expr(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 
     /// The optional `with [...]` clause.
@@ -740,11 +937,7 @@ impl StreamRange {
     /// A `+` inside a `BinExpr` child (e.g. `[a + b]`) is NOT a direct
     /// token of `StreamRange`, so it cannot trigger `IndexedPlus`.
     pub fn op(&self) -> Option<StreamRangeOp> {
-        let expr_count = self
-            .syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()))
-            .count();
+        let expr_count = support::expr_children(&self.syntax).count();
         match expr_count {
             1 => Some(StreamRangeOp::Single),
             2 => {
@@ -785,18 +978,13 @@ impl StreamRange {
     }
 
     /// First expression child (the index/base).
-    pub fn lhs(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .find(|c| crate::node::is_expression_kind(c.kind()))
+    pub fn lhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 
     /// Second expression child (upper bound/width), `None` for `Single`.
-    pub fn rhs(&self) -> Option<lyra_parser::SyntaxNode> {
-        self.syntax
-            .children()
-            .filter(|c| crate::node::is_expression_kind(c.kind()))
-            .nth(1)
+    pub fn rhs(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 1)
     }
 }
 
@@ -840,12 +1028,29 @@ impl InstancePort {
             |el| matches!(el, rowan::NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::DotStar),
         )
     }
+
+    /// Whether the connection has explicit parentheses (`.foo(expr)`).
+    pub fn has_parens(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::LParen).is_some()
+    }
 }
 
 impl ModuleInstantiation {
     /// The parameter override list `#(...)` if present.
     pub fn param_overrides(&self) -> Option<ParamPortList> {
         support::child(&self.syntax)
+    }
+
+    /// Iterate `InstancePort` children in the parameter override list.
+    ///
+    /// In override context (`#(.W(8), .D(16))`), the `ParamPortList` node
+    /// contains `InstancePort` children rather than `ParamDecl`. This
+    /// accessor exposes that grammar-specific iteration from the parent
+    /// that knows which production is in use.
+    pub fn param_override_ports(&self) -> impl Iterator<Item = InstancePort> {
+        self.param_overrides()
+            .into_iter()
+            .flat_map(|ppl| support::children::<InstancePort>(&ppl.syntax))
     }
 }
 

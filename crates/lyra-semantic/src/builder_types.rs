@@ -1,6 +1,6 @@
 use lyra_ast::{
-    AstIdMap, AstNode, EnumMember, EnumType, NameRef, QualifiedName, StructType, TypeSpec,
-    TypedefDecl,
+    AstIdMap, AstNode, EnumMember, EnumType, HasSyntax, NameRef, QualifiedName, StructType,
+    TypeSpec, TypedefDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -23,7 +23,7 @@ use crate::types::Ty;
 
 pub(crate) fn collect_type_spec_refs(ctx: &mut DefContext<'_>, ts: &TypeSpec, scope: ScopeId) {
     let node = ts.syntax();
-    if let Some(utr) = crate::type_extract::user_type_ref(node) {
+    if let Some(utr) = crate::type_extract::user_type_ref(ts) {
         register_type_use_site(ctx, &utr, scope);
     }
     for child in node.children() {
@@ -78,13 +78,10 @@ fn register_type_use_site(
 
 pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
-        ctx.emit_internal_error(
-            &format!(
-                "erased_ast_id returned None for {:?} in collect_typedef",
-                node.kind()
-            ),
-            node.text_range(),
-        );
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_typedef",
+            node.kind()
+        ));
         return;
     };
     // Detect enum/struct in the TypeSpec child
@@ -174,7 +171,7 @@ fn collect_enum_def(
             .ast_id_map
             .erased_ast_id(base_ts.syntax())
             .unwrap_or(ast_id);
-        let tref = extract_typeref_from_typespec(base_ts.syntax(), ctx.ast_id_map);
+        let tref = extract_typeref_from_typespec(&base_ts, ctx.ast_id_map);
         EnumBase { tref, type_site }
     } else {
         // Default base (int): anchor to the enum type node itself
@@ -208,9 +205,10 @@ fn collect_enum_def(
         let init = init_expr
             .as_ref()
             .and_then(|expr| ctx.ast_id_map.erased_ast_id(expr.syntax()));
-        let init_literal_width = init_expr
-            .as_ref()
-            .and_then(|expr| crate::literal::extract_sized_literal_width(expr.syntax()));
+        let init_literal_width = init_expr.as_ref().and_then(|expr| {
+            let e = expr.peeled_expr()?;
+            crate::literal::extract_sized_literal_width(&e)
+        });
 
         let (range_kind, range_site) = extract_enum_range_spec(&member, ctx.ast_id_map);
 
@@ -329,9 +327,8 @@ fn collect_record_def(
                 });
             }
         } else {
-            ctx.emit_internal_error(
+            ctx.emit_internal_error_unanchored(
                 "erased_ast_id returned None for StructType in collect_record_def",
-                struct_type.text_range(),
             );
         }
         return None;
@@ -361,20 +358,17 @@ fn collect_record_def(
         let ty = match member_ts {
             Some(ref ts) => {
                 collect_type_spec_refs(ctx, ts, scope);
-                extract_typeref_from_typespec(ts.syntax(), ctx.ast_id_map)
+                extract_typeref_from_typespec(ts, ctx.ast_id_map)
             }
             None => TypeRef::Resolved(Ty::Error),
         };
         for decl in member.declarators() {
             if let Some(name_tok) = decl.name() {
                 let Some(decl_site) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
-                    ctx.emit_internal_error(
-                        &format!(
-                            "erased_ast_id returned None for {:?} in collect_record_def declarator",
-                            decl.syntax().kind()
-                        ),
-                        decl.syntax().text_range(),
-                    );
+                    ctx.emit_internal_error_unanchored(&format!(
+                        "erased_ast_id returned None for {:?} in collect_record_def declarator",
+                        decl.syntax().kind()
+                    ));
                     continue;
                 };
                 fields.push(RecordField {

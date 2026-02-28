@@ -2,13 +2,8 @@
 """Check that TextRange does not leak into semantic diagnostic types.
 
 Rules:
-  D001: No TextRange code references in non-allowlisted lyra-semantic files
-  D002: No TextRange references in diagnostic.rs (hard ban, including comments)
-  D003: No text_range() calls in diagnostic.rs (hard ban)
-  D004: No AstIdMap in type-check lowering (lyra-db diagnostics.rs)
-        Site.text_range() is context-free; lowering must not use AstIdMap
-        to resolve Sites. Allowlisted: DbTypeCheckCtx, anchor_span,
-        lower_enum_value_diag (cross-file anchors).
+  D001: No TextRange type references in lyra-semantic source files
+  D002: No text_range() method calls in lyra-semantic source files
 
 The semantic layer stores stable anchors (Site, NameSpan, TokenSpan) in
 diagnostics. TextRange computation belongs in the lowering layer (lyra-db).
@@ -27,26 +22,22 @@ from pathlib import Path
 
 TARGET_PREFIX = "crates/lyra-semantic/src/"
 
-# Files that legitimately use TextRange for non-diagnostic purposes
-# (type extraction, type checking, builder internals, etc.).
-# diagnostic.rs and resolve_index.rs are NOT in this list.
-# TODO: goal is an empty allowlist -- shrink as TextRange is migrated out.
-TEXTRANGE_ALLOWED = frozenset({
-    "type_extract.rs",
-    "def_index.rs",
-    "builder_types.rs",
-    "builder.rs",
-    "name_graph.rs",
-})
-
 # D001: TextRange in code (imports, type annotations, expressions).
 # Matches whole-word TextRange, not inside doc comments.
 RE_TEXTRANGE = re.compile(r'\bTextRange\b')
 
-# D002/D003: hard ban patterns for diagnostic.rs
+# D002: text_range() method calls.
+# Builder modules and producer modules that construct diagnostic anchors
+# legitimately call text_range() to extract spans from CST nodes.
 RE_TEXT_RANGE_CALL = re.compile(r'\btext_range\s*\(')
-
-DIAG_FILE = "diagnostic.rs"
+D002_ALLOWED = frozenset({
+    "builder.rs",
+    "builder_items.rs",
+    "builder_stmt.rs",
+    "builder_types.rs",
+    "builder_order.rs",
+    "type_check.rs",
+})
 
 
 def get_repo_root() -> Path:
@@ -85,14 +76,10 @@ def should_check_file(filepath: str) -> bool:
     return True
 
 
-def _module_name(filepath: str) -> str:
-    return filepath.removeprefix(TARGET_PREFIX)
-
-
 def check_file(filepath: str, repo_root: Path) -> list[str]:
     errors = []
     full_path = repo_root / filepath
-    module = _module_name(filepath)
+    module = filepath.removeprefix(TARGET_PREFIX)
 
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
@@ -100,33 +87,26 @@ def check_file(filepath: str, repo_root: Path) -> list[str]:
         return [f"{filepath}: failed to read: {e}"]
 
     lines = content.splitlines()
-
-    is_diag = module == DIAG_FILE
-    is_allowed = module in TEXTRANGE_ALLOWED
+    check_d002 = module not in D002_ALLOWED
 
     for lineno_0, line in enumerate(lines):
         lineno = lineno_0 + 1
         stripped = line.lstrip()
 
-        if is_diag:
-            # D002: hard ban on TextRange anywhere in diagnostic.rs
-            if RE_TEXTRANGE.search(line):
-                errors.append(
-                    f"{filepath}:{lineno}: D002 TextRange reference in diagnostic.rs"
-                )
-            # D003: hard ban on text_range() calls in diagnostic.rs
-            if RE_TEXT_RANGE_CALL.search(line):
-                errors.append(
-                    f"{filepath}:{lineno}: D003 text_range() call in diagnostic.rs"
-                )
-        elif not is_allowed:
-            # D001: TextRange in non-allowlisted files (skip comments)
-            if stripped.startswith("//"):
-                continue
-            if RE_TEXTRANGE.search(line):
-                errors.append(
-                    f"{filepath}:{lineno}: D001 TextRange in non-allowlisted file"
-                )
+        # Skip comment-only lines
+        if stripped.startswith("//"):
+            continue
+
+        # D001: no TextRange type references
+        if RE_TEXTRANGE.search(line):
+            errors.append(
+                f"{filepath}:{lineno}: D001 TextRange reference"
+            )
+        # D002: no text_range() method calls (builder/producer modules exempt)
+        if check_d002 and RE_TEXT_RANGE_CALL.search(line):
+            errors.append(
+                f"{filepath}:{lineno}: D002 text_range() call"
+            )
 
     return errors
 
@@ -169,19 +149,11 @@ def main() -> int:
             print(f"  {error}")
         print(f"\nTotal: {len(all_errors)} violations")
         print("\nRules:")
-        print("  D001: No TextRange in non-allowlisted lyra-semantic files")
-        print("  D002: No TextRange references in diagnostic.rs (hard ban)")
-        print("  D003: No text_range() calls in diagnostic.rs (hard ban)")
-        print(f"  Allowlisted files: {', '.join(sorted(TEXTRANGE_ALLOWED))}")
+        print("  D001: No TextRange type references in lyra-semantic files")
+        print("  D002: No text_range() method calls in lyra-semantic files")
         return 1
 
-    allowed_count = sum(
-        1 for f in files if _module_name(f) in TEXTRANGE_ALLOWED
-    )
-    checked = len(files) - allowed_count
-    # diagnostic.rs is always fully checked (D002/D003), not skipped
-    print(f"Checked {len(files)} files ({allowed_count} allowlisted for "
-          f"D001 only), no violations")
+    print(f"Checked {len(files)} files, no violations")
     return 0
 
 

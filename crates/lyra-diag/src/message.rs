@@ -87,7 +87,10 @@ pub enum MessageId {
 /// A typed argument that fills a placeholder in a message template.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Arg {
+    /// User-visible symbol or type name.
     Name(SmolStr),
+    /// Internal diagnostic payload (not a user symbol name).
+    Detail(SmolStr),
     Width(u32),
     Count(usize),
 }
@@ -97,6 +100,14 @@ impl Arg {
     pub fn as_name(&self) -> Option<&str> {
         match self {
             Arg::Name(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Extract the inner `&str` if this is a `Detail` variant.
+    pub fn as_detail(&self) -> Option<&str> {
+        match self {
+            Arg::Detail(s) => Some(s.as_str()),
             _ => None,
         }
     }
@@ -232,10 +243,16 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::ValueNotType => "this is a value, not a type".into(),
         MessageId::RedefinedHere => "redefined here".into(),
         MessageId::FirstDefinedHere => "first defined here".into(),
-        MessageId::ParseError | MessageId::PreprocessError | MessageId::InternalError => msg
+        MessageId::ParseError | MessageId::PreprocessError => msg
             .args
             .first()
             .and_then(Arg::as_name)
+            .map(String::from)
+            .unwrap_or_default(),
+        MessageId::InternalError => msg
+            .args
+            .first()
+            .and_then(|a| a.as_detail().or_else(|| a.as_name()))
             .map(String::from)
             .unwrap_or_default(),
         _ => render_elab_message(msg),

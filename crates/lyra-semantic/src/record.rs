@@ -1,8 +1,6 @@
-use lyra_ast::{AstIdMap, AstNode, NameRef, QualifiedName};
+use lyra_ast::{AstIdMap, TypeNameRef, TypeSpec};
 
 use crate::Site;
-use lyra_lexer::SyntaxKind;
-use lyra_parser::SyntaxNode;
 use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
@@ -142,37 +140,34 @@ pub enum SymbolOrigin {
     Error,
 }
 
-// Extract a TypeRef from a TypeSpec syntax node.
-pub(crate) fn extract_typeref_from_typespec(
-    typespec: &SyntaxNode,
-    ast_id_map: &AstIdMap,
-) -> TypeRef {
-    // Check for NameRef or QualifiedName child (user-defined type)
-    for child in typespec.children() {
-        if child.kind() == SyntaxKind::NameRef
-            && let Some(name_ref) = NameRef::cast(child.clone())
-            && let Some(ident) = name_ref.ident()
-            && let Some(ast_id) = ast_id_map.ast_id(&name_ref)
-        {
-            return TypeRef::Named {
-                name: SmolStr::new(ident.text()),
-                type_site: ast_id.erase(),
-            };
-        } else if child.kind() == SyntaxKind::QualifiedName
-            && let Some(qn) = QualifiedName::cast(child.clone())
-            && let Some(ast_id) = ast_id_map.ast_id(&qn)
-        {
-            let segments: Box<[SmolStr]> = qn.segments().map(|s| SmolStr::new(s.text())).collect();
-            if !segments.is_empty() {
-                return TypeRef::Qualified {
-                    segments,
+// Extract a TypeRef from a `TypeSpec`.
+pub(crate) fn extract_typeref_from_typespec(typespec: &TypeSpec, ast_id_map: &AstIdMap) -> TypeRef {
+    match typespec.type_name_ref() {
+        Some(TypeNameRef::Simple(name_ref)) => {
+            if let Some(ident) = name_ref.ident()
+                && let Some(ast_id) = ast_id_map.ast_id(&name_ref)
+            {
+                return TypeRef::Named {
+                    name: SmolStr::new(ident.text()),
                     type_site: ast_id.erase(),
                 };
             }
         }
+        Some(TypeNameRef::Qualified(qn)) => {
+            if let Some(ast_id) = ast_id_map.ast_id(&qn) {
+                let segments: Box<[SmolStr]> =
+                    qn.segments().map(|s| SmolStr::new(s.text())).collect();
+                if !segments.is_empty() {
+                    return TypeRef::Qualified {
+                        segments,
+                        type_site: ast_id.erase(),
+                    };
+                }
+            }
+        }
+        Some(TypeNameRef::Dotted(_)) | None => {}
     }
 
-    // Keyword base type with packed dimensions
     let ty = extract_base_ty_from_typespec(typespec, ast_id_map);
     TypeRef::Resolved(ty)
 }

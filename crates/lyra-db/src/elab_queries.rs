@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-use lyra_ast::{AstNode, ErasedAstId};
-use lyra_lexer::SyntaxKind;
-use lyra_parser::{SyntaxElement, SyntaxNode, SyntaxToken};
+use lyra_ast::{AstNode, ErasedAstId, HasSyntax};
+use lyra_parser::{SyntaxNode, SyntaxToken};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::ConstInt;
@@ -18,7 +17,7 @@ use crate::elaboration::{
     GenScopeOrigin, GenvarEnvId, GenvarEnvInterner, InstId, InstOrigin, InstanceNode, ParamEnvId,
     ParamEnvInterner,
 };
-use crate::module_sig::{DesignUnitSig, ParamKind, PortDirection, PortSig};
+use crate::module_sig::{DesignUnitSig, ParamKind, PortSig};
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::semantic::{def_index_file, global_def_index};
 use crate::type_queries::{SymbolRef, type_of_symbol};
@@ -75,10 +74,10 @@ impl DesignUnitDeclNode {
         }
     }
 
-    fn body_syntax(&self) -> Option<SyntaxNode> {
+    fn body_scope(&self) -> Option<lyra_ast::GenerateScope> {
         match self {
-            Self::Module(m) => m.body().map(|b| b.syntax().clone()),
-            Self::Interface(i) => i.body().map(|b| b.syntax().clone()),
+            Self::Module(m) => m.body().map(lyra_ast::GenerateScope::ModuleBody),
+            Self::Interface(i) => i.body().map(lyra_ast::GenerateScope::InterfaceBody),
         }
     }
 }
@@ -138,13 +137,7 @@ fn extract_port_sigs(
             .map(|t| SmolStr::new(t.text()))
             .unwrap_or_default();
 
-        let direction = port.direction().and_then(|tok| match tok.kind() {
-            SyntaxKind::InputKw => Some(PortDirection::Input),
-            SyntaxKind::OutputKw => Some(PortDirection::Output),
-            SyntaxKind::InoutKw => Some(PortDirection::Inout),
-            SyntaxKind::RefKw => Some(PortDirection::Ref),
-            _ => None,
-        });
+        let direction = port.direction();
 
         let port_ast_id = id_map.erased_ast_id(port.syntax());
         let ty = port_ast_id
@@ -187,9 +180,7 @@ fn extract_param_sigs(
 
     let mut params = Vec::new();
     for param_decl in param_port_list.params() {
-        let is_type_param = param_decl.syntax().children_with_tokens().any(
-            |el| matches!(el, SyntaxElement::Token(ref tok) if tok.kind() == SyntaxKind::TypeKw),
-        );
+        let is_type_param = param_decl.is_type_param();
 
         for declarator in param_decl.declarators() {
             let param_name = declarator
@@ -200,22 +191,9 @@ fn extract_param_sigs(
                 .name()
                 .map(|t| t.text_range())
                 .unwrap_or_default();
-            let has_default = declarator
-                .syntax()
-                .children_with_tokens()
-                .any(|el| {
-                    matches!(el, SyntaxElement::Token(ref tok) if tok.kind() == SyntaxKind::Assign)
-                });
-
-            let default_expr = if has_default {
-                declarator
-                    .syntax()
-                    .children()
-                    .find(|c| is_expr_kind(c.kind()))
-                    .and_then(|expr_node| id_map.erased_ast_id(&expr_node))
-            } else {
-                None
-            };
+            let init = declarator.init_expr();
+            let has_default = init.is_some();
+            let default_expr = init.and_then(|expr| id_map.erased_ast_id(expr.syntax()));
 
             params.push(crate::module_sig::ParamSig {
                 name: param_name,
@@ -447,7 +425,7 @@ fn elaborate_unit_body(
     // always blocks, modport declarations, etc.) are intentionally
     // skipped -- they are handled by per-file semantic queries, not
     // the elaboration pass.
-    let Some(body) = decl.body_syntax() else {
+    let Some(body_scope) = decl.body_scope() else {
         return;
     };
 
@@ -463,30 +441,47 @@ fn elaborate_unit_body(
         genvar_env: GenvarEnvId::EMPTY,
         global,
     };
-    expand_body_children(ctx, &body, &env);
+    for item in body_scope.generate_items() {
+        dispatch_generate_item(ctx, item, &env);
+    }
 }
 
-fn expand_body_children(ctx: &mut ElabCtx<'_>, body_node: &SyntaxNode, env: &ScopeEnv<'_>) {
-    for child in body_node.children() {
-        match child.kind() {
-            SyntaxKind::ModuleInstantiation => {
-                process_instantiation(ctx, &child, env);
+fn dispatch_generate_body(ctx: &mut ElabCtx<'_>, body: lyra_ast::GenerateBody, env: &ScopeEnv<'_>) {
+    match body {
+        lyra_ast::GenerateBody::Scope(scope) => {
+            for item in scope.generate_items() {
+                dispatch_generate_item(ctx, item, env);
             }
-            SyntaxKind::IfStmt => process_generate_if(ctx, &child, env),
-            SyntaxKind::ForStmt => process_generate_for(ctx, &child, env),
-            SyntaxKind::CaseStmt => process_generate_case(ctx, &child, env),
-            SyntaxKind::GenerateRegion => expand_body_children(ctx, &child, env),
-            SyntaxKind::BlockStmt => process_generate_block(ctx, &child, env),
-            _ => {}
+        }
+        lyra_ast::GenerateBody::Item(item) => {
+            dispatch_generate_item(ctx, item, env);
         }
     }
 }
 
-fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
-    let Some(inst_node) = lyra_ast::ModuleInstantiation::cast(node.clone()) else {
-        return;
-    };
-    let Some(name_tok) = inst_node.module_name() else {
+fn dispatch_generate_item(ctx: &mut ElabCtx<'_>, item: lyra_ast::GenerateItem, env: &ScopeEnv<'_>) {
+    match item {
+        lyra_ast::GenerateItem::ModuleInstantiation(inst) => {
+            process_instantiation(ctx, &inst, env);
+        }
+        lyra_ast::GenerateItem::IfStmt(s) => process_generate_if(ctx, &s, env),
+        lyra_ast::GenerateItem::ForStmt(s) => process_generate_for(ctx, &s, env),
+        lyra_ast::GenerateItem::CaseStmt(s) => process_generate_case(ctx, &s, env),
+        lyra_ast::GenerateItem::GenerateRegion(r) => {
+            for sub in r.generate_items() {
+                dispatch_generate_item(ctx, sub, env);
+            }
+        }
+        lyra_ast::GenerateItem::BlockStmt(s) => process_generate_block(ctx, &s, env),
+    }
+}
+
+fn process_instantiation(
+    ctx: &mut ElabCtx<'_>,
+    inst: &lyra_ast::ModuleInstantiation,
+    env: &ScopeEnv<'_>,
+) {
+    let Some(name_tok) = inst.module_name() else {
         return;
     };
     let inst_module_name = SmolStr::new(name_tok.text());
@@ -517,13 +512,13 @@ fn process_instantiation(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
     let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
     let inst_stmt_ast = id_map
         .as_ref()
-        .and_then(|m| m.erased_ast_id(node))
+        .and_then(|m| m.erased_ast_id(inst.syntax()))
         .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
     let eval_env = make_eval_env(ctx, env);
-    let overrides = extract_param_overrides(&inst_node, ctx.db, ctx.unit, &eval_env);
+    let overrides = extract_param_overrides(inst, ctx.db, ctx.unit, &eval_env);
     #[cfg(debug_assertions)]
     let mut debug_origins = std::collections::HashSet::new();
-    for (idx, hier_inst) in inst_node.instances().enumerate() {
+    for (idx, hier_inst) in inst.instances().enumerate() {
         let Some(inst_name_tok) = hier_inst.name() else {
             continue;
         };
@@ -629,10 +624,7 @@ fn add_implicit_port_bindings(
         if !port.is_named() || port.actual_expr().is_some() {
             continue;
         }
-        let has_parens = port
-            .syntax()
-            .children_with_tokens()
-            .any(|c| c.kind() == SyntaxKind::LParen);
+        let has_parens = port.has_parens();
         if has_parens {
             continue;
         }
@@ -680,17 +672,16 @@ fn add_implicit_port_bindings(
     }
 }
 
-fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
-    let children: Vec<SyntaxNode> = node.children().collect();
-    if children.is_empty() {
+fn process_generate_if(ctx: &mut ElabCtx<'_>, if_stmt: &lyra_ast::IfStmt, env: &ScopeEnv<'_>) {
+    let Some(cond_expr) = if_stmt.condition() else {
         return;
-    }
+    };
 
     let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
     let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
     let scope_ast = id_map
         .as_ref()
-        .and_then(|m| m.erased_ast_id(node))
+        .and_then(|m| m.erased_ast_id(if_stmt.syntax()))
         .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
 
     let cache_key = Some(cond_site_key(
@@ -711,7 +702,7 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
     let cond_val = eval_gen_condition(
         ctx.db,
         ctx.unit,
-        &children[0],
+        &cond_expr,
         &eval_env,
         ctx.cond_cache,
         cache_key,
@@ -723,19 +714,20 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
         ctx.diags.push(ElabDiag::GenCondNotConst {
             span: Span {
                 file: env.file_id,
-                range: children[0].text_range(),
+                range: cond_expr.syntax().text_range(),
             },
         });
         return;
     };
 
-    let has_else = node
-        .children_with_tokens()
-        .any(|el| matches!(el, SyntaxElement::Token(ref t) if t.kind() == SyntaxKind::ElseKw));
-
-    let true_body = children.get(1);
-    let false_body = if has_else { children.get(2) } else { None };
-    let Some(body) = (if cond_true { true_body } else { false_body }) else {
+    let body = if cond_true {
+        if_stmt.then_generate_body()
+    } else if if_stmt.has_else() {
+        if_stmt.else_generate_body()
+    } else {
+        None
+    };
+    let Some(body) = body else {
         return;
     };
 
@@ -745,7 +737,7 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
         iter: None,
     };
 
-    let block_name = extract_block_name(body);
+    let block_name = body.block_name().map(|t| SmolStr::new(t.text()));
 
     let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
         origin,
@@ -754,7 +746,7 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
         kind: GenScopeKind::If,
         children: Vec::new(),
         source_file: env.file_id,
-        offset: node.text_range(),
+        offset: if_stmt.syntax().text_range(),
     });
 
     ctx.tree
@@ -764,27 +756,27 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<
         parent_scope: ElabNodeId::GenScope(scope_id),
         ..*env
     };
-    expand_body_children(ctx, body, &child_env);
+    dispatch_generate_body(ctx, body, &child_env);
 }
 
-fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
+fn process_generate_for(ctx: &mut ElabCtx<'_>, for_stmt: &lyra_ast::ForStmt, env: &ScopeEnv<'_>) {
     let eval_env = make_eval_env(ctx, env);
-    let eval_fn = |expr_node: &SyntaxNode| -> Option<i64> {
-        eval_env_expr(ctx.db, ctx.unit, expr_node, &eval_env).ok()
+    let eval_fn = |expr: &lyra_ast::Expr| -> Option<i64> {
+        eval_env_expr(ctx.db, ctx.unit, expr, &eval_env).ok()
     };
-    let for_parts = extract_for_parts(node, &eval_fn);
+    let for_parts = extract_for_parts(for_stmt, &eval_fn);
 
     let Some(parts) = for_parts else {
         ctx.diags.push(ElabDiag::GenvarNotConst {
             span: Span {
                 file: env.file_id,
-                range: node.text_range(),
+                range: for_stmt.syntax().text_range(),
             },
         });
         return;
     };
 
-    let Some(body) = node.children().last() else {
+    let Some(body) = for_stmt.generate_body() else {
         return;
     };
 
@@ -792,7 +784,7 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
     let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
     let scope_ast = id_map
         .as_ref()
-        .and_then(|m| m.erased_ast_id(node))
+        .and_then(|m| m.erased_ast_id(for_stmt.syntax()))
         .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
 
     let genvar_name = parts.genvar_name;
@@ -827,7 +819,7 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
             iter: Some(iter_value.clone()),
         };
 
-        let block_name = extract_block_name(&body);
+        let block_name = body.block_name().map(|t| SmolStr::new(t.text()));
 
         let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
             origin,
@@ -839,7 +831,7 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
             },
             children: Vec::new(),
             source_file: env.file_id,
-            offset: node.text_range(),
+            offset: for_stmt.syntax().text_range(),
         });
 
         ctx.tree
@@ -855,7 +847,7 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
             genvar_env: child_genvar_env,
             ..*env
         };
-        expand_body_children(ctx, &body, &child_env);
+        dispatch_generate_body(ctx, body.clone(), &child_env);
 
         current = current.wrapping_add(step);
         iteration += 1;
@@ -873,7 +865,7 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
             ctx.diags.push(ElabDiag::GenerateIterationLimit {
                 span: Span {
                     file: env.file_id,
-                    range: node.text_range(),
+                    range: for_stmt.syntax().text_range(),
                 },
                 limit: max_iters,
             });
@@ -882,70 +874,62 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv
 }
 
 fn match_case_body(
-    child_nodes: &[SyntaxNode],
+    case_stmt: &lyra_ast::CaseStmt,
     case_val: i64,
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     cond_cache: &mut HashMap<CondCacheKey, ConstInt>,
     eval_env: &EvalEnv<'_>,
-) -> Option<(Option<SyntaxNode>, SyntaxNode)> {
-    let mut matched_body: Option<(SyntaxNode, SyntaxNode)> = None;
-    let mut default_body: Option<SyntaxNode> = None;
+) -> Option<(Option<lyra_ast::CaseItem>, lyra_ast::GenerateBody)> {
+    let mut matched: Option<(lyra_ast::CaseItem, lyra_ast::GenerateBody)> = None;
+    let mut default_body: Option<lyra_ast::GenerateBody> = None;
 
-    for child in &child_nodes[1..] {
-        if child.kind() != SyntaxKind::CaseItem {
+    for item in case_stmt.items() {
+        if item.is_default() {
+            default_body = item.generate_body();
             continue;
         }
 
-        let is_default = child.children_with_tokens().any(
-            |el| matches!(el, SyntaxElement::Token(ref t) if t.kind() == SyntaxKind::DefaultKw),
-        );
-
-        if is_default {
-            default_body = child.children().last();
-            continue;
-        }
-
-        let item_exprs: Vec<SyntaxNode> = child
-            .children()
-            .take_while(|c| is_expr_kind(c.kind()))
-            .collect();
-
-        for expr in &item_exprs {
-            let item_val = eval_gen_condition(db, unit, expr, eval_env, cond_cache, None);
+        let mut label_matched = false;
+        for label in item.labels() {
+            let item_val = eval_gen_condition(db, unit, &label, eval_env, cond_cache, None);
             if let Some(v) = item_val
                 && v == case_val
             {
-                if let Some(body_node) = child.children().last() {
-                    matched_body = Some((child.clone(), body_node));
-                }
+                label_matched = true;
                 break;
             }
         }
 
-        if matched_body.is_some() {
+        if label_matched {
+            if let Some(body) = item.generate_body() {
+                matched = Some((item, body));
+            }
             break;
         }
     }
 
-    if let Some((item, body)) = matched_body {
+    if let Some((item, body)) = matched {
         Some((Some(item), body))
     } else {
         default_body.map(|body| (None, body))
     }
 }
 
-fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
-    let child_nodes: Vec<SyntaxNode> = node.children().collect();
-    if child_nodes.is_empty() {
+fn process_generate_case(
+    ctx: &mut ElabCtx<'_>,
+    case_stmt: &lyra_ast::CaseStmt,
+    env: &ScopeEnv<'_>,
+) {
+    let Some(selector) = case_stmt.selector() else {
         return;
-    }
+    };
 
     let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
     let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
     let case_stmt_ast = id_map
         .as_ref()
-        .and_then(|m| m.erased_ast_id(node))
+        .and_then(|m| m.erased_ast_id(case_stmt.syntax()))
         .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
 
     let cache_key = Some(cond_site_key(
@@ -966,7 +950,7 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
     let case_val = eval_gen_condition(
         ctx.db,
         ctx.unit,
-        &child_nodes[0],
+        &selector,
         &eval_env,
         ctx.cond_cache,
         cache_key,
@@ -976,14 +960,14 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         ctx.diags.push(ElabDiag::GenCondNotConst {
             span: Span {
                 file: env.file_id,
-                range: child_nodes[0].text_range(),
+                range: selector.syntax().text_range(),
             },
         });
         return;
     };
 
-    let Some((case_item_node, body)) = match_case_body(
-        &child_nodes,
+    let Some((case_item, body)) = match_case_body(
+        case_stmt,
         case_val,
         ctx.db,
         ctx.unit,
@@ -993,9 +977,9 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         return;
     };
 
-    let scope_ast = case_item_node
+    let scope_ast = case_item
         .as_ref()
-        .and_then(|item| id_map.as_ref().and_then(|m| m.erased_ast_id(item)))
+        .and_then(|item| id_map.as_ref().and_then(|m| m.erased_ast_id(item.syntax())))
         .unwrap_or(case_stmt_ast);
 
     let origin = GenScopeOrigin {
@@ -1004,7 +988,7 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         iter: None,
     };
 
-    let block_name = extract_block_name(&body);
+    let block_name = body.block_name().map(|t| SmolStr::new(t.text()));
 
     let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
         origin,
@@ -1013,7 +997,7 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         kind: GenScopeKind::CaseItem,
         children: Vec::new(),
         source_file: env.file_id,
-        offset: node.text_range(),
+        offset: case_stmt.syntax().text_range(),
     });
 
     ctx.tree
@@ -1023,17 +1007,17 @@ fn process_generate_case(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEn
         parent_scope: ElabNodeId::GenScope(scope_id),
         ..*env
     };
-    expand_body_children(ctx, &body, &child_env);
+    dispatch_generate_body(ctx, body, &child_env);
 }
 
-fn process_generate_block(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeEnv<'_>) {
-    let block_name = extract_block_name(node);
+fn process_generate_block(ctx: &mut ElabCtx<'_>, block: &lyra_ast::BlockStmt, env: &ScopeEnv<'_>) {
+    let block_name = extract_block_name(block);
 
     let source_file = source_file_by_id(ctx.db, ctx.unit, env.file_id);
     let id_map = source_file.map(|sf| ast_id_map(ctx.db, sf));
     let scope_ast = id_map
         .as_ref()
-        .and_then(|m| m.erased_ast_id(node))
+        .and_then(|m| m.erased_ast_id(block.syntax()))
         .unwrap_or_else(|| ErasedAstId::placeholder(env.file_id));
 
     let origin = GenScopeOrigin {
@@ -1049,7 +1033,7 @@ fn process_generate_block(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeE
         kind: GenScopeKind::If,
         children: Vec::new(),
         source_file: env.file_id,
-        offset: node.text_range(),
+        offset: block.syntax().text_range(),
     });
 
     ctx.tree
@@ -1059,7 +1043,9 @@ fn process_generate_block(ctx: &mut ElabCtx<'_>, node: &SyntaxNode, env: &ScopeE
         parent_scope: ElabNodeId::GenScope(scope_id),
         ..*env
     };
-    expand_body_children(ctx, node, &child_env);
+    for item in block.generate_items() {
+        dispatch_generate_item(ctx, item, &child_env);
+    }
 }
 
-use crate::elab_lower::{ForLimit, extract_block_name, extract_for_parts, is_expr_kind};
+use crate::elab_lower::{ForLimit, extract_block_name, extract_for_parts};

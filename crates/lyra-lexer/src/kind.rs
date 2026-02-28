@@ -482,5 +482,15 @@ pub enum SyntaxKind {
     __Last,
 }
 
+impl SyntaxKind {
+    /// Whether this kind is trivia (whitespace or comments).
+    pub fn is_trivia(self) -> bool {
+        matches!(
+            self,
+            Self::Whitespace | Self::LineComment | Self::BlockComment
+        )
+    }
+}
+
 /// First node kind value -- tokens are `< NODE_START`, nodes `>= NODE_START`.
 pub const NODE_START: u16 = SyntaxKind::__NodeStart as u16;

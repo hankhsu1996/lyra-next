@@ -68,6 +68,29 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - **Lowering depends only on anchor data, not producer-layer services** --semantic anchors are self-describing; lowering extracts presentation data (ranges, spans) from the anchor's own stored fields. Injecting producer-layer services (AST maps, syntax trees) into lowering breaks layering and hides producer bugs.
 - **Producers must not silently drop findings** --when a producer encounters an unexpected state (failed lookup, missing data), it must emit an internal diagnostic with a deterministic fallback and continue. Never `return`/`continue` to skip producing a finding. Thread required (non-optional) fallbacks through the call stack so no code path can silently bail.
 
+## Typed AST Boundary
+
+`lyra-ast` is the only crate that walks CST structure (rowan children, token kinds). `lyra-db` and `lyra-semantic` consume typed AST accessors exclusively. Classification is typed (enums, accessors), not `SyntaxKind` matching.
+
+- **No dual-meaning wrappers.** If an AST node appears in multiple grammar contexts, expose grammar-specific iterators or a typed sum, not two same-shaped accessors with different names.
+- **No raw `SyntaxNode` in db/semantic helpers.** Functions accept typed wrappers (`&BinExpr`, `&TypeSpec`), not `&SyntaxNode`.
+- **No `.syntax()` in `lyra-semantic` (non-builder).** If a semantic change needs `.syntax()`, add or extend a typed accessor in `lyra-ast` or move the conversion glue into `lyra-db`. `.syntax()` is allowed in `lyra-db` (orchestration) and `lyra-ast` (typed accessor layer).
+- **Structure assumptions live in lyra-ast.** If a consumer assumes a node has a specific child structure, the accessor returns the typed result directly (e.g. `Option<BinExpr>`). Consumer layers never cast typed results into narrower types.
+
+Enforced by `tools/policy/check_cst_layering.py` (rules C001-C005).
+
+## Semantic API Discipline
+
+- **Contract-preserving changes.** When replacing a classifier or guard, preserve the accepted/rejected set exactly. Any intentional behavior change requires an explicit note and a test.
+- **No boolean-meaning public APIs.** Do not encode meaning in `bool` or `Option<bool>` across crate boundaries. Use small enums (`Signing`, `Direction`, `Polarity`).
+- **No silent fallback to `Error`.** Do not use `unwrap_or(Ty::Error)` as control flow. Return `Option`/`Result` and force callers to decide deliberately.
+- **Single choke point for shared classification.** If two call sites need the same "what is this?" logic, it becomes one typed accessor or classifier, usually in `lyra-ast`.
+- **Performance boundary.** No per-call expensive infrastructure (maps, whole-tree scans, allocations) in hot paths. Build once per query/file and pass in (`&AstIdMap`, `&ResolveCtx`).
+- **Behavior locks.** Any refactor that changes classification paths must include a small test that would fail if the accept/reject contract regresses.
+- **No special-case escape hatches.** Do not introduce local helpers (e.g. `expr_site_of`) because a wrapper "doesn't implement X". Fix the infrastructure so the common path works (e.g. add a trait or method in `lyra-ast`).
+- **No silent downgrade.** Do not return `Unsupported`/`Ty::Error` to satisfy a type mismatch (e.g. `TfArg::Type` mapped to `UnsupportedExprKind`). Use `Option`, split the helper by kind, or handle the kind correctly.
+- **No global scans for internal invariants.** Surface invariant failures at creation with a fallback anchor already in hand. Do not add later-stage sweeps over all symbols/defs/types to rediscover errors; prefer structured errors lowered once.
+
 ## Crate Dependency Graph
 
 ```
@@ -223,9 +246,9 @@ python3 tools/policy/check_ascii.py --staged    # staged files only
 
 ## CST Layering Policy
 
-`lyra-semantic` must not perform raw CST traversal (rowan `.children()`, `.descendants()`, etc.) except in allowlisted modules. The semantic layer consumes typed AST accessors; CST walking belongs in the builder phase or thin extraction helpers.
+`lyra-semantic` and `lyra-db` must not perform raw CST traversal (rowan `.children()`, `.descendants()`, etc.) except in allowlisted modules. Consumer layers use typed AST accessors from `lyra-ast`. CST walking belongs in: (1) accessor implementations inside `lyra-ast`, (2) builder-phase modules in `lyra-semantic`, or (3) explicitly allowlisted transitional modules (marked with TODO tags for cleanup).
 
-Allowlisted modules are listed in the script. When adding CST access to a new module, add it to the allowlist with a comment explaining why. Prefer adding a typed AST accessor in `lyra-ast` instead.
+Allowlisted modules are listed in the script per crate. When adding CST access to a new module, add it to the allowlist with a comment explaining why. Prefer adding a typed AST accessor in `lyra-ast` instead.
 
 Run the checker:
 

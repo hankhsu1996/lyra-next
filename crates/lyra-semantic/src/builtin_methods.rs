@@ -1,25 +1,23 @@
-use lyra_parser::SyntaxNode;
+use lyra_ast::{CallExpr, Expr};
 
 use crate::member::{
     ArrayMethodKind, ArrayReceiverInfo, ArrayReceiverKind, AssocKey, BuiltinMethodKind,
     ReceiverInfo, StringMethodKind,
 };
 use crate::type_infer::{
-    ExprType, ExprTypeErrorKind, ExprView, InferCtx, infer_expr_type, try_integral_view,
+    ExprType, ExprTypeErrorKind, ExprView, InferCtx, infer_expr, try_integral_view,
 };
 use crate::types::Ty;
 
 pub(crate) fn infer_builtin_method_call(
-    call_node: &SyntaxNode,
+    call: &CallExpr,
     bm: BuiltinMethodKind,
     result_ty: &Ty,
     receiver: Option<&ReceiverInfo>,
     ctx: &dyn InferCtx,
 ) -> ExprType {
-    use lyra_ast::{AstNode, CallExpr};
-
-    let args: Vec<SyntaxNode> = CallExpr::cast(call_node.clone())
-        .and_then(|c| c.arg_list())
+    let args: Vec<Expr> = call
+        .arg_list()
         .map(|al| al.args().collect())
         .unwrap_or_default();
 
@@ -35,9 +33,9 @@ pub(crate) fn infer_builtin_method_call(
     match bm {
         BuiltinMethodKind::Enum(ek) => {
             if ek.arg_requires_integral()
-                && let Some(arg_node) = args.first()
+                && let Some(arg) = args.first()
             {
-                let arg_type = infer_expr_type(arg_node, ctx, None);
+                let arg_type = infer_expr(arg, ctx, None);
                 if let ExprView::Error(_) = &arg_type.view {
                     return arg_type;
                 }
@@ -64,7 +62,7 @@ pub(crate) fn infer_builtin_method_call(
 
 fn check_array_method_args(
     ak: ArrayMethodKind,
-    args: &[SyntaxNode],
+    args: &[Expr],
     receiver: Option<&ReceiverInfo>,
     ctx: &dyn InferCtx,
 ) -> Option<ExprType> {
@@ -89,14 +87,14 @@ fn check_array_method_args(
 }
 
 fn check_delete_args(
-    args: &[SyntaxNode],
+    args: &[Expr],
     recv: &ArrayReceiverInfo,
     ctx: &dyn InferCtx,
 ) -> Option<ExprType> {
-    let arg_node = args.first()?;
+    let arg = args.first()?;
     match recv.kind {
         ArrayReceiverKind::Queue => {
-            let arg_type = infer_expr_type(arg_node, ctx, None);
+            let arg_type = infer_expr(arg, ctx, None);
             if let ExprView::Error(_) = &arg_type.view {
                 return Some(arg_type);
             }
@@ -106,7 +104,7 @@ fn check_delete_args(
             None
         }
         ArrayReceiverKind::Assoc => match &recv.assoc_key {
-            Some(AssocKey::Known(key_ty)) => check_typed_key_arg(arg_node, key_ty, ctx),
+            Some(AssocKey::Known(key_ty)) => check_typed_key_arg(arg, key_ty, ctx),
             Some(AssocKey::Wildcard | AssocKey::Unknown) => {
                 Some(ExprType::error(ExprTypeErrorKind::MethodKeyTypeUnknown))
             }
@@ -117,18 +115,18 @@ fn check_delete_args(
 }
 
 fn check_assoc_key_arg(
-    args: &[SyntaxNode],
+    args: &[Expr],
     recv: &ArrayReceiverInfo,
     ctx: &dyn InferCtx,
     require_lvalue: bool,
 ) -> Option<ExprType> {
-    if let Some(arg_node) = args.first()
+    if let Some(arg) = args.first()
         && let Some(AssocKey::Known(key_ty)) = &recv.assoc_key
     {
-        if let Some(err) = check_typed_key_arg(arg_node, key_ty, ctx) {
+        if let Some(err) = check_typed_key_arg(arg, key_ty, ctx) {
             return Some(err);
         }
-        if require_lvalue && !is_assignable_ref(arg_node) {
+        if require_lvalue && !is_assignable_ref(arg) {
             return Some(ExprType::error(ExprTypeErrorKind::MethodArgNotLvalue));
         }
     }
@@ -136,19 +134,19 @@ fn check_assoc_key_arg(
 }
 
 fn check_insert_args(
-    args: &[SyntaxNode],
+    args: &[Expr],
     recv: &ArrayReceiverInfo,
     ctx: &dyn InferCtx,
 ) -> Option<ExprType> {
     if args.len() >= 2 {
-        let idx_type = infer_expr_type(&args[0], ctx, None);
+        let idx_type = infer_expr(&args[0], ctx, None);
         if let ExprView::Error(_) = &idx_type.view {
             return Some(idx_type);
         }
         if try_integral_view(&idx_type, ctx).is_none() {
             return Some(ExprType::error(ExprTypeErrorKind::MethodArgNotIntegral));
         }
-        let item_type = infer_expr_type(&args[1], ctx, None);
+        let item_type = infer_expr(&args[1], ctx, None);
         if let ExprView::Error(_) = &item_type.view {
             return Some(item_type);
         }
@@ -159,13 +157,9 @@ fn check_insert_args(
     None
 }
 
-fn check_elem_arg(
-    args: &[SyntaxNode],
-    recv: &ArrayReceiverInfo,
-    ctx: &dyn InferCtx,
-) -> Option<ExprType> {
-    if let Some(arg_node) = args.first() {
-        let arg_type = infer_expr_type(arg_node, ctx, None);
+fn check_elem_arg(args: &[Expr], recv: &ArrayReceiverInfo, ctx: &dyn InferCtx) -> Option<ExprType> {
+    if let Some(arg) = args.first() {
+        let arg_type = infer_expr(arg, ctx, None);
         if let ExprView::Error(_) = &arg_type.view {
             return Some(arg_type);
         }
@@ -176,8 +170,8 @@ fn check_elem_arg(
     None
 }
 
-fn check_typed_key_arg(arg_node: &SyntaxNode, key_ty: &Ty, ctx: &dyn InferCtx) -> Option<ExprType> {
-    let arg_type = infer_expr_type(arg_node, ctx, None);
+fn check_typed_key_arg(arg: &Expr, key_ty: &Ty, ctx: &dyn InferCtx) -> Option<ExprType> {
+    let arg_type = infer_expr(arg, ctx, None);
     if let ExprView::Error(_) = &arg_type.view {
         return Some(arg_type);
     }
@@ -199,14 +193,14 @@ fn check_arg_assignable(expected: &Ty, actual: &Ty) -> bool {
 
 fn check_string_method(
     sk: StringMethodKind,
-    args: &[SyntaxNode],
+    args: &[Expr],
     result_ty: &Ty,
     ctx: &dyn InferCtx,
 ) -> ExprType {
     let sig = sk.sig();
     for (i, param_ty) in sig.params.iter().enumerate() {
-        if let Some(arg_node) = args.get(i) {
-            let arg_type = infer_expr_type(arg_node, ctx, None);
+        if let Some(arg) = args.get(i) {
+            let arg_type = infer_expr(arg, ctx, None);
             if let ExprView::Error(_) = &arg_type.view {
                 return arg_type;
             }

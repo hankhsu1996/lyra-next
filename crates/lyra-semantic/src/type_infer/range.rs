@@ -1,7 +1,7 @@
 use lyra_ast::RangeKind;
-use lyra_parser::SyntaxNode;
 
-use super::{ExprType, ExprTypeErrorKind, ExprView, InferCtx, infer_expr_type};
+use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx};
+use super::infer_expr;
 use crate::types::{ConstInt, Ty, UnpackedDim};
 
 /// Compute the constant width of a range select from const-eval results.
@@ -34,19 +34,14 @@ fn compute_slice_width(
 ///
 /// Supports packed integral part-select (LRM 11.5.1) and unpacked fixed-size
 /// array slicing (LRM 7.4.6).
-pub(super) fn infer_range(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
-    use lyra_ast::{AstNode, RangeExpr};
-
-    let Some(range) = RangeExpr::cast(node.clone()) else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
+pub(super) fn infer_range(range: &lyra_ast::RangeExpr, ctx: &dyn InferCtx) -> ExprType {
     let kind = range.range_kind();
 
     // 1. Infer base expression and reject non-sliceable types early
     let Some(base_node) = range.base_expr() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let base = infer_expr_type(&base_node, ctx, None);
+    let base = infer_expr(&base_node, ctx, None);
     if matches!(base.view, ExprView::Error(_)) {
         return base;
     }
@@ -67,11 +62,11 @@ pub(super) fn infer_range(node: &SyntaxNode, ctx: &dyn InferCtx) -> ExprType {
     let Some((op1_node, op2_node)) = range.operand_exprs() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let op1_et = infer_expr_type(&op1_node, ctx, None);
+    let op1_et = infer_expr(&op1_node, ctx, None);
     if matches!(op1_et.view, ExprView::Error(_)) {
         return op1_et;
     }
-    let op2_et = infer_expr_type(&op2_node, ctx, None);
+    let op2_et = infer_expr(&op2_node, ctx, None);
     if matches!(op2_et.view, ExprView::Error(_)) {
         return op2_et;
     }

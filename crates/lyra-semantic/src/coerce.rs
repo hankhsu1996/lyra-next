@@ -1,5 +1,5 @@
-use crate::expr_helpers::BinaryOp;
 use crate::type_infer::{BitVecType, BitWidth, Signedness};
+use lyra_ast::SyntaxBinaryOp;
 
 /// Target context for integral expression coercion (LRM 11.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,41 +47,43 @@ pub struct OpSpec {
 }
 
 /// Look up the operator specification for a binary operator.
-pub fn op_spec(op: BinaryOp) -> OpSpec {
+pub fn op_spec(op: SyntaxBinaryOp) -> OpSpec {
     match op {
-        BinaryOp::Add
-        | BinaryOp::Sub
-        | BinaryOp::Mul
-        | BinaryOp::Div
-        | BinaryOp::Mod
-        | BinaryOp::Power
-        | BinaryOp::BitAnd
-        | BinaryOp::BitOr
-        | BinaryOp::BitXor
-        | BinaryOp::BitXnor => OpSpec {
+        SyntaxBinaryOp::Add
+        | SyntaxBinaryOp::Sub
+        | SyntaxBinaryOp::Mul
+        | SyntaxBinaryOp::Div
+        | SyntaxBinaryOp::Mod
+        | SyntaxBinaryOp::Power
+        | SyntaxBinaryOp::BitAnd
+        | SyntaxBinaryOp::BitOr
+        | SyntaxBinaryOp::BitXor
+        | SyntaxBinaryOp::BitXnor => OpSpec {
             category: OpCategory::ContextBoth,
             result_state: ResultState::FromOperands,
         },
-        BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Ashl | BinaryOp::Ashr => OpSpec {
-            category: OpCategory::ShiftLike,
-            result_state: ResultState::FromOperands,
-        },
-        BinaryOp::Lt
-        | BinaryOp::LtEq
-        | BinaryOp::Gt
-        | BinaryOp::GtEq
-        | BinaryOp::Eq
-        | BinaryOp::Neq
-        | BinaryOp::WildEq
-        | BinaryOp::WildNeq => OpSpec {
+        SyntaxBinaryOp::Shl | SyntaxBinaryOp::Shr | SyntaxBinaryOp::Ashl | SyntaxBinaryOp::Ashr => {
+            OpSpec {
+                category: OpCategory::ShiftLike,
+                result_state: ResultState::FromOperands,
+            }
+        }
+        SyntaxBinaryOp::Lt
+        | SyntaxBinaryOp::LtEq
+        | SyntaxBinaryOp::Gt
+        | SyntaxBinaryOp::GtEq
+        | SyntaxBinaryOp::Eq
+        | SyntaxBinaryOp::Neq
+        | SyntaxBinaryOp::WildEq
+        | SyntaxBinaryOp::WildNeq => OpSpec {
             category: OpCategory::Comparison,
             result_state: ResultState::FourState,
         },
-        BinaryOp::CaseEq | BinaryOp::CaseNeq => OpSpec {
+        SyntaxBinaryOp::CaseEq | SyntaxBinaryOp::CaseNeq => OpSpec {
             category: OpCategory::Comparison,
             result_state: ResultState::TwoState,
         },
-        BinaryOp::LogAnd | BinaryOp::LogOr => OpSpec {
+        SyntaxBinaryOp::LogAnd | SyntaxBinaryOp::LogOr => OpSpec {
             category: OpCategory::Logical,
             result_state: ResultState::LogicalXable,
         },
@@ -235,34 +237,34 @@ mod tests {
 
     #[test]
     fn op_spec_add_is_context_both() {
-        let s = op_spec(BinaryOp::Add);
+        let s = op_spec(SyntaxBinaryOp::Add);
         assert_eq!(s.category, OpCategory::ContextBoth);
         assert_eq!(s.result_state, ResultState::FromOperands);
     }
 
     #[test]
     fn op_spec_shift_is_shift_like() {
-        let s = op_spec(BinaryOp::Shl);
+        let s = op_spec(SyntaxBinaryOp::Shl);
         assert_eq!(s.category, OpCategory::ShiftLike);
     }
 
     #[test]
     fn op_spec_eq_is_comparison_four_state() {
-        let s = op_spec(BinaryOp::Eq);
+        let s = op_spec(SyntaxBinaryOp::Eq);
         assert_eq!(s.category, OpCategory::Comparison);
         assert_eq!(s.result_state, ResultState::FourState);
     }
 
     #[test]
     fn op_spec_case_eq_is_two_state() {
-        let s = op_spec(BinaryOp::CaseEq);
+        let s = op_spec(SyntaxBinaryOp::CaseEq);
         assert_eq!(s.category, OpCategory::Comparison);
         assert_eq!(s.result_state, ResultState::TwoState);
     }
 
     #[test]
     fn op_spec_logical_and() {
-        let s = op_spec(BinaryOp::LogAnd);
+        let s = op_spec(SyntaxBinaryOp::LogAnd);
         assert_eq!(s.category, OpCategory::Logical);
         assert_eq!(s.result_state, ResultState::LogicalXable);
     }

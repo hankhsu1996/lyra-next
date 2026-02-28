@@ -72,7 +72,7 @@ impl<'t> Parser<'t> {
         let mut seen = 0usize;
         while pos < self.tokens.len() {
             let kind = self.tokens[pos].kind;
-            if is_trivia(kind) {
+            if kind.is_trivia() {
                 pos += 1;
                 continue;
             }
@@ -113,7 +113,7 @@ impl<'t> Parser<'t> {
     pub(crate) fn bump(&mut self) {
         self.fuel.set(PARSER_FUEL);
         let mut n_raw = 0u32;
-        while self.pos < self.tokens.len() && is_trivia(self.tokens[self.pos].kind) {
+        while self.pos < self.tokens.len() && self.tokens[self.pos].kind.is_trivia() {
             self.pos += 1;
             n_raw = n_raw.saturating_add(1);
         }
@@ -173,7 +173,7 @@ impl<'t> Parser<'t> {
     // Consume all remaining trivia tokens individually. Call before closing
     // the root node so trailing whitespace/comments end up inside it.
     pub(crate) fn eat_remaining_trivia(&mut self) {
-        while self.pos < self.tokens.len() && is_trivia(self.tokens[self.pos].kind) {
+        while self.pos < self.tokens.len() && self.tokens[self.pos].kind.is_trivia() {
             self.events.push(Event::Token { n_raw_tokens: 1 });
             self.pos += 1;
         }
@@ -201,7 +201,7 @@ impl<'t> Parser<'t> {
 
     fn current_range(&self) -> TextRange {
         let mut p = self.pos;
-        while p < self.tokens.len() && is_trivia(self.tokens[p].kind) {
+        while p < self.tokens.len() && self.tokens[p].kind.is_trivia() {
             p += 1;
         }
         if p < self.tokens.len() && self.tokens[p].kind != SyntaxKind::Eof {
@@ -269,13 +269,6 @@ fn normalize(kind: SyntaxKind) -> SyntaxKind {
         SyntaxKind::EscapedIdent => SyntaxKind::Ident,
         k => k,
     }
-}
-
-pub(crate) fn is_trivia(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
-    )
 }
 
 fn token_name(kind: SyntaxKind) -> &'static str {

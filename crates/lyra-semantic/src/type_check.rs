@@ -1,17 +1,16 @@
 use crate::Site;
-use lyra_lexer::SyntaxKind;
-use lyra_parser::SyntaxNode;
+use crate::site;
+use lyra_ast::{
+    AssignStmt, AstIdMap, CallExpr, CastExpr, ContinuousAssign, Declarator, Expr, ExprKind,
+    StreamOperandItem, SystemTfCall, TfArg, VarDecl,
+};
 use lyra_source::NameSpan;
 
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
-use crate::expr_helpers::is_expression_kind;
 use crate::modport_def::PortDirection;
 use crate::modport_facts::FieldAccessFacts;
-use crate::syntax_helpers::{system_tf_args, system_tf_name};
-use crate::system_functions::{
-    BitsArgKind, SystemFnKind, classify_bits_arg, iter_args, lookup_builtin,
-};
+use crate::system_functions::{BitsArgKind, SystemFnKind, classify_bits_arg, lookup_builtin};
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
 use crate::types::{SymbolType, Ty};
 
@@ -20,6 +19,15 @@ use crate::types::{SymbolType, Ty};
 pub enum AccessKind {
     Read,
     Write,
+}
+
+/// Access mode propagated from the index to individual check sites.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum AccessMode {
+    Read = 0,
+    Write = 1,
+    ReadWrite = 2,
 }
 
 /// A type-check finding.
@@ -105,326 +113,106 @@ pub enum TypeCheckItem {
 pub trait TypeCheckCtx {
     /// The file being analyzed.
     fn file_id(&self) -> lyra_source::FileId;
+    /// Per-file AST ID map, enabling `Site`/ID computation from typed nodes.
+    fn ast_id_map(&self) -> &AstIdMap;
     /// Infer the type of an expression node (self-determined).
-    fn expr_type(&self, node: &SyntaxNode) -> ExprType;
+    fn expr_type(&self, expr: &Expr) -> ExprType;
     /// Infer the type of an expression node under an integral context.
-    fn expr_type_in_ctx(&self, node: &SyntaxNode, ctx: &IntegralCtx) -> ExprType;
+    fn expr_type_in_ctx(&self, expr: &Expr, ctx: &IntegralCtx) -> ExprType;
     /// Infer the type of an expression in statement context.
-    fn expr_type_stmt(&self, node: &SyntaxNode) -> ExprType;
-    /// Get the declared type of a symbol via its Declarator node.
-    fn symbol_type_of_declarator(&self, declarator: &SyntaxNode) -> Option<SymbolType>;
-    /// Resolve a `NameRef` node as a type (typedef/enum/struct name).
-    fn resolve_type_arg(&self, name_node: &SyntaxNode) -> Option<crate::types::Ty>;
-    /// Pure identity lookup -- returns the stable ID for a syntax node.
-    /// O(1) map lookup, no DB calls, no allocations.
-    /// Returns None for nodes without stable IDs (e.g. error-recovered trees).
-    fn node_id(&self, node: &SyntaxNode) -> Option<Site>;
+    fn expr_type_stmt(&self, expr: &Expr) -> ExprType;
+    /// Get the declared type of a symbol via its `Declarator` node.
+    fn symbol_type_of_declarator(&self, decl: &Declarator) -> Option<SymbolType>;
+    /// Resolve a `UserTypeRef` as a type (typedef/enum/struct name).
+    fn resolve_type_arg(&self, utr: &crate::type_extract::UserTypeRef) -> Option<crate::types::Ty>;
     /// Evaluate a constant integer expression. Returns None if non-const.
-    fn const_eval_int(&self, node: &SyntaxNode) -> Option<i64>;
+    fn const_eval_int(&self, expr: &Expr) -> Option<i64>;
     /// Get sorted set of known enum member values. None if any value unknown.
     fn enum_known_value_set(&self, id: &EnumId) -> Option<std::sync::Arc<[i64]>>;
     /// Check whether a modport expression target is an lvalue.
     fn is_modport_target_lvalue(&self, expr_id: Site) -> bool;
 }
 
-/// Walk a file's AST and produce type-check items.
-pub fn check_types(
-    root: &SyntaxNode,
-    ctx: &dyn TypeCheckCtx,
-    field_facts: &FieldAccessFacts,
-) -> Vec<TypeCheckItem> {
-    let mut items = Vec::new();
-    let root_fallback = ctx
-        .node_id(root)
-        .unwrap_or_else(|| Site::placeholder(ctx.file_id()));
-    walk_for_checks(
-        root,
-        ctx,
-        field_facts,
-        AccessCtx::Read,
-        root_fallback,
-        &mut items,
-    );
-    items
-}
+const MISSING_AST_ID: &str = "missing_ast_id in type checker";
 
-/// Checker-internal access context propagated through the walk.
-#[derive(Debug, Clone, Copy)]
-enum AccessCtx {
-    Read,
-    Write,
-    ReadWrite,
-}
-
-/// Resolve a syntax node to its stable `Site` anchor.
+/// Require a `Site` anchor, emitting `InternalError` on failure.
 ///
-/// On failure (error-recovered tree), emits `InternalError` anchored at
-/// `fallback` and returns the fallback. Callers must not silently skip
-/// findings when `node_id` returns `None`.
-fn require_site(
-    ctx: &dyn TypeCheckCtx,
-    node: &SyntaxNode,
-    fallback: Site,
-    items: &mut Vec<TypeCheckItem>,
-) -> Site {
-    if let Some(site) = ctx.node_id(node) {
-        return site;
-    }
-    items.push(TypeCheckItem::InternalError {
-        detail: smol_str::SmolStr::new_static("node_id returned None in type checker"),
-        site: fallback,
-    });
-    fallback
-}
-
-fn walk_for_checks(
-    node: &SyntaxNode,
-    ctx: &dyn TypeCheckCtx,
-    facts: &FieldAccessFacts,
-    access: AccessCtx,
-    fallback: Site,
-    items: &mut Vec<TypeCheckItem>,
-) {
-    let self_site = ctx.node_id(node).unwrap_or(fallback);
-    match node.kind() {
-        SyntaxKind::ContinuousAssign => {
-            check_continuous_assign(node, ctx, facts, self_site, items);
-            return;
-        }
-        SyntaxKind::AssignStmt => {
-            check_assign_stmt(node, ctx, facts, self_site, items);
-            return;
-        }
-        SyntaxKind::VarDecl => check_var_decl(node, ctx, self_site, items),
-        SyntaxKind::SystemTfCall => check_system_call(node, ctx, self_site, items),
-        SyntaxKind::FieldExpr => check_field_direction(node, ctx, facts, access, items),
-        SyntaxKind::CastExpr => check_cast_expr(node, ctx, self_site, items),
-        SyntaxKind::StreamOperandItem => {
-            check_stream_operand(node, ctx, self_site, items);
-        }
-        SyntaxKind::CallExpr => check_method_call(node, ctx, items),
-        _ => {}
-    }
-    for child in node.children() {
-        walk_for_checks(&child, ctx, facts, access, self_site, items);
-    }
-}
-
-fn check_field_direction(
-    node: &SyntaxNode,
-    ctx: &dyn TypeCheckCtx,
-    facts: &FieldAccessFacts,
-    access: AccessCtx,
-    items: &mut Vec<TypeCheckItem>,
-) {
-    use crate::modport_facts::FieldAccessTarget;
-
-    let Some(ast_id) = ctx.node_id(node) else {
-        return;
-    };
-    let Some(fact) = facts.get(&ast_id) else {
-        return;
-    };
-    if fact.direction == PortDirection::Ref {
-        items.push(TypeCheckItem::ModportRefUnsupported {
-            member_name_span: fact.member_name_span,
+/// Type-check-specific: when anchor extraction yields `None` (error-recovered
+/// tree), emits a diagnostic anchored at `fallback` and returns the fallback.
+fn require_site(anchor: Option<Site>, fallback: Site, items: &mut Vec<TypeCheckItem>) -> Site {
+    site::require_site(anchor, fallback, || {
+        items.push(TypeCheckItem::InternalError {
+            detail: smol_str::SmolStr::new_static(MISSING_AST_ID),
+            site: fallback,
         });
-        return;
-    }
-
-    // Direction check
-    match access {
-        AccessCtx::Read => {
-            if !direction_permits(fact.direction, AccessKind::Read) {
-                items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_name_span: fact.member_name_span,
-                    direction: fact.direction,
-                    access: AccessKind::Read,
-                });
-            }
-        }
-        AccessCtx::Write => {
-            if !direction_permits(fact.direction, AccessKind::Write) {
-                items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_name_span: fact.member_name_span,
-                    direction: fact.direction,
-                    access: AccessKind::Write,
-                });
-            }
-        }
-        AccessCtx::ReadWrite => {
-            if !direction_permits(fact.direction, AccessKind::Read) {
-                items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_name_span: fact.member_name_span,
-                    direction: fact.direction,
-                    access: AccessKind::Read,
-                });
-            }
-            if !direction_permits(fact.direction, AccessKind::Write) {
-                items.push(TypeCheckItem::ModportDirectionViolation {
-                    member_name_span: fact.member_name_span,
-                    direction: fact.direction,
-                    access: AccessKind::Write,
-                });
-            }
-        }
-    }
-
-    // Target legality check
-    match &fact.target {
-        FieldAccessTarget::Empty => {
-            items.push(TypeCheckItem::ModportEmptyPortAccess {
-                member_name_span: fact.member_name_span,
-            });
-        }
-        FieldAccessTarget::Expr(expr_id) => {
-            let is_write = matches!(access, AccessCtx::Write | AccessCtx::ReadWrite);
-            if is_write && !ctx.is_modport_target_lvalue(*expr_id) {
-                items.push(TypeCheckItem::ModportExprNotAssignable {
-                    member_name_span: fact.member_name_span,
-                });
-            }
-        }
-        FieldAccessTarget::Member => {}
-    }
-}
-
-/// Check whether a modport direction permits the given access kind.
-/// Input = read-only, Output = write-only, Inout = both.
-fn direction_permits(dir: PortDirection, access: AccessKind) -> bool {
-    !matches!(
-        (dir, access),
-        (PortDirection::Input, AccessKind::Write) | (PortDirection::Output, AccessKind::Read)
-    )
-}
-
-/// Check whether a node is a compound assignment (+=, -=, etc.).
-fn is_compound_assign(node: &SyntaxNode) -> bool {
-    node.children_with_tokens().any(|child| {
-        child.as_token().is_some_and(|t| {
-            matches!(
-                t.kind(),
-                SyntaxKind::PlusEq
-                    | SyntaxKind::MinusEq
-                    | SyntaxKind::StarEq
-                    | SyntaxKind::SlashEq
-                    | SyntaxKind::PercentEq
-                    | SyntaxKind::AmpEq
-                    | SyntaxKind::PipeEq
-                    | SyntaxKind::CaretEq
-                    | SyntaxKind::LtLtEq
-                    | SyntaxKind::GtGtEq
-                    | SyntaxKind::LtLtLtEq
-                    | SyntaxKind::GtGtGtEq
-            )
-        })
     })
 }
 
-fn has_assign_op(node: &SyntaxNode) -> bool {
-    use lyra_parser::SyntaxElement;
-    node.children_with_tokens().any(|el| {
-        if let SyntaxElement::Token(tok) = el {
-            matches!(tok.kind(), SyntaxKind::Assign | SyntaxKind::LtEq)
-        } else {
-            false
-        }
-    })
-}
-
-fn check_continuous_assign(
-    node: &SyntaxNode,
-    ctx: &dyn TypeCheckCtx,
-    facts: &FieldAccessFacts,
-    fallback: Site,
-    items: &mut Vec<TypeCheckItem>,
-) {
-    let self_site = ctx.node_id(node).unwrap_or(fallback);
-    let exprs: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if exprs.len() >= 2 {
-        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, self_site, items);
-    }
-    // Walk LHS in Write context, RHS in Read context
-    if exprs.len() >= 2 {
-        walk_for_checks(&exprs[0], ctx, facts, AccessCtx::Write, self_site, items);
-        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, self_site, items);
-        for child in node.children() {
-            let r = child.text_range();
-            if r != exprs[0].text_range() && r != exprs[1].text_range() {
-                walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
-            }
-        }
-    } else {
-        for child in node.children() {
-            walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
-        }
-    }
-}
-
-fn check_assign_stmt(
-    node: &SyntaxNode,
-    ctx: &dyn TypeCheckCtx,
-    facts: &FieldAccessFacts,
-    fallback: Site,
-    items: &mut Vec<TypeCheckItem>,
-) {
-    let self_site = ctx.node_id(node).unwrap_or(fallback);
-    let exprs: Vec<SyntaxNode> = node
-        .children()
-        .filter(|c| is_expression_kind(c.kind()))
-        .collect();
-    if exprs.len() >= 2 {
-        check_assignment_pair(node, &exprs[0], &exprs[1], ctx, self_site, items);
-    } else if exprs.len() == 1 && !has_assign_op(node) {
-        let _result = ctx.expr_type_stmt(&exprs[0]);
-    }
-    let compound = is_compound_assign(node);
-    let lhs_access = if compound {
-        AccessCtx::ReadWrite
-    } else {
-        AccessCtx::Write
-    };
-    if exprs.len() >= 2 {
-        walk_for_checks(&exprs[0], ctx, facts, lhs_access, self_site, items);
-        walk_for_checks(&exprs[1], ctx, facts, AccessCtx::Read, self_site, items);
-        for child in node.children() {
-            let r = child.text_range();
-            if r != exprs[0].text_range() && r != exprs[1].text_range() {
-                walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
-            }
-        }
-    } else {
-        for child in node.children() {
-            walk_for_checks(&child, ctx, facts, AccessCtx::Read, self_site, items);
-        }
-    }
-}
-
-fn check_var_decl(
-    node: &SyntaxNode,
+/// Check a `ContinuousAssign` node for type errors.
+///
+/// Performs only the local assignment check (truncation, enum compat, LHS
+/// validity). Does not recurse into children -- the `ChecksIndex` ensures
+/// nested expression sites are checked separately.
+pub fn check_continuous_assign(
+    ca: &ContinuousAssign,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let decl_site = require_site(ctx, node, fallback, items);
-    for child in node.children() {
-        if child.kind() != SyntaxKind::Declarator {
-            continue;
-        }
-        let init_expr = find_declarator_init_expr(&child);
-        let Some(init_expr) = init_expr else {
+    let map = ctx.ast_id_map();
+    let self_site = require_site(site::opt_site_of(map, ca), fallback, items);
+    let lhs = ca.lhs();
+    let rhs = ca.rhs();
+    if let (Some(l), Some(r)) = (&lhs, &rhs) {
+        check_assignment_pair(self_site, l, r, ctx, items);
+    }
+}
+
+/// Check an `AssignStmt` node for type errors.
+///
+/// Performs only the local assignment check. Does not recurse.
+pub fn check_assign_stmt(
+    assign: &AssignStmt,
+    ctx: &dyn TypeCheckCtx,
+    fallback: Site,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let map = ctx.ast_id_map();
+    let self_site = require_site(site::opt_site_of(map, assign), fallback, items);
+    let lhs = assign.lhs();
+    let rhs = assign.rhs();
+    let has_op = assign.assign_op().is_some();
+
+    if let (Some(l), Some(r)) = (&lhs, &rhs) {
+        check_assignment_pair(self_site, l, r, ctx, items);
+    } else if rhs.is_none()
+        && !has_op
+        && let Some(l) = &lhs
+    {
+        let _result = ctx.expr_type_stmt(l);
+    }
+}
+
+/// Check a `VarDecl` node for initializer type compatibility.
+pub fn check_var_decl(
+    var_decl: &VarDecl,
+    ctx: &dyn TypeCheckCtx,
+    fallback: Site,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let map = ctx.ast_id_map();
+    let decl_site = require_site(site::opt_site_of(map, var_decl), fallback, items);
+    for decl in var_decl.declarators() {
+        let Some(init_expr) = decl.init_expr() else {
             continue;
         };
 
-        let Some(sym_type) = ctx.symbol_type_of_declarator(&child) else {
+        let Some(sym_type) = ctx.symbol_type_of_declarator(&decl) else {
             continue;
         };
 
-        let lhs_site = require_site(ctx, &child, decl_site, items);
-        let rhs_site = require_site(ctx, &init_expr, decl_site, items);
+        let lhs_site = require_site(site::opt_site_of(map, &decl), decl_site, items);
+        let rhs_site = require_site(site::opt_site_of(map, &init_expr), decl_site, items);
 
         let lhs_type = ExprType::from_symbol_type(&sym_type);
         let rhs_type = ctx.expr_type(&init_expr);
@@ -433,41 +221,20 @@ fn check_var_decl(
     }
 }
 
-fn find_declarator_init_expr(declarator: &SyntaxNode) -> Option<SyntaxNode> {
-    let mut seen_assign = false;
-    for child in declarator.children_with_tokens() {
-        if child
-            .as_token()
-            .is_some_and(|t| t.kind() == SyntaxKind::Assign)
-        {
-            seen_assign = true;
-            continue;
-        }
-        if seen_assign
-            && let Some(node) = child.as_node()
-            && is_expression_kind(node.kind())
-        {
-            return Some(node.clone());
-        }
-    }
-    None
-}
-
 fn check_assignment_pair(
-    stmt_node: &SyntaxNode,
-    lhs: &SyntaxNode,
-    rhs: &SyntaxNode,
+    stmt_site: Site,
+    lhs: &Expr,
+    rhs: &Expr,
     ctx: &dyn TypeCheckCtx,
-    fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let stmt_site = require_site(ctx, stmt_node, fallback, items);
-    let lhs_site = require_site(ctx, lhs, stmt_site, items);
-    let rhs_site = require_site(ctx, rhs, stmt_site, items);
+    let map = ctx.ast_id_map();
+    let lhs_site = require_site(site::opt_site_of(map, lhs), stmt_site, items);
+    let rhs_site = require_site(site::opt_site_of(map, rhs), stmt_site, items);
 
     match crate::lhs::classify_lhs(lhs) {
-        crate::lhs::LhsClass::Assignable(lhs_node) => {
-            let lhs_type = ctx.expr_type(&lhs_node);
+        crate::lhs::LhsClass::Assignable(lhs_expr) => {
+            let lhs_type = ctx.expr_type(&lhs_expr);
             let rhs_type = ctx.expr_type(rhs);
             check_assignment_compat(&lhs_type, &rhs_type, stmt_site, lhs_site, rhs_site, items);
         }
@@ -536,23 +303,20 @@ fn check_assignment_compat(
     }
 }
 
-fn check_cast_expr(
-    node: &SyntaxNode,
+/// Check a `CastExpr` for enum cast-out-of-range.
+pub fn check_cast_expr(
+    cast: &CastExpr,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    use lyra_ast::{AstNode, CastExpr};
-    let Some(cast) = CastExpr::cast(node.clone()) else {
-        return;
-    };
     let Some(typespec) = cast.cast_type() else {
         return;
     };
-    let Some(utr) = crate::type_extract::user_type_ref(typespec.syntax()) else {
+    let Some(utr) = crate::type_extract::user_type_ref(&typespec) else {
         return;
     };
-    let Some(ty) = ctx.resolve_type_arg(utr.resolve_node()) else {
+    let Some(ty) = ctx.resolve_type_arg(&utr) else {
         return;
     };
     let Ty::Enum(ref enum_id) = ty else {
@@ -568,7 +332,8 @@ fn check_cast_expr(
         return;
     };
     if value_set.binary_search(&value).is_err() {
-        let cast_site = require_site(ctx, node, fallback, items);
+        let map = ctx.ast_id_map();
+        let cast_site = require_site(site::opt_site_of(map, cast), fallback, items);
         items.push(TypeCheckItem::EnumCastOutOfRange {
             cast_site,
             enum_id: *enum_id,
@@ -577,22 +342,24 @@ fn check_cast_expr(
     }
 }
 
-fn check_method_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
+/// Check a `CallExpr` for method-call errors.
+pub fn check_method_call(call: &CallExpr, ctx: &dyn TypeCheckCtx, items: &mut Vec<TypeCheckItem>) {
     use crate::type_infer::ExprTypeErrorKind;
-    use lyra_ast::{AstNode, FieldExpr};
 
-    let callee = match node.first_child() {
-        Some(c) if c.kind() == SyntaxKind::FieldExpr => c,
-        _ => return,
+    let Some(callee) = call.callee() else {
+        return;
     };
-    let Some(field_expr) = FieldExpr::cast(callee) else {
+    let Some(ExprKind::FieldExpr(field_expr)) = callee.classify() else {
         return;
     };
     let Some(field_tok) = field_expr.field_name() else {
         return;
     };
 
-    let result = ctx.expr_type_stmt(node);
+    let Some(expr) = Expr::from_ast(call) else {
+        return;
+    };
+    let result = ctx.expr_type_stmt(&expr);
     let ExprView::Error(error_kind) = &result.view else {
         return;
     };
@@ -614,56 +381,157 @@ fn check_method_call(node: &SyntaxNode, ctx: &dyn TypeCheckCtx, items: &mut Vec<
     }
 }
 
-fn check_system_call(
-    node: &SyntaxNode,
+/// Check a `FieldExpr` for modport direction violations.
+pub fn check_field_direction(
+    field: &lyra_ast::FieldExpr,
+    ctx: &dyn TypeCheckCtx,
+    facts: &FieldAccessFacts,
+    access: AccessMode,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    use crate::modport_facts::FieldAccessTarget;
+
+    let map = ctx.ast_id_map();
+    let Some(ast_id) = site::opt_site_of(map, field) else {
+        return;
+    };
+    let Some(fact) = facts.get(&ast_id) else {
+        return;
+    };
+    if fact.direction == PortDirection::Ref {
+        items.push(TypeCheckItem::ModportRefUnsupported {
+            member_name_span: fact.member_name_span,
+        });
+        return;
+    }
+
+    // Direction check
+    match access {
+        AccessMode::Read => {
+            if !direction_permits(fact.direction, AccessKind::Read) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_name_span: fact.member_name_span,
+                    direction: fact.direction,
+                    access: AccessKind::Read,
+                });
+            }
+        }
+        AccessMode::Write => {
+            if !direction_permits(fact.direction, AccessKind::Write) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_name_span: fact.member_name_span,
+                    direction: fact.direction,
+                    access: AccessKind::Write,
+                });
+            }
+        }
+        AccessMode::ReadWrite => {
+            if !direction_permits(fact.direction, AccessKind::Read) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_name_span: fact.member_name_span,
+                    direction: fact.direction,
+                    access: AccessKind::Read,
+                });
+            }
+            if !direction_permits(fact.direction, AccessKind::Write) {
+                items.push(TypeCheckItem::ModportDirectionViolation {
+                    member_name_span: fact.member_name_span,
+                    direction: fact.direction,
+                    access: AccessKind::Write,
+                });
+            }
+        }
+    }
+
+    // Target legality check
+    match &fact.target {
+        FieldAccessTarget::Empty => {
+            items.push(TypeCheckItem::ModportEmptyPortAccess {
+                member_name_span: fact.member_name_span,
+            });
+        }
+        FieldAccessTarget::Expr(expr_id) => {
+            let is_write = matches!(access, AccessMode::Write | AccessMode::ReadWrite);
+            if is_write && !ctx.is_modport_target_lvalue(*expr_id) {
+                items.push(TypeCheckItem::ModportExprNotAssignable {
+                    member_name_span: fact.member_name_span,
+                });
+            }
+        }
+        FieldAccessTarget::Member => {}
+    }
+}
+
+/// Check whether a modport direction permits the given access kind.
+/// Input = read-only, Output = write-only, Inout = both.
+fn direction_permits(dir: PortDirection, access: AccessKind) -> bool {
+    !matches!(
+        (dir, access),
+        (PortDirection::Input, AccessKind::Write) | (PortDirection::Output, AccessKind::Read)
+    )
+}
+
+/// Check a `SystemTfCall` for argument type errors.
+pub fn check_system_call(
+    stf: &SystemTfCall,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(tok) = system_tf_name(node) else {
+    let Some(tok) = stf.system_name() else {
         return;
     };
     let name = tok.text();
     let Some(entry) = lookup_builtin(name) else {
         return;
     };
-    let Some(arg_list) = system_tf_args(node) else {
+    let Some(al) = stf.arg_list() else {
         return;
     };
+    let args: Vec<TfArg> = al.args().collect();
+    let map = ctx.ast_id_map();
     match entry.kind {
-        SystemFnKind::Bits => check_bits_call(node, &arg_list, ctx, fallback, items),
+        SystemFnKind::Bits => check_bits_call(stf, &args, map, ctx, fallback, items),
         SystemFnKind::IntToReal => {
-            check_conversion_arg_integral(node, &arg_list, name, ctx, fallback, items);
+            check_conversion_arg_integral(stf, &args, name, map, ctx, fallback, items);
         }
         SystemFnKind::RealToInt | SystemFnKind::RealToBits | SystemFnKind::ShortRealToBits => {
-            check_conversion_arg_real(node, &arg_list, name, ctx, fallback, items);
+            check_conversion_arg_real(stf, &args, name, map, ctx, fallback, items);
         }
         SystemFnKind::BitsToReal => {
-            check_conversion_bits_to_real(node, &arg_list, name, 64, ctx, fallback, items);
+            check_conversion_bits_to_real(stf, &args, name, 64, ctx, fallback, items);
         }
         SystemFnKind::BitsToShortReal => {
-            check_conversion_bits_to_real(node, &arg_list, name, 32, ctx, fallback, items);
+            check_conversion_bits_to_real(stf, &args, name, 32, ctx, fallback, items);
         }
         _ => {}
     }
 }
 
+fn tf_arg_expr(arg: &TfArg) -> Option<&Expr> {
+    match arg {
+        TfArg::Expr(e) => Some(e),
+        _ => None,
+    }
+}
+
 fn check_bits_call(
-    node: &SyntaxNode,
-    arg_list: &SyntaxNode,
+    stf: &SystemTfCall,
+    args: &[TfArg],
+    map: &AstIdMap,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(first) = iter_args(arg_list).next() else {
+    let Some(first) = args.first() else {
         return;
     };
-    let kind = classify_bits_arg(&first, ctx.file_id(), &|n| ctx.resolve_type_arg(n));
+    let kind = classify_bits_arg(first, map, &|utr| ctx.resolve_type_arg(utr));
     if let BitsArgKind::Type(ty) = kind
         && !ty.is_data_type()
     {
-        let call_site = require_site(ctx, node, fallback, items);
-        let arg_site = require_site(ctx, &first, call_site, items);
+        let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
+        let arg_site = require_site(site::opt_site_of(map, first), call_site, items);
         items.push(TypeCheckItem::BitsNonDataType {
             call_site,
             arg_site,
@@ -672,23 +540,27 @@ fn check_bits_call(
 }
 
 fn check_conversion_arg_integral(
-    node: &SyntaxNode,
-    arg_list: &SyntaxNode,
+    stf: &SystemTfCall,
+    args: &[TfArg],
     fn_name: &str,
+    map: &AstIdMap,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(first) = iter_args(arg_list).next() else {
+    let Some(first) = args.first() else {
         return;
     };
-    let arg_ty = ctx.expr_type(&first);
+    let Some(first_expr) = tf_arg_expr(first) else {
+        return;
+    };
+    let arg_ty = ctx.expr_type(first_expr);
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
     if !matches!(arg_ty.ty, Ty::Integral(_) | Ty::Enum(_)) {
-        let call_site = require_site(ctx, node, fallback, items);
-        let arg_site = require_site(ctx, &first, call_site, items);
+        let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
+        let arg_site = require_site(site::opt_site_of(map, first), call_site, items);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -699,23 +571,27 @@ fn check_conversion_arg_integral(
 }
 
 fn check_conversion_arg_real(
-    node: &SyntaxNode,
-    arg_list: &SyntaxNode,
+    stf: &SystemTfCall,
+    args: &[TfArg],
     fn_name: &str,
+    map: &AstIdMap,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(first) = iter_args(arg_list).next() else {
+    let Some(first) = args.first() else {
         return;
     };
-    let arg_ty = ctx.expr_type(&first);
+    let Some(first_expr) = tf_arg_expr(first) else {
+        return;
+    };
+    let arg_ty = ctx.expr_type(first_expr);
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
     if !arg_ty.ty.is_real() {
-        let call_site = require_site(ctx, node, fallback, items);
-        let arg_site = require_site(ctx, &first, call_site, items);
+        let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
+        let arg_site = require_site(site::opt_site_of(map, first), call_site, items);
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
             arg_site,
@@ -726,23 +602,27 @@ fn check_conversion_arg_real(
 }
 
 fn check_conversion_bits_to_real(
-    node: &SyntaxNode,
-    arg_list: &SyntaxNode,
+    stf: &SystemTfCall,
+    args: &[TfArg],
     fn_name: &str,
     expected_width: u32,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    let Some(first) = iter_args(arg_list).next() else {
+    let map = ctx.ast_id_map();
+    let Some(first) = args.first() else {
         return;
     };
-    let arg_ty = ctx.expr_type(&first);
+    let Some(first_expr) = tf_arg_expr(first) else {
+        return;
+    };
+    let arg_ty = ctx.expr_type(first_expr);
     if matches!(arg_ty.view, ExprView::Error(_)) {
         return;
     }
-    let call_site = require_site(ctx, node, fallback, items);
-    let arg_site = require_site(ctx, &first, call_site, items);
+    let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
+    let arg_site = require_site(site::opt_site_of(map, first), call_site, items);
     if !matches!(arg_ty.ty, Ty::Integral(_)) {
         items.push(TypeCheckItem::ConversionArgCategory {
             call_site,
@@ -765,17 +645,13 @@ fn check_conversion_bits_to_real(
     }
 }
 
-fn check_stream_operand(
-    node: &SyntaxNode,
+/// Check a `StreamOperandItem` for non-array `with` clause.
+pub fn check_stream_operand(
+    item: &StreamOperandItem,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
     items: &mut Vec<TypeCheckItem>,
 ) {
-    use lyra_ast::{AstNode, StreamOperandItem};
-
-    let Some(item) = StreamOperandItem::cast(node.clone()) else {
-        return;
-    };
     let Some(with_clause) = item.with_clause() else {
         return;
     };
@@ -787,7 +663,8 @@ fn check_stream_operand(
         return;
     }
     if !matches!(operand_ty.ty, Ty::Array { .. }) {
-        let with_site = require_site(ctx, with_clause.syntax(), fallback, items);
+        let map = ctx.ast_id_map();
+        let with_site = require_site(site::opt_site_of(map, &with_clause), fallback, items);
         items.push(TypeCheckItem::StreamWithNonArray { with_site });
     }
 }

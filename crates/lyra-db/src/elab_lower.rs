@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use lyra_ast::{AstNode, ErasedAstId};
-use lyra_lexer::SyntaxKind;
-use lyra_parser::{SyntaxElement, SyntaxNode};
+use lyra_ast::{AstNode, ErasedAstId, Expr, HasSyntax, SyntaxBinaryOp};
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::{InterfaceType, Ty};
 use lyra_source::{FileId, Span, TextRange};
@@ -413,29 +411,8 @@ fn map_elab_span(db: &dyn salsa::Database, unit: CompilationUnit, raw: Span) -> 
     pp.source_map.map_span(raw.range).unwrap_or(raw)
 }
 
-pub(crate) fn extract_block_name(node: &SyntaxNode) -> Option<SmolStr> {
-    let mut saw_begin = false;
-    let mut saw_colon = false;
-    for el in node.children_with_tokens() {
-        match el {
-            SyntaxElement::Token(tok) => match tok.kind() {
-                SyntaxKind::BeginKw => saw_begin = true,
-                SyntaxKind::Colon if saw_begin => saw_colon = true,
-                SyntaxKind::Ident if saw_colon => return Some(SmolStr::new(tok.text())),
-                _ => {
-                    if saw_begin && !saw_colon {
-                        return None;
-                    }
-                }
-            },
-            SyntaxElement::Node(_) => {
-                if saw_begin {
-                    return None;
-                }
-            }
-        }
-    }
-    None
+pub(crate) fn extract_block_name(block: &lyra_ast::BlockStmt) -> Option<SmolStr> {
+    block.block_name().map(|tok| SmolStr::new(tok.text()))
 }
 
 pub(crate) enum ForLimit {
@@ -454,44 +431,20 @@ pub(crate) struct ForParts {
 }
 
 pub(crate) fn extract_for_parts(
-    node: &SyntaxNode,
-    eval_expr: &dyn Fn(&SyntaxNode) -> Option<i64>,
+    for_stmt: &lyra_ast::ForStmt,
+    eval_expr: &dyn Fn(&Expr) -> Option<i64>,
 ) -> Option<ForParts> {
-    // ForStmt child structure (from the parser):
-    //   NameRef       -- genvar name (init LHS)
-    //   Expression    -- init value
-    //   BinExpr       -- condition (genvar OP limit)
-    //   NameRef       -- genvar name (step LHS)
-    //   BinExpr       -- step expression (genvar +/- step_val)
-    //   Body          -- loop body (BlockStmt)
-    let children: Vec<SyntaxNode> = node.children().collect();
+    let init_name_ref = for_stmt.init_name()?;
+    let genvar_name = SmolStr::new(init_name_ref.ident()?.text());
 
-    // Extract genvar name from first NameRef
-    let genvar_name_node = children.iter().find(|c| c.kind() == SyntaxKind::NameRef)?;
-    let genvar_name = SmolStr::new(
-        genvar_name_node
-            .children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .find(|t| t.kind() == SyntaxKind::Ident)?
-            .text(),
-    );
+    let init_expr = for_stmt.init_value()?;
+    let init = eval_expr(&init_expr)?;
 
-    // Find the init expression (first non-NameRef expression-kind node)
-    let init_node = children
-        .iter()
-        .find(|c| c.kind() != SyntaxKind::NameRef && is_expr_kind(c.kind()))?;
-    let init = eval_expr(init_node)?;
+    let cond_bin = for_stmt.condition_bin()?;
+    let (limit, flipped) = extract_condition(&genvar_name, &cond_bin, eval_expr)?;
 
-    // Find the first BinExpr (condition)
-    let cond_node = children.iter().find(|c| c.kind() == SyntaxKind::BinExpr)?;
-    let (limit, flipped) = extract_condition(&genvar_name, cond_node, eval_expr)?;
-
-    // Find the second BinExpr (step), after the condition
-    let cond_idx = children.iter().position(|c| std::ptr::eq(c, cond_node))?;
-    let step_node = children[cond_idx + 1..]
-        .iter()
-        .find(|c| c.kind() == SyntaxKind::BinExpr)?;
-    let step = extract_step(&genvar_name, step_node, eval_expr)?;
+    let step_bin = for_stmt.step_bin()?;
+    let step = extract_step(&genvar_name, &step_bin, eval_expr)?;
 
     let _ = flipped;
     Some(ForParts {
@@ -504,38 +457,35 @@ pub(crate) fn extract_for_parts(
 
 fn extract_condition(
     genvar_name: &str,
-    cond_node: &SyntaxNode,
-    eval_expr: &dyn Fn(&SyntaxNode) -> Option<i64>,
+    cond_bin: &lyra_ast::BinExpr,
+    eval_expr: &dyn Fn(&Expr) -> Option<i64>,
 ) -> Option<(ForLimit, bool)> {
-    let cond_children: Vec<SyntaxNode> = cond_node.children().collect();
-    if cond_children.len() < 2 {
+    let lhs = cond_bin.lhs()?;
+    let rhs = cond_bin.rhs()?;
+    let op = cond_bin.binary_op()?;
+
+    if !op.is_comparison() {
         return None;
     }
 
-    let op_kind = cond_node
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .find(|t| is_comparison_op(t.kind()))?
-        .kind();
+    let lhs_is_genvar = expr_is_name(genvar_name, &lhs);
+    let rhs_is_genvar = expr_is_name(genvar_name, &rhs);
 
-    let lhs_is_genvar = node_is_name(genvar_name, &cond_children[0]);
-    let rhs_is_genvar = node_is_name(genvar_name, &cond_children[1]);
-
-    let (limit_node, effective_op, flipped) = if lhs_is_genvar {
-        (&cond_children[1], op_kind, false)
+    let (limit_expr, effective_op, flipped) = if lhs_is_genvar {
+        (&rhs, op, false)
     } else if rhs_is_genvar {
-        (&cond_children[0], flip_comparison(op_kind)?, true)
+        (&lhs, op.flip()?, true)
     } else {
         return None;
     };
 
-    let limit_val = eval_expr(limit_node)?;
+    let limit_val = eval_expr(limit_expr)?;
     let limit = match effective_op {
-        SyntaxKind::Lt => ForLimit::Lt(limit_val),
-        SyntaxKind::LtEq => ForLimit::Le(limit_val),
-        SyntaxKind::Gt => ForLimit::Gt(limit_val),
-        SyntaxKind::GtEq => ForLimit::Ge(limit_val),
-        SyntaxKind::BangEq => ForLimit::Ne(limit_val),
+        SyntaxBinaryOp::Lt => ForLimit::Lt(limit_val),
+        SyntaxBinaryOp::LtEq => ForLimit::Le(limit_val),
+        SyntaxBinaryOp::Gt => ForLimit::Gt(limit_val),
+        SyntaxBinaryOp::GtEq => ForLimit::Ge(limit_val),
+        SyntaxBinaryOp::Neq => ForLimit::Ne(limit_val),
         _ => return None,
     };
     Some((limit, flipped))
@@ -543,77 +493,27 @@ fn extract_condition(
 
 fn extract_step(
     genvar_name: &str,
-    step_node: &SyntaxNode,
-    eval_expr: &dyn Fn(&SyntaxNode) -> Option<i64>,
+    step_bin: &lyra_ast::BinExpr,
+    eval_expr: &dyn Fn(&Expr) -> Option<i64>,
 ) -> Option<i64> {
-    let step_children: Vec<SyntaxNode> = step_node.children().collect();
-    if step_children.len() < 2 {
+    let lhs = step_bin.lhs()?;
+    let rhs = step_bin.rhs()?;
+    let op = step_bin.binary_op()?;
+
+    if !expr_is_name(genvar_name, &lhs) {
         return None;
     }
 
-    let op_kind = step_node
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .find(|t| matches!(t.kind(), SyntaxKind::Plus | SyntaxKind::Minus))?
-        .kind();
-
-    let lhs_is_genvar = node_is_name(genvar_name, &step_children[0]);
-
-    if !lhs_is_genvar {
-        return None;
-    }
-
-    let step_val = eval_expr(&step_children[1])?;
-    match op_kind {
-        SyntaxKind::Plus => Some(step_val),
-        SyntaxKind::Minus => Some(-step_val),
-        _ => None,
-    }
-}
-
-fn node_is_name(name: &str, node: &SyntaxNode) -> bool {
-    if node.kind() != SyntaxKind::NameRef {
-        return false;
-    }
-    node.children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .any(|t| t.kind() == SyntaxKind::Ident && t.text() == name)
-}
-
-fn is_comparison_op(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Lt | SyntaxKind::LtEq | SyntaxKind::Gt | SyntaxKind::GtEq | SyntaxKind::BangEq
-    )
-}
-
-fn flip_comparison(op: SyntaxKind) -> Option<SyntaxKind> {
+    let step_val = eval_expr(&rhs)?;
     match op {
-        SyntaxKind::Lt => Some(SyntaxKind::Gt),
-        SyntaxKind::Gt => Some(SyntaxKind::Lt),
-        SyntaxKind::LtEq => Some(SyntaxKind::GtEq),
-        SyntaxKind::GtEq => Some(SyntaxKind::LtEq),
-        SyntaxKind::BangEq => Some(SyntaxKind::BangEq),
+        SyntaxBinaryOp::Add => Some(step_val),
+        SyntaxBinaryOp::Sub => Some(-step_val),
         _ => None,
     }
 }
 
-pub(crate) fn is_expr_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Literal
-            | SyntaxKind::BinExpr
-            | SyntaxKind::PrefixExpr
-            | SyntaxKind::ParenExpr
-            | SyntaxKind::CondExpr
-            | SyntaxKind::ConcatExpr
-            | SyntaxKind::ReplicExpr
-            | SyntaxKind::IndexExpr
-            | SyntaxKind::RangeExpr
-            | SyntaxKind::FieldExpr
-            | SyntaxKind::CallExpr
-            | SyntaxKind::NameRef
-            | SyntaxKind::QualifiedName
-            | SyntaxKind::Expression
-    )
+fn expr_is_name(name: &str, expr: &Expr) -> bool {
+    lyra_ast::NameRef::cast(expr.syntax().clone())
+        .and_then(|nr| nr.ident())
+        .is_some_and(|tok| tok.text() == name)
 }

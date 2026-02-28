@@ -1,4 +1,5 @@
 mod callable_queries;
+pub mod checks_index;
 mod const_eval;
 mod diagnostics;
 mod dim_model;
@@ -57,6 +58,9 @@ pub use record_queries::{
 
 // Re-export facts queries
 pub use facts::modport::field_access_facts;
+
+// Re-export checks index types (query accessed via checks_index::checks_index)
+pub use checks_index::{CheckEntry, CheckKind, ChecksIndex};
 
 // Re-export diagnostics
 pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};
