@@ -65,12 +65,7 @@ pub fn bit_width_total<'db>(
             let elem_width = bit_width_total(db, unit, elem_ref)?;
             len.checked_mul(elem_width)
         }
-        Ty::String
-        | Ty::Chandle
-        | Ty::Event
-        | Ty::Void
-        | Ty::Interface(_)
-        | Ty::Error => None,
+        Ty::String | Ty::Chandle | Ty::Event | Ty::Void | Ty::Interface(_) | Ty::Error => None,
     }
 }
 
