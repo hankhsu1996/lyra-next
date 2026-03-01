@@ -127,6 +127,30 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 18,
     };
+    pub const NEW_EXPR_NOT_DYN_ARRAY: Self = Self {
+        namespace: "lyra.type",
+        number: 19,
+    };
+    pub const NEW_EXPR_TOO_MANY_INIT_ARGS: Self = Self {
+        namespace: "lyra.type",
+        number: 20,
+    };
+    pub const NEW_EXPR_SIZE_NOT_LONGINT: Self = Self {
+        namespace: "lyra.type",
+        number: 21,
+    };
+    pub const NEW_EXPR_SIZE_NEGATIVE: Self = Self {
+        namespace: "lyra.type",
+        number: 22,
+    };
+    pub const NEW_EXPR_INIT_INCOMPAT: Self = Self {
+        namespace: "lyra.type",
+        number: 23,
+    };
+    pub const ARRAY_INCOMPAT: Self = Self {
+        namespace: "lyra.type",
+        number: 24,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,

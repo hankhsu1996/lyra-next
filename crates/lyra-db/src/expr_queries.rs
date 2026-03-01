@@ -148,6 +148,27 @@ pub fn type_of_expr_in_ctx<'db>(
     lyra_semantic::type_infer::infer_expr(&expr, &ctx, Some(&integral_ctx))
 }
 
+/// Inline (non-cached) expression typing with an expected type.
+///
+/// Used only by `DbTypeCheckCtx::expr_type_with_expected` for contextual typing
+/// at assignment sites. Sub-queries inside `DbInferCtx` are still Salsa-cached.
+pub(crate) fn infer_expr_with_expected_inline(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: crate::SourceFile,
+    ast_id_map: &AstIdMap,
+    expr: &Expr,
+    expected: &Ty,
+) -> ExprType {
+    let ctx = DbInferCtx {
+        db,
+        unit,
+        source_file,
+        ast_id_map,
+    };
+    lyra_semantic::type_infer::infer_expr_with_expected(expr, Some(expected), &ctx, None)
+}
+
 /// Const-eval-safe expression typing (Salsa-tracked with cycle recovery).
 ///
 /// This query must NOT call `resolve_index_file`, `type_of_symbol`,

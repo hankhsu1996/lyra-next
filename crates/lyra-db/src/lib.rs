@@ -11,6 +11,7 @@ mod enum_queries;
 mod expr_queries;
 pub mod facts;
 mod lower_diag;
+mod lower_type_check;
 mod module_sig;
 pub mod pipeline;
 mod record_queries;

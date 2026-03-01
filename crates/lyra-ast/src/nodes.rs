@@ -96,6 +96,7 @@ ast_nodes! {
     StreamSliceSize(SyntaxKind::StreamSliceSize) {}
     StreamOperands(SyntaxKind::StreamOperands) { @custom }
     CastExpr(SyntaxKind::CastExpr) { @custom }
+    NewExpr(SyntaxKind::NewExpr) { @custom }
     IndexExpr(SyntaxKind::IndexExpr) { @custom }
     RangeExpr(SyntaxKind::RangeExpr) {}
     FieldExpr(SyntaxKind::FieldExpr) { @custom }
@@ -881,6 +882,37 @@ impl EnumMemberRange {
 
     pub fn second_expr(&self) -> Option<Expression> {
         support::children::<Expression>(&self.syntax).nth(1)
+    }
+}
+
+impl NewExpr {
+    /// Whether this is the dynamic-array form `new[...]` (vs class `new(...)`).
+    pub fn has_brackets(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::LBracket).is_some()
+    }
+
+    /// The size expression inside `new[size]`.
+    pub fn size_expr(&self) -> Option<crate::expr::Expr> {
+        if !self.has_brackets() {
+            return None;
+        }
+        support::expr_child(&self.syntax, 0)
+    }
+
+    /// The initializer expression inside `new[size](init)`.
+    pub fn init_arg(&self) -> Option<crate::expr::Expr> {
+        let arg_list: Option<ArgList> = support::child(&self.syntax);
+        let al = arg_list?;
+        support::expr_child(&al.syntax, 0)
+    }
+
+    /// Count of expression children inside the `ArgList` child.
+    pub fn init_arg_count(&self) -> usize {
+        let arg_list: Option<ArgList> = support::child(&self.syntax);
+        match arg_list {
+            Some(al) => support::expr_children(&al.syntax).count(),
+            None => 0,
+        }
     }
 }
 

@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.type[24]] 20:13..20:13: incompatible array types: cannot assign `int [3]` to `int [5]`
+  error[lyra.type[24]] 27:11..27:11: incompatible array types: cannot assign `logic [7:0] []` to `int []`
+---
+unit (0 diagnostics)

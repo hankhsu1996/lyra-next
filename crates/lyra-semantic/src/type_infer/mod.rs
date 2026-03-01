@@ -11,10 +11,10 @@ pub use expr_type::{
     ExprTypeErrorKind, ExprView, InferCtx, ResolveCallableError, Signedness,
 };
 
-use lyra_ast::{Expr, ExprKind};
+use lyra_ast::{Expr, ExprKind, NewExpr};
 
 use crate::coerce::IntegralCtx;
-use crate::types::Ty;
+use crate::types::{Ty, UnpackedDim};
 
 /// Infer the type of an expression, optionally in a context.
 ///
@@ -42,6 +42,42 @@ pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx
         ExprKind::SystemTfCall(s) => call::infer_system_call(&s, ctx),
         ExprKind::StreamExpr(s) => aggregate::infer_stream(&s, ctx),
         ExprKind::CastExpr(c) => scalar::infer_cast(&c, ctx),
+        ExprKind::NewExpr(ne) => infer_new_expr(&ne, None),
+    }
+}
+
+/// Infer the type of an expression with an expected type for contextual typing.
+///
+/// For `NewExpr`, passes the expected type through so the constructor can
+/// adopt the target array type. All other expression kinds ignore the expected
+/// type and delegate to `infer_expr`.
+pub fn infer_expr_with_expected(
+    expr: &Expr,
+    expected: Option<&Ty>,
+    ctx: &dyn InferCtx,
+    integral_ctx: Option<&IntegralCtx>,
+) -> ExprType {
+    let Some(peeled) = expr.peeled() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+    if let Some(ExprKind::NewExpr(ne)) = peeled.classify() {
+        return infer_new_expr(&ne, expected);
+    }
+    infer_expr(expr, ctx, integral_ctx)
+}
+
+fn infer_new_expr(ne: &NewExpr, expected: Option<&Ty>) -> ExprType {
+    if !ne.has_brackets() {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    }
+    match expected {
+        Some(
+            ty @ Ty::Array {
+                dim: UnpackedDim::Unsized,
+                ..
+            },
+        ) => ExprType::from_ty(ty),
+        _ => ExprType::error(ExprTypeErrorKind::NewExprNeedsExpectedDynArray),
     }
 }
 

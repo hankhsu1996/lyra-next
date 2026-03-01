@@ -4,8 +4,8 @@ use lyra_parser::{SyntaxNode, SyntaxToken};
 use crate::node::{AstNode, HasSyntax, is_expression_kind};
 use crate::nodes::{
     BinExpr, CallExpr, CastExpr, ConcatExpr, CondExpr, Expression, FieldExpr, IndexExpr, Literal,
-    NameRef, ParenExpr, PrefixExpr, QualifiedName, RangeExpr, ReplicExpr, StreamExpr, SystemTfCall,
-    TypeSpec,
+    NameRef, NewExpr, ParenExpr, PrefixExpr, QualifiedName, RangeExpr, ReplicExpr, StreamExpr,
+    SystemTfCall, TypeSpec,
 };
 
 /// Typed handle for any expression-kind syntax node.
@@ -110,6 +110,7 @@ impl Expr {
             SyntaxKind::QualifiedName => QualifiedName::cast(node).map(ExprKind::QualifiedName),
             SyntaxKind::StreamExpr => StreamExpr::cast(node).map(ExprKind::StreamExpr),
             SyntaxKind::CastExpr => CastExpr::cast(node).map(ExprKind::CastExpr),
+            SyntaxKind::NewExpr => NewExpr::cast(node).map(ExprKind::NewExpr),
             _ => None,
         }
     }
@@ -136,6 +137,7 @@ pub enum ExprKind {
     QualifiedName(QualifiedName),
     StreamExpr(StreamExpr),
     CastExpr(CastExpr),
+    NewExpr(NewExpr),
 }
 
 impl ExprKind {
@@ -178,6 +180,7 @@ impl ExprKind {
             Self::QualifiedName(n) => n.syntax(),
             Self::StreamExpr(n) => n.syntax(),
             Self::CastExpr(n) => n.syntax(),
+            Self::NewExpr(n) => n.syntax(),
         }
     }
 }

@@ -54,6 +54,12 @@ pub enum MessageId {
     MethodArgTypeMismatch,
     UnsupportedLhsForm,
     InvalidAssignmentLhs,
+    NewExprNotDynArray,
+    NewExprTooManyInitArgs,
+    NewExprSizeNotLongint,
+    NewExprSizeNegative,
+    NewExprInitIncompat,
+    ArrayIncompatible,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -225,7 +231,20 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::MethodArityMismatch
         | MessageId::MethodArgTypeMismatch
         | MessageId::UnsupportedLhsForm
-        | MessageId::InvalidAssignmentLhs => render_type_message(msg),
+        | MessageId::InvalidAssignmentLhs
+        | MessageId::NewExprNotDynArray
+        | MessageId::NewExprTooManyInitArgs
+        | MessageId::NewExprSizeNotLongint
+        | MessageId::NewExprSizeNegative
+        | MessageId::NewExprInitIncompat
+        | MessageId::ArrayIncompatible => render_type_message(msg),
+        _ => render_other_message(msg),
+    }
+}
+
+fn render_other_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -233,10 +252,7 @@ pub fn render_message(msg: &Message) -> String {
                 "local declaration of `{sym_name}` conflicts with wildcard import from package `{pkg}`"
             )
         }
-        MessageId::RealizedHere => {
-            let sym_name = name();
-            format!("wildcard import of `{sym_name}` realized here")
-        }
+        MessageId::RealizedHere => format!("wildcard import of `{}` realized here", name()),
         MessageId::WildcardImportHere => "wildcard import here".into(),
         MessageId::NotFoundInScope => "not found in this scope".into(),
         MessageId::NotFoundAsType => "not found as a type in this scope".into(),
@@ -345,6 +361,37 @@ fn render_type_message(msg: &Message) -> String {
         | MessageId::MethodArgTypeMismatch => render_method_message(msg),
         MessageId::UnsupportedLhsForm => "assignment target form is not yet type-checked".into(),
         MessageId::InvalidAssignmentLhs => "expression is not a valid assignment target".into(),
+        MessageId::NewExprNotDynArray
+        | MessageId::NewExprTooManyInitArgs
+        | MessageId::NewExprSizeNotLongint
+        | MessageId::NewExprSizeNegative
+        | MessageId::NewExprInitIncompat
+        | MessageId::ArrayIncompatible => render_array_message(msg),
+        _ => String::new(),
+    }
+}
+
+fn render_array_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
+        MessageId::NewExprNotDynArray => "new[] can only initialize a dynamic array".into(),
+        MessageId::NewExprTooManyInitArgs => {
+            "new[] initializer accepts at most one argument".into()
+        }
+        MessageId::NewExprSizeNotLongint => "new[] size must be coercible to longint".into(),
+        MessageId::NewExprSizeNegative => "new[] size must be non-negative".into(),
+        MessageId::NewExprInitIncompat => {
+            let lhs_ty = name();
+            let init_ty = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!(
+                "new[] initializer type `{init_ty}` is not assignment-compatible with target `{lhs_ty}`"
+            )
+        }
+        MessageId::ArrayIncompatible => {
+            let lhs_ty = name();
+            let rhs_ty = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("incompatible array types: cannot assign `{rhs_ty}` to `{lhs_ty}`")
+        }
         _ => String::new(),
     }
 }
