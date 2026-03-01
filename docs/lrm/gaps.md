@@ -10,12 +10,6 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 The preprocessor handles `` `include `` (single-level), conditional compilation (`` `ifdef ``/`` `ifndef ``/`` `elsif ``/`` `else ``/`` `endif ``), and object-like `` `define ``/`` `undef ``. Macro definitions are captured but use-site expansion (`` `FOO `` in normal code) is not yet implemented. Non-conditional/non-define directives (`` `timescale ``, `` `default_nettype ``, `` `resetall ``, etc.) are silently stripped. Blocked by: text macro expansion at use sites, parameterized macros. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
-## Chapter 6 -- Data Types
-
-### 6.19: Enum member visibility vs local declaration ordering
-
-Enum member names are injected into the enclosing scope unconditionally. The LRM's ordering/visibility rules for when a name becomes visible vs later local declarations are not modeled. Collisions between enum members and other declarations are diagnosed as duplicates under the current model. This is the same class of problem as Ch26 wildcard import ordering. Test: `lrm/ch06/6.19.0_enumerated_types/cases/enum_member_ordering`.
-
 ## Chapter 7 -- Aggregate Types
 
 ### 7.4: Dynamic arrays, queues, and associative arrays -- foreach iteration
