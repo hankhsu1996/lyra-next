@@ -6,9 +6,9 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 5 -- Lexical Conventions
 
-### 5.6.4: Compiler directives beyond `include
+### 5.6.4: Compiler directives -- macro expansion and non-conditional directives
 
-The preprocessor handles `` `include `` (single-level). All other compiler directives (`` `define ``, `` `ifdef ``/`` `ifndef ``/`` `else ``/`` `endif ``, `` `undef ``, `` `timescale ``, `` `default_nettype ``, `` `resetall ``, etc.) are not implemented -- directive tokens pass through to the parser unprocessed. Blocked by: preprocessor expansion for text macros and conditional compilation. Test: `lrm/ch05/5.6.4_compiler_directives`.
+The preprocessor handles `` `include `` (single-level), conditional compilation (`` `ifdef ``/`` `ifndef ``/`` `elsif ``/`` `else ``/`` `endif ``), and object-like `` `define ``/`` `undef ``. Macro definitions are captured but use-site expansion (`` `FOO `` in normal code) is not yet implemented. Non-conditional/non-define directives (`` `timescale ``, `` `default_nettype ``, `` `resetall ``, etc.) are silently stripped. Blocked by: text macro expansion at use sites, parameterized macros. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
 ## Chapter 6 -- Data Types
 
