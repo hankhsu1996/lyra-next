@@ -43,8 +43,7 @@ pub(crate) fn lower_file_diagnostics(
     let mut diags = Vec::new();
 
     for e in &pp.errors {
-        let (span, extra) = map_span_or_fallback(file_id, &pp.source_map, e.range);
-        let text = freeform_text(&e.message, extra);
+        let text = SmolStr::new(&e.message);
         diags.push(
             Diagnostic::new(
                 Severity::Error,
@@ -53,7 +52,7 @@ pub(crate) fn lower_file_diagnostics(
             )
             .with_label(Label {
                 kind: LabelKind::Primary,
-                span,
+                span: e.span,
                 message: Message::new(MessageId::PreprocessError, vec![Arg::Name(text)]),
             }),
         );

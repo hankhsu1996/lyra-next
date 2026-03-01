@@ -1,4 +1,4 @@
-use lyra_preprocess::{IncludeProvider, ResolvedInclude};
+use lyra_preprocess::{IncludeProvider, MacroEnv, PreprocessInputs, ResolvedInclude};
 use salsa::Setter;
 
 use crate::{IncludeMap, SourceFile};
@@ -34,12 +34,14 @@ pub fn preprocess_file(
 ) -> lyra_preprocess::PreprocOutput {
     let include_map = file.include_map(db);
     let provider = DbIncludeProvider { db, include_map };
-    lyra_preprocess::preprocess(
-        file.file_id(db),
-        lex_file(db, file),
-        file.text(db),
-        &provider,
-    )
+    let empty_env = MacroEnv::empty();
+    lyra_preprocess::preprocess(&PreprocessInputs {
+        file: file.file_id(db),
+        tokens: lex_file(db, file),
+        text: file.text(db),
+        provider: &provider,
+        starting_env: &empty_env,
+    })
 }
 
 /// Parse a source file into a lossless green tree with diagnostics.

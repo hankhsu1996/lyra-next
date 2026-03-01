@@ -10,3 +10,4 @@ workspace = true
 [dependencies]
 lyra-source.workspace = true
 lyra-lexer.workspace = true
+smol_str.workspace = true
