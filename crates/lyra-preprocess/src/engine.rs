@@ -122,14 +122,6 @@ impl<'a> Preprocessor<'a> {
         });
     }
 
-    fn parent_emit(&self) -> bool {
-        let len = self.cond_stack.len();
-        if len < 2 {
-            return true;
-        }
-        self.cond_stack[len - 2].allow_emit
-    }
-
     fn handle_directive(&mut self, idx: usize, directive_text: &str) -> usize {
         match directive_text {
             "`ifdef" => self.handle_ifdef(idx, false),
@@ -189,37 +181,43 @@ impl<'a> Preprocessor<'a> {
             TextSize::new((dir_start + dir_len) as u32),
         );
 
-        if self.cond_stack.is_empty() {
+        let Some((frame, parent_frames)) = self.cond_stack.split_last_mut() else {
             self.push_error(
                 dir_range,
                 SmolStr::from("`elsif without matching `ifdef/`ifndef"),
             );
             return consumed;
-        }
+        };
 
-        // SAFETY of indexing: is_empty() check above guarantees at least one frame.
-        let top = self.cond_stack.len() - 1;
-        if self.cond_stack[top].saw_else {
+        let parent_emit = match parent_frames.last() {
+            Some(p) => p.allow_emit,
+            None => true,
+        };
+
+        if frame.saw_else {
             self.push_error(dir_range, SmolStr::from("`elsif after `else"));
             return consumed;
         }
 
+        let mut missing_name = false;
         let predicate = if let Some(n) = &name {
             self.env.is_defined(n)
         } else {
-            self.push_error(dir_range, SmolStr::from("`elsif missing macro name"));
+            missing_name = true;
             false
         };
 
-        let parent = self.parent_emit();
-        let frame = &mut self.cond_stack[top];
         if frame.taken {
             frame.allow_emit = false;
         } else {
-            frame.allow_emit = parent && predicate;
+            frame.allow_emit = parent_emit && predicate;
             if predicate {
                 frame.taken = true;
             }
+        }
+
+        if missing_name {
+            self.push_error(dir_range, SmolStr::from("`elsif missing macro name"));
         }
 
         consumed
@@ -235,25 +233,26 @@ impl<'a> Preprocessor<'a> {
             TextSize::new((dir_start + dir_len) as u32),
         );
 
-        if self.cond_stack.is_empty() {
+        let Some((frame, parent_frames)) = self.cond_stack.split_last_mut() else {
             self.push_error(
                 dir_range,
                 SmolStr::from("`else without matching `ifdef/`ifndef"),
             );
             return consumed;
-        }
+        };
 
-        // is_empty() check above guarantees at least one frame.
-        let top = self.cond_stack.len() - 1;
-        if self.cond_stack[top].saw_else {
+        let parent_emit = match parent_frames.last() {
+            Some(p) => p.allow_emit,
+            None => true,
+        };
+
+        if frame.saw_else {
             self.push_error(dir_range, SmolStr::from("duplicate `else"));
             return consumed;
         }
 
-        let parent = self.parent_emit();
-        let frame = &mut self.cond_stack[top];
         frame.saw_else = true;
-        frame.allow_emit = parent && !frame.taken;
+        frame.allow_emit = parent_emit && !frame.taken;
 
         consumed
     }
