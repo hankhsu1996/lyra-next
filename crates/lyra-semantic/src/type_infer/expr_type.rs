@@ -114,6 +114,7 @@ pub enum ExprTypeErrorKind {
     CastTargetNotAType,
     InternalStreamOperandError,
     UnsupportedIncDec,
+    NewExprNeedsExpectedDynArray,
 }
 
 /// How an expression's type is viewed for operations.

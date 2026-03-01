@@ -379,3 +379,145 @@ fn string_arity_mismatch_diagnostic() {
     assert!(msg.contains("len"), "msg: {msg}");
     assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::METHOD_CALL_ERROR);
 }
+
+// new[] constructor tests
+
+#[test]
+fn new_expr_dyn_array_no_diag() {
+    let src = "module m; int a[]; initial begin a = new[10]; end endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "new[] on dynamic array should not error: {diags:?}"
+    );
+}
+
+#[test]
+fn new_expr_dyn_array_with_init_no_diag() {
+    let src = "module m; int a[]; int b[5]; initial begin a = new[5](b); end endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "new[] with compatible init should not error: {diags:?}"
+    );
+}
+
+#[test]
+fn new_expr_var_init_no_diag() {
+    let src = "module m; int a[] = new[10]; endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "new[] as var init should not error: {diags:?}"
+    );
+}
+
+#[test]
+fn new_expr_not_dyn_array() {
+    let src = "module m; int b[10]; initial begin b = new[10]; end endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(
+        diags.len(),
+        1,
+        "fixed array with new[] should error: {diags:?}"
+    );
+    assert_eq!(
+        diags[0].code,
+        lyra_diag::DiagnosticCode::NEW_EXPR_NOT_DYN_ARRAY
+    );
+}
+
+#[test]
+fn new_expr_size_negative() {
+    let src = "module m; int a[]; initial begin a = new[-1]; end endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(diags.len(), 1, "negative size should error: {diags:?}");
+    assert_eq!(
+        diags[0].code,
+        lyra_diag::DiagnosticCode::NEW_EXPR_SIZE_NEGATIVE
+    );
+}
+
+// Array assignment compatibility tests
+
+#[test]
+fn array_compat_dyn_to_dyn_no_diag() {
+    let src = "module m; int a[]; int b[]; initial begin a = b; end endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "dynamic <- dynamic should not error: {diags:?}"
+    );
+}
+
+#[test]
+fn array_compat_dyn_from_fixed_no_diag() {
+    let src = "module m; int a[]; int b[5]; initial begin a = b; end endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "dynamic <- fixed should not error: {diags:?}"
+    );
+}
+
+#[test]
+fn array_compat_dyn_from_queue_no_diag() {
+    let src = "module m; int a[]; int b[$]; initial begin a = b; end endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "dynamic <- queue should not error: {diags:?}"
+    );
+}
+
+#[test]
+fn array_compat_queue_to_queue_no_diag() {
+    let src = "module m; int a[$]; int b[$]; initial begin a = b; end endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "queue <- queue should not error: {diags:?}"
+    );
+}
+
+#[test]
+fn array_compat_queue_from_dyn_no_diag() {
+    let src = "module m; int a[$]; int b[]; initial begin a = b; end endmodule";
+    let diags = type_diag_errors(src);
+    assert!(
+        diags.is_empty(),
+        "queue <- dynamic should not error: {diags:?}"
+    );
+}
+
+#[test]
+fn array_incompat_fixed_size_mismatch() {
+    let src = "module m; int a[5]; int b[3]; initial begin a = b; end endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(
+        diags.len(),
+        1,
+        "fixed size mismatch should error: {diags:?}"
+    );
+    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::ARRAY_INCOMPAT);
+}
+
+#[test]
+fn array_incompat_element_type_mismatch() {
+    let src = "module m; int a[]; logic [7:0] b[]; initial begin a = b; end endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(
+        diags.len(),
+        1,
+        "element type mismatch should error: {diags:?}"
+    );
+    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::ARRAY_INCOMPAT);
+}
+
+#[test]
+fn array_incompat_inner_dim_mismatch() {
+    let src = "module m; int a[][5]; int b[3][6]; initial begin a = b; end endmodule";
+    let diags = type_diag_errors(src);
+    assert_eq!(diags.len(), 1, "inner dim mismatch should error: {diags:?}");
+    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::ARRAY_INCOMPAT);
+}
