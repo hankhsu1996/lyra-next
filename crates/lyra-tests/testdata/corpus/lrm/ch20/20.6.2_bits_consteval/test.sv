@@ -32,3 +32,18 @@ module bits_param_dim;
   logic [W-1:0] x;
   parameter P = $bits(x);
 endmodule
+
+// Unpacked arrays
+module bits_unpacked;
+  int x [4];
+  logic [7:0] y [2][3];
+  parameter P_X = $bits(x);
+  parameter P_Y = $bits(y);
+endmodule
+
+// Unpacked records
+module bits_unpacked_record;
+  typedef struct { logic [7:0] a; int b; } S;
+  S s;
+  parameter P_S = $bits(s);
+endmodule

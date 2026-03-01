@@ -1,3 +1,4 @@
+use lyra_ast::UnpackedDimSource;
 use lyra_semantic::Site;
 use lyra_semantic::def_entry;
 use lyra_semantic::def_index::ExpectedNs;
@@ -11,7 +12,7 @@ use lyra_source::NameSpan;
 use smol_str::SmolStr;
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
-use crate::pipeline::preprocess_file;
+use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
 use crate::semantic::{
     compilation_unit_env, def_index_file, global_def_index, name_graph_file, package_scope_index,
 };
@@ -105,6 +106,8 @@ pub fn record_field_tys<'db>(
         return Box::new([]);
     };
 
+    let parse = parse_file(db, source_file);
+    let map = ast_id_map(db, source_file);
     let graph = name_graph_file(db, source_file);
     let global = global_def_index(db, unit);
     let pkg_scope = package_scope_index(db, unit);
@@ -144,7 +147,14 @@ pub fn record_field_tys<'db>(
                 LoweredFieldTy { ty, err }
             }
         };
-        result.push(lowered);
+
+        // Apply field declarator unpacked dims
+        let dim_src = UnpackedDimSource::from_name_site(&parse.syntax(), map, field.name_site);
+        let ty = wrap_field_unpacked_dims(lowered.ty, dim_src.as_ref(), map);
+        result.push(LoweredFieldTy {
+            ty,
+            err: lowered.err,
+        });
     }
 
     result.into_boxed_slice()
@@ -243,6 +253,22 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
         field_lookup: lookup.into_boxed_slice(),
         diags: diags.into_boxed_slice(),
     }
+}
+
+fn wrap_field_unpacked_dims(
+    ty: Ty,
+    owner: Option<&UnpackedDimSource>,
+    ast_id_map: &lyra_ast::AstIdMap,
+) -> Ty {
+    let Some(owner) = owner else { return ty };
+    let dims: Vec<lyra_semantic::types::UnpackedDim> = owner
+        .unpacked_dimensions()
+        .map(|dim| lyra_semantic::extract_unpacked_dim(&dim, ast_id_map))
+        .collect();
+    if dims.is_empty() {
+        return ty;
+    }
+    lyra_semantic::wrap_unpacked(ty, &dims)
 }
 
 fn empty_record_sem() -> RecordSem {

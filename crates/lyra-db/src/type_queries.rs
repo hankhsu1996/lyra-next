@@ -1,6 +1,6 @@
 use lyra_ast::{TypeDeclSite, UnpackedDimSource};
 use lyra_semantic::UserTypeRef;
-use lyra_semantic::record::{Packing, RecordKind, SymbolOrigin};
+use lyra_semantic::record::{RecordKind, SymbolOrigin};
 use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::BitWidth;
@@ -59,7 +59,18 @@ pub fn bit_width_total<'db>(
             let rref = RecordRef::new(db, unit, *id);
             record_width(db, unit, rref)
         }
-        _ => None,
+        Ty::Array { elem, dim } => {
+            let len = dim.fixed_len()?;
+            let elem_ref = TyRef::new(db, elem.as_ref().clone());
+            let elem_width = bit_width_total(db, unit, elem_ref)?;
+            len.checked_mul(elem_width)
+        }
+        Ty::String
+        | Ty::Chandle
+        | Ty::Event
+        | Ty::Void
+        | Ty::Interface(_)
+        | Ty::Error => None,
     }
 }
 
@@ -72,10 +83,11 @@ fn bit_width_total_recover<'db>(
     None
 }
 
-/// Compute the total bit width of a packed record (struct or union).
+/// Compute the total bit-stream width of a record (struct or union).
 ///
-/// Struct: sum of field widths. Union (hard or soft): max of field widths.
-/// Unpacked records and tagged unions return None.
+/// Struct: field concatenation in declared order (sum of field widths).
+/// Union (hard or soft): one active field (max of field widths).
+/// Tagged unions return `None`.
 fn record_width<'db>(
     db: &'db dyn salsa::Database,
     unit: CompilationUnit,
@@ -89,9 +101,8 @@ fn record_width<'db>(
 
     let record_def = def.record_def_by_id(record_id)?;
 
-    match (record_def.kind, record_def.packing) {
-        (RecordKind::TaggedUnion, _) | (_, Packing::Unpacked) => return None,
-        _ => {}
+    if record_def.kind == RecordKind::TaggedUnion {
+        return None;
     }
 
     let lowered = record_field_tys(db, rref);
