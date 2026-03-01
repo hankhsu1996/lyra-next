@@ -58,7 +58,7 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 ### 20.6.2: $bits constant evaluation -- unsupported type categories
 
-`$bits` const-eval handles packed integral types (all packed dims), real types, enums (base type width), and packed records (struct=sum, union=max). Unsupported: `$bits` on unpacked arrays, strings, chandles, events, void, and interfaces (implementation-defined or not applicable per LRM). Test: `lrm/ch20/20.6.2_expression_size_system_function`.
+`$bits` const-eval handles packed integral types (all packed dims), real types, enums (base type width), packed records (struct=sum, union=max), unpacked records (bit-stream sum/max including per-field declarator dims), and fixed-size unpacked arrays (recursive element width * length). Strings and dynamic arrays return const-eval error (not yet surfaced as user-visible diagnostic). Unsupported: chandle, event, void, and interfaces (implementation-defined or not applicable per LRM). Test: `lrm/ch20/20.6.2_expression_size_system_function`.
 
 ### 20.7: Array query functions -- runtime evaluation
 

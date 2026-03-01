@@ -342,6 +342,139 @@ fn const_eval_bits_param_dim() {
     assert_eq!(eval_named_param(&db, file, unit, "P"), ConstInt::Known(8));
 }
 
+// $bits unpacked arrays
+
+#[test]
+fn const_eval_bits_unpacked_array() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int x [4]; parameter P = $bits(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(128));
+}
+
+#[test]
+fn const_eval_bits_unpacked_2d() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int x [2][3]; parameter P = $bits(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(192));
+}
+
+#[test]
+fn const_eval_bits_packed_in_unpacked() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x [4]; parameter P = $bits(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(32));
+}
+
+#[test]
+fn const_eval_bits_packed_in_unpacked_2d() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] y [2][3]; parameter P = $bits(y); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(48));
+}
+
+#[test]
+fn const_eval_bits_unpacked_range() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int x [3:0]; parameter P = $bits(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(128));
+}
+
+#[test]
+fn const_eval_bits_dynamic_array() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int x []; parameter P = $bits(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert!(matches!(
+        eval_first_param(&db, file, unit),
+        ConstInt::Error(_)
+    ));
+}
+
+#[test]
+fn const_eval_bits_queue() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; int x [$]; parameter P = $bits(x); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert!(matches!(
+        eval_first_param(&db, file, unit),
+        ConstInt::Error(_)
+    ));
+}
+
+#[test]
+fn const_eval_bits_string_var() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; string s; parameter P = $bits(s); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert!(matches!(
+        eval_first_param(&db, file, unit),
+        ConstInt::Error(_)
+    ));
+}
+
+// $bits unpacked records
+
+#[test]
+fn const_eval_bits_unpacked_struct() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef struct { logic [7:0] a; int b; } s_t; parameter P = $bits(s_t); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(40));
+}
+
+#[test]
+fn const_eval_bits_unpacked_union() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union { logic [7:0] a; int b; } u_t; parameter P = $bits(u_t); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(32));
+}
+
 // $bits negative cases
 
 #[test]
@@ -614,4 +747,42 @@ fn const_eval_dimensions_variable() {
     );
     let unit = single_file_unit(&db, file);
     assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(4));
+}
+
+// $bits with record field declarator dims
+
+#[test]
+fn const_eval_bits_unpacked_struct_array_field() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef struct { logic [3:0] a[3]; } s_t; parameter P = $bits(s_t); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(12));
+}
+
+#[test]
+fn const_eval_bits_unpacked_struct_2d_field() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef struct { logic [7:0] a[2][3]; } s_t; parameter P = $bits(s_t); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(48));
+}
+
+#[test]
+fn const_eval_bits_unpacked_struct_var() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef struct { logic [7:0] a; int b; } s_t; s_t v; parameter P = $bits(v); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(eval_first_param(&db, file, unit), ConstInt::Known(40));
 }
