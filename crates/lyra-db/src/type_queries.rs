@@ -201,6 +201,11 @@ pub fn type_of_symbol_raw<'db>(
         SymbolOrigin::TypeSpec => {}
     }
 
+    // Foreach loop variables: derive type from the iterated array's dimension
+    if let Some(fv_def) = def.foreach_var_defs.get(&gsym.local) {
+        return type_of_foreach_var(db, unit, source_file, fv_def);
+    }
+
     let decl_site_id = sym.name_site;
 
     let parse = parse_file(db, source_file);
@@ -275,6 +280,78 @@ fn type_of_instance(
         ),
         _ => SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
     }
+}
+
+/// Derive the type of a foreach loop variable from the iterated array's dimension.
+///
+/// The array expression is always a `NameRef` or `QualifiedName` (the parser
+/// rejects postfix forms). Resolves the name, extracts the array type,
+/// decomposes its unpacked dimensions, and maps the variable's slot to the
+/// corresponding dimension's index type.
+/// Fixed-size, dynamic, queue, and wildcard-associative dimensions yield `int`;
+/// typed-associative dimensions yield the explicit index type.
+fn type_of_foreach_var(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    fv_def: &lyra_semantic::def_index::ForeachVarDef,
+) -> lyra_semantic::types::SymbolType {
+    use lyra_ast::{AstNode, ForeachStmt, HasSyntax};
+    use lyra_semantic::resolve_index::ResolvedTarget;
+    use lyra_semantic::types::{AssocIndex, SymbolType, SymbolTypeError};
+
+    let parse = parse_file(db, source_file);
+    let map = ast_id_map(db, source_file);
+
+    let Some(foreach_node) = map.get_node(&parse.syntax(), fv_def.foreach_stmt) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+    let Some(foreach_stmt) = ForeachStmt::cast(foreach_node) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+    let Some(array_expr) = foreach_stmt.array_expr() else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+
+    // The array expression is a NameRef or QualifiedName; get its site.
+    let Some(expr_site) = map.erased_ast_id(array_expr.syntax()) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+
+    // Resolve the name via ResolveIndex
+    let resolve = resolve_index_file(db, source_file, unit);
+    let Some(resolution) = resolve.resolutions.get(&expr_site) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+
+    let array_type = match &resolution.target {
+        ResolvedTarget::Symbol(gsym) => {
+            let sym_ref = SymbolRef::new(db, unit, *gsym);
+            type_of_symbol(db, sym_ref)
+        }
+        _ => return SymbolType::Error(SymbolTypeError::MissingDecl),
+    };
+
+    let ty = match &array_type {
+        SymbolType::Value(ty) | SymbolType::TypeAlias(ty) => ty.clone(),
+        SymbolType::Net(net) => net.data.clone(),
+        SymbolType::Error(_) => return array_type,
+    };
+
+    // Decompose unpacked dimensions and map slot directly to index type.
+    let (_base, dims) = lyra_semantic::types::collect_array_dims(&ty);
+    let slot = fv_def.slot as usize;
+
+    if slot >= dims.len() {
+        return SymbolType::Value(Ty::Error);
+    }
+
+    let index_type = match dims[slot] {
+        UnpackedDim::Assoc(AssocIndex::Typed(inner_ty)) => inner_ty.as_ref().clone(),
+        _ => Ty::int(),
+    };
+
+    SymbolType::Value(index_type)
 }
 
 /// Resolve a definition-namespace target to its base `Ty` (no dims).

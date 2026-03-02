@@ -65,6 +65,7 @@ pub struct DefIndex {
     pub modport_defs: HashMap<ModportDefId, ModportDef>,
     pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportDecl]>,
+    pub foreach_var_defs: HashMap<SymbolId, ForeachVarDef>,
     pub diagnostics: Box<[SemanticDiag]>,
     pub internal_errors: Box<[(Option<Site>, SmolStr)]>,
 }
@@ -262,6 +263,19 @@ pub struct ExportDecl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompilationUnitEnv {
     pub implicit_imports: Box<[ImplicitImport]>,
+}
+
+/// Metadata for a foreach loop variable (LRM 12.7.3).
+///
+/// Stored in `DefIndex::foreach_var_defs` keyed by the variable's `SymbolId`.
+/// The type system uses this to derive the loop variable's type from the
+/// iterated array's dimension at the given slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ForeachVarDef {
+    /// `ErasedAstId` of the containing `ForeachStmt` node.
+    pub foreach_stmt: Site,
+    /// 0-indexed dimension slot (counting all slots, including skipped).
+    pub slot: u32,
 }
 
 /// An implicit import added at the compilation-unit level.

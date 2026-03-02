@@ -242,6 +242,10 @@
   {"section": "11.11", "chapter": 11, "title": "Minimum, typical, and maximum delay expressions", "parent": "11", "children": [], "ownable": false},
   {"section": "11.12", "chapter": 11, "title": "Let construct", "parent": "11", "children": [], "ownable": false},
 
+  {"section": "12", "chapter": 12, "title": "Procedural Programming Statements", "parent": null, "children": ["12.7"], "ownable": false},
+  {"section": "12.7", "chapter": 12, "title": "Loop statements", "parent": "12", "children": ["12.7.3"], "ownable": false},
+  {"section": "12.7.3", "chapter": 12, "title": "Foreach-loop statements", "parent": "12.7", "children": [], "ownable": true},
+
   {"section": "20", "chapter": 20, "title": "Utility System Tasks and System Functions", "parent": null, "children": ["20.1","20.2","20.3","20.4","20.5","20.6","20.7","20.8","20.9","20.10","20.11","20.12","20.13","20.14","20.15","20.16","20.17"], "ownable": false},
   {"section": "20.1", "chapter": 20, "title": "General", "parent": "20", "children": [], "ownable": false},
   {"section": "20.2", "chapter": 20, "title": "Simulation control system tasks", "parent": "20", "children": [], "ownable": false},

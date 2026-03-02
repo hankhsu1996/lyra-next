@@ -12,10 +12,6 @@ Object-like macro expansion at use sites is implemented (recursive expansion wit
 
 ## Chapter 7 -- Aggregate Types
 
-### 7.4: Dynamic arrays, queues, and associative arrays -- foreach iteration
-
-Type representation handles all unpacked dimension forms. Built-in array methods are implemented with receiver classification, arity/arg-type checking, and void-in-expression detection. `new[]` constructor with contextual typing, size/init validation, and structural array assignment compatibility are implemented. Remaining gap: `foreach` iteration (Ch12 loop statements). Tests: `lrm/ch07/7.5.0_dynamic_array_declaration/cases/`.
-
 ## Chapter 7 -- Structures and Unions
 
 ### 7.3.1: Soft packed union layout semantics
@@ -47,6 +43,12 @@ Parser accepts any expression as `slice_size`. The LRM requires it to be a const
 ### 11.5.1: Fixed part-select with non-constant bounds
 
 Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Supporting non-constant bounds needs symbolic/dynamic width representation. Blocked by: dynamic width model. Test: `lrm/ch11/11.5.1_bit_select_and_part_select/cases/part_select_nonconstant`.
+
+## Chapter 12 -- Procedural Programming Statements
+
+### 12.7.3: Foreach -- indexed and field-access array references
+
+The foreach array reference accepts only simple names (`arr`) and package-qualified names (`pkg::arr`). Postfix forms -- field access (`foreach(obj.arr[i])`), index select (`foreach(arr[0][i])`) -- are rejected with a targeted diagnostic. Blocked by: full expression typing. Test: `lrm/ch12/12.7.3_foreach_loop_statements/cases/indexed_array_ref`.
 
 ## Chapter 20 -- System Functions
 

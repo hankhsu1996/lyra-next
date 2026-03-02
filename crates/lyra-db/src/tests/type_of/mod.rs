@@ -1,6 +1,7 @@
 mod aggregate;
 mod basic;
 mod dims;
+mod foreach;
 mod interface;
 mod typedef;
 

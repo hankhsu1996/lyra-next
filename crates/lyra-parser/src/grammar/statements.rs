@@ -27,6 +27,7 @@ pub(crate) fn stmt(p: &mut Parser) {
         }
         SyntaxKind::CaseKw | SyntaxKind::CasexKw | SyntaxKind::CasezKw => case_stmt(p),
         SyntaxKind::ForKw => for_stmt(p),
+        SyntaxKind::ForeachKw => foreach_stmt(p),
         SyntaxKind::WhileKw => while_stmt(p),
         SyntaxKind::RepeatKw => repeat_stmt(p),
         SyntaxKind::ForeverKw => forever_stmt(p),
@@ -209,6 +210,106 @@ fn forever_stmt(p: &mut Parser) {
     p.bump(); // forever
     stmt(p);
     m.complete(p, SyntaxKind::ForeverStmt);
+}
+
+// `foreach (array_ref[vars]) stmt` (LRM 12.7.3)
+fn foreach_stmt(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // foreach
+    p.expect(SyntaxKind::LParen);
+    foreach_array_ref(p);
+    foreach_var_list(p);
+    p.expect(SyntaxKind::RParen);
+    stmt(p);
+    m.complete(p, SyntaxKind::ForeachStmt);
+}
+
+// Parse the array reference: NameRef or QualifiedName only.
+// Postfix forms (field access, index select) are not yet supported;
+// they require expression typing to derive foreach variable types.
+// If unsupported postfix tokens follow, emit a diagnostic and skip
+// to the var-list bracket so the body still parses.
+fn foreach_array_ref(p: &mut Parser) {
+    if !p.at(SyntaxKind::Ident) && !p.at(SyntaxKind::EscapedIdent) {
+        p.error("expected array name");
+        return;
+    }
+    if p.current() == SyntaxKind::Ident
+        && p.nth(1) == SyntaxKind::ColonColon
+        && p.nth(2) == SyntaxKind::Ident
+    {
+        let m = p.start();
+        p.bump(); // first segment
+        while p.at(SyntaxKind::ColonColon) && p.nth(1) == SyntaxKind::Ident {
+            p.bump(); // ::
+            p.bump(); // segment
+        }
+        m.complete(p, SyntaxKind::QualifiedName);
+    } else {
+        let m = p.start();
+        p.bump(); // ident
+        m.complete(p, SyntaxKind::NameRef);
+    }
+    // Recovery: skip unsupported postfix (field access, index select)
+    // to reach the var-list bracket.
+    if p.at(SyntaxKind::Dot) || (p.at(SyntaxKind::LBracket) && !is_foreach_var_bracket(p)) {
+        p.error("foreach does not support field access or indexing in array reference");
+        while !p.at_end() && !p.at(SyntaxKind::RParen) {
+            if p.at(SyntaxKind::LBracket) && is_foreach_var_bracket(p) {
+                break;
+            }
+            p.bump();
+        }
+    }
+}
+
+// Check if the current `[` starts the foreach loop-variable list.
+// The var list bracket is the last `[...]` before `)`.
+// Used for recovery when unsupported postfix forms appear.
+fn is_foreach_var_bracket(p: &Parser) -> bool {
+    if p.current() != SyntaxKind::LBracket {
+        return false;
+    }
+    let mut n = 1;
+    let mut depth: u32 = 1;
+    loop {
+        let kind = p.nth(n);
+        if kind == SyntaxKind::LBracket {
+            depth += 1;
+        } else if kind == SyntaxKind::RBracket {
+            depth -= 1;
+            if depth == 0 {
+                return p.nth(n + 1) == SyntaxKind::RParen;
+            }
+        } else if kind == SyntaxKind::Eof {
+            return false;
+        }
+        n += 1;
+    }
+}
+
+// Parse `[var1, , var3]` as ForeachVarList with ForeachVarSlot children.
+fn foreach_var_list(p: &mut Parser) {
+    let m = p.start();
+    p.expect(SyntaxKind::LBracket);
+    // First slot
+    foreach_var_slot(p);
+    while p.eat(SyntaxKind::Comma) {
+        foreach_var_slot(p);
+    }
+    p.expect(SyntaxKind::RBracket);
+    m.complete(p, SyntaxKind::ForeachVarList);
+}
+
+fn foreach_var_slot(p: &mut Parser) {
+    let m = p.start();
+    if p.at(SyntaxKind::Ident) || p.at(SyntaxKind::EscapedIdent) {
+        let d = p.start();
+        p.bump(); // variable name
+        d.complete(p, SyntaxKind::Declarator);
+    }
+    // Skipped slot: no Declarator child
+    m.complete(p, SyntaxKind::ForeachVarSlot);
 }
 
 // Timing control: `@(event_expr) stmt` or `#delay stmt`

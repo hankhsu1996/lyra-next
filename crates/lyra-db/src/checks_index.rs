@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use lyra_ast::{
     AssignStmt, AstIdMap, AstNode, BlockStmt, CaseStmt, ContinuousAssign, ErasedAstId, Expr,
-    ExprKind, ForStmt, ForeverStmt, FunctionDecl, GenerateItem, GenerateRegion, HasSyntax, IfStmt,
-    ModuleBody, RepeatStmt, SourceFile, StmtNode, SystemTfCall, TaskDecl, TimingControl, VarDecl,
-    WhileStmt, expr_children,
+    ExprKind, ForStmt, ForeachStmt, ForeverStmt, FunctionDecl, GenerateItem, GenerateRegion,
+    HasSyntax, IfStmt, ModuleBody, RepeatStmt, SourceFile, StmtNode, SystemTfCall, TaskDecl,
+    TimingControl, VarDecl, WhileStmt, expr_children,
 };
 use lyra_parser::SyntaxNode;
 use lyra_semantic::type_check::AccessMode;
@@ -267,6 +267,13 @@ impl IndexBuilder<'_> {
             }
         } else if let Some(forever_s) = ForeverStmt::cast(node.clone()) {
             if let Some(b) = forever_s.body() {
+                self.collect_stmt(&b, access);
+            }
+        } else if let Some(foreach_s) = ForeachStmt::cast(node.clone()) {
+            if let Some(arr) = foreach_s.array_expr() {
+                self.collect_from_expr(&arr, access);
+            }
+            if let Some(b) = foreach_s.body() {
                 self.collect_stmt(&b, access);
             }
         } else if let Some(tc) = TimingControl::cast(node.clone()) {

@@ -1,9 +1,10 @@
-use lyra_ast::{AstNode, NameRef, QualifiedName};
+use lyra_ast::{AstNode, ForeachStmt, HasSyntax, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
 
 use crate::builder::{DefContext, collect_declarators, is_expression_kind};
+use crate::builder_items::collect_foreach_vars;
 use crate::builder_types::collect_name_refs;
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::scopes::ScopeKind;
@@ -40,6 +41,18 @@ pub(crate) fn collect_statement(
         }
         SyntaxKind::VarDecl => {
             collect_declarators(ctx, node, SymbolKind::Variable, scope);
+        }
+        SyntaxKind::ForeachStmt => {
+            // Name refs in the array expression resolve in the parent scope.
+            collect_direct_name_refs(ctx, node, scope);
+            // Create foreach body scope + define foreach vars in the index.
+            let foreach_scope = collect_foreach_vars(ctx, node, scope);
+            // Recurse into body (statement walker owns recursion).
+            if let Some(fs) = ForeachStmt::cast(node.clone())
+                && let Some(body) = fs.body()
+            {
+                collect_statement(ctx, body.syntax(), foreach_scope);
+            }
         }
         SyntaxKind::IfStmt
         | SyntaxKind::CaseStmt
