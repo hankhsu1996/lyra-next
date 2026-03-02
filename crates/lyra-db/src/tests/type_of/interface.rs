@@ -1,4 +1,4 @@
-use lyra_semantic::types::InterfaceType;
+use lyra_semantic::types::{InterfaceIdentity, InterfaceType};
 
 use super::*;
 
@@ -45,7 +45,12 @@ fn interface_identity_resolves_to_interface_kind() {
     let unit = single_file_unit(&db, file);
     let ty = get_type(&db, file, unit, "v");
     let iface_def = match ty {
-        SymbolType::Value(Ty::Interface(ref it)) => it.iface,
+        SymbolType::Value(Ty::Interface(ref it)) => match it.iface {
+            InterfaceIdentity::Concrete(id) => id,
+            InterfaceIdentity::Generic => {
+                panic!("expected Concrete interface identity, got Generic")
+            }
+        },
         other => panic!("expected Value(Interface), got {other:?}"),
     };
     let global = crate::semantic::global_def_index(&db, unit);
@@ -249,4 +254,36 @@ fn port_with_keyword_type_still_works() {
         SymbolType::Value(Ty::simple_logic()),
         "keyword type port should still work"
     );
+}
+
+#[test]
+fn generic_interface_port() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m(interface a); endmodule");
+    let unit = single_file_unit(&db, file);
+    let ty = get_type(&db, file, unit, "a");
+    match ty {
+        SymbolType::Value(Ty::Interface(InterfaceType {
+            iface: InterfaceIdentity::Generic,
+            modport: None,
+        })) => {}
+        other => panic!("expected Value(Interface(Generic)), got {other:?}"),
+    }
+}
+
+#[test]
+fn generic_interface_port_multiple() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module m(interface a, interface b); endmodule");
+    let unit = single_file_unit(&db, file);
+    for name in ["a", "b"] {
+        let ty = get_type(&db, file, unit, name);
+        match ty {
+            SymbolType::Value(Ty::Interface(InterfaceType {
+                iface: InterfaceIdentity::Generic,
+                modport: None,
+            })) => {}
+            other => panic!("port '{name}': expected Value(Interface(Generic)), got {other:?}"),
+        }
+    }
 }

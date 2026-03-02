@@ -116,5 +116,8 @@ pub(crate) fn is_direction(kind: SyntaxKind) -> bool {
 
 pub(crate) fn is_type_start(kind: SyntaxKind) -> bool {
     super::declarations::is_scalar_type_keyword(kind)
-        || matches!(kind, SyntaxKind::WireKw | SyntaxKind::Ident)
+        || matches!(
+            kind,
+            SyntaxKind::WireKw | SyntaxKind::InterfaceKw | SyntaxKind::Ident
+        )
 }

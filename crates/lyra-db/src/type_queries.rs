@@ -4,7 +4,9 @@ use lyra_semantic::record::{RecordKind, SymbolOrigin};
 use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::BitWidth;
-use lyra_semantic::types::{ConstInt, InterfaceType, SymbolType, Ty, UnpackedDim};
+use lyra_semantic::types::{
+    ConstInt, InterfaceIdentity, InterfaceType, SymbolType, Ty, UnpackedDim,
+};
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
 use crate::enum_queries::{EnumRef, enum_sem};
@@ -300,7 +302,7 @@ fn type_of_instance(
     match def_target_sem(db, unit, *def_id) {
         Some(DefTargetSem::Interface(iface_def)) => classify(
             Ty::Interface(InterfaceType {
-                iface: iface_def,
+                iface: InterfaceIdentity::Concrete(iface_def),
                 modport: None,
             }),
             kind,
@@ -401,7 +403,7 @@ fn resolve_def_base_ty(
         _ => None,
     };
     Ok(Ty::Interface(InterfaceType {
-        iface: iface_def,
+        iface: InterfaceIdentity::Concrete(iface_def),
         modport,
     }))
 }

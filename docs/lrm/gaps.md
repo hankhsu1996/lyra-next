@@ -162,10 +162,6 @@ Typing (arity validation, return type) and const-eval for fixed packed/unpacked 
 
 ## Chapter 25 -- Interfaces
 
-### 25.3.3: Generic interface reference
-
-Module ports declared with bare `interface` keyword as type (generic interface). Parser and semantic layer do not recognize this syntax. Test: `lrm/ch25/25.3.3_generic_interface`.
-
 ### 25.5.5: Clocking blocks in modports
 
 `modport_clocking_declaration` syntax. No clocking block support. Test: `lrm/ch25/25.5.5_modport_clocking`.

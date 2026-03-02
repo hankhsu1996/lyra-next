@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use lyra_ast::{AstNode, ErasedAstId, Expr, HasSyntax, SyntaxBinaryOp};
 use lyra_semantic::symbols::GlobalDefId;
-use lyra_semantic::types::{InterfaceType, Ty};
+use lyra_semantic::types::{InterfaceIdentity, InterfaceType, Ty};
 use lyra_source::{FileId, Span, TextRange};
 use smol_str::SmolStr;
 
@@ -187,7 +187,7 @@ pub(crate) fn check_modport_conflicts(
         };
         let (formal_iface, formal_mp) = match &formal.ty {
             Ty::Interface(InterfaceType {
-                iface,
+                iface: InterfaceIdentity::Concrete(iface),
                 modport: Some(mp),
             }) => (*iface, *mp),
             _ => continue,
@@ -202,7 +202,7 @@ pub(crate) fn check_modport_conflicts(
         }
         let (actual_iface, actual_mp) = match &actual_ty {
             Ty::Interface(InterfaceType {
-                iface,
+                iface: InterfaceIdentity::Concrete(iface),
                 modport: Some(mp),
             }) => (*iface, *mp),
             _ => continue,

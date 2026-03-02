@@ -6,8 +6,9 @@ use lyra_ast::{
 use smol_str::SmolStr;
 
 use crate::types::{
-    AssocIndex, ConstEvalError, ConstInt, Integral, IntegralKw, NetKind, NetType, PackedDim,
-    PackedDims, RealKw, SymbolType, SymbolTypeError, Ty, UnpackedDim, wrap_unpacked,
+    AssocIndex, ConstEvalError, ConstInt, Integral, IntegralKw, InterfaceIdentity, InterfaceType,
+    NetKind, NetType, PackedDim, PackedDims, RealKw, SymbolType, SymbolTypeError, Ty, UnpackedDim,
+    wrap_unpacked,
 };
 
 /// Extract a `SymbolType` from a typed declaration container.
@@ -428,6 +429,10 @@ fn keyword_to_ty(kw: TypeSpecKeyword) -> Option<Ty> {
         TypeSpecKeyword::Chandle => Some(Ty::Chandle),
         TypeSpecKeyword::Event => Some(Ty::Event),
         TypeSpecKeyword::Void => Some(Ty::Void),
+        TypeSpecKeyword::Interface => Some(Ty::Interface(InterfaceType {
+            iface: InterfaceIdentity::Generic,
+            modport: None,
+        })),
         _ => None,
     }
 }

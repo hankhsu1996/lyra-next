@@ -2,7 +2,7 @@ use lyra_ast::HasSyntax;
 use lyra_semantic::resolve_index::ResolvedTarget;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::ExprType;
-use lyra_semantic::types::{SymbolType, Ty};
+use lyra_semantic::types::{InterfaceIdentity, SymbolType, Ty};
 use smol_str::SmolStr;
 
 use crate::expr_queries::ExprRef;
@@ -228,7 +228,10 @@ impl<'db> TyFmt<'db> {
     }
 
     fn interface_name(&self, iface_ty: &lyra_semantic::types::InterfaceType) -> String {
-        let iface_def_id = iface_ty.iface.global_def();
+        let InterfaceIdentity::Concrete(concrete_iface) = iface_ty.iface else {
+            return "interface".to_string();
+        };
+        let iface_def_id = concrete_iface.global_def();
         let file_id = iface_def_id.ast_id().file();
         let Some(src) = source_file_by_id(self.db, self.unit, file_id) else {
             return "interface".to_string();

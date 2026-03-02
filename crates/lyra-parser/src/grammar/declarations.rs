@@ -135,6 +135,8 @@ pub(crate) fn type_spec(p: &mut Parser) {
             p.bump();
             nr.complete(p, SyntaxKind::NameRef);
         }
+    } else if p.at(SyntaxKind::InterfaceKw) {
+        p.bump();
     } else {
         p.error("expected type");
         m.abandon(p);
