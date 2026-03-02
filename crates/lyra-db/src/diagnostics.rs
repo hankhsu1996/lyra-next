@@ -342,6 +342,28 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
             })
         })
     }
+
+    fn readonly_target_kind(
+        &self,
+        expr_site: lyra_ast::ErasedAstId,
+    ) -> Option<(lyra_semantic::type_check::ReadonlyKind, smol_str::SmolStr)> {
+        let resolve = resolve_index_file(self.db, self.source_file, self.unit);
+        let resolution = resolve.resolutions.get(&expr_site)?;
+        let lyra_semantic::resolve_index::ResolvedTarget::Symbol(gsym) = &resolution.target else {
+            return None;
+        };
+        let target_file = source_file_by_id(self.db, self.unit, gsym.file)?;
+        let def = def_index_file(self.db, target_file);
+        let sym = def.symbols.get(gsym.local);
+        if sym.constness == lyra_semantic::symbols::Constness::Const {
+            Some((
+                lyra_semantic::type_check::ReadonlyKind::Const,
+                sym.name.clone(),
+            ))
+        } else {
+            None
+        }
+    }
 }
 
 /// Check whether a modport expression target is an assignable reference.

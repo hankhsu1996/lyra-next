@@ -52,10 +52,6 @@ Class declarations (`class`/`endclass`) are not parsed. Keywords are in the lexe
 
 `specparam` declarations have no semantic tracking. No specify block support exists in the parser. Blocked by: specify block parsing (Ch 32), specparam scope and constant model. Test: `lrm/ch06/6.20.5_specify_parameters`.
 
-### 6.20.6: Const constants
-
-The `const` qualifier on variable declarations is not parsed. The keyword is in the lexer but no parser grammar handles `const var` or `const` in data declarations. Blocked by: parser grammar for const-qualified declarations, immutability tracking in the semantic layer. Test: `lrm/ch06/6.20.6_const_constants`.
-
 ### 6.21: Scope and lifetime
 
 `automatic` and `static` lifetime qualifiers are parsed on module/task/function declarations but not tracked in the semantic layer. No symbol-level lifetime storage or queries exist. Lifetime inference rules (default static in modules, default automatic in classes) are not enforced. Blocked by: lifetime attribute on symbols, lifetime inference logic. Test: `lrm/ch06/6.21_scope_and_lifetime`.

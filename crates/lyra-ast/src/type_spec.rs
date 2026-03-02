@@ -357,6 +357,15 @@ impl DottedName {
     }
 }
 
+// VarDecl accessors
+
+impl crate::nodes::VarDecl {
+    /// The `const` keyword token, if present (LRM 6.20.6).
+    pub fn const_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::ConstKw)
+    }
+}
+
 // Parent-specific unpacked dimension accessors
 
 impl crate::nodes::Declarator {

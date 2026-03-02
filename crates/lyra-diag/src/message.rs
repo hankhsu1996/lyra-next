@@ -66,6 +66,8 @@ pub enum MessageId {
     StreamUnpackOperandUnsupported,
     StreamUnpackWithClause,
     StreamUnpackWidthMismatch,
+    AssignToConst,
+    ConstMissingInit,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -258,7 +260,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
         | MessageId::StreamUnpackWithClause
-        | MessageId::StreamUnpackWidthMismatch => render_type_message(msg),
+        | MessageId::StreamUnpackWidthMismatch
+        | MessageId::AssignToConst
+        | MessageId::ConstMissingInit => render_type_message(msg),
         _ => render_other_message(msg),
     }
 }
@@ -382,6 +386,10 @@ fn render_type_message(msg: &Message) -> String {
         | MessageId::StreamUnpackOperandUnsupported
         | MessageId::StreamUnpackWithClause
         | MessageId::StreamUnpackWidthMismatch => render_stream_unpack_message(msg),
+        MessageId::AssignToConst => {
+            format!("cannot assign to const variable `{}`", name())
+        }
+        MessageId::ConstMissingInit => "const variable must have an initializer".into(),
         _ => String::new(),
     }
 }

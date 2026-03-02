@@ -16,7 +16,7 @@ use crate::record::{
     extract_typeref_from_typespec,
 };
 use crate::scopes::ScopeId;
-use crate::symbols::{Namespace, Symbol, SymbolKind};
+use crate::symbols::{Constness, Namespace, Symbol, SymbolKind};
 use crate::types::Ty;
 
 pub(crate) fn collect_type_spec_refs(ctx: &mut DefContext<'_>, ts: &TypeSpec, scope: ScopeId) {
@@ -112,6 +112,7 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
         let sym_id = ctx.push_symbol(Symbol {
             name: typedef_name,
             kind: SymbolKind::Typedef,
+            constness: Constness::Mutable,
             decl_site,
             name_site: decl_site,
             type_site: typedef_type_site,
@@ -242,6 +243,7 @@ fn collect_enum_def(
             let sym_id = ctx.push_symbol(Symbol {
                 name,
                 kind: SymbolKind::EnumMember,
+                constness: Constness::Mutable,
                 decl_site: erased_ast_id,
                 name_site: erased_ast_id,
                 type_site: None,

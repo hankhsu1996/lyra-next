@@ -14,6 +14,12 @@ use crate::system_functions::{BitsArgKind, SystemFnKind, classify_bits_arg, look
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
 use crate::types::{SymbolType, Ty, UnpackedDim};
 
+/// Why an assignment target is readonly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadonlyKind {
+    Const,
+}
+
 /// What direction a modport member was accessed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessKind {
@@ -154,6 +160,16 @@ pub enum TypeCheckItem {
         lhs_width: u32,
         rhs_width: u32,
     },
+    AssignToReadonly {
+        kind: ReadonlyKind,
+        assign_site: Site,
+        lhs_name_span: NameSpan,
+        name: smol_str::SmolStr,
+    },
+    ConstMissingInit {
+        decl_site: Site,
+        name_span: NameSpan,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -190,6 +206,8 @@ pub trait TypeCheckCtx {
     fn fixed_stream_width_bits(&self, id: Site) -> Option<u32>;
     /// Fixed streaming width in bits for an already-inferred expression type.
     fn fixed_stream_width_bits_of_type(&self, et: &ExprType) -> Option<u32>;
+    /// Check whether an assignment target resolves to a readonly symbol.
+    fn readonly_target_kind(&self, expr_site: Site) -> Option<(ReadonlyKind, smol_str::SmolStr)>;
 }
 
 const MISSING_AST_ID: &str = "missing_ast_id in type checker";
@@ -263,7 +281,19 @@ pub fn check_var_decl(
 ) {
     let map = ctx.ast_id_map();
     let decl_site = require_site(site::opt_site_of(map, var_decl), fallback, items);
+    let is_const = var_decl.const_token().is_some();
     for decl in var_decl.declarators() {
+        // Const variable must have an initializer (LRM 6.20.6)
+        if is_const && decl.init_expr().is_none() {
+            let name_span = decl
+                .ident_name_span()
+                .unwrap_or(NameSpan::new(decl_site.text_range()));
+            items.push(TypeCheckItem::ConstMissingInit {
+                decl_site,
+                name_span,
+            });
+        }
+
         let Some(init_expr) = decl.init_expr() else {
             continue;
         };
@@ -302,6 +332,21 @@ fn check_assignment_pair(
 
     match crate::lhs::classify_lhs(lhs) {
         crate::lhs::LhsClass::Assignable(lhs_expr) => {
+            // Check for assignment to readonly (const) target
+            if let Some(peeled_site) = site::opt_site_of(map, &lhs_expr)
+                && let Some((kind, name)) = ctx.readonly_target_kind(peeled_site)
+            {
+                let lhs_name_span = lhs_expr
+                    .ident_name_span()
+                    .unwrap_or(NameSpan::new(lhs_site.text_range()));
+                items.push(TypeCheckItem::AssignToReadonly {
+                    kind,
+                    assign_site: stmt_site,
+                    lhs_name_span,
+                    name,
+                });
+            }
+
             let lhs_type = ctx.expr_type(&lhs_expr);
             let rhs_type = type_rhs_for_assignment(ctx, rhs, &lhs_type.ty);
 

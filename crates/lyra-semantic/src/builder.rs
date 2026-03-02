@@ -632,6 +632,7 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
             let sym_id = ctx.push_symbol(Symbol {
                 name: SmolStr::new(name_tok.text()),
                 kind: SymbolKind::PortAnsi,
+                constness: crate::symbols::Constness::Mutable,
                 decl_site,
                 name_site: decl_site,
                 type_site: port_type_site,

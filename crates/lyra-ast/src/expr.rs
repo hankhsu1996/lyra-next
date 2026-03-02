@@ -1,5 +1,6 @@
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxNode, SyntaxToken};
+use lyra_source::NameSpan;
 
 use crate::node::{AstNode, HasSyntax, is_expression_kind};
 use crate::nodes::{
@@ -85,6 +86,24 @@ impl Expr {
     /// (malformed), returns the wrapper itself.
     pub fn peeled(&self) -> Option<Expr> {
         Self::peel(&self.syntax)
+    }
+
+    /// Token-level span of the identifier for name-like expressions.
+    ///
+    /// For `NameRef`, returns the span of the `Ident`/`EscapedIdent` token.
+    /// For `QualifiedName`, returns the span of the last segment token.
+    /// Returns `None` for other expression kinds or if the token is missing.
+    ///
+    /// Unlike `text_range()` on the node (which includes leading trivia),
+    /// this returns the exact range of the name token.
+    pub fn ident_name_span(&self) -> Option<NameSpan> {
+        match self.classify()? {
+            ExprKind::NameRef(nr) => nr.ident().map(|t| NameSpan::new(t.text_range())),
+            ExprKind::QualifiedName(qn) => {
+                qn.segments().last().map(|t| NameSpan::new(t.text_range()))
+            }
+            _ => None,
+        }
     }
 
     /// Peel wrappers and classify into a typed `ExprKind` variant.

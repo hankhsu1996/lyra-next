@@ -67,9 +67,13 @@ fn net_declarator(p: &mut Parser) {
 }
 
 // Variable declaration: `logic [7:0] a = 0, b ;`
-// Also handles declarations starting with direction keywords or user-defined types.
+// Also handles declarations starting with direction keywords, `const`, or user-defined types.
 pub(crate) fn var_decl(p: &mut Parser) {
     let m = p.start();
+    // Optional const qualifier (LRM 6.20.6)
+    if p.at(SyntaxKind::ConstKw) {
+        p.bump();
+    }
     // Optional direction for port-like declarations in module body
     if matches!(
         p.current(),
@@ -379,6 +383,7 @@ pub(crate) fn at_unambiguous_data_decl_start(p: &Parser) -> bool {
         SyntaxKind::SignedKw
             | SyntaxKind::UnsignedKw
             | SyntaxKind::VarKw
+            | SyntaxKind::ConstKw
             | SyntaxKind::InputKw
             | SyntaxKind::OutputKw
             | SyntaxKind::InoutKw
