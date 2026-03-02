@@ -163,10 +163,6 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 26,
     };
-    pub const STREAM_UNPACK_WITH_CLAUSE: Self = Self {
-        namespace: "lyra.type",
-        number: 27,
-    };
     pub const STREAM_UNPACK_WIDTH_MISMATCH: Self = Self {
         namespace: "lyra.type",
         number: 28,

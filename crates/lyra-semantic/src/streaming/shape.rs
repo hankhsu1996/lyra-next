@@ -1,4 +1,4 @@
-use lyra_ast::{AstIdMap, ExprKind, StreamDir, StreamExpr};
+use lyra_ast::{AstIdMap, ExprKind, StreamDir, StreamExpr, StreamRangeOp};
 
 use crate::lhs::{LhsClass, classify_lhs};
 use crate::site::{self, Site};
@@ -59,9 +59,17 @@ impl StreamTargetKind {
     }
 }
 
-/// Presence marker for a `with` clause on a streaming operand.
+/// Data extracted from a `with [range]` clause on a streaming operand.
 pub(crate) struct WithInfo {
+    /// Diagnostic anchor for the `with` clause node.
     pub(crate) with_site: Site,
+    /// Range form classification.
+    pub(crate) range_op: Option<StreamRangeOp>,
+    /// Stable identity of the first range expression (index / lo bound).
+    pub(crate) lhs_expr_site: Option<Site>,
+    /// Stable identity of the second range expression (hi bound / width).
+    /// `None` for `Single`.
+    pub(crate) rhs_expr_site: Option<Site>,
 }
 
 /// Error from `build_unpack_shape` when the shape cannot be constructed.
@@ -110,7 +118,21 @@ pub(crate) fn build_unpack_shape(
 
         let with_clause = operand.with_clause().map(|wc| {
             let with_site = site::opt_site_of(map, &wc).unwrap_or(item_site);
-            WithInfo { with_site }
+            let (range_op, lhs_expr_site, rhs_expr_site) = match wc.range() {
+                Some(range) => {
+                    let op = range.op();
+                    let lhs_site = range.lhs().and_then(|e| site::opt_site_of(map, &e));
+                    let rhs_site = range.rhs().and_then(|e| site::opt_site_of(map, &e));
+                    (op, lhs_site, rhs_site)
+                }
+                None => (None, None, None),
+            };
+            WithInfo {
+                with_site,
+                range_op,
+                lhs_expr_site,
+                rhs_expr_site,
+            }
         });
 
         items.push(StreamUnpackItem {

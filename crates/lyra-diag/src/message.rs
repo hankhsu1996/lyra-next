@@ -64,7 +64,6 @@ pub enum MessageId {
     ArrayIncompatible,
     StreamUnpackOperandInvalid,
     StreamUnpackOperandUnsupported,
-    StreamUnpackWithClause,
     StreamUnpackWidthMismatch,
     AssignToConst,
     ConstMissingInit,
@@ -259,7 +258,6 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::ArrayIncompatible
         | MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
-        | MessageId::StreamUnpackWithClause
         | MessageId::StreamUnpackWidthMismatch
         | MessageId::AssignToConst
         | MessageId::ConstMissingInit => render_type_message(msg),
@@ -384,7 +382,6 @@ fn render_type_message(msg: &Message) -> String {
         | MessageId::ArrayIncompatible => render_array_message(msg),
         MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
-        | MessageId::StreamUnpackWithClause
         | MessageId::StreamUnpackWidthMismatch => render_stream_unpack_message(msg),
         MessageId::AssignToConst => {
             format!("cannot assign to const variable `{}`", name())
@@ -398,9 +395,6 @@ fn render_stream_unpack_message(msg: &Message) -> String {
     match msg.id {
         MessageId::StreamUnpackOperandInvalid => {
             "streaming unpack operand is not a valid assignment target".into()
-        }
-        MessageId::StreamUnpackWithClause => {
-            "`with` clause on streaming unpack target is not yet supported".into()
         }
         MessageId::StreamUnpackOperandUnsupported => {
             let ty_name = msg.args.first().and_then(Arg::as_name).unwrap_or("?");

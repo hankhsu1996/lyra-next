@@ -120,9 +120,9 @@ Locator methods (`find`, `find_index`, `find_first`, `find_first_index`, `find_l
 
 ## Chapter 11 -- Operators and Expressions
 
-### 11.4.14: Streaming `with` selection semantics and dynamic array resize
+### 11.4.14.4: Dynamic array resize on streaming unpack
 
-Pack-width semantics for const ranges on fixed-size arrays with integral/enum elements implemented. Streaming unpack (LHS) implemented for fixed-width operands with width matching. Remaining: `with` selection semantics on unpack targets and dynamic array resize on unpack. Test: `lrm/ch11/11.4.14.4_streaming_with`.
+When a dynamic array appears in a streaming unpack target, the LRM says it is resized to absorb the remaining bits after all fixed-width targets are satisfied. Currently dynamic arrays on unpack are rejected with `type[26]` "no fixed streaming width". Implementing this requires computing remaining width and resizing the target. Test: extend `lrm/ch11/11.4.14.4_streaming_dynamic`.
 
 ### 11.4.14.1: Non-integral operand bitstream conversion
 

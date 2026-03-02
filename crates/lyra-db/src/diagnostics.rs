@@ -189,7 +189,11 @@ pub fn type_diagnostics(
             CheckKind::StreamOperandItem => {
                 if let Some(soi) = lyra_ast::StreamOperandItem::cast(node) {
                     lyra_semantic::type_check::check_stream_operand(
-                        &soi, &ctx, fallback, &mut items,
+                        &soi,
+                        &ctx,
+                        fallback,
+                        entry.access,
+                        &mut items,
                     );
                 }
             }
@@ -221,6 +225,19 @@ struct DbTypeCheckCtx<'a> {
     unit: CompilationUnit,
     source_file: SourceFile,
     ast_id_map: &'a lyra_ast::AstIdMap,
+}
+
+impl DbTypeCheckCtx<'_> {
+    fn enum_bits_cb(&self) -> impl Fn(&lyra_semantic::enum_def::EnumId) -> Option<u32> + '_ {
+        |enum_id| {
+            let eref = EnumRef::new(self.db, self.unit, *enum_id);
+            let sem = enum_sem(self.db, eref);
+            sem.base_int.and_then(|bv| match bv.width {
+                lyra_semantic::type_infer::BitWidth::Known(w) => Some(w),
+                _ => None,
+            })
+        }
+    }
 }
 
 impl TypeCheckCtx for DbTypeCheckCtx<'_> {
@@ -306,6 +323,14 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         }
     }
 
+    fn const_eval_int_by_site(&self, site: lyra_semantic::Site) -> Option<i64> {
+        let expr_ref = crate::const_eval::ConstExprRef::new(self.db, self.unit, site);
+        match crate::const_eval::eval_const_int(self.db, expr_ref) {
+            lyra_semantic::types::ConstInt::Known(v) => Some(v),
+            _ => None,
+        }
+    }
+
     fn enum_known_value_set(
         &self,
         id: &lyra_semantic::enum_def::EnumId,
@@ -333,14 +358,12 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
     }
 
     fn fixed_stream_width_bits_of_type(&self, et: &ExprType) -> Option<u32> {
-        lyra_semantic::fixed_stream_width_bits_of_expr_type(et, &|enum_id| {
-            let eref = EnumRef::new(self.db, self.unit, *enum_id);
-            let sem = enum_sem(self.db, eref);
-            sem.base_int.and_then(|bv| match bv.width {
-                lyra_semantic::type_infer::BitWidth::Known(w) => Some(w),
-                _ => None,
-            })
-        })
+        lyra_semantic::fixed_stream_width_bits_of_expr_type(et, &self.enum_bits_cb())
+    }
+
+    fn fixed_stream_width_bits_of_ty(&self, ty: &lyra_semantic::types::Ty) -> Option<u32> {
+        let et = ExprType::from_ty(ty);
+        self.fixed_stream_width_bits_of_type(&et)
     }
 
     fn readonly_target_kind(
