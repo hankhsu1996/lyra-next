@@ -110,6 +110,27 @@ impl QualifiedName {
 }
 
 impl FunctionDecl {
+    pub fn lifetime_token(&self) -> Option<SyntaxToken> {
+        let mut past_kw = false;
+        for el in self.syntax.children_with_tokens() {
+            if let Some(tok) = el.into_token() {
+                let k = tok.kind();
+                if k == SyntaxKind::FunctionKw {
+                    past_kw = true;
+                    continue;
+                }
+                if !past_kw || k.is_trivia() {
+                    continue;
+                }
+                if matches!(k, SyntaxKind::AutomaticKw | SyntaxKind::StaticKw) {
+                    return Some(tok);
+                }
+                return None;
+            }
+        }
+        None
+    }
+
     pub fn name(&self) -> Option<SyntaxToken> {
         // The function name is the Ident that follows either:
         //   (a) the TypeSpec child (explicit return type), or
@@ -158,6 +179,27 @@ impl FunctionDecl {
 }
 
 impl TaskDecl {
+    pub fn lifetime_token(&self) -> Option<SyntaxToken> {
+        let mut past_kw = false;
+        for el in self.syntax.children_with_tokens() {
+            if let Some(tok) = el.into_token() {
+                let k = tok.kind();
+                if k == SyntaxKind::TaskKw {
+                    past_kw = true;
+                    continue;
+                }
+                if !past_kw || k.is_trivia() {
+                    continue;
+                }
+                if matches!(k, SyntaxKind::AutomaticKw | SyntaxKind::StaticKw) {
+                    return Some(tok);
+                }
+                return None;
+            }
+        }
+        None
+    }
+
     pub fn name(&self) -> Option<SyntaxToken> {
         support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
     }

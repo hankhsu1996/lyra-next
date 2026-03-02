@@ -18,7 +18,7 @@ use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId, ModportEntry, ModportTarget, PortDirection};
 use crate::record::SymbolOrigin;
 use crate::scopes::{ScopeId, ScopeKind};
-use crate::symbols::{Constness, Namespace, Symbol, SymbolKind};
+use crate::symbols::{Constness, Lifetime, Namespace, Symbol, SymbolKind};
 
 use crate::builder::RawModportEntry;
 
@@ -65,6 +65,7 @@ pub(crate) fn collect_module_instantiation(
                 name: SmolStr::new(inst_name_tok.text()),
                 kind: SymbolKind::Instance,
                 constness: Constness::Mutable,
+                lifetime: Lifetime::Static,
                 decl_site,
                 name_site: inst_name_site,
                 type_site: None,
@@ -121,6 +122,7 @@ pub(crate) fn collect_foreach_vars(
             name: SmolStr::new(name_tok.text()),
             kind: SymbolKind::Variable,
             constness: Constness::Mutable,
+            lifetime: Lifetime::Static,
             decl_site: foreach_stmt_site,
             name_site: decl_name_site,
             type_site: None,
@@ -141,19 +143,29 @@ pub(crate) fn collect_foreach_vars(
 }
 
 pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    let is_function = node.kind() == SyntaxKind::FunctionDecl;
-    let kind = if is_function {
-        SymbolKind::Function
-    } else {
-        SymbolKind::Task
-    };
-
-    // Extract name: for functions, use FunctionDecl::name(); for tasks, use TaskDecl::name()
-    let name_tok = if is_function {
-        FunctionDecl::cast(node.clone()).and_then(|f| f.name())
-    } else {
-        TaskDecl::cast(node.clone()).and_then(|t| t.name())
-    };
+    // Cast once; extract all header data from the typed node.
+    let (kind, scope_kind, name_tok, lifetime_tok, type_spec, tf_port_decls) =
+        if let Some(f) = FunctionDecl::cast(node.clone()) {
+            (
+                SymbolKind::Function,
+                ScopeKind::Function,
+                f.name(),
+                f.lifetime_token(),
+                f.type_spec(),
+                f.tf_port_decls().collect::<Box<[_]>>(),
+            )
+        } else if let Some(t) = TaskDecl::cast(node.clone()) {
+            (
+                SymbolKind::Task,
+                ScopeKind::Task,
+                t.name(),
+                t.lifetime_token(),
+                None,
+                t.tf_port_decls().collect::<Box<[_]>>(),
+            )
+        } else {
+            return;
+        };
 
     let Some(name_tok) = name_tok else { return };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
@@ -164,23 +176,23 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let scope_kind = if is_function {
-        ScopeKind::Function
-    } else {
-        ScopeKind::Task
-    };
     let callable_scope = ctx.scopes.push(scope_kind, Some(scope));
-    let callable_type_site = if is_function {
-        FunctionDecl::cast(node.clone())
-            .and_then(|f| f.type_spec())
-            .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()))
+    let callable_type_site = type_spec
+        .as_ref()
+        .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
+    let lifetime = if lifetime_tok
+        .as_ref()
+        .is_some_and(|t| t.kind() == SyntaxKind::AutomaticKw)
+    {
+        Lifetime::Automatic
     } else {
-        None
+        Lifetime::Static
     };
     let sym_id = ctx.push_symbol(Symbol {
         name: name.clone(),
         kind,
         constness: Constness::Mutable,
+        lifetime,
         decl_site,
         name_site: decl_site,
         type_site: callable_type_site,
@@ -191,24 +203,10 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
 
     ctx.register_binding(sym_id);
 
-    // Collect return type spec refs (for typedef resolution in the enclosing scope)
-    if is_function
-        && let Some(func) = FunctionDecl::cast(node.clone())
-        && let Some(ts) = func.type_spec()
-    {
-        collect_type_spec_refs(ctx, &ts, scope);
+    if let Some(ts) = &type_spec {
+        collect_type_spec_refs(ctx, ts, scope);
     }
 
-    // Collect TF port declarations
-    let tf_port_decls: Box<[TfPortDecl]> = if is_function {
-        FunctionDecl::cast(node.clone())
-            .map(|f| f.tf_port_decls().collect())
-            .unwrap_or_default()
-    } else {
-        TaskDecl::cast(node.clone())
-            .map(|t| t.tf_port_decls().collect())
-            .unwrap_or_default()
-    };
     collect_tf_ports(ctx, &tf_port_decls, callable_scope);
 }
 
@@ -241,6 +239,7 @@ fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: 
                     name: SmolStr::new(name_tok.text()),
                     kind: SymbolKind::PortTf,
                     constness: Constness::Mutable,
+                    lifetime: Lifetime::Static,
                     decl_site: port_decl_site,
                     name_site: decl_name_site,
                     type_site: port_type_site,
@@ -294,6 +293,7 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, 
             name: name.clone(),
             kind: SymbolKind::Modport,
             constness: Constness::Mutable,
+            lifetime: Lifetime::Static,
             decl_site: modport_decl_site,
             name_site: modport_decl_site,
             type_site: None,
@@ -521,6 +521,7 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
                     name: SmolStr::new(name_tok.text()),
                     kind: SymbolKind::Parameter,
                     constness: Constness::Mutable,
+                    lifetime: Lifetime::Static,
                     decl_site,
                     name_site: decl_name_site,
                     type_site: param_type_site,
@@ -602,6 +603,7 @@ pub(crate) fn collect_declarators(
                     name: SmolStr::new(name_tok.text()),
                     kind,
                     constness,
+                    lifetime: Lifetime::Static,
                     decl_site,
                     name_site: decl_name_site,
                     type_site: decl_type_site,

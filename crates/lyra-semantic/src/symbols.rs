@@ -172,6 +172,13 @@ pub enum Constness {
     Const,
 }
 
+/// Scope lifetime qualifier (LRM 6.21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Lifetime {
+    Static,
+    Automatic,
+}
+
 /// A resolved symbol entry.
 ///
 /// `decl_site` anchors this symbol to the declaration item node that
@@ -194,6 +201,7 @@ pub struct Symbol {
     pub name: SmolStr,
     pub kind: SymbolKind,
     pub constness: Constness,
+    pub lifetime: Lifetime,
     pub decl_site: Site,
     pub name_site: Site,
     pub type_site: Option<Site>,

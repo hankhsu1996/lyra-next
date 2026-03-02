@@ -177,7 +177,7 @@ mod tests {
 
     use super::*;
     use crate::record::SymbolOrigin;
-    use crate::symbols::{Constness, Symbol, SymbolKind, SymbolTableBuilder};
+    use crate::symbols::{Constness, Lifetime, Symbol, SymbolKind, SymbolTableBuilder};
 
     #[test]
     fn resolve_finds_binding() {
@@ -190,6 +190,7 @@ mod tests {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
             constness: Constness::Mutable,
+            lifetime: Lifetime::Static,
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
@@ -221,6 +222,7 @@ mod tests {
             name: SmolStr::new("a"),
             kind: SymbolKind::PortAnsi,
             constness: Constness::Mutable,
+            lifetime: Lifetime::Static,
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
@@ -251,6 +253,7 @@ mod tests {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
             constness: Constness::Mutable,
+            lifetime: Lifetime::Static,
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
@@ -262,6 +265,7 @@ mod tests {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
             constness: Constness::Mutable,
+            lifetime: Lifetime::Static,
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
