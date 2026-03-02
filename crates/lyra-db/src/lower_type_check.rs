@@ -64,7 +64,6 @@ pub(crate) fn lower_type_check_item(
             lower_array_incompat(item, source_map, diags);
         }
         TypeCheckItem::StreamUnpackOperandInvalid { .. }
-        | TypeCheckItem::StreamUnpackWithClause { .. }
         | TypeCheckItem::StreamUnpackOperandUnsupported { .. } => {
             lower_stream_unpack_operand(item, source_map, diags);
         }
@@ -869,12 +868,6 @@ fn lower_stream_unpack_operand(
             *operand_site,
             lyra_diag::DiagnosticCode::STREAM_UNPACK_OPERAND_INVALID,
             lyra_diag::MessageId::StreamUnpackOperandInvalid,
-            vec![],
-        ),
-        TypeCheckItem::StreamUnpackWithClause { with_site } => (
-            *with_site,
-            lyra_diag::DiagnosticCode::STREAM_UNPACK_WITH_CLAUSE,
-            lyra_diag::MessageId::StreamUnpackWithClause,
             vec![],
         ),
         TypeCheckItem::StreamUnpackOperandUnsupported {

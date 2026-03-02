@@ -28,7 +28,7 @@ pub fn fixed_stream_width_bits_of_expr_type(
 /// Compute fixed streaming width for a validated data type.
 ///
 /// Entry point requires `DataTyView` to enforce the data-type invariant.
-/// Array recursion uses the private `&Ty` helper since the leaf is already
+/// Array recursion uses the `&Ty` helper since the leaf is already
 /// validated by `DataTyView` construction.
 fn fixed_stream_width_bits_of_data_ty(
     view: DataTyView<'_>,
@@ -37,8 +37,12 @@ fn fixed_stream_width_bits_of_data_ty(
     fixed_stream_width_bits_of_ty(view.ty(), enum_bits)
 }
 
-/// Recursive helper operating on raw `Ty` for array descent.
-fn fixed_stream_width_bits_of_ty(
+/// Fixed streaming width in bits from a `Ty` directly.
+///
+/// Requires an `enum_bits` callback to resolve enum base widths.
+/// Returns `Some(bits)` for integral, enum, and fixed-size array types;
+/// `None` for dynamic/unsupported types.
+pub(crate) fn fixed_stream_width_bits_of_ty(
     ty: &Ty,
     enum_bits: &dyn Fn(&EnumId) -> Option<u32>,
 ) -> Option<u32> {

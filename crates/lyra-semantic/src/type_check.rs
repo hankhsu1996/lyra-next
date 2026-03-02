@@ -145,9 +145,6 @@ pub enum TypeCheckItem {
     StreamUnpackOperandInvalid {
         operand_site: Site,
     },
-    StreamUnpackWithClause {
-        with_site: Site,
-    },
     StreamUnpackOperandUnsupported {
         operand_site: Site,
         operand_ty: Ty,
@@ -192,6 +189,9 @@ pub trait TypeCheckCtx {
     fn resolve_type_arg(&self, utr: &crate::type_extract::UserTypeRef) -> Option<crate::types::Ty>;
     /// Evaluate a constant integer expression. Returns None if non-const.
     fn const_eval_int(&self, expr: &Expr) -> Option<i64>;
+    /// Evaluate a constant integer expression by its `Site` identity.
+    /// Returns `None` if non-const or not evaluable.
+    fn const_eval_int_by_site(&self, site: Site) -> Option<i64>;
     /// Get sorted set of known enum member values. None if any value unknown.
     fn enum_known_value_set(&self, id: &EnumId) -> Option<std::sync::Arc<[i64]>>;
     /// Check whether a modport expression target is an lvalue.
@@ -206,6 +206,10 @@ pub trait TypeCheckCtx {
     fn fixed_stream_width_bits(&self, id: Site) -> Option<u32>;
     /// Fixed streaming width in bits for an already-inferred expression type.
     fn fixed_stream_width_bits_of_type(&self, et: &ExprType) -> Option<u32>;
+    /// Fixed streaming width in bits for a `Ty` directly.
+    ///
+    /// Avoids the need to synthesize an `ExprType` from a raw `Ty`.
+    fn fixed_stream_width_bits_of_ty(&self, ty: &Ty) -> Option<u32>;
     /// Check whether an assignment target resolves to a readonly symbol.
     fn readonly_target_kind(&self, expr_site: Site) -> Option<(ReadonlyKind, smol_str::SmolStr)>;
 }
@@ -805,12 +809,20 @@ fn check_conversion_bits_to_real(
 }
 
 /// Check a `StreamOperandItem` for non-array `with` clause.
+///
+/// When `access` is `Write` or `ReadWrite`, the non-array `with` check is
+/// skipped because `check_streaming_unpack` handles it for LHS streaming
+/// targets with its own anchor.
 pub fn check_stream_operand(
     item: &StreamOperandItem,
     ctx: &dyn TypeCheckCtx,
     fallback: Site,
+    access: AccessMode,
     items: &mut Vec<TypeCheckItem>,
 ) {
+    if matches!(access, AccessMode::Write | AccessMode::ReadWrite) {
+        return;
+    }
     let Some(with_clause) = item.with_clause() else {
         return;
     };
