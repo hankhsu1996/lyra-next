@@ -19,7 +19,7 @@ use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId};
 use crate::record::{RecordDef, SymbolOrigin};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
-use crate::symbols::{GlobalDefId, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
+use crate::symbols::{GlobalDefId, Lifetime, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
 
 pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> DefIndex {
     let mut ctx = DefContext::new(file, ast_id_map);
@@ -633,6 +633,7 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 name: SmolStr::new(name_tok.text()),
                 kind: SymbolKind::PortAnsi,
                 constness: crate::symbols::Constness::Mutable,
+                lifetime: Lifetime::Static,
                 decl_site,
                 name_site: decl_site,
                 type_site: port_type_site,

@@ -3,6 +3,7 @@ mod elab;
 mod enum_base;
 mod exports;
 mod expr_type;
+mod lifetime;
 mod modport;
 mod resolve;
 mod type_at;

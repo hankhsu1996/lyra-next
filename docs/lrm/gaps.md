@@ -54,7 +54,7 @@ Class declarations (`class`/`endclass`) are not parsed. Keywords are in the lexe
 
 ### 6.21: Scope and lifetime
 
-`automatic` and `static` lifetime qualifiers are parsed on module/task/function declarations but not tracked in the semantic layer. No symbol-level lifetime storage or queries exist. Lifetime inference rules (default static in modules, default automatic in classes) are not enforced. Blocked by: lifetime attribute on symbols, lifetime inference logic. Test: `lrm/ch06/6.21_scope_and_lifetime`.
+Lifetime qualifiers are stored on function/task symbols, defaulting to static when unspecified. Remaining gaps: variable-level lifetime qualifiers, lifetime inheritance to locals within callable scope, class-context defaults (blocked on class support), program/module/package/interface container lifetime modeling. Test: `lrm/ch06/6.21_scope_and_lifetime`.
 
 ### 6.22: Type compatibility -- formal matching and equivalence rules
 
