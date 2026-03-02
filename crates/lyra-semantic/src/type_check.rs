@@ -180,14 +180,14 @@ pub trait TypeCheckCtx {
     fn enum_known_value_set(&self, id: &EnumId) -> Option<std::sync::Arc<[i64]>>;
     /// Check whether a modport expression target is an lvalue.
     fn is_modport_target_lvalue(&self, expr_id: Site) -> bool;
-    /// Infer the type of an expression by its stable `ErasedAstId`.
-    fn expr_type_by_id(&self, id: lyra_ast::ErasedAstId) -> ExprType;
-    /// Fixed streaming width in bits for an expression by its stable ID.
+    /// Infer the type of an expression by its `Site`.
+    fn expr_type_by_id(&self, id: Site) -> ExprType;
+    /// Fixed streaming width in bits for an expression by its `Site`.
     ///
     /// Returns `Some(bits)` when the expression type has a statically known
     /// fixed streaming width (integral, enum, fixed-size array of streamable
     /// elements). Returns `None` for dynamic/unsupported types.
-    fn fixed_stream_width_bits(&self, id: lyra_ast::ErasedAstId) -> Option<u32>;
+    fn fixed_stream_width_bits(&self, id: Site) -> Option<u32>;
     /// Fixed streaming width in bits for an already-inferred expression type.
     fn fixed_stream_width_bits_of_type(&self, et: &ExprType) -> Option<u32>;
 }

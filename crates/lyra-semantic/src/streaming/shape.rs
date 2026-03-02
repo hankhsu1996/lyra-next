@@ -1,4 +1,4 @@
-use lyra_ast::{AstIdMap, ErasedAstId, ExprKind, StreamDir, StreamExpr};
+use lyra_ast::{AstIdMap, ExprKind, StreamDir, StreamExpr};
 
 use crate::lhs::{LhsClass, classify_lhs};
 use crate::site::{self, Site};
@@ -18,7 +18,7 @@ pub(crate) struct StreamUnpackItem {
     pub(crate) expr_site: Option<Site>,
     /// Stable identity of the inner `Expr` (for type queries).
     /// `None` when the operand has no parseable expression.
-    pub(crate) expr_id: Option<ErasedAstId>,
+    pub(crate) expr_id: Option<Site>,
     /// What kind of assignment target this operand is.
     pub(crate) target: StreamTargetKind,
     /// Presence of a `with` clause (extended with selection details in future).
@@ -102,9 +102,8 @@ pub(crate) fn build_unpack_shape(
         let (expr_site, expr_id, target) = match operand.expr() {
             Some(expr) => {
                 let es = site::opt_site_of(map, &expr);
-                let eid = map.id_of(&expr);
                 let kind = classify_target_kind(&expr);
-                (es, eid, kind)
+                (es, es, kind)
             }
             None => (None, None, StreamTargetKind::NotAssignable),
         };

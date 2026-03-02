@@ -43,8 +43,10 @@ pub(crate) fn check_streaming_unpack(
         }
 
         // Assignable, no with clause -- compute operand width.
-        // expr_id is guaranteed Some for assignable items.
-        let eid = item.expr_id.expect("assignable item always has expr_id");
+        let Some(eid) = item.expr_id else {
+            lhs_total_bits = None;
+            continue;
+        };
         let operand_bits = ctx.fixed_stream_width_bits(eid);
 
         if let Some(w) = operand_bits {

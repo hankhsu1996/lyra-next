@@ -322,12 +322,12 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         expr_is_assignable_ref(self.db, src, expr_id)
     }
 
-    fn expr_type_by_id(&self, id: lyra_ast::ErasedAstId) -> ExprType {
+    fn expr_type_by_id(&self, id: lyra_semantic::Site) -> ExprType {
         let expr_ref = ExprRef::new(self.db, self.unit, id);
         crate::expr_queries::type_of_expr(self.db, expr_ref)
     }
 
-    fn fixed_stream_width_bits(&self, id: lyra_ast::ErasedAstId) -> Option<u32> {
+    fn fixed_stream_width_bits(&self, id: lyra_semantic::Site) -> Option<u32> {
         let et = self.expr_type_by_id(id);
         self.fixed_stream_width_bits_of_type(&et)
     }
