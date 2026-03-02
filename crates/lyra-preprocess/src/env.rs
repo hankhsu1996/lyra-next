@@ -1,12 +1,87 @@
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+
+use lyra_lexer::Token;
 use smol_str::SmolStr;
+
+/// A single token stored in a macro body, pairing the original lexer
+/// `Token` with its exact text spelling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MacroTok {
+    pub token: Token,
+    pub text: SmolStr,
+}
+
+impl Hash for MacroTok {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.token.kind.hash(state);
+        self.token.len.hash(state);
+        self.text.hash(state);
+    }
+}
+
+/// A deterministic sequence of tokens forming a macro body.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MacroTokenSeq {
+    tokens: Vec<MacroTok>,
+}
+
+impl MacroTokenSeq {
+    /// Wrap a pre-built vec of tokens (used by `handle_define`).
+    pub fn from_vec(toks: Vec<MacroTok>) -> Self {
+        Self { tokens: toks }
+    }
+
+    /// Iterate over tokens for expansion.
+    pub fn tokens(&self) -> &[MacroTok] {
+        &self.tokens
+    }
+
+    /// Concatenate all token texts. Debug/test use only -- allocates a
+    /// new `String` on every call.
+    pub fn text(&self) -> String {
+        let mut s = String::new();
+        for t in &self.tokens {
+            s.push_str(&t.text);
+        }
+        s
+    }
+
+    /// Whether the token sequence is empty.
+    pub fn is_empty(&self) -> bool {
+        self.tokens.is_empty()
+    }
+
+    /// Lex text and collect into a `MacroTokenSeq` (test-only convenience).
+    #[cfg(test)]
+    pub fn from_text(text: &str) -> Self {
+        use lyra_lexer::SyntaxKind;
+        let tokens = lyra_lexer::lex(text);
+        let mut result = Vec::new();
+        let mut cursor = 0usize;
+        for t in &tokens {
+            if t.kind == SyntaxKind::Eof {
+                break;
+            }
+            let len: usize = t.len.into();
+            result.push(MacroTok {
+                token: *t,
+                text: SmolStr::from(&text[cursor..cursor + len]),
+            });
+            cursor += len;
+        }
+        Self { tokens: result }
+    }
+}
 
 /// Value of a defined macro.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MacroValue {
     /// Defined with no value (`` `define FOO ``).
     Flag,
-    /// Object-like macro with a text body (`` `define FOO 42 ``).
-    ObjectLike(SmolStr),
+    /// Object-like macro with a token body (`` `define FOO 42 ``).
+    /// Wrapped in `Arc` so expansion clones cheaply.
+    ObjectLike(Arc<MacroTokenSeq>),
 }
 
 /// A single macro definition (name + value).
@@ -104,25 +179,28 @@ mod tests {
         let mut env = MacroEnv::empty();
         env.define(
             SmolStr::new("WIDTH"),
-            MacroValue::ObjectLike(SmolStr::new("8")),
+            MacroValue::ObjectLike(Arc::new(MacroTokenSeq::from_text("8"))),
         );
         assert!(env.is_defined("WIDTH"));
-        assert_eq!(
-            env.get("WIDTH").map(|d| &d.value),
-            Some(&MacroValue::ObjectLike(SmolStr::new("8")))
-        );
+        match env.get("WIDTH").map(|d| &d.value) {
+            Some(MacroValue::ObjectLike(seq)) => assert_eq!(seq.text(), "8"),
+            other => panic!("expected ObjectLike, got {other:?}"),
+        }
     }
 
     #[test]
     fn redefine() {
         let mut env = MacroEnv::empty();
         env.define(SmolStr::new("X"), MacroValue::Flag);
-        env.define(SmolStr::new("X"), MacroValue::ObjectLike(SmolStr::new("1")));
-        assert_eq!(env.len(), 1);
-        assert_eq!(
-            env.get("X").map(|d| &d.value),
-            Some(&MacroValue::ObjectLike(SmolStr::new("1")))
+        env.define(
+            SmolStr::new("X"),
+            MacroValue::ObjectLike(Arc::new(MacroTokenSeq::from_text("1"))),
         );
+        assert_eq!(env.len(), 1);
+        match env.get("X").map(|d| &d.value) {
+            Some(MacroValue::ObjectLike(seq)) => assert_eq!(seq.text(), "1"),
+            other => panic!("expected ObjectLike, got {other:?}"),
+        }
     }
 
     #[test]

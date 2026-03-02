@@ -12,6 +12,7 @@ pub struct FileLoc {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExpansionKind {
     Include,
+    Macro,
 }
 
 /// One frame in the expansion stack, representing a single
