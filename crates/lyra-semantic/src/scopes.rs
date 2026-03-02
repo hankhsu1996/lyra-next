@@ -177,7 +177,7 @@ mod tests {
 
     use super::*;
     use crate::record::SymbolOrigin;
-    use crate::symbols::{Symbol, SymbolKind, SymbolTableBuilder};
+    use crate::symbols::{Constness, Symbol, SymbolKind, SymbolTableBuilder};
 
     #[test]
     fn resolve_finds_binding() {
@@ -189,6 +189,7 @@ mod tests {
         let id = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
+            constness: Constness::Mutable,
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
@@ -219,6 +220,7 @@ mod tests {
         let id = sym_builder.push(Symbol {
             name: SmolStr::new("a"),
             kind: SymbolKind::PortAnsi,
+            constness: Constness::Mutable,
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
@@ -248,6 +250,7 @@ mod tests {
         let id1 = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
+            constness: Constness::Mutable,
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
@@ -258,6 +261,7 @@ mod tests {
         let id2 = sym_builder.push(Symbol {
             name: SmolStr::new("x"),
             kind: SymbolKind::Variable,
+            constness: Constness::Mutable,
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,

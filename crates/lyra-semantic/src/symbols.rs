@@ -165,6 +165,13 @@ impl SymbolKind {
     }
 }
 
+/// Whether a variable is declared `const` (LRM 6.20.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Constness {
+    Mutable,
+    Const,
+}
+
 /// A resolved symbol entry.
 ///
 /// `decl_site` anchors this symbol to the declaration item node that
@@ -186,6 +193,7 @@ impl SymbolKind {
 pub struct Symbol {
     pub name: SmolStr,
     pub kind: SymbolKind,
+    pub constness: Constness,
     pub decl_site: Site,
     pub name_site: Site,
     pub type_site: Option<Site>,

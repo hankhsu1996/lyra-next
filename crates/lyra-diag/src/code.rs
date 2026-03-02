@@ -171,6 +171,14 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 28,
     };
+    pub const ASSIGN_TO_CONST: Self = Self {
+        namespace: "lyra.type",
+        number: 29,
+    };
+    pub const CONST_MISSING_INIT: Self = Self {
+        namespace: "lyra.type",
+        number: 30,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,

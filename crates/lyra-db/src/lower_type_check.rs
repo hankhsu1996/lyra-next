@@ -71,6 +71,12 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::StreamUnpackWidthMismatch { .. } => {
             lower_stream_unpack_width_mismatch(item, source_map, diags);
         }
+        TypeCheckItem::AssignToReadonly { .. } => {
+            lower_assign_to_readonly(item, source_map, diags);
+        }
+        TypeCheckItem::ConstMissingInit { .. } => {
+            lower_const_missing_init(item, source_map, diags);
+        }
     }
 }
 
@@ -963,6 +969,79 @@ fn lower_stream_unpack_width_mismatch(
                 lyra_diag::MessageId::BitsWide,
                 vec![lyra_diag::Arg::Width(*rhs_width)],
             ),
+        }),
+    );
+}
+
+fn lower_assign_to_readonly(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::AssignToReadonly {
+        kind,
+        assign_site,
+        lhs_name_span,
+        name,
+    } = item
+    else {
+        return;
+    };
+    let Some(assign_span) = source_map.map_span(assign_site.text_range()) else {
+        return;
+    };
+    let lhs_span = source_map
+        .map_span(lhs_name_span.text_range())
+        .unwrap_or(assign_span);
+    let (code, msg_id) = match kind {
+        lyra_semantic::type_check::ReadonlyKind::Const => (
+            lyra_diag::DiagnosticCode::ASSIGN_TO_CONST,
+            lyra_diag::MessageId::AssignToConst,
+        ),
+    };
+    let msg_args = vec![lyra_diag::Arg::Name(name.clone())];
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            code,
+            lyra_diag::Message::new(msg_id, msg_args.clone()),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span: lhs_span,
+            message: lyra_diag::Message::new(msg_id, msg_args),
+        }),
+    );
+}
+
+fn lower_const_missing_init(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::ConstMissingInit {
+        decl_site,
+        name_span,
+    } = item
+    else {
+        return;
+    };
+    let Some(decl_span) = source_map.map_span(decl_site.text_range()) else {
+        return;
+    };
+    let span = source_map
+        .map_span(name_span.text_range())
+        .unwrap_or(decl_span);
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::DiagnosticCode::CONST_MISSING_INIT,
+            lyra_diag::Message::simple(lyra_diag::MessageId::ConstMissingInit),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span,
+            message: lyra_diag::Message::simple(lyra_diag::MessageId::ConstMissingInit),
         }),
     );
 }

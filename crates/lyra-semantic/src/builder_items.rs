@@ -18,7 +18,7 @@ use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId, ModportEntry, ModportTarget, PortDirection};
 use crate::record::SymbolOrigin;
 use crate::scopes::{ScopeId, ScopeKind};
-use crate::symbols::{Namespace, Symbol, SymbolKind};
+use crate::symbols::{Constness, Namespace, Symbol, SymbolKind};
 
 use crate::builder::RawModportEntry;
 
@@ -64,6 +64,7 @@ pub(crate) fn collect_module_instantiation(
             let sym_id = ctx.push_symbol(Symbol {
                 name: SmolStr::new(inst_name_tok.text()),
                 kind: SymbolKind::Instance,
+                constness: Constness::Mutable,
                 decl_site,
                 name_site: inst_name_site,
                 type_site: None,
@@ -119,6 +120,7 @@ pub(crate) fn collect_foreach_vars(
         let sym_id = ctx.push_symbol(Symbol {
             name: SmolStr::new(name_tok.text()),
             kind: SymbolKind::Variable,
+            constness: Constness::Mutable,
             decl_site: foreach_stmt_site,
             name_site: decl_name_site,
             type_site: None,
@@ -178,6 +180,7 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
     let sym_id = ctx.push_symbol(Symbol {
         name: name.clone(),
         kind,
+        constness: Constness::Mutable,
         decl_site,
         name_site: decl_site,
         type_site: callable_type_site,
@@ -237,6 +240,7 @@ fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: 
                 let port_sym = ctx.push_symbol(Symbol {
                     name: SmolStr::new(name_tok.text()),
                     kind: SymbolKind::PortTf,
+                    constness: Constness::Mutable,
                     decl_site: port_decl_site,
                     name_site: decl_name_site,
                     type_site: port_type_site,
@@ -289,6 +293,7 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, 
         ctx.push_symbol(Symbol {
             name: name.clone(),
             kind: SymbolKind::Modport,
+            constness: Constness::Mutable,
             decl_site: modport_decl_site,
             name_site: modport_decl_site,
             type_site: None,
@@ -515,6 +520,7 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
                 let sym_id = ctx.push_symbol(Symbol {
                     name: SmolStr::new(name_tok.text()),
                     kind: SymbolKind::Parameter,
+                    constness: Constness::Mutable,
                     decl_site,
                     name_site: decl_name_site,
                     type_site: param_type_site,
@@ -552,6 +558,20 @@ pub(crate) fn collect_declarators(
     };
     // Detect inline enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
+    // Detect const qualifier (LRM 6.20.6)
+    let constness = match node.kind() {
+        SyntaxKind::VarDecl => {
+            if lyra_ast::VarDecl::cast(node.clone())
+                .and_then(|vd| vd.const_token())
+                .is_some()
+            {
+                Constness::Const
+            } else {
+                Constness::Mutable
+            }
+        }
+        _ => Constness::Mutable,
+    };
     let decl_type_site = match node.kind() {
         SyntaxKind::VarDecl => lyra_ast::VarDecl::cast(node.clone())
             .and_then(|vd| vd.type_spec())
@@ -581,6 +601,7 @@ pub(crate) fn collect_declarators(
                 let sym_id = ctx.push_symbol(Symbol {
                     name: SmolStr::new(name_tok.text()),
                     kind,
+                    constness,
                     decl_site,
                     name_site: decl_name_site,
                     type_site: decl_type_site,

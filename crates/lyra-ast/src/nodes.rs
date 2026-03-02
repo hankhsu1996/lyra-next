@@ -829,6 +829,15 @@ impl Declarator {
         support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
     }
 
+    /// Token-level span of the declarator name identifier.
+    ///
+    /// Returns the span of the `Ident`/`EscapedIdent` token without
+    /// leading trivia. Returns `None` if the name token is missing.
+    pub fn ident_name_span(&self) -> Option<lyra_source::NameSpan> {
+        self.name()
+            .map(|t| lyra_source::NameSpan::new(t.text_range()))
+    }
+
     /// The initializer expression after `=`, if present.
     pub fn init_expr(&self) -> Option<crate::expr::Expr> {
         let mut seen_assign = false;
