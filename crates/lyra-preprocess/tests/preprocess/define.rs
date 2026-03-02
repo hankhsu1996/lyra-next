@@ -121,3 +121,88 @@ fn final_env_returned() {
     assert!(out.final_env.is_defined("B"));
     assert_eq!(out.final_env.len(), 2);
 }
+
+#[test]
+fn continuation_object_like() {
+    let out = pp("`define FOO \\\nbar\n`FOO\n");
+    assert!(out.errors.is_empty());
+    assert_object_like_text(out.final_env.get("FOO").map(|d| &d.value), "bar");
+    assert!(out.expanded_text.contains("bar"));
+}
+
+#[test]
+fn continuation_multiple_lines() {
+    let out = pp("`define FOO \\\n  a \\\n  + b\n`FOO\n");
+    assert!(out.errors.is_empty());
+    assert_object_like_text(out.final_env.get("FOO").map(|d| &d.value), "  a   + b");
+}
+
+#[test]
+fn continuation_fn_macro() {
+    let out = pp("`define ADD(a,b) \\\n((a)+(b))\n`ADD(1,2)\n");
+    assert!(out.errors.is_empty());
+    assert!(out.expanded_text.contains("((1)+(2))"));
+}
+
+#[test]
+fn continuation_in_param_list() {
+    let out = pp("`define FOO(a, \\\nb) a+b\n`FOO(1,2)\n");
+    assert!(out.errors.is_empty());
+    assert!(out.expanded_text.contains("1+2"));
+}
+
+#[test]
+fn continuation_preserves_indentation() {
+    let out = pp("`define FOO \\\n    bar\n`FOO\n");
+    assert!(out.errors.is_empty());
+    assert_object_like_text(out.final_env.get("FOO").map(|d| &d.value), "    bar");
+}
+
+#[test]
+fn continuation_followed_by_blank_line() {
+    let out = pp("`define FOO \\\n\nwire w;\n");
+    assert!(out.errors.is_empty());
+    let def = out.final_env.get("FOO");
+    match def.map(|d| &d.value) {
+        Some(MacroValue::Flag) => {}
+        other => panic!("expected Flag (empty body), got {other:?}"),
+    }
+    assert!(out.expanded_text.contains("wire w;"));
+}
+
+#[test]
+fn continuation_crlf() {
+    let out = pp("`define FOO \\\r\nbar\n`FOO\n");
+    assert!(out.errors.is_empty());
+    assert_object_like_text(out.final_env.get("FOO").map(|d| &d.value), "bar");
+}
+
+#[test]
+fn continuation_comment_in_body() {
+    // Comment with trailing `\` acts as continuation. The comment is initial
+    // trivia (skipped before body), so the body is just `bar` from the next line.
+    let out = pp("`define FOO // comment \\\nbar\n`FOO\n");
+    assert!(out.errors.is_empty());
+    assert_object_like_text(out.final_env.get("FOO").map(|d| &d.value), "bar");
+}
+
+#[test]
+fn no_continuation_when_spaces_after_backslash() {
+    // `\` followed by spaces then newline is NOT a continuation per LRM;
+    // the backslash must be immediately before the newline.
+    let out = pp("`define FOO \\   \nbar\n");
+    assert!(out.errors.is_empty());
+    // Body is `\` + spaces (stops at the newline without continuing).
+    // `bar` is NOT part of the macro body.
+    let def = out.final_env.get("FOO");
+    match def.map(|d| &d.value) {
+        Some(MacroValue::ObjectLike(seq)) => {
+            assert!(
+                !seq.text().contains("bar"),
+                "body should not include 'bar': {:?}",
+                seq.text()
+            );
+        }
+        other => panic!("expected ObjectLike, got {other:?}"),
+    }
+}

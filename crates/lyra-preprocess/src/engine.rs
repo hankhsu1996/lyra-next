@@ -827,6 +827,7 @@ impl<'a> Preprocessor<'a> {
 
     /// Scan forward from `(start_idx, start_cursor)` to the end of the
     /// current logical directive line (newline-carrying token or EOF).
+    /// Skips past backslash-newline line continuations.
     /// Returns `(end_idx, end_cursor)` -- pure scan, no mutation.
     fn scan_to_line_end(&self, start_idx: usize, start_cursor: usize) -> (usize, usize) {
         let mut j = start_idx;
@@ -838,7 +839,13 @@ impl<'a> Preprocessor<'a> {
                 break;
             }
             let t_len: usize = t.len.into();
-            if token_carries_newline(t.kind, &self.text[cursor..cursor + t_len]) {
+            let t_text = &self.text[cursor..cursor + t_len];
+            if token_carries_newline(t.kind, t_text) {
+                if self.is_line_continuation(cursor, t_text) {
+                    cursor += t_len;
+                    j += 1;
+                    continue;
+                }
                 break;
             }
             cursor += t_len;
@@ -908,7 +915,35 @@ impl<'a> Preprocessor<'a> {
         true
     }
 
+    /// Check whether a newline-carrying trivia token represents a line
+    /// continuation (`\` immediately before the newline). The backslash
+    /// may be inside the trivia text (e.g. `\   \n` -- NOT a continuation
+    /// because spaces intervene) or in the preceding token (the common
+    /// `EscapedIdent(\)` + `Whitespace(\n)` pattern).
+    fn is_line_continuation(&self, trivia_cursor: usize, trivia_text: &str) -> bool {
+        let bytes = trivia_text.as_bytes();
+        // Find the first \n in the trivia token text.
+        let Some(nl_pos) = bytes.iter().position(|&b| b == b'\n') else {
+            return false;
+        };
+        // Determine the start of the newline sequence (\r\n vs \n).
+        let nl_start = if nl_pos > 0 && bytes[nl_pos - 1] == b'\r' {
+            nl_pos - 1
+        } else {
+            nl_pos
+        };
+        if nl_start > 0 {
+            // Backslash is inside this token, immediately before the newline.
+            bytes[nl_start - 1] == b'\\'
+        } else {
+            // Newline is at the very start of the token; check the byte in
+            // the preceding token (cross-token boundary).
+            trivia_cursor > 0 && self.text.as_bytes()[trivia_cursor - 1] == b'\\'
+        }
+    }
+
     /// Skip trivia and collect body tokens until newline or EOF.
+    /// Handles backslash-newline line continuations (LRM 5.6.4).
     /// Returns `(body_tokens, end_token_idx, end_byte_cursor)`.
     fn collect_define_body(
         &self,
@@ -935,6 +970,32 @@ impl<'a> Preprocessor<'a> {
             }
             let t_text = self.tok_text_at(j, cursor);
             if token_carries_newline(t.kind, t_text) {
+                if self.is_line_continuation(cursor, t_text) {
+                    // Pop the trailing backslash token from body
+                    if let Some(last) = toks.last()
+                        && last.token.kind == SyntaxKind::EscapedIdent
+                        && last.text == "\\"
+                    {
+                        toks.pop();
+                    }
+                    // Keep post-newline indentation as body content
+                    let remaining = text_after_first_newline(t_text);
+                    if !remaining.is_empty() {
+                        if remaining.contains('\n') {
+                            break;
+                        }
+                        toks.push(MacroTok {
+                            token: Token {
+                                kind: SyntaxKind::Whitespace,
+                                len: (remaining.len() as u32).into(),
+                            },
+                            text: SmolStr::from(remaining),
+                        });
+                    }
+                    cursor += t_text.len();
+                    j += 1;
+                    continue;
+                }
                 break;
             }
             toks.push(MacroTok {
@@ -967,6 +1028,11 @@ impl<'a> Preprocessor<'a> {
             while j < self.tokens.len() && self.tokens[j].kind.is_trivia() {
                 let t_text = self.tok_text_at(j, cursor);
                 if token_carries_newline(self.tokens[j].kind, t_text) {
+                    if self.is_line_continuation(cursor, t_text) {
+                        cursor += t_text.len();
+                        j += 1;
+                        continue;
+                    }
                     let (end_j, end_cursor) = self.scan_to_line_end(j, cursor);
                     return unterminated_params(lparen_range, end_j, end_cursor);
                 }
@@ -978,9 +1044,21 @@ impl<'a> Preprocessor<'a> {
                 return unterminated_params(lparen_range, j, cursor);
             }
 
+            // Skip continuation backslash before next newline trivia
             let t = self.tokens[j];
             let t_len: usize = t.len.into();
             let t_text = self.tok_text_at(j, cursor);
+            if t.kind == SyntaxKind::EscapedIdent && t_text == "\\" {
+                let next_cursor = cursor + t_len;
+                if j + 1 < self.tokens.len() {
+                    let next_text = self.tok_text_at(j + 1, next_cursor);
+                    if token_carries_newline(self.tokens[j + 1].kind, next_text) {
+                        cursor = next_cursor + next_text.len();
+                        j += 2;
+                        continue;
+                    }
+                }
+            }
 
             if t.kind == SyntaxKind::RParen {
                 cursor += t_len;
@@ -1139,6 +1217,20 @@ fn unterminated_params(
 /// carry newlines in well-formed source.
 fn token_carries_newline(kind: SyntaxKind, text: &str) -> bool {
     kind.is_trivia() && text.contains('\n')
+}
+
+/// Return the portion of `text` after the first `\n`.
+/// For `\r\n` sequences the `\r` precedes `\n`, so slicing after `\n`
+/// correctly skips the entire line ending.
+/// If `text` contains no newline, returns the entire string.
+fn text_after_first_newline(text: &str) -> &str {
+    let bytes = text.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b'\n' {
+            return &text[i + 1..];
+        }
+    }
+    text
 }
 
 /// Total byte length of a token slice.
