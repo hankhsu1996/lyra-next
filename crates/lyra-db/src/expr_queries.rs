@@ -9,7 +9,7 @@ use lyra_semantic::type_infer::{
     CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx,
     ResolveCallableError, Signedness,
 };
-use lyra_semantic::types::{ConstInt, Ty};
+use lyra_semantic::types::{ConstInt, InterfaceIdentity, Ty};
 
 use crate::callable_queries::{CallableRef, callable_signature, callable_signature_raw};
 use crate::const_eval::{ConstExprRef, eval_const_int};
@@ -586,7 +586,10 @@ fn interface_member_lookup(
         lyra_ast::ErasedAstId,
     ) -> ExprType,
 ) -> Result<MemberInfo, MemberLookupError> {
-    let iface_def_id = iface_ty.iface.global_def();
+    let InterfaceIdentity::Concrete(concrete_iface) = iface_ty.iface else {
+        return Err(MemberLookupError::NoMembersOnType);
+    };
+    let iface_def_id = concrete_iface.global_def();
     let file_id = iface_def_id.ast_id().file();
     let src = source_file_by_id(db, unit, file_id).ok_or(MemberLookupError::NoMembersOnType)?;
     let def = def_index_file(db, src);
@@ -631,7 +634,7 @@ fn interface_member_lookup(
             receiver: None,
         });
     }
-    if let Some(mp_def) = def.modport_by_name(iface_ty.iface, member_name) {
+    if let Some(mp_def) = def.modport_by_name(concrete_iface, member_name) {
         let mp_ty = Ty::Interface(lyra_semantic::types::InterfaceType {
             iface: iface_ty.iface,
             modport: Some(mp_def.id),
@@ -666,6 +669,9 @@ fn modport_member_lookup(
     mp_id: lyra_semantic::modport_def::ModportDefId,
     member_name: &str,
 ) -> Result<MemberInfo, MemberLookupError> {
+    let InterfaceIdentity::Concrete(concrete_iface) = iface_ty.iface else {
+        return Err(MemberLookupError::NoMembersOnType);
+    };
     let mref = ModportRef::new(ctx.db, ctx.unit, mp_id);
     let sem = modport_sem(ctx.db, mref);
     if let Some(entry) = sem.view.lookup(member_name) {
@@ -720,7 +726,7 @@ fn modport_member_lookup(
         .is_some()
         || ctx
             .def
-            .modport_by_name(iface_ty.iface, member_name)
+            .modport_by_name(concrete_iface, member_name)
             .is_some();
     if exists_in_iface {
         return Err(MemberLookupError::NotInModport);

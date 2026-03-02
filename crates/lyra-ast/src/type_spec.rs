@@ -119,6 +119,8 @@ pub enum TypeSpecKeyword {
     Chandle,
     Event,
     Void,
+    // Interface
+    Interface,
     // Net
     Wire,
     Tri,
@@ -196,6 +198,7 @@ impl TypeSpecKeyword {
             SyntaxKind::ChandleKw => Some(Self::Chandle),
             SyntaxKind::EventKw => Some(Self::Event),
             SyntaxKind::VoidKw => Some(Self::Void),
+            SyntaxKind::InterfaceKw => Some(Self::Interface),
             SyntaxKind::WireKw => Some(Self::Wire),
             SyntaxKind::TriKw => Some(Self::Tri),
             SyntaxKind::WandKw => Some(Self::Wand),

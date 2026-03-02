@@ -352,6 +352,16 @@ impl RealKw {
     }
 }
 
+/// Whether an interface type references a concrete definition or is
+/// a generic (bare `interface` keyword) port (LRM 25.3.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InterfaceIdentity {
+    /// Concrete interface definition.
+    Concrete(InterfaceDefId),
+    /// LRM 25.3.3 bare `interface` keyword (unbound until instantiation).
+    Generic,
+}
+
 /// Handle type for an interface instance value.
 ///
 /// Not a primitive datatype -- represents a reference to an interface
@@ -359,7 +369,7 @@ impl RealKw {
 /// interface definition) and compatible modport constraints.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InterfaceType {
-    pub iface: InterfaceDefId,
+    pub iface: InterfaceIdentity,
     pub modport: Option<ModportDefId>,
 }
 

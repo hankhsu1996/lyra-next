@@ -3,7 +3,7 @@ use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::interface_id::InterfaceDefId;
 use lyra_semantic::resolve_index::CoreResolveResult;
 use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId};
-use lyra_semantic::types::{InterfaceType, Ty};
+use lyra_semantic::types::{InterfaceIdentity, InterfaceType, Ty};
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
@@ -171,7 +171,7 @@ pub(crate) fn def_target_ty(
 ) -> Ty {
     match def_target_sem(db, unit, def_id) {
         Some(DefTargetSem::Interface(iface)) => Ty::Interface(InterfaceType {
-            iface,
+            iface: InterfaceIdentity::Concrete(iface),
             modport: None,
         }),
         _ => Ty::Error,

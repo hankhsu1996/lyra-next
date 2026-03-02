@@ -3,7 +3,7 @@ use std::sync::Arc;
 use lyra_ast::{AstNode, FunctionDecl, HasSyntax, TaskDecl, TypeSpec};
 use lyra_semantic::UserTypeRef;
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
-use lyra_semantic::types::{InterfaceType, SymbolType, Ty};
+use lyra_semantic::types::{InterfaceIdentity, InterfaceType, SymbolType, Ty};
 use smol_str::SmolStr;
 
 use crate::module_sig::{CallableKind, CallableSig, TfPortSig};
@@ -85,7 +85,7 @@ fn resolve_def_interface_ty(
         _ => None,
     };
     Ty::Interface(InterfaceType {
-        iface: iface_def,
+        iface: InterfaceIdentity::Concrete(iface_def),
         modport,
     })
 }
