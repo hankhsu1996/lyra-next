@@ -687,7 +687,7 @@ fn check_bits_call(
     };
     let kind = classify_bits_arg(first, map, &|utr| ctx.resolve_type_arg(utr));
     if let BitsArgKind::Type(ty) = kind
-        && !ty.is_data_type()
+        && ty.as_data_view().is_none()
     {
         let call_site = require_site(site::opt_site_of(map, stf), fallback, items);
         let arg_site = require_site(site::opt_site_of(map, first), call_site, items);

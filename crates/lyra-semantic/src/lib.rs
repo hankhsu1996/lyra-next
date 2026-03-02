@@ -46,4 +46,4 @@ pub use type_extract::{
     extract_type_from_container, extract_unpacked_dim, normalize_symbol_type, normalize_ty,
     user_type_ref, user_type_ref_from_expr, user_type_ref_from_type_ref,
 };
-pub use types::wrap_unpacked;
+pub use types::{DataTyView, wrap_unpacked};

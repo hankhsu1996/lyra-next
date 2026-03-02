@@ -1,5 +1,6 @@
 use lyra_ast::{Expr, ExprKind, HasSyntax, TfArg};
 use lyra_parser::SyntaxNode;
+use lyra_semantic::DataTyView;
 use lyra_semantic::resolve_index::{CoreResolution, CoreResolveResult};
 use lyra_semantic::symbols::{GlobalSymbolId, Namespace};
 use lyra_semantic::types::{ConstEvalError, ConstInt, SymbolType, Ty};
@@ -189,7 +190,10 @@ fn eval_bits_intrinsic(
     };
 
     let ty = classify_bits_arg_for_const(db, unit, source_file, map, arg);
-    bits_from_ty(db, unit, &ty)
+    let Some(view) = ty.as_data_view() else {
+        return ConstInt::Error(ConstEvalError::Unsupported);
+    };
+    bits_from_ty(db, unit, view)
 }
 
 /// Classify a `$bits` argument and resolve to a `Ty`.
@@ -485,12 +489,15 @@ fn normalize_for_dim(db: &dyn salsa::Database, unit: CompilationUnit, ty: &Ty) -
 }
 
 /// Convert a [`Ty`] to a bit width via `normalize_ty` + `bit_width_total`.
-fn bits_from_ty(db: &dyn salsa::Database, unit: CompilationUnit, ty: &Ty) -> ConstInt {
+///
+/// Requires a `DataTyView` to ensure only data types enter the bit-width
+/// computation pipeline.
+fn bits_from_ty(db: &dyn salsa::Database, unit: CompilationUnit, view: DataTyView<'_>) -> ConstInt {
     let eval = |expr_ast_id: lyra_ast::ErasedAstId| -> ConstInt {
         let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
         eval_const_int(db, expr_ref)
     };
-    let normalized = lyra_semantic::normalize_ty(ty, &eval);
+    let normalized = lyra_semantic::normalize_ty(view.ty(), &eval);
     let ty_ref = TyRef::new(db, normalized);
     match bit_width_total(db, unit, ty_ref) {
         Some(w) => ConstInt::Known(i64::from(w)),

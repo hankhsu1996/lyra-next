@@ -1,3 +1,6 @@
+use crate::enum_def::EnumId;
+use crate::record::RecordId;
+
 use super::*;
 
 fn dummy_ast_id() -> Site {
@@ -475,4 +478,169 @@ fn pretty_assoc_error() {
         dim: UnpackedDim::Assoc(AssocIndex::Typed(Box::new(Ty::Error))),
     };
     assert_eq!(ty.pretty(), "int [<error>]");
+}
+
+fn dummy_enum() -> Ty {
+    Ty::Enum(EnumId::new(dummy_ast_id()))
+}
+
+fn dummy_record() -> Ty {
+    Ty::Record(RecordId::new(dummy_ast_id()))
+}
+
+fn dummy_interface() -> Ty {
+    Ty::Interface(InterfaceType {
+        iface: InterfaceIdentity::Concrete(InterfaceDefId::placeholder()),
+        modport: None,
+    })
+}
+
+#[test]
+fn data_view_accepts_integral() {
+    assert!(Ty::int().as_data_view().is_some());
+    assert!(Ty::simple_logic().as_data_view().is_some());
+    assert!(Ty::byte().as_data_view().is_some());
+}
+
+#[test]
+fn data_view_accepts_real() {
+    assert!(Ty::Real(RealKw::Real).as_data_view().is_some());
+    assert!(Ty::Real(RealKw::Short).as_data_view().is_some());
+}
+
+#[test]
+fn data_view_accepts_string() {
+    assert!(Ty::String.as_data_view().is_some());
+}
+
+#[test]
+fn data_view_accepts_chandle() {
+    assert!(Ty::Chandle.as_data_view().is_some());
+}
+
+#[test]
+fn data_view_accepts_enum() {
+    assert!(dummy_enum().as_data_view().is_some());
+}
+
+#[test]
+fn data_view_accepts_record() {
+    assert!(dummy_record().as_data_view().is_some());
+}
+
+#[test]
+fn data_view_accepts_array_of_data() {
+    let ty = Ty::Array {
+        elem: Box::new(Ty::int()),
+        dim: UnpackedDim::Size(ConstInt::Known(4)),
+    };
+    assert!(ty.as_data_view().is_some());
+}
+
+#[test]
+fn data_view_accepts_nested_array_of_data() {
+    let inner = Ty::Array {
+        elem: Box::new(Ty::byte()),
+        dim: UnpackedDim::Size(ConstInt::Known(3)),
+    };
+    let outer = Ty::Array {
+        elem: Box::new(inner),
+        dim: UnpackedDim::Size(ConstInt::Known(2)),
+    };
+    assert!(outer.as_data_view().is_some());
+}
+
+#[test]
+fn data_view_rejects_interface() {
+    assert!(dummy_interface().as_data_view().is_none());
+}
+
+#[test]
+fn data_view_rejects_event() {
+    assert!(Ty::Event.as_data_view().is_none());
+}
+
+#[test]
+fn data_view_rejects_void() {
+    assert!(Ty::Void.as_data_view().is_none());
+}
+
+#[test]
+fn data_view_rejects_error() {
+    assert!(Ty::Error.as_data_view().is_none());
+}
+
+#[test]
+fn data_view_rejects_array_of_interface() {
+    let ty = Ty::Array {
+        elem: Box::new(dummy_interface()),
+        dim: UnpackedDim::Size(ConstInt::Known(4)),
+    };
+    assert!(ty.as_data_view().is_none());
+}
+
+#[test]
+fn data_view_rejects_nested_array_of_void() {
+    let inner = Ty::Array {
+        elem: Box::new(Ty::Void),
+        dim: UnpackedDim::Size(ConstInt::Known(3)),
+    };
+    let outer = Ty::Array {
+        elem: Box::new(inner),
+        dim: UnpackedDim::Size(ConstInt::Known(2)),
+    };
+    assert!(outer.as_data_view().is_none());
+}
+
+#[test]
+fn data_view_rejects_nested_array_of_event() {
+    let inner = Ty::Array {
+        elem: Box::new(Ty::Event),
+        dim: UnpackedDim::Size(ConstInt::Known(3)),
+    };
+    let outer = Ty::Array {
+        elem: Box::new(inner),
+        dim: UnpackedDim::Size(ConstInt::Known(2)),
+    };
+    assert!(outer.as_data_view().is_none());
+}
+
+#[test]
+fn is_data_type_consistent_with_data_view() {
+    let types = vec![
+        Ty::int(),
+        Ty::simple_logic(),
+        Ty::Real(RealKw::Real),
+        Ty::String,
+        Ty::Chandle,
+        dummy_enum(),
+        dummy_record(),
+        Ty::Event,
+        Ty::Void,
+        Ty::Error,
+        dummy_interface(),
+        Ty::Array {
+            elem: Box::new(Ty::int()),
+            dim: UnpackedDim::Size(ConstInt::Known(4)),
+        },
+        Ty::Array {
+            elem: Box::new(dummy_interface()),
+            dim: UnpackedDim::Size(ConstInt::Known(4)),
+        },
+    ];
+    for ty in &types {
+        assert_eq!(
+            ty.is_data_type(),
+            ty.as_data_view().is_some(),
+            "mismatch for {:?}",
+            ty.pretty()
+        );
+    }
+}
+
+#[test]
+fn data_view_ty_returns_original() {
+    let ty = Ty::int();
+    let view = ty.as_data_view().expect("int is data");
+    assert!(std::ptr::eq(view.ty(), &raw const ty));
 }
