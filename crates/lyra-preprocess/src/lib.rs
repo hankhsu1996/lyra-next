@@ -1,6 +1,8 @@
+mod args;
 mod directive;
 mod engine;
 mod env;
+mod expand;
 mod source_map;
 
 use lyra_lexer::{SyntaxKind, Token};

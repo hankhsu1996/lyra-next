@@ -1,11 +1,14 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use lyra_lexer::{SyntaxKind, Token};
 use lyra_source::{FileId, Span, TextRange, TextSize};
 use smol_str::SmolStr;
 
+use crate::args::parse_args_from_tokens;
 use crate::directive::{DirectiveClass, DirectiveKeyword, classify_directive};
-use crate::env::{MacroEnv, MacroTok, MacroTokenSeq, MacroValue};
+use crate::env::{MacroEnv, MacroTemplate, MacroTok, MacroTokenSeq, MacroValue};
+use crate::expand::{ExpansionCtx, ExpansionSink, expand_seq_into};
 use crate::source_map::{Segment, SegmentKind, SourceMap};
 use crate::{
     DirectiveEvent, DirectiveEventKind, DirectiveEventOrigin, IncludeGraph, IncludeProvider,
@@ -16,6 +19,20 @@ struct CondFrame {
     allow_emit: bool,
     taken: bool,
     saw_else: bool,
+}
+
+enum DefineParamsResult {
+    Ok {
+        param_names: Vec<SmolStr>,
+        end_j: usize,
+        end_cursor: usize,
+    },
+    Error {
+        message: SmolStr,
+        range: TextRange,
+        end_j: usize,
+        end_cursor: usize,
+    },
 }
 
 pub(crate) struct Preprocessor<'a> {
@@ -334,46 +351,62 @@ impl<'a> Preprocessor<'a> {
         cursor += usize::from(self.tokens[j].len);
         j += 1;
 
-        // Skip non-newline trivia between name and value
-        while j < self.tokens.len() && self.tokens[j].kind.is_trivia() {
-            let t_text = self.tok_text_at(j, cursor);
-            if token_carries_newline(self.tokens[j].kind, t_text) {
-                break;
+        // Adjacency check: if the *immediate* next token (no trivia skip)
+        // is LParen, this is a function-like macro definition.
+        let mut params: Option<Vec<SmolStr>> = None;
+        if j < self.tokens.len() && self.tokens[j].kind == SyntaxKind::LParen {
+            match self.parse_define_params(j, cursor) {
+                DefineParamsResult::Ok {
+                    param_names,
+                    end_j,
+                    end_cursor,
+                } => {
+                    params = Some(param_names);
+                    j = end_j;
+                    cursor = end_cursor;
+                }
+                DefineParamsResult::Error {
+                    message,
+                    range,
+                    end_j,
+                    end_cursor,
+                } => {
+                    self.flush_identity();
+                    self.src_cursor = end_cursor;
+                    self.flush_start = end_cursor;
+                    if self.currently_emitting() {
+                        self.push_error(range, message);
+                    }
+                    return end_j - idx;
+                }
             }
-            cursor += t_text.len();
-            j += 1;
         }
 
-        // Collect value tokens until newline or EOF
-        let mut value_toks: Vec<MacroTok> = Vec::new();
-        while j < self.tokens.len() {
-            let t = self.tokens[j];
-            if t.kind == SyntaxKind::Eof {
-                break;
-            }
-            let t_text = self.tok_text_at(j, cursor);
-            if token_carries_newline(t.kind, t_text) {
-                break;
-            }
-            value_toks.push(MacroTok {
-                token: t,
-                text: SmolStr::from(t_text),
-            });
-            cursor += t_text.len();
-            j += 1;
-        }
+        let (value_toks, body_end_j, body_end_cursor) = self.collect_define_body(j, cursor);
 
         // Consume the directive line (flushing identity, advancing cursors)
         self.flush_identity();
-        self.src_cursor = cursor;
-        self.flush_start = cursor;
-        let consumed = j - idx;
+        self.src_cursor = body_end_cursor;
+        self.flush_start = body_end_cursor;
+        let consumed = body_end_j - idx;
 
         if self.currently_emitting() {
-            let value = if value_toks.is_empty() {
-                MacroValue::Flag
-            } else {
-                MacroValue::ObjectLike(Arc::new(MacroTokenSeq::from_vec(value_toks)))
+            let value = match params {
+                Some(param_names) => {
+                    let body = MacroTokenSeq::from_vec(value_toks);
+                    let template = MacroTemplate::compile(&body, &param_names);
+                    MacroValue::FunctionLike {
+                        params: param_names,
+                        body: Arc::new(template),
+                    }
+                }
+                None => {
+                    if value_toks.is_empty() {
+                        MacroValue::Flag
+                    } else {
+                        MacroValue::ObjectLike(Arc::new(MacroTokenSeq::from_vec(value_toks)))
+                    }
+                }
             };
             self.env.define(name, value);
         }
@@ -583,11 +616,132 @@ impl<'a> Preprocessor<'a> {
                 self.flush_start = self.src_cursor;
                 1
             }
-            Some(MacroValue::ObjectLike(seq)) => self.expand_macro_tokens(idx, call_site, &seq),
+            Some(MacroValue::ObjectLike(seq)) => self.expand_macro_tokens(call_site, &seq, 1),
+            Some(MacroValue::FunctionLike { params, body }) => {
+                self.handle_fn_macro_use(idx, name, &params, &body)
+            }
         }
     }
 
-    fn expand_macro_tokens(&mut self, _idx: usize, call_site: Span, seq: &MacroTokenSeq) -> usize {
+    fn handle_fn_macro_use(
+        &mut self,
+        idx: usize,
+        name: &str,
+        params: &[SmolStr],
+        body: &MacroTemplate,
+    ) -> usize {
+        let dir_len: usize = self.tokens[idx].len.into();
+        let dir_start = self.src_cursor;
+
+        // Adjacency: immediate next token must be LParen (no trivia skip)
+        let next_idx = idx + 1;
+        if next_idx >= self.tokens.len() || self.tokens[next_idx].kind != SyntaxKind::LParen {
+            self.flush_identity();
+            self.push_error(
+                TextRange::new(
+                    TextSize::new(dir_start as u32),
+                    TextSize::new((dir_start + dir_len) as u32),
+                ),
+                SmolStr::from(format!(
+                    "function-like macro '{name}' used without argument list",
+                )),
+            );
+            self.src_cursor += dir_len;
+            self.flush_start = self.src_cursor;
+            return 1;
+        }
+
+        // Parse argument structure from the file token stream
+        let lparen_cursor = self.src_cursor + dir_len;
+        let parsed = match parse_args_from_tokens(self.tokens, next_idx) {
+            Ok(p) => p,
+            Err(eof_idx) => {
+                self.flush_identity();
+                self.push_error(
+                    TextRange::new(
+                        TextSize::new(lparen_cursor as u32),
+                        TextSize::new((lparen_cursor + 1) as u32),
+                    ),
+                    SmolStr::from(format!("unterminated argument list for macro '{name}'")),
+                );
+                let end_cursor = lparen_cursor + token_span_bytes(&self.tokens[next_idx..eof_idx]);
+                self.src_cursor = end_cursor;
+                self.flush_start = self.src_cursor;
+                return eof_idx - idx;
+            }
+        };
+
+        let end_j = parsed.end_idx;
+        let end_cursor = lparen_cursor + token_span_bytes(&self.tokens[next_idx..end_j]);
+
+        // Validate arity: FOO() for zero-param macro is valid
+        let actual_count = if params.is_empty()
+            && parsed.arg_ranges.len() == 1
+            && parsed.arg_ranges[0].0 == parsed.arg_ranges[0].1
+        {
+            0
+        } else {
+            parsed.arg_ranges.len()
+        };
+
+        if actual_count != params.len() {
+            self.flush_identity();
+            self.push_error(
+                TextRange::new(
+                    TextSize::new(dir_start as u32),
+                    TextSize::new(end_cursor as u32),
+                ),
+                SmolStr::from(format!(
+                    "macro '{name}' expects {} arguments, got {actual_count}",
+                    params.len(),
+                )),
+            );
+            self.src_cursor = end_cursor;
+            self.flush_start = self.src_cursor;
+            return end_j - idx;
+        }
+
+        // Materialize argument token sequences from index ranges
+        let materialized = self.materialize_arg_ranges(&parsed.arg_ranges, next_idx, lparen_cursor);
+        let args = if params.is_empty() {
+            &[] as &[MacroTokenSeq]
+        } else {
+            &materialized
+        };
+        let instantiated = match body.instantiate(args) {
+            Ok(seq) => seq,
+            Err(e) => {
+                self.flush_identity();
+                self.push_error(
+                    TextRange::new(
+                        TextSize::new(dir_start as u32),
+                        TextSize::new(end_cursor as u32),
+                    ),
+                    SmolStr::from(e.to_string()),
+                );
+                self.src_cursor = end_cursor;
+                self.flush_start = self.src_cursor;
+                return end_j - idx;
+            }
+        };
+
+        // Expand with call_site spanning the full invocation
+        let call_site = Span {
+            file: self.file,
+            range: TextRange::new(
+                TextSize::new(dir_start as u32),
+                TextSize::new(end_cursor as u32),
+            ),
+        };
+        self.expand_macro_tokens(call_site, &instantiated, end_j - idx)
+    }
+
+    fn expand_macro_tokens(
+        &mut self,
+        call_site: Span,
+        seq: &MacroTokenSeq,
+        tokens_consumed: usize,
+    ) -> usize {
         debug_assert!(
             self.currently_emitting(),
             "expand_macro_tokens called while not emitting",
@@ -597,32 +751,30 @@ impl<'a> Preprocessor<'a> {
 
         let mut tmp_tokens = Vec::new();
         let mut tmp_text = String::new();
+        let ctx = ExpansionCtx {
+            env: &self.env,
+            call_site,
+            recursion_limit: self.macro_recursion_limit,
+            base_offset,
+        };
         let mut sink = ExpansionSink {
             out_tokens: &mut tmp_tokens,
             out_text: &mut tmp_text,
             events: &mut self.directive_events,
             next_event_seq: &mut self.event_seq_counter,
         };
-        let result = expand_seq_into(
-            &self.env,
-            call_site,
-            seq,
-            0,
-            self.macro_recursion_limit,
-            &mut sink,
-            base_offset,
-        );
+        let result = expand_seq_into(&ctx, seq, 0, &mut sink);
 
-        let dir_len = usize::from(call_site.range.len());
+        let site_len = usize::from(call_site.range.len());
 
         if let Err(msg) = result {
             self.errors.push(PreprocError {
                 span: call_site,
                 message: msg,
             });
-            self.src_cursor += dir_len;
+            self.src_cursor += site_len;
             self.flush_start = self.src_cursor;
-            return 1;
+            return tokens_consumed;
         }
 
         debug_assert!(
@@ -650,9 +802,9 @@ impl<'a> Preprocessor<'a> {
             });
         }
 
-        self.src_cursor += dir_len;
+        self.src_cursor += site_len;
         self.flush_start = self.src_cursor;
-        1
+        tokens_consumed
     }
 
     fn strip_macro_token(&mut self, idx: usize) -> usize {
@@ -756,6 +908,188 @@ impl<'a> Preprocessor<'a> {
         true
     }
 
+    /// Skip trivia and collect body tokens until newline or EOF.
+    /// Returns `(body_tokens, end_token_idx, end_byte_cursor)`.
+    fn collect_define_body(
+        &self,
+        start_j: usize,
+        start_cursor: usize,
+    ) -> (Vec<MacroTok>, usize, usize) {
+        let mut j = start_j;
+        let mut cursor = start_cursor;
+
+        while j < self.tokens.len() && self.tokens[j].kind.is_trivia() {
+            let t_text = self.tok_text_at(j, cursor);
+            if token_carries_newline(self.tokens[j].kind, t_text) {
+                break;
+            }
+            cursor += t_text.len();
+            j += 1;
+        }
+
+        let mut toks: Vec<MacroTok> = Vec::new();
+        while j < self.tokens.len() {
+            let t = self.tokens[j];
+            if t.kind == SyntaxKind::Eof {
+                break;
+            }
+            let t_text = self.tok_text_at(j, cursor);
+            if token_carries_newline(t.kind, t_text) {
+                break;
+            }
+            toks.push(MacroTok {
+                token: t,
+                text: SmolStr::from(t_text),
+            });
+            cursor += t_text.len();
+            j += 1;
+        }
+
+        (toks, j, cursor)
+    }
+
+    /// Parse a function-like macro parameter list starting at an `LParen`
+    /// token. Returns the parameter names and position after the closing
+    /// `RParen`, or an error with diagnostic info.
+    fn parse_define_params(&self, lparen_idx: usize, lparen_cursor: usize) -> DefineParamsResult {
+        let lparen_len: usize = self.tokens[lparen_idx].len.into();
+        let lparen_range = TextRange::new(
+            TextSize::new(lparen_cursor as u32),
+            TextSize::new((lparen_cursor + lparen_len) as u32),
+        );
+        let mut params: Vec<SmolStr> = Vec::new();
+        let mut seen: HashSet<SmolStr> = HashSet::new();
+        let mut j = lparen_idx + 1;
+        let mut cursor = lparen_cursor + lparen_len;
+        let mut want_param = true;
+
+        loop {
+            while j < self.tokens.len() && self.tokens[j].kind.is_trivia() {
+                let t_text = self.tok_text_at(j, cursor);
+                if token_carries_newline(self.tokens[j].kind, t_text) {
+                    let (end_j, end_cursor) = self.scan_to_line_end(j, cursor);
+                    return unterminated_params(lparen_range, end_j, end_cursor);
+                }
+                cursor += t_text.len();
+                j += 1;
+            }
+
+            if j >= self.tokens.len() || self.tokens[j].kind == SyntaxKind::Eof {
+                return unterminated_params(lparen_range, j, cursor);
+            }
+
+            let t = self.tokens[j];
+            let t_len: usize = t.len.into();
+            let t_text = self.tok_text_at(j, cursor);
+
+            if t.kind == SyntaxKind::RParen {
+                cursor += t_len;
+                j += 1;
+                return DefineParamsResult::Ok {
+                    param_names: params,
+                    end_j: j,
+                    end_cursor: cursor,
+                };
+            }
+
+            if want_param {
+                if t.kind != SyntaxKind::Ident {
+                    return self.define_param_error(
+                        format!("expected parameter name, found '{t_text}'"),
+                        cursor,
+                        t_len,
+                        lparen_idx,
+                        lparen_cursor,
+                    );
+                }
+                let name = SmolStr::from(t_text);
+                if !seen.insert(name.clone()) {
+                    return self.define_param_error(
+                        format!("duplicate parameter name '{name}' in macro definition"),
+                        cursor,
+                        t_len,
+                        lparen_idx,
+                        lparen_cursor,
+                    );
+                }
+                params.push(name);
+                cursor += t_len;
+                j += 1;
+                want_param = false;
+            } else if t.kind != SyntaxKind::Comma {
+                return self.define_param_error(
+                    format!("expected ',' or ')' after parameter, found '{t_text}'"),
+                    cursor,
+                    t_len,
+                    lparen_idx,
+                    lparen_cursor,
+                );
+            } else {
+                cursor += t_len;
+                j += 1;
+                want_param = true;
+            }
+        }
+    }
+
+    fn define_param_error(
+        &self,
+        msg: String,
+        cursor: usize,
+        t_len: usize,
+        lparen_idx: usize,
+        lparen_cursor: usize,
+    ) -> DefineParamsResult {
+        let (end_j, end_cursor) = self.scan_to_line_end(lparen_idx, lparen_cursor);
+        DefineParamsResult::Error {
+            message: SmolStr::from(msg),
+            range: TextRange::new(
+                TextSize::new(cursor as u32),
+                TextSize::new((cursor + t_len) as u32),
+            ),
+            end_j,
+            end_cursor,
+        }
+    }
+
+    /// Convert token-index ranges (from `parse_args_from_tokens`) into
+    /// `MacroTokenSeq` argument values. Cursor tracking happens here
+    /// so the arg parser stays purely structural.
+    fn materialize_arg_ranges(
+        &self,
+        arg_ranges: &[(usize, usize)],
+        lparen_idx: usize,
+        lparen_cursor: usize,
+    ) -> Vec<MacroTokenSeq> {
+        let lparen_len: usize = self.tokens[lparen_idx].len.into();
+        let mut cursor = lparen_cursor + lparen_len;
+        let mut tok_idx = lparen_idx + 1;
+        let mut result = Vec::with_capacity(arg_ranges.len());
+
+        for &(start, end) in arg_ranges {
+            // Advance past separator tokens (commas) between args
+            while tok_idx < start {
+                cursor += usize::from(self.tokens[tok_idx].len);
+                tok_idx += 1;
+            }
+            // Materialize this argument's tokens
+            let mut toks = Vec::new();
+            for j in start..end {
+                let t = self.tokens[j];
+                let t_len: usize = t.len.into();
+                toks.push(MacroTok {
+                    token: t,
+                    text: SmolStr::from(&self.text[cursor..cursor + t_len]),
+                });
+                cursor += t_len;
+            }
+            tok_idx = end;
+            result.push(MacroTokenSeq::from_vec(toks));
+        }
+
+        result
+    }
+
     /// Flush pending identity bytes from the primary file into the
     /// expanded output, recording an identity segment.
     fn flush_identity(&mut self) {
@@ -784,97 +1118,17 @@ impl<'a> Preprocessor<'a> {
     }
 }
 
-/// Mutable accumulators for recursive macro expansion, bundled to
-/// keep the `expand_seq_into` argument count manageable.
-struct ExpansionSink<'a> {
-    out_tokens: &'a mut Vec<Token>,
-    out_text: &'a mut String,
-    events: &'a mut Vec<DirectiveEvent>,
-    next_event_seq: &'a mut u32,
-}
-
-/// Recursively expand a macro token sequence, splicing non-directive
-/// tokens into the sink and stripping or recursing on directive tokens
-/// found in the body.
-///
-/// Precondition: only called when the preprocessor is emitting (i.e.,
-/// from `expand_macro_tokens` which is gated on `currently_emitting`).
-/// All events produced here are therefore from emitted text.
-fn expand_seq_into(
-    env: &MacroEnv,
-    call_site: Span,
-    seq: &MacroTokenSeq,
-    depth: usize,
-    recursion_limit: usize,
-    sink: &mut ExpansionSink<'_>,
-    base_offset: TextSize,
-) -> Result<(), SmolStr> {
-    if depth > recursion_limit {
-        return Err(SmolStr::from("macro expansion depth limit exceeded"));
+fn unterminated_params(
+    lparen_range: TextRange,
+    end_j: usize,
+    end_cursor: usize,
+) -> DefineParamsResult {
+    DefineParamsResult::Error {
+        message: SmolStr::from("unterminated parameter list in macro definition"),
+        range: lparen_range,
+        end_j,
+        end_cursor,
     }
-
-    for tok in seq.tokens() {
-        if tok.token.kind == SyntaxKind::Directive {
-            let offset = base_offset + TextSize::new(sink.out_text.len() as u32);
-            match classify_directive(&tok.text) {
-                DirectiveClass::MacroInvoke { name } => {
-                    let value = env.get(name).map(|d| d.value.clone());
-                    match value {
-                        None => {
-                            let event_seq = *sink.next_event_seq;
-                            *sink.next_event_seq += 1;
-                            sink.events.push(DirectiveEvent {
-                                span: call_site,
-                                kind: DirectiveEventKind::UndefinedMacro(SmolStr::from(name)),
-                                origin: DirectiveEventOrigin::MacroExpansion,
-                                expanded_offset: offset,
-                                event_seq,
-                            });
-                        }
-                        Some(MacroValue::Flag) => {}
-                        Some(MacroValue::ObjectLike(inner_seq)) => {
-                            expand_seq_into(
-                                env,
-                                call_site,
-                                &inner_seq,
-                                depth + 1,
-                                recursion_limit,
-                                sink,
-                                base_offset,
-                            )?;
-                        }
-                    }
-                }
-                DirectiveClass::Keyword(kw) => {
-                    let event_seq = *sink.next_event_seq;
-                    *sink.next_event_seq += 1;
-                    sink.events.push(DirectiveEvent {
-                        span: call_site,
-                        kind: DirectiveEventKind::KnownDirective(kw),
-                        origin: DirectiveEventOrigin::MacroExpansion,
-                        expanded_offset: offset,
-                        event_seq,
-                    });
-                }
-                DirectiveClass::Other { raw } => {
-                    let event_seq = *sink.next_event_seq;
-                    *sink.next_event_seq += 1;
-                    sink.events.push(DirectiveEvent {
-                        span: call_site,
-                        kind: DirectiveEventKind::UnrecognizedDirective(SmolStr::from(raw)),
-                        origin: DirectiveEventOrigin::MacroExpansion,
-                        expanded_offset: offset,
-                        event_seq,
-                    });
-                }
-            }
-        } else {
-            sink.out_tokens.push(tok.token);
-            sink.out_text.push_str(&tok.text);
-        }
-    }
-
-    Ok(())
 }
 
 /// Whether a token with the given kind and text carries a newline.
@@ -885,4 +1139,9 @@ fn expand_seq_into(
 /// carry newlines in well-formed source.
 fn token_carries_newline(kind: SyntaxKind, text: &str) -> bool {
     kind.is_trivia() && text.contains('\n')
+}
+
+/// Total byte length of a token slice.
+fn token_span_bytes(tokens: &[Token]) -> usize {
+    tokens.iter().map(|t| usize::from(t.len)).sum()
 }
