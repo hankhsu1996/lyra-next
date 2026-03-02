@@ -155,6 +155,22 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 24,
     };
+    pub const STREAM_UNPACK_OPERAND_INVALID: Self = Self {
+        namespace: "lyra.type",
+        number: 25,
+    };
+    pub const STREAM_UNPACK_OPERAND_UNSUPPORTED: Self = Self {
+        namespace: "lyra.type",
+        number: 26,
+    };
+    pub const STREAM_UNPACK_WITH_CLAUSE: Self = Self {
+        namespace: "lyra.type",
+        number: 27,
+    };
+    pub const STREAM_UNPACK_WIDTH_MISMATCH: Self = Self {
+        namespace: "lyra.type",
+        number: 28,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,

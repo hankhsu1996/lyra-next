@@ -62,6 +62,10 @@ pub enum MessageId {
     NewExprSizeNegative,
     NewExprInitIncompat,
     ArrayIncompatible,
+    StreamUnpackOperandInvalid,
+    StreamUnpackOperandUnsupported,
+    StreamUnpackWithClause,
+    StreamUnpackWidthMismatch,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -250,7 +254,11 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::NewExprSizeNotLongint
         | MessageId::NewExprSizeNegative
         | MessageId::NewExprInitIncompat
-        | MessageId::ArrayIncompatible => render_type_message(msg),
+        | MessageId::ArrayIncompatible
+        | MessageId::StreamUnpackOperandInvalid
+        | MessageId::StreamUnpackOperandUnsupported
+        | MessageId::StreamUnpackWithClause
+        | MessageId::StreamUnpackWidthMismatch => render_type_message(msg),
         _ => render_other_message(msg),
     }
 }
@@ -370,6 +378,31 @@ fn render_type_message(msg: &Message) -> String {
         | MessageId::NewExprSizeNegative
         | MessageId::NewExprInitIncompat
         | MessageId::ArrayIncompatible => render_array_message(msg),
+        MessageId::StreamUnpackOperandInvalid
+        | MessageId::StreamUnpackOperandUnsupported
+        | MessageId::StreamUnpackWithClause
+        | MessageId::StreamUnpackWidthMismatch => render_stream_unpack_message(msg),
+        _ => String::new(),
+    }
+}
+
+fn render_stream_unpack_message(msg: &Message) -> String {
+    match msg.id {
+        MessageId::StreamUnpackOperandInvalid => {
+            "streaming unpack operand is not a valid assignment target".into()
+        }
+        MessageId::StreamUnpackWithClause => {
+            "`with` clause on streaming unpack target is not yet supported".into()
+        }
+        MessageId::StreamUnpackOperandUnsupported => {
+            let ty_name = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            format!("streaming unpack operand type `{ty_name}` has no fixed streaming width")
+        }
+        MessageId::StreamUnpackWidthMismatch => {
+            let lhs_w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
+            let rhs_w = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
+            format!("streaming unpack target is {lhs_w} bits but source is {rhs_w} bits")
+        }
         _ => String::new(),
     }
 }

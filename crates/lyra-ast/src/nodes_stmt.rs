@@ -314,6 +314,11 @@ impl ContinuousAssign {
         support::expr_child(&self.syntax, 1)
     }
 
+    /// The `=` assignment operator token.
+    pub fn eq_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Assign)
+    }
+
     /// Optional timing control (delay) on the assign.
     pub fn timing_control(&self) -> Option<TimingControl> {
         support::child(&self.syntax)

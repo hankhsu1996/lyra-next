@@ -1,11 +1,12 @@
-use lyra_ast::{Expr, ExprKind};
+use lyra_ast::{Expr, ExprKind, StreamExpr};
 
 /// Classification of an expression appearing on the LHS of an assignment.
 pub(crate) enum LhsClass {
     /// Simple assignable reference whose type can be queried via `expr_type`.
     Assignable(Expr),
-    /// Valid SV lvalue form not yet type-checked by this engine
-    /// (concat, streaming).
+    /// Streaming unpack target: `{>> {a, b}} = rhs`.
+    Stream(StreamExpr),
+    /// Valid SV lvalue form not yet type-checked by this engine (concat).
     Unsupported,
     /// Not a valid assignment target.
     NotAssignable,
@@ -46,7 +47,8 @@ pub(crate) fn classify_lhs(expr: &Expr) -> LhsClass {
                 LhsClass::NotAssignable
             }
         }
-        ExprKind::ConcatExpr(_) | ExprKind::StreamExpr(_) => LhsClass::Unsupported,
+        ExprKind::StreamExpr(s) => LhsClass::Stream(s),
+        ExprKind::ConcatExpr(_) => LhsClass::Unsupported,
         _ => LhsClass::NotAssignable,
     }
 }

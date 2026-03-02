@@ -688,9 +688,38 @@ impl CallExpr {
     }
 }
 
+/// Streaming direction: MSB-first (`>>`) or LSB-first (`<<`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StreamDir {
+    MsbFirst,
+    LsbFirst,
+}
+
 impl StreamExpr {
     pub fn stream_operands(&self) -> Option<StreamOperands> {
         support::child(&self.syntax)
+    }
+
+    /// Streaming direction from the `>>` or `<<` direct child operator token.
+    ///
+    /// Uses `support::token` which searches only direct child tokens (not
+    /// descendants), so this matches exactly the operator at the known
+    /// position in the `StreamExpr` grammar.
+    pub fn dir(&self) -> Option<StreamDir> {
+        if support::token(&self.syntax, SyntaxKind::GtGt).is_some() {
+            Some(StreamDir::MsbFirst)
+        } else if support::token(&self.syntax, SyntaxKind::LtLt).is_some() {
+            Some(StreamDir::LsbFirst)
+        } else {
+            None
+        }
+    }
+
+    /// Iterate streaming operand items in source order.
+    pub fn operand_items(&self) -> impl Iterator<Item = StreamOperandItem> {
+        self.stream_operands()
+            .into_iter()
+            .flat_map(|ops| ops.items())
     }
 }
 

@@ -4,7 +4,7 @@ use lyra_ast::{
     AssignStmt, AstIdMap, CallExpr, CastExpr, ContinuousAssign, Declarator, Expr, ExprKind,
     NewExpr, StreamOperandItem, SystemTfCall, TfArg, VarDecl,
 };
-use lyra_source::NameSpan;
+use lyra_source::{NameSpan, TextRange};
 
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
@@ -136,6 +136,24 @@ pub enum TypeCheckItem {
         lhs_ty: Ty,
         rhs_ty: Ty,
     },
+    StreamUnpackOperandInvalid {
+        operand_site: Site,
+    },
+    StreamUnpackWithClause {
+        with_site: Site,
+    },
+    StreamUnpackOperandUnsupported {
+        operand_site: Site,
+        operand_ty: Ty,
+    },
+    StreamUnpackWidthMismatch {
+        assign_site: Site,
+        op_range: Option<TextRange>,
+        lhs_site: Site,
+        rhs_site: Site,
+        lhs_width: u32,
+        rhs_width: u32,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -162,6 +180,16 @@ pub trait TypeCheckCtx {
     fn enum_known_value_set(&self, id: &EnumId) -> Option<std::sync::Arc<[i64]>>;
     /// Check whether a modport expression target is an lvalue.
     fn is_modport_target_lvalue(&self, expr_id: Site) -> bool;
+    /// Infer the type of an expression by its `Site`.
+    fn expr_type_by_id(&self, id: Site) -> ExprType;
+    /// Fixed streaming width in bits for an expression by its `Site`.
+    ///
+    /// Returns `Some(bits)` when the expression type has a statically known
+    /// fixed streaming width (integral, enum, fixed-size array of streamable
+    /// elements). Returns `None` for dynamic/unsupported types.
+    fn fixed_stream_width_bits(&self, id: Site) -> Option<u32>;
+    /// Fixed streaming width in bits for an already-inferred expression type.
+    fn fixed_stream_width_bits_of_type(&self, et: &ExprType) -> Option<u32>;
 }
 
 const MISSING_AST_ID: &str = "missing_ast_id in type checker";
@@ -192,10 +220,11 @@ pub fn check_continuous_assign(
 ) {
     let map = ctx.ast_id_map();
     let self_site = require_site(site::opt_site_of(map, ca), fallback, items);
+    let op_range = ca.eq_token().map(|t| t.text_range());
     let lhs = ca.lhs();
     let rhs = ca.rhs();
     if let (Some(l), Some(r)) = (&lhs, &rhs) {
-        check_assignment_pair(self_site, l, r, ctx, items);
+        check_assignment_pair(self_site, op_range, l, r, ctx, items);
     }
 }
 
@@ -210,12 +239,13 @@ pub fn check_assign_stmt(
 ) {
     let map = ctx.ast_id_map();
     let self_site = require_site(site::opt_site_of(map, assign), fallback, items);
+    let op_range = assign.op_token().map(|t| t.text_range());
     let lhs = assign.lhs();
     let rhs = assign.rhs();
     let has_op = assign.assign_op().is_some();
 
     if let (Some(l), Some(r)) = (&lhs, &rhs) {
-        check_assignment_pair(self_site, l, r, ctx, items);
+        check_assignment_pair(self_site, op_range, l, r, ctx, items);
     } else if rhs.is_none()
         && !has_op
         && let Some(l) = &lhs
@@ -260,6 +290,7 @@ pub fn check_var_decl(
 
 fn check_assignment_pair(
     stmt_site: Site,
+    op_range: Option<TextRange>,
     lhs: &Expr,
     rhs: &Expr,
     ctx: &dyn TypeCheckCtx,
@@ -280,6 +311,28 @@ fn check_assignment_pair(
 
             if !matches!(rhs_type.ty, Ty::Error) {
                 check_assignment_compat(&lhs_type, &rhs_type, stmt_site, lhs_site, rhs_site, items);
+            }
+        }
+        crate::lhs::LhsClass::Stream(stream_expr) => {
+            let map = ctx.ast_id_map();
+            match crate::streaming::shape::build_unpack_shape(&stream_expr, map, stmt_site) {
+                Ok(shape) => {
+                    let sites = crate::streaming::check::UnpackAssignSites {
+                        assign_site: stmt_site,
+                        op_range,
+                        lhs_site,
+                        rhs_site,
+                    };
+                    crate::streaming::check::check_streaming_unpack(
+                        &shape, rhs, &sites, ctx, items,
+                    );
+                }
+                Err(e) => {
+                    items.push(TypeCheckItem::InternalError {
+                        detail: smol_str::SmolStr::new_static(e.detail()),
+                        site: e.fallback(),
+                    });
+                }
             }
         }
         crate::lhs::LhsClass::Unsupported => {

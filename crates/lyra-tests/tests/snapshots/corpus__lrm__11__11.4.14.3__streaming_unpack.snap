@@ -1,0 +1,11 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (4 diagnostics)
+  error[lyra.type[28]] 20:13..20:13: streaming unpack target is 8 bits but source is 64 bits
+  error[lyra.type[25]] 24:9..24:9: streaming unpack operand is not a valid assignment target
+  error[lyra.type[26]] 28:9..28:9: streaming unpack operand type `logic []` has no fixed streaming width
+  error[lyra.type[27]] 32:12..32:12: `with` clause on streaming unpack target is not yet supported
+---
+unit (0 diagnostics)

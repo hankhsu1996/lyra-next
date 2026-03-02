@@ -321,6 +321,27 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         };
         expr_is_assignable_ref(self.db, src, expr_id)
     }
+
+    fn expr_type_by_id(&self, id: lyra_semantic::Site) -> ExprType {
+        let expr_ref = ExprRef::new(self.db, self.unit, id);
+        crate::expr_queries::type_of_expr(self.db, expr_ref)
+    }
+
+    fn fixed_stream_width_bits(&self, id: lyra_semantic::Site) -> Option<u32> {
+        let et = self.expr_type_by_id(id);
+        self.fixed_stream_width_bits_of_type(&et)
+    }
+
+    fn fixed_stream_width_bits_of_type(&self, et: &ExprType) -> Option<u32> {
+        lyra_semantic::fixed_stream_width_bits_of_expr_type(et, &|enum_id| {
+            let eref = EnumRef::new(self.db, self.unit, *enum_id);
+            let sem = enum_sem(self.db, eref);
+            sem.base_int.and_then(|bv| match bv.width {
+                lyra_semantic::type_infer::BitWidth::Known(w) => Some(w),
+                _ => None,
+            })
+        })
+    }
 }
 
 /// Check whether a modport expression target is an assignable reference.

@@ -90,6 +90,9 @@ Enforced by `tools/policy/check_cst_layering.py` (rules C001-C005).
 - **No special-case escape hatches.** Do not introduce local helpers (e.g. `expr_site_of`) because a wrapper "doesn't implement X". Fix the infrastructure so the common path works (e.g. add a trait or method in `lyra-ast`).
 - **No silent downgrade.** Do not return `Unsupported`/`Ty::Error` to satisfy a type mismatch (e.g. `TfArg::Type` mapped to `UnsupportedExprKind`). Use `Option`, split the helper by kind, or handle the kind correctly.
 - **No global scans for internal invariants.** Surface invariant failures at creation with a fallback anchor already in hand. Do not add later-stage sweeps over all symbols/defs/types to rediscover errors; prefer structured errors lowered once.
+- **Design data shapes before behavior.** Before emitting diagnostics or running checks, define the pure-data representation (shape, plan, fact) that will survive future features without refactors. Store both coarse and fine anchors (item-site and expr-site), carry selection/classification fields even if unsupported in the current PR.
+- **Minimize ad-hoc context hooks.** Do not grow trait interfaces (`TypeCheckCtx`, `InferCtx`) into grab bags of one-off queries. Prefer higher-level, principled queries (e.g. `fixed_stream_width_bits(id)` over `enum_bit_width(id)` + `try_packed_width` + ...). Each hook should represent a coherent concept, not a leaf accessor.
+- **Future-proof by construction.** Ask "what does the next PR need?" and ensure the current data model already has the slots (selection info, dynamic-target marker, target kind tag). Later work should extend, not rewrite.
 
 ## Crate Dependency Graph
 
