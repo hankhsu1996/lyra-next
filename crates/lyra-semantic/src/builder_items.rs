@@ -1,6 +1,6 @@
 use lyra_ast::{
-    AstNode, Declarator, ExportDecl, ExportItem, FunctionDecl, HasSyntax, ImportItem, ModportDecl,
-    ModportPortKind, ModuleInstantiation, TaskDecl, TfPortDecl, TypeSpec,
+    AstNode, Declarator, ExportDecl, ExportItem, ForeachStmt, FunctionDecl, HasSyntax, ImportItem,
+    ModportDecl, ModportPortKind, ModuleInstantiation, TaskDecl, TfPortDecl, TypeSpec,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -10,7 +10,8 @@ use smol_str::SmolStr;
 use crate::builder::DefContext;
 use crate::builder_types::{collect_name_refs, collect_type_spec_refs, detect_aggregate_type};
 use crate::def_index::{
-    ExpectedNs, ExportDeclId, ExportKey, Import, ImportDeclId, ImportName, NamePath, UseSite,
+    ExpectedNs, ExportDeclId, ExportKey, ForeachVarDef, Import, ImportDeclId, ImportName, NamePath,
+    UseSite,
 };
 use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
@@ -80,6 +81,61 @@ pub(crate) fn collect_module_instantiation(
     }
     // Still collect NameRefs in port connection expressions
     collect_name_refs(ctx, node, scope);
+}
+
+pub(crate) fn collect_foreach_vars(
+    ctx: &mut DefContext<'_>,
+    node: &SyntaxNode,
+    parent_scope: ScopeId,
+) -> ScopeId {
+    let foreach_scope = ctx.scopes.push(ScopeKind::Block, Some(parent_scope));
+    let Some(fs) = ForeachStmt::cast(node.clone()) else {
+        return foreach_scope;
+    };
+    let Some(foreach_stmt_site) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_foreach_vars",
+            node.kind()
+        ));
+        return foreach_scope;
+    };
+    let Some(var_list) = fs.var_list() else {
+        return foreach_scope;
+    };
+    for (slot_index, slot) in var_list.slots().enumerate() {
+        let Some(decl) = slot.declarator() else {
+            continue; // skipped slot
+        };
+        let Some(name_tok) = decl.name() else {
+            continue;
+        };
+        let Some(decl_name_site) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
+            ctx.emit_internal_error_unanchored(&format!(
+                "erased_ast_id returned None for {:?} in collect_foreach_vars declarator",
+                decl.syntax().kind()
+            ));
+            continue;
+        };
+        let sym_id = ctx.push_symbol(Symbol {
+            name: SmolStr::new(name_tok.text()),
+            kind: SymbolKind::Variable,
+            decl_site: foreach_stmt_site,
+            name_site: decl_name_site,
+            type_site: None,
+            name_span: NameSpan::new(name_tok.text_range()),
+            scope: foreach_scope,
+            origin: SymbolOrigin::TypeSpec,
+        });
+        ctx.register_binding(sym_id);
+        ctx.foreach_var_defs.insert(
+            sym_id,
+            ForeachVarDef {
+                foreach_stmt: foreach_stmt_site,
+                slot: slot_index as u32,
+            },
+        );
+    }
+    foreach_scope
 }
 
 pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {

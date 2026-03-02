@@ -7,8 +7,9 @@ use lyra_parser::SyntaxToken;
 
 use crate::node::AstNode;
 use crate::nodes::{
-    AssignStmt, BinExpr, BlockStmt, CaseItem, CaseStmt, ContinuousAssign, ForStmt, ForeverStmt,
-    IfStmt, NameRef, RepeatStmt, SyntaxAssignOp, TimingControl, WhileStmt,
+    AssignStmt, BinExpr, BlockStmt, CaseItem, CaseStmt, ContinuousAssign, ForStmt, ForeachStmt,
+    ForeachVarList, ForeverStmt, IfStmt, NameRef, RepeatStmt, SyntaxAssignOp, TimingControl,
+    WhileStmt,
 };
 use crate::support::{self, AstChildren};
 
@@ -249,6 +250,23 @@ impl RepeatStmt {
 
 impl ForeverStmt {
     /// The loop body.
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+}
+
+impl ForeachStmt {
+    /// The array expression before the loop-variable list.
+    pub fn array_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    /// The `[var1, , var3]` loop-variable list.
+    pub fn var_list(&self) -> Option<ForeachVarList> {
+        support::child(&self.syntax)
+    }
+
+    /// The loop body statement.
     pub fn body(&self) -> Option<crate::node::StmtNode> {
         support::child(&self.syntax)
     }

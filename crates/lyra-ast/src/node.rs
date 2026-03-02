@@ -43,6 +43,7 @@ pub fn is_statement_kind(kind: lyra_lexer::SyntaxKind) -> bool {
             | SyntaxKind::WhileStmt
             | SyntaxKind::RepeatStmt
             | SyntaxKind::ForeverStmt
+            | SyntaxKind::ForeachStmt
             | SyntaxKind::AssignStmt
             | SyntaxKind::ContinuousAssign
             | SyntaxKind::VarDecl

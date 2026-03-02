@@ -478,6 +478,11 @@ pub enum SyntaxKind {
     // Per-instance wrapper in module instantiation (LRM 23.3.2)
     HierarchicalInstance,
 
+    // Foreach loop (LRM 12.7.3)
+    ForeachStmt,
+    ForeachVarList,
+    ForeachVarSlot,
+
     #[doc(hidden)]
     __Last,
 }

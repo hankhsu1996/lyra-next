@@ -10,7 +10,7 @@ use crate::builder_order::{assign_order_keys, detect_duplicates};
 use crate::builder_types::{collect_name_refs, collect_type_spec_refs, collect_typedef};
 
 use crate::def_entry::{DefEntry, DefEntryBuilder, DefScope};
-use crate::def_index::{DefIndex, Import, LocalDecl, LocalDeclId, UseSite};
+use crate::def_index::{DefIndex, ForeachVarDef, Import, LocalDecl, LocalDeclId, UseSite};
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::EnumDef;
 use crate::global_index::DefinitionKind;
@@ -99,6 +99,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         modport_defs: HashMap::new(),
         modport_name_map: HashMap::new(),
         export_decls: ctx.export_decls.into_boxed_slice(),
+        foreach_var_defs: ctx.foreach_var_defs,
         diagnostics: diagnostics.into_boxed_slice(),
         internal_errors: ctx.internal_errors.into_boxed_slice(),
     };
@@ -152,6 +153,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) instance_decls: Vec<InstanceDecl>,
     pub(crate) raw_modport_defs: Vec<RawModportEntry>,
     pub(crate) export_decls: Vec<crate::def_index::ExportDecl>,
+    pub(crate) foreach_var_defs: HashMap<crate::symbols::SymbolId, ForeachVarDef>,
     pub(crate) local_decls: Vec<LocalDecl>,
     pub(crate) local_decl_ordinals: HashMap<ScopeId, u32>,
     pub(crate) import_ordinals: HashMap<ScopeId, u32>,
@@ -179,6 +181,7 @@ impl<'a> DefContext<'a> {
             instance_decls: Vec::new(),
             raw_modport_defs: Vec::new(),
             export_decls: Vec::new(),
+            foreach_var_defs: HashMap::new(),
             local_decls: Vec::new(),
             local_decl_ordinals: HashMap::new(),
             import_ordinals: HashMap::new(),
@@ -228,7 +231,10 @@ impl<'a> DefContext<'a> {
             match sym.kind {
                 SymbolKind::Function => sym.decl_site.kind() == SyntaxKind::FunctionDecl,
                 SymbolKind::Task => sym.decl_site.kind() == SyntaxKind::TaskDecl,
-                SymbolKind::Variable => sym.decl_site.kind() == SyntaxKind::VarDecl,
+                SymbolKind::Variable => matches!(
+                    sym.decl_site.kind(),
+                    SyntaxKind::VarDecl | SyntaxKind::ForeachStmt
+                ),
                 SymbolKind::Net => sym.decl_site.kind() == SyntaxKind::NetDecl,
                 SymbolKind::Parameter => sym.decl_site.kind() == SyntaxKind::ParamDecl,
                 SymbolKind::PortAnsi => sym.decl_site.kind() == SyntaxKind::Port,
