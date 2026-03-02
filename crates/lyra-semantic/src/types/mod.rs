@@ -583,17 +583,22 @@ impl Ty {
     /// Whether this type is a data type (LRM 6.2.1).
     ///
     /// Returns false for void, event, interface, and error types.
+    /// For arrays, peels to the leaf element and checks that it is a data type.
     pub fn is_data_type(&self) -> bool {
-        matches!(
-            self,
-            Ty::Integral(_)
-                | Ty::Real(_)
-                | Ty::Enum(_)
-                | Ty::Record(_)
-                | Ty::Array { .. }
-                | Ty::String
-                | Ty::Chandle
-        )
+        is_data_recursive(self)
+    }
+
+    /// Produce a `DataTyView` if this type is a data type (LRM 6.2.1).
+    ///
+    /// Accepts integral, real, enum, record, string, chandle, and arrays
+    /// whose leaf element is a data type. Rejects interface, event, void,
+    /// and error.
+    pub fn as_data_view(&self) -> Option<DataTyView<'_>> {
+        if is_data_recursive(self) {
+            Some(DataTyView(self))
+        } else {
+            None
+        }
     }
 
     /// Human-readable type representation (pure, no DB access).
@@ -625,6 +630,37 @@ impl Ty {
             Self::Void => SmolStr::new_static("void"),
             Self::Error => SmolStr::new_static("<error>"),
         }
+    }
+}
+
+/// A borrowed view proving that the wrapped `Ty` is a data type (LRM 6.2.1).
+///
+/// Constructible only through [`Ty::as_data_view`]. Data-only APIs can
+/// accept `DataTyView` to enforce at the type level that non-data kinds
+/// (interface, event, void, error) have been excluded.
+#[derive(Debug, Clone, Copy)]
+pub struct DataTyView<'a>(&'a Ty);
+
+impl<'a> DataTyView<'a> {
+    /// Access the underlying `Ty`.
+    pub fn ty(self) -> &'a Ty {
+        self.0
+    }
+}
+
+/// Whether a non-array `Ty` variant is a data type leaf.
+fn is_data_leaf(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Integral(_) | Ty::Real(_) | Ty::Enum(_) | Ty::Record(_) | Ty::String | Ty::Chandle
+    )
+}
+
+/// Whether a `Ty` is a data type, peeling arrays to check the leaf element.
+fn is_data_recursive(ty: &Ty) -> bool {
+    match ty {
+        Ty::Array { elem, .. } => is_data_recursive(elem),
+        other => is_data_leaf(other),
     }
 }
 
