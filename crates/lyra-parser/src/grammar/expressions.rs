@@ -232,7 +232,7 @@ fn eat_indexed_part_select_op(p: &mut Parser) -> bool {
     }
 }
 
-fn parse_index_or_range(p: &mut Parser, lhs: CompletedMarker) -> CompletedMarker {
+pub(crate) fn parse_index_or_range(p: &mut Parser, lhs: CompletedMarker) -> CompletedMarker {
     let m = lhs.precede(p);
     p.bump(); // [
     // Use Bracket mode so `+:` and `-:` are not consumed as binary ops

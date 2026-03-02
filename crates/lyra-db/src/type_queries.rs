@@ -311,10 +311,10 @@ fn type_of_instance(
 
 /// Derive the type of a foreach loop variable from the iterated array's dimension.
 ///
-/// The array expression is always a `NameRef` or `QualifiedName` (the parser
-/// rejects postfix forms). Resolves the name, extracts the array type,
-/// decomposes its unpacked dimensions, and maps the variable's slot to the
-/// corresponding dimension's index type.
+/// Types the full array header expression via `type_of_expr`, decomposes its
+/// unpacked dimensions, and maps the variable's slot to the corresponding
+/// dimension's index type. This handles simple names, qualified names,
+/// field access (`s.arr`), and index selects (`a[0]`) uniformly.
 /// Fixed-size, dynamic, queue, and wildcard-associative dimensions yield `int`;
 /// typed-associative dimensions yield the explicit index type.
 fn type_of_foreach_var(
@@ -324,8 +324,9 @@ fn type_of_foreach_var(
     fv_def: &lyra_semantic::def_index::ForeachVarDef,
 ) -> lyra_semantic::types::SymbolType {
     use lyra_ast::{AstNode, ForeachStmt, HasSyntax};
-    use lyra_semantic::resolve_index::ResolvedTarget;
     use lyra_semantic::types::{AssocIndex, SymbolType, SymbolTypeError};
+
+    use crate::expr_queries::{ExprRef, type_of_expr};
 
     let parse = parse_file(db, source_file);
     let map = ast_id_map(db, source_file);
@@ -340,30 +341,17 @@ fn type_of_foreach_var(
         return SymbolType::Error(SymbolTypeError::MissingDecl);
     };
 
-    // The array expression is a NameRef or QualifiedName; get its site.
     let Some(expr_site) = map.erased_ast_id(array_expr.syntax()) else {
         return SymbolType::Error(SymbolTypeError::MissingDecl);
     };
 
-    // Resolve the name via ResolveIndex
-    let resolve = resolve_index_file(db, source_file, unit);
-    let Some(resolution) = resolve.resolutions.get(&expr_site) else {
-        return SymbolType::Error(SymbolTypeError::MissingDecl);
-    };
-
-    let array_type = match &resolution.target {
-        ResolvedTarget::Symbol(gsym) => {
-            let sym_ref = SymbolRef::new(db, unit, *gsym);
-            type_of_symbol(db, sym_ref)
-        }
-        _ => return SymbolType::Error(SymbolTypeError::MissingDecl),
-    };
-
-    let ty = match &array_type {
-        SymbolType::Value(ty) | SymbolType::TypeAlias(ty) => ty.clone(),
-        SymbolType::Net(net) => net.data.clone(),
-        SymbolType::Error(_) => return array_type,
-    };
+    // Type the array header expression via type_of_expr.
+    // IndexExpr peels unpacked dims, FieldExpr resolves member types,
+    // so the returned type reflects only the remaining dims after the
+    // header selects. Slot 0 maps to the outermost remaining dim.
+    let expr_ref = ExprRef::new(db, unit, expr_site);
+    let expr_type = type_of_expr(db, expr_ref);
+    let ty = expr_type.ty;
 
     // Decompose unpacked dimensions and map slot directly to index type.
     let (_base, dims) = lyra_semantic::types::collect_array_dims(&ty);
