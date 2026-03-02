@@ -27,10 +27,10 @@ pub use nodes::{
     ModuleInstantiation, NameRef, NetDecl, NewExpr, PackageBody, PackageDecl, PackedDimension,
     ParamDecl, ParamPortList, ParenExpr, Port, PortList, PrefixExpr, PrimitiveDecl, ProgramBody,
     ProgramDecl, QualifiedName, RangeExpr, RangeKind, RepeatStmt, ReplicExpr, SourceFile,
-    StreamExpr, StreamOperandItem, StreamOperands, StreamRange, StreamRangeOp, StreamSliceSize,
-    StreamWithClause, StructMember, StructType, SyntaxAssignOp, SyntaxBinaryOp, SyntaxPrefixOp,
-    SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl, TimingControl, TypeSpec, TypedefDecl,
-    UnpackedDimension, VarDecl, WhileStmt,
+    StreamDir, StreamExpr, StreamOperandItem, StreamOperands, StreamRange, StreamRangeOp,
+    StreamSliceSize, StreamWithClause, StructMember, StructType, SyntaxAssignOp, SyntaxBinaryOp,
+    SyntaxPrefixOp, SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl, TimingControl, TypeSpec,
+    TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
 };
 pub use port::PortDirection;
 pub use support::{AstChildren, expr_children, field_exprs};

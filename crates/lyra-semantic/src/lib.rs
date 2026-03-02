@@ -25,6 +25,7 @@ mod resolve;
 pub mod resolve_index;
 pub mod scopes;
 pub mod site;
+pub(crate) mod streaming;
 pub mod symbols;
 pub(crate) mod system_functions;
 pub mod type_check;
@@ -33,6 +34,7 @@ pub mod type_infer;
 pub mod types;
 
 pub use site::Site;
+pub use streaming::fixed_stream_width_bits_of_expr_type;
 
 pub use builder::build_def_index;
 pub use resolve::{

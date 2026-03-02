@@ -124,13 +124,9 @@ Locator methods (`find`, `find_index`, `find_first`, `find_first_index`, `find_l
 
 ## Chapter 11 -- Operators and Expressions
 
-### 11.4.14: Streaming `with` array range -- unpack and dynamic arrays
+### 11.4.14: Streaming `with` selection semantics and dynamic array resize
 
-Parsing and pack-width semantics for const ranges on fixed-size arrays with integral/enum elements implemented. Unpack (LHS) semantics and dynamic array resize pending (blocked by streaming assignment target gap and dynamic array support). Test: `lrm/ch11/11.4.14.4_streaming_with`.
-
-### 11.4.14: Streaming assignment target (unpack)
-
-Streaming operators on the LHS of assignments (unpack semantics) are not handled. The parser accepts the syntax but semantic checking (width validation, dynamic resizing) is not implemented. Blocked by: assignment target analysis. Test: `lrm/ch11/11.4.14.0_streaming_operators/cases/streaming_unpack`.
+Pack-width semantics for const ranges on fixed-size arrays with integral/enum elements implemented. Streaming unpack (LHS) implemented for fixed-width operands with width matching. Remaining: `with` selection semantics on unpack targets and dynamic array resize on unpack. Test: `lrm/ch11/11.4.14.4_streaming_with`.
 
 ### 11.4.14.1: Non-integral operand bitstream conversion
 
