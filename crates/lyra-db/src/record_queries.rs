@@ -197,14 +197,9 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
         // Normalize unevaluated dims
         let ty = lyra_semantic::normalize_ty(&lowered.ty, &eval);
 
-        // Convert field type errors to SemanticDiag using the type reference anchor
+        // Convert field type errors to SemanticDiag using the def-anchored type site
         if let Some(err) = &lowered.err {
-            let primary = match &field.ty {
-                TypeRef::Named { type_site, .. } | TypeRef::Qualified { type_site, .. } => {
-                    DiagSpan::Site(*type_site)
-                }
-                TypeRef::Resolved(_) => DiagSpan::Site(field.name_site),
-            };
+            let primary = DiagSpan::Site(field.best_type_site());
             let display_name = err.path.join("::");
             match err.kind {
                 FieldTyErrorKind::UndeclaredType => {
@@ -228,15 +223,10 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
             }
         }
 
-        let type_site = match &field.ty {
-            TypeRef::Named { type_site, .. } | TypeRef::Qualified { type_site, .. } => *type_site,
-            TypeRef::Resolved(_) => field.name_site,
-        };
-
         fields.push(FieldSem {
             name: field.name.clone(),
             ty,
-            type_site,
+            type_site: field.best_type_site(),
         });
     }
 
@@ -271,6 +261,28 @@ fn wrap_field_unpacked_dims(
     lyra_semantic::wrap_unpacked(ty, &dims)
 }
 
+/// Returns the forbidden type category if this type cannot appear in an untagged union.
+///
+/// LRM 7.3: untagged unions shall not contain dynamic arrays, associative
+/// arrays, queues, chandle, or event as data members.
+///
+/// Checks the direct (outermost) type only. Does not chase through
+/// typedefs or nested array element types -- typedef resolution has
+/// already been applied by `record_sem` before this point.
+fn forbidden_union_member_category(ty: &Ty) -> Option<&'static str> {
+    match ty {
+        Ty::Chandle => Some("chandle"),
+        Ty::Event => Some("event"),
+        Ty::Array { dim, .. } => match dim {
+            lyra_semantic::types::UnpackedDim::Unsized => Some("dynamic array"),
+            lyra_semantic::types::UnpackedDim::Queue { .. } => Some("queue"),
+            lyra_semantic::types::UnpackedDim::Assoc(_) => Some("associative array"),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn empty_record_sem() -> RecordSem {
     RecordSem {
         fields: Box::new([]),
@@ -279,7 +291,7 @@ fn empty_record_sem() -> RecordSem {
     }
 }
 
-/// Per-record diagnostics: type resolution errors + packed union width validation.
+/// Per-record diagnostics: type resolution errors + member validation.
 #[salsa::tracked(return_ref)]
 pub fn record_diagnostics<'db>(
     db: &'db dyn salsa::Database,
@@ -295,10 +307,48 @@ pub fn record_diagnostics<'db>(
 
     let pp = preprocess_file(db, source_file);
     let sem = record_sem(db, rref);
+    let def = def_index_file(db, source_file);
+    let record_def = def.record_def_by_id(record_id);
 
-    // Lower record_sem.diags
+    // Collect SemanticDiags: record_sem type-resolution errors + validation checks
+    let mut sem_diags: Vec<SemanticDiag> = sem.diags.to_vec();
+
+    if let Some(record_def) = record_def {
+        // Void member restriction (LRM 7.3.2): void only in tagged unions
+        if record_def.kind != RecordKind::TaggedUnion {
+            for (def_field, sem_field) in record_def.fields.iter().zip(sem.fields.iter()) {
+                if sem_field.ty == Ty::Void {
+                    sem_diags.push(SemanticDiag {
+                        kind: SemanticDiagKind::VoidMemberNonTagged {
+                            name: sem_field.name.clone(),
+                        },
+                        primary: DiagSpan::Site(def_field.best_type_site()),
+                        label: None,
+                    });
+                }
+            }
+        }
+
+        // Untagged union member type restriction (LRM 7.3)
+        if record_def.kind == RecordKind::Union {
+            for (def_field, sem_field) in record_def.fields.iter().zip(sem.fields.iter()) {
+                if let Some(category) = forbidden_union_member_category(&sem_field.ty) {
+                    sem_diags.push(SemanticDiag {
+                        kind: SemanticDiagKind::IllegalUnionMemberType {
+                            name: sem_field.name.clone(),
+                            category: SmolStr::new(category),
+                        },
+                        primary: DiagSpan::Site(def_field.best_type_site()),
+                        label: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Lower all SemanticDiags through the shared pipeline
     let mut diags = Vec::new();
-    for diag in &*sem.diags {
+    for diag in &sem_diags {
         let chosen = crate::lower_diag::choose_best_diag_span(diag.primary, diag.label);
         let (primary_span, _) =
             crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, chosen);
@@ -309,9 +359,7 @@ pub fn record_diagnostics<'db>(
         ));
     }
 
-    // Packed union width validation
-    let def = def_index_file(db, source_file);
-    let record_def = def.record_def_by_id(record_id);
+    // Packed union width validation (structural, not SemanticDiag-based)
     if let Some(record_def) = record_def
         && record_def.kind == RecordKind::Union
         && record_def.packing == Packing::Packed

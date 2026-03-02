@@ -262,7 +262,8 @@ impl<'db> TyFmt<'db> {
             Some(d) => {
                 let mut s = String::new();
                 match d.kind {
-                    RecordKind::Union | RecordKind::TaggedUnion => s.push_str("union"),
+                    RecordKind::TaggedUnion => s.push_str("tagged union"),
+                    RecordKind::Union => s.push_str("union"),
                     RecordKind::Struct => s.push_str("struct"),
                 }
                 match d.packing {

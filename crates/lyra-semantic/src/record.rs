@@ -91,6 +91,19 @@ pub struct RecordField {
     pub ty: TypeRef,
 }
 
+impl RecordField {
+    /// The declared type site for this field.
+    ///
+    /// Named/qualified types use their use-site anchor; resolved types
+    /// (builtins like `int`, `void`) fall back to the field name site.
+    pub fn best_type_site(&self) -> Site {
+        match &self.ty {
+            TypeRef::Named { type_site, .. } | TypeRef::Qualified { type_site, .. } => *type_site,
+            TypeRef::Resolved(_) => self.name_site,
+        }
+    }
+}
+
 /// A resolved record field with its semantic type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldSem {

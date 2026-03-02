@@ -47,9 +47,13 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 7,
     };
-    pub const UNSUPPORTED_TAGGED_UNION: Self = Self {
+    pub const VOID_MEMBER_NON_TAGGED: Self = Self {
         namespace: "lyra.semantic",
-        number: 8,
+        number: 13,
+    };
+    pub const ILLEGAL_UNION_MEMBER_TYPE: Self = Self {
+        namespace: "lyra.semantic",
+        number: 14,
     };
     pub const ENUM_RANGE_INVALID: Self = Self {
         namespace: "lyra.semantic",
