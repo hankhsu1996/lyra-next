@@ -57,7 +57,7 @@ pub fn bit_width_total<'db>(
         }
         Ty::Record(id) => {
             let rref = RecordRef::new(db, unit, *id);
-            record_width(db, unit, rref)
+            record_bitstream_width(db, unit, rref)
         }
         Ty::Array { elem, dim } => {
             let len = dim.fixed_len()?;
@@ -78,12 +78,13 @@ fn bit_width_total_recover<'db>(
     None
 }
 
-/// Compute the total bit-stream width of a record (struct or union).
+/// Bit-stream width of a record: the value `$bits` reports (LRM 20.6.2).
 ///
-/// Struct: field concatenation in declared order (sum of field widths).
-/// Union (hard or soft): one active field (max of field widths).
-/// Tagged unions return `None`.
-fn record_width<'db>(
+/// Width depends only on record kind, not on packing:
+/// - Struct: sum of member bit-stream widths.
+/// - Union: max of member bit-stream widths.
+/// - `TaggedUnion`: `tag_bits + max(member bit-stream widths)`.
+fn record_bitstream_width<'db>(
     db: &'db dyn salsa::Database,
     unit: CompilationUnit,
     rref: RecordRef<'db>,
@@ -96,10 +97,6 @@ fn record_width<'db>(
 
     let record_def = def.record_def_by_id(record_id)?;
 
-    if record_def.kind == RecordKind::TaggedUnion {
-        return None;
-    }
-
     let lowered = record_field_tys(db, rref);
     if lowered.is_empty() {
         return Some(0);
@@ -110,24 +107,54 @@ fn record_width<'db>(
         eval_const_int(db, expr_ref)
     };
 
-    let mut widths = Vec::with_capacity(lowered.len());
-    for field_ty in &*lowered {
-        let normalized = lyra_semantic::normalize_ty(&field_ty.ty, &eval);
-        let ty_ref = TyRef::new(db, normalized);
-        let w = bit_width_total(db, unit, ty_ref)?;
-        widths.push(w);
-    }
-
     match record_def.kind {
         RecordKind::Struct => {
             let mut total: u32 = 0;
-            for w in &widths {
-                total = total.checked_add(*w)?;
+            for field_ty in &*lowered {
+                let normalized = lyra_semantic::normalize_ty(&field_ty.ty, &eval);
+                let ty_ref = TyRef::new(db, normalized);
+                let w = bit_width_total(db, unit, ty_ref)?;
+                total = total.checked_add(w)?;
             }
             Some(total)
         }
-        RecordKind::Union => widths.iter().copied().max(),
-        RecordKind::TaggedUnion => None,
+        RecordKind::Union => {
+            let mut max_w: u32 = 0;
+            for field_ty in &*lowered {
+                let normalized = lyra_semantic::normalize_ty(&field_ty.ty, &eval);
+                let ty_ref = TyRef::new(db, normalized);
+                let w = bit_width_total(db, unit, ty_ref)?;
+                if w > max_w {
+                    max_w = w;
+                }
+            }
+            Some(max_w)
+        }
+        RecordKind::TaggedUnion => {
+            let mut max_payload: u32 = 0;
+            for field_ty in &*lowered {
+                let normalized = lyra_semantic::normalize_ty(&field_ty.ty, &eval);
+                if normalized == lyra_semantic::types::Ty::Void {
+                    continue;
+                }
+                let ty_ref = TyRef::new(db, normalized);
+                let w = bit_width_total(db, unit, ty_ref)?;
+                if w > max_payload {
+                    max_payload = w;
+                }
+            }
+            let n = record_def.fields.len();
+            Some(tag_bits(n).checked_add(max_payload)?)
+        }
+    }
+}
+
+/// Minimum bits needed to encode `n` alternatives.
+fn tag_bits(n: usize) -> u32 {
+    if n <= 1 {
+        0
+    } else {
+        u32::BITS - ((n as u32) - 1).leading_zeros()
     }
 }
 

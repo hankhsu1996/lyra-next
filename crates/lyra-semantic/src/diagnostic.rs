@@ -59,7 +59,13 @@ pub enum SemanticDiagKind {
     NotAType {
         name: SmolStr,
     },
-    UnsupportedTaggedUnion,
+    VoidMemberNonTagged {
+        name: SmolStr,
+    },
+    IllegalUnionMemberType {
+        name: SmolStr,
+        category: SmolStr,
+    },
     IllegalEnumBaseType {
         name: SmolStr,
     },
@@ -105,8 +111,11 @@ impl SemanticDiag {
             SemanticDiagKind::NotAType { name } => {
                 format!("`{name}` is not a type")
             }
-            SemanticDiagKind::UnsupportedTaggedUnion => {
-                "tagged unions are not yet supported".to_string()
+            SemanticDiagKind::VoidMemberNonTagged { name } => {
+                format!("void member `{name}` is only allowed in tagged unions")
+            }
+            SemanticDiagKind::IllegalUnionMemberType { name, category } => {
+                format!("{category} member `{name}` is not allowed in untagged unions")
             }
             SemanticDiagKind::IllegalEnumBaseType { name } => {
                 format!("enum base type `{name}` is not an integral type")

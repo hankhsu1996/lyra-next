@@ -161,10 +161,17 @@ pub(crate) fn lower_semantic_diag(
             name,
             primary_span,
         ),
-        SemanticDiagKind::UnsupportedTaggedUnion => lower_args_diag(
-            DiagnosticCode::UNSUPPORTED_TAGGED_UNION,
-            MessageId::UnsupportedTaggedUnion,
-            vec![],
+        SemanticDiagKind::VoidMemberNonTagged { name } => lower_name_diag(
+            DiagnosticCode::VOID_MEMBER_NON_TAGGED,
+            MessageId::VoidMemberNonTagged,
+            MessageId::OnlyInTaggedUnion,
+            name,
+            primary_span,
+        ),
+        SemanticDiagKind::IllegalUnionMemberType { name, category } => lower_args_diag(
+            DiagnosticCode::ILLEGAL_UNION_MEMBER_TYPE,
+            MessageId::IllegalUnionMemberType,
+            vec![Arg::Name(name.clone()), Arg::Category(category.clone())],
             primary_span,
         ),
         SemanticDiagKind::IllegalEnumBaseType { name } => lower_name_diag(

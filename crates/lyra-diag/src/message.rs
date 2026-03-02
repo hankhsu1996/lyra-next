@@ -25,7 +25,9 @@ pub enum MessageId {
     NotADataType,
     UndeclaredType,
     NotAType,
-    UnsupportedTaggedUnion,
+    VoidMemberNonTagged,
+    OnlyInTaggedUnion,
+    IllegalUnionMemberType,
     IllegalEnumBaseType,
     EnumBaseDimsNotConstant,
     EnumRangeBoundNotEvaluable,
@@ -97,6 +99,8 @@ pub enum Arg {
     Name(SmolStr),
     /// Internal diagnostic payload (not a user symbol name).
     Detail(SmolStr),
+    /// Type category label (e.g. "chandle", "dynamic array").
+    Category(SmolStr),
     Width(u32),
     Count(usize),
 }
@@ -114,6 +118,14 @@ impl Arg {
     pub fn as_detail(&self) -> Option<&str> {
         match self {
             Arg::Detail(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Extract the inner `&str` if this is a `Category` variant.
+    pub fn as_category(&self) -> Option<&str> {
+        match self {
+            Arg::Category(s) => Some(s.as_str()),
             _ => None,
         }
     }
@@ -203,7 +215,8 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::NotAType
         | MessageId::BitsNonDataType
         | MessageId::NotADataType
-        | MessageId::UnsupportedTaggedUnion
+        | MessageId::VoidMemberNonTagged
+        | MessageId::IllegalUnionMemberType
         | MessageId::IllegalEnumBaseType
         | MessageId::EnumBaseDimsNotConstant
         | MessageId::EnumRangeBoundNotEvaluable
@@ -254,6 +267,7 @@ fn render_other_message(msg: &Message) -> String {
         }
         MessageId::RealizedHere => format!("wildcard import of `{}` realized here", name()),
         MessageId::WildcardImportHere => "wildcard import here".into(),
+        MessageId::OnlyInTaggedUnion => "only allowed in tagged unions".into(),
         MessageId::NotFoundInScope => "not found in this scope".into(),
         MessageId::NotFoundAsType => "not found as a type in this scope".into(),
         MessageId::ValueNotType => "this is a value, not a type".into(),
@@ -291,24 +305,13 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::NotAType => format!("`{}` is not a type", name()),
         MessageId::BitsNonDataType => "$bits argument is not a data type".into(),
         MessageId::NotADataType => "not a data type".into(),
-        MessageId::UnsupportedTaggedUnion => "tagged unions are not yet supported".into(),
-        MessageId::IllegalEnumBaseType => {
-            format!("enum base type `{}` is not an integral type", name())
-        }
-        MessageId::EnumBaseDimsNotConstant => {
-            "enum base type has non-constant packed dimensions".into()
-        }
-        MessageId::EnumRangeBoundNotEvaluable => {
-            "enum member range bound is not a constant expression".into()
-        }
-        MessageId::EnumRangeCountNegative => {
-            let count = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
-            format!("enum member range count is negative ({count})")
-        }
-        MessageId::EnumRangeTooLarge => {
-            let count = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
-            format!("enum member range count is too large ({count})")
-        }
+        MessageId::VoidMemberNonTagged
+        | MessageId::IllegalUnionMemberType
+        | MessageId::IllegalEnumBaseType
+        | MessageId::EnumBaseDimsNotConstant
+        | MessageId::EnumRangeBoundNotEvaluable
+        | MessageId::EnumRangeCountNegative
+        | MessageId::EnumRangeTooLarge => render_record_message(msg),
         MessageId::EnumAssignFromNonEnum => {
             let rhs_ty = name();
             let lhs_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -391,6 +394,40 @@ fn render_array_message(msg: &Message) -> String {
             let lhs_ty = name();
             let rhs_ty = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
             format!("incompatible array types: cannot assign `{rhs_ty}` to `{lhs_ty}`")
+        }
+        _ => String::new(),
+    }
+}
+
+fn render_record_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
+        MessageId::VoidMemberNonTagged => {
+            format!("void member `{}` is only allowed in tagged unions", name())
+        }
+        MessageId::IllegalUnionMemberType => {
+            let category = msg.args.iter().find_map(Arg::as_category).unwrap_or("?");
+            format!(
+                "{category} member `{}` is not allowed in untagged unions",
+                name()
+            )
+        }
+        MessageId::IllegalEnumBaseType => {
+            format!("enum base type `{}` is not an integral type", name())
+        }
+        MessageId::EnumBaseDimsNotConstant => {
+            "enum base type has non-constant packed dimensions".into()
+        }
+        MessageId::EnumRangeBoundNotEvaluable => {
+            "enum member range bound is not a constant expression".into()
+        }
+        MessageId::EnumRangeCountNegative => {
+            let count = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            format!("enum member range count is negative ({count})")
+        }
+        MessageId::EnumRangeTooLarge => {
+            let count = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            format!("enum member range count is too large ({count})")
         }
         _ => String::new(),
     }

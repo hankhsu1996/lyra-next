@@ -258,7 +258,7 @@ fn union_def_fields_stable() {
 }
 
 #[test]
-fn tagged_union_rejected() {
+fn tagged_union_basic() {
     let db = LyraDatabase::default();
     let file = new_file(
         &db,
@@ -266,18 +266,20 @@ fn tagged_union_rejected() {
         "module m; typedef union tagged { int a; int b; } instr_t; instr_t x; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    let var = get_type(&db, file, unit, "x");
-    assert_eq!(
-        var,
-        SymbolType::Value(Ty::Error),
-        "tagged union typedef should resolve to Ty::Error"
+    let td = get_type(&db, file, unit, "instr_t");
+    assert!(
+        matches!(td, SymbolType::TypeAlias(Ty::Record(_))),
+        "tagged union typedef should be TypeAlias(Record), got {td:?}"
     );
-    let diags = file_diagnostics(&db, file, unit);
-    let has_tagged = diags.iter().any(|d| {
-        d.render_message()
-            .contains("tagged unions are not yet supported")
-    });
-    assert!(has_tagged, "should emit tagged union diagnostic: {diags:?}");
+    let var = get_type(&db, file, unit, "x");
+    match var {
+        SymbolType::Value(Ty::Record(ref id)) => {
+            let def = def_index_file(&db, file);
+            let rec = def.record_def_by_id(*id).expect("record def");
+            assert_eq!(rec.kind, RecordKind::TaggedUnion);
+        }
+        other => panic!("expected Value(Record) for tagged union, got {other:?}"),
+    }
 }
 
 #[test]
@@ -426,5 +428,144 @@ fn enum_member_name_collision() {
     assert!(
         !dup_diags.is_empty(),
         "should diagnose duplicate IDLE in value namespace: {diags:?}"
+    );
+}
+
+#[test]
+fn void_member_in_struct_diagnosed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef struct packed { void v; logic [7:0] d; } s_t; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let void_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == lyra_diag::DiagnosticCode::VOID_MEMBER_NON_TAGGED)
+        .collect();
+    assert_eq!(
+        void_diags.len(),
+        1,
+        "should diagnose void member in struct: {diags:?}"
+    );
+    assert!(
+        void_diags[0].render_message().contains("void member `v`"),
+        "message should name the field: {}",
+        void_diags[0].render_message()
+    );
+}
+
+#[test]
+fn void_member_in_untagged_union_diagnosed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union packed { void v; logic [7:0] d; } u_t; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let void_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == lyra_diag::DiagnosticCode::VOID_MEMBER_NON_TAGGED)
+        .collect();
+    assert_eq!(
+        void_diags.len(),
+        1,
+        "should diagnose void member in untagged union: {diags:?}"
+    );
+}
+
+#[test]
+fn tagged_union_allows_void_member() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union tagged { void None; int Valid; } maybe_t; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let void_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == lyra_diag::DiagnosticCode::VOID_MEMBER_NON_TAGGED)
+        .collect();
+    assert!(
+        void_diags.is_empty(),
+        "tagged union should allow void members: {diags:?}"
+    );
+}
+
+#[test]
+fn chandle_in_untagged_union_diagnosed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union { chandle h; int i; } u_t; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let illegal_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == lyra_diag::DiagnosticCode::ILLEGAL_UNION_MEMBER_TYPE)
+        .collect();
+    assert_eq!(
+        illegal_diags.len(),
+        1,
+        "should diagnose chandle in untagged union: {diags:?}"
+    );
+    assert!(
+        illegal_diags[0].render_message().contains("chandle"),
+        "message should name the category: {}",
+        illegal_diags[0].render_message()
+    );
+}
+
+#[test]
+fn event_in_untagged_union_diagnosed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union { event e; int i; } u_t; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let illegal_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == lyra_diag::DiagnosticCode::ILLEGAL_UNION_MEMBER_TYPE)
+        .collect();
+    assert_eq!(
+        illegal_diags.len(),
+        1,
+        "should diagnose event in untagged union: {diags:?}"
+    );
+    assert!(
+        illegal_diags[0].render_message().contains("event"),
+        "message should name the category: {}",
+        illegal_diags[0].render_message()
+    );
+}
+
+#[test]
+fn tagged_union_allows_chandle_and_event() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; typedef union tagged { chandle Handle; event Evt; int Val; } u_t; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let illegal_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == lyra_diag::DiagnosticCode::ILLEGAL_UNION_MEMBER_TYPE)
+        .collect();
+    assert!(
+        illegal_diags.is_empty(),
+        "tagged union should allow chandle/event members: {diags:?}"
     );
 }

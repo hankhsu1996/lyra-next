@@ -127,7 +127,7 @@
   {"section": "7.3", "chapter": 7, "title": "Unions", "parent": "7", "children": ["7.3.0","7.3.1","7.3.2"], "ownable": false},
   {"section": "7.3.0", "chapter": 7, "title": "Union declaration", "parent": "7.3", "children": [], "ownable": true},
   {"section": "7.3.1", "chapter": 7, "title": "Packed unions", "parent": "7.3", "children": [], "ownable": true},
-  {"section": "7.3.2", "chapter": 7, "title": "Tagged unions", "parent": "7.3", "children": [], "ownable": false},
+  {"section": "7.3.2", "chapter": 7, "title": "Tagged unions", "parent": "7.3", "children": [], "ownable": true},
   {"section": "7.4", "chapter": 7, "title": "Packed and unpacked arrays", "parent": "7", "children": ["7.4.1","7.4.2","7.4.3","7.4.4","7.4.5","7.4.6"], "ownable": false},
   {"section": "7.4.1", "chapter": 7, "title": "Packed arrays", "parent": "7.4", "children": [], "ownable": true},
   {"section": "7.4.2", "chapter": 7, "title": "Unpacked arrays", "parent": "7.4", "children": [], "ownable": true},
