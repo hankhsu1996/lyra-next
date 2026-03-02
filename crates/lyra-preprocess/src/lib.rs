@@ -1,3 +1,4 @@
+mod directive;
 mod engine;
 mod env;
 mod source_map;
@@ -6,7 +7,8 @@ use lyra_lexer::{SyntaxKind, Token};
 use lyra_source::{FileId, Span, TextRange, TextSize};
 use smol_str::SmolStr;
 
-pub use crate::env::{MacroDef, MacroEnv, MacroValue};
+pub use crate::directive::DirectiveKeyword;
+pub use crate::env::{MacroDef, MacroEnv, MacroTok, MacroTokenSeq, MacroValue};
 pub use crate::source_map::SourceMap;
 
 /// A resolved include file returned by an [`IncludeProvider`].
@@ -40,23 +42,57 @@ pub struct PreprocError {
     pub message: SmolStr,
 }
 
+/// Whether a directive event originated at the top level or inside a
+/// macro expansion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectiveEventOrigin {
+    TopLevel,
+    MacroExpansion,
+}
+
 /// A directive encountered during preprocessing that was not handled
 /// by the preprocessor itself (e.g., `` `timescale ``, `` `default_nettype ``).
 ///
 /// Preserved as a side-channel so later stages can consume directives
 /// they care about, while the output token stream stays directive-free.
+///
+/// Events are totally ordered by `(expanded_offset, event_seq)`.
+/// `expanded_offset` records the exact byte position in the expanded
+/// output where the directive would have appeared. `event_seq` is a
+/// monotonically increasing counter that breaks ties when multiple
+/// events share the same offset (e.g., consecutive stripped
+/// directives). This ordering is deterministic within a single
+/// preprocess invocation and provides a stable merge key for future
+/// parallel include processing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectiveEvent {
     pub span: Span,
     pub kind: DirectiveEventKind,
+    pub origin: DirectiveEventOrigin,
+    /// Byte offset in the expanded output at the point this event was
+    /// produced. For top-level events this is the current expanded
+    /// text length after flushing identity; for events inside a macro
+    /// body this is the expansion base offset plus bytes emitted so
+    /// far within the expansion.
+    pub expanded_offset: TextSize,
+    /// Monotonically increasing sequence number for deterministic
+    /// ordering when multiple events share the same `expanded_offset`.
+    pub event_seq: u32,
 }
 
 /// Classification of a directive event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DirectiveEventKind {
-    /// A directive the preprocessor does not handle.
-    Unknown(SmolStr),
+    /// A recognized LRM directive keyword encountered outside the
+    /// preprocessor's own handling (e.g., `` `timescale ``).
+    KnownDirective(DirectiveKeyword),
+    /// Use of an undefined macro name.
+    UndefinedMacro(SmolStr),
+    /// Malformed or unrecognized directive form.
+    UnrecognizedDirective(SmolStr),
 }
+
+const DEFAULT_MACRO_RECURSION_LIMIT: usize = 64;
 
 /// Inputs for preprocessing a single file.
 pub struct PreprocessInputs<'a> {
@@ -65,6 +101,14 @@ pub struct PreprocessInputs<'a> {
     pub text: &'a str,
     pub provider: &'a dyn IncludeProvider,
     pub starting_env: &'a MacroEnv,
+    /// Maximum nesting depth for recursive macro expansion.
+    /// Defaults to 64.
+    pub macro_recursion_limit: usize,
+}
+
+impl PreprocessInputs<'_> {
+    /// Default macro recursion limit (64).
+    pub const DEFAULT_RECURSION_LIMIT: usize = DEFAULT_MACRO_RECURSION_LIMIT;
 }
 
 /// Bundled output of preprocessing a single file.
@@ -131,6 +175,7 @@ pub fn preprocess_identity(file: FileId, tokens: &[Token], text: &str) -> Prepro
         text,
         provider: &NoOpProvider,
         starting_env: &env,
+        macro_recursion_limit: DEFAULT_MACRO_RECURSION_LIMIT,
     })
 }
 

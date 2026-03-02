@@ -1,24 +1,31 @@
 use lyra_source::{ExpansionFrame, ExpansionKind, FileId, FileLoc, Span, TextRange, TextSize};
 
+/// What produced a source-map segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SegmentKind {
+    /// Bytes copied verbatim from the primary file.
+    Identity,
+    /// Bytes from an included file. `call_site` points to the
+    /// `` `include `` directive in the parent file (distinct from
+    /// `Segment::origin` which points into the included file).
+    Include { call_site: Span },
+    /// Bytes produced by macro expansion. The call site (`` `FOO ``
+    /// token) is stored in `Segment::origin`.
+    Macro,
+}
+
 /// A contiguous range in the expanded output that originated from a
 /// specific source location.
-///
-/// Identity segments map back to the primary file. Expansion segments
-/// (includes, future macros) map to a different file and carry a
-/// non-empty `call_site`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Segment {
     pub expanded_range: TextRange,
     pub origin: Span,
-    /// The call-site span that caused expansion (e.g., the full
-    /// `` `include "x.sv" `` directive). Zero-range for identity
-    /// segments.
-    pub call_site: Span,
+    pub kind: SegmentKind,
 }
 
 impl Segment {
     fn is_identity(&self) -> bool {
-        self.call_site.range.is_empty()
+        matches!(self.kind, SegmentKind::Identity)
     }
 }
 
@@ -44,10 +51,10 @@ impl SourceMap {
             "segments must be sorted and non-overlapping",
         );
         debug_assert!(
-            segments
-                .iter()
-                .all(|s| s.expanded_range.len() == s.origin.range.len()),
-            "segment expanded length must match origin length",
+            segments.iter().all(|s| s.is_identity()
+                || matches!(s.kind, SegmentKind::Macro)
+                || s.expanded_range.len() == s.origin.range.len()),
+            "non-macro expansion segment length must match origin length",
         );
         Self {
             file,
@@ -66,9 +73,21 @@ impl SourceMap {
         }
         if let Some(seg) = self.find_segment(offset) {
             let delta = offset - seg.expanded_range.start();
+            let mapped_delta = if matches!(seg.kind, SegmentKind::Macro) {
+                std::cmp::min(
+                    delta,
+                    seg.origin
+                        .range
+                        .len()
+                        .checked_sub(TextSize::new(1))
+                        .unwrap_or(TextSize::new(0)),
+                )
+            } else {
+                delta
+            };
             Some(Span {
                 file: seg.origin.file,
-                range: TextRange::empty(seg.origin.range.start() + delta),
+                range: TextRange::empty(seg.origin.range.start() + mapped_delta),
             })
         } else {
             // No segment covers this offset. This can happen at the
@@ -142,18 +161,36 @@ impl SourceMap {
     /// primary file). Returns `Some` for positions from included files.
     pub fn expansion_frame(&self, offset: TextSize) -> Option<ExpansionFrame> {
         let seg = self.find_segment(offset)?;
-        if seg.is_identity() {
-            return None;
-        }
         let delta = offset - seg.expanded_range.start();
-        Some(ExpansionFrame {
-            kind: ExpansionKind::Include,
-            call_site: seg.call_site,
-            spelling: FileLoc {
-                file: seg.origin.file,
-                offset: seg.origin.range.start() + delta,
-            },
-        })
+        match &seg.kind {
+            SegmentKind::Identity => None,
+            SegmentKind::Include { call_site } => Some(ExpansionFrame {
+                kind: ExpansionKind::Include,
+                call_site: *call_site,
+                spelling: FileLoc {
+                    file: seg.origin.file,
+                    offset: seg.origin.range.start() + delta,
+                },
+            }),
+            SegmentKind::Macro => {
+                let clamped = std::cmp::min(
+                    delta,
+                    seg.origin
+                        .range
+                        .len()
+                        .checked_sub(TextSize::new(1))
+                        .unwrap_or(TextSize::new(0)),
+                );
+                Some(ExpansionFrame {
+                    kind: ExpansionKind::Macro,
+                    call_site: seg.origin,
+                    spelling: FileLoc {
+                        file: seg.origin.file,
+                        offset: seg.origin.range.start() + clamped,
+                    },
+                })
+            }
+        }
     }
 
     /// The primary file this source map belongs to.

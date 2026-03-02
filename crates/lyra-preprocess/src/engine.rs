@@ -1,12 +1,15 @@
+use std::sync::Arc;
+
 use lyra_lexer::{SyntaxKind, Token};
 use lyra_source::{FileId, Span, TextRange, TextSize};
 use smol_str::SmolStr;
 
-use crate::env::{MacroEnv, MacroValue};
-use crate::source_map::{Segment, SourceMap};
+use crate::directive::{DirectiveClass, DirectiveKeyword, classify_directive};
+use crate::env::{MacroEnv, MacroTok, MacroTokenSeq, MacroValue};
+use crate::source_map::{Segment, SegmentKind, SourceMap};
 use crate::{
-    DirectiveEvent, DirectiveEventKind, IncludeGraph, IncludeProvider, PreprocError, PreprocOutput,
-    PreprocessInputs, find_include_path,
+    DirectiveEvent, DirectiveEventKind, DirectiveEventOrigin, IncludeGraph, IncludeProvider,
+    PreprocError, PreprocOutput, PreprocessInputs, find_include_path,
 };
 
 struct CondFrame {
@@ -20,6 +23,7 @@ pub(crate) struct Preprocessor<'a> {
     tokens: &'a [Token],
     text: &'a str,
     provider: &'a dyn IncludeProvider,
+    macro_recursion_limit: usize,
 
     env: MacroEnv,
     cond_stack: Vec<CondFrame>,
@@ -30,6 +34,7 @@ pub(crate) struct Preprocessor<'a> {
     includes: IncludeGraph,
     errors: Vec<PreprocError>,
     directive_events: Vec<DirectiveEvent>,
+    event_seq_counter: u32,
 
     src_cursor: usize,
     flush_start: usize,
@@ -42,6 +47,7 @@ impl<'a> Preprocessor<'a> {
             tokens: inputs.tokens,
             text: inputs.text,
             provider: inputs.provider,
+            macro_recursion_limit: inputs.macro_recursion_limit,
             env: inputs.starting_env.clone(),
             cond_stack: Vec::new(),
             out_tokens: Vec::with_capacity(inputs.tokens.len()),
@@ -50,6 +56,7 @@ impl<'a> Preprocessor<'a> {
             includes: IncludeGraph::default(),
             errors: Vec::new(),
             directive_events: Vec::new(),
+            event_seq_counter: 0,
             src_cursor: 0,
             flush_start: 0,
         }
@@ -112,6 +119,12 @@ impl<'a> Preprocessor<'a> {
         self.cond_stack.last().is_none_or(|f| f.allow_emit)
     }
 
+    fn next_event_seq(&mut self) -> u32 {
+        let seq = self.event_seq_counter;
+        self.event_seq_counter += 1;
+        seq
+    }
+
     fn push_error(&mut self, range: TextRange, message: SmolStr) {
         self.errors.push(PreprocError {
             span: Span {
@@ -132,7 +145,17 @@ impl<'a> Preprocessor<'a> {
             "`define" => self.handle_define(idx),
             "`undef" => self.handle_undef(idx),
             "`include" => self.handle_include(idx),
-            _ => self.handle_unknown(idx, directive_text),
+            _ => match classify_directive(directive_text) {
+                DirectiveClass::MacroInvoke { name } => {
+                    if self.currently_emitting() {
+                        self.handle_macro_use(idx, name)
+                    } else {
+                        self.strip_macro_token(idx)
+                    }
+                }
+                DirectiveClass::Keyword(kw) => self.handle_known_directive(idx, kw),
+                DirectiveClass::Other { raw } => self.handle_unrecognized_directive(idx, raw),
+            },
         }
     }
 
@@ -278,18 +301,17 @@ impl<'a> Preprocessor<'a> {
     fn handle_define(&mut self, idx: usize) -> usize {
         let dir_len: usize = self.tokens[idx].len.into();
         let dir_start = self.src_cursor;
-        let dir_cursor = self.src_cursor;
 
         let mut j = idx + 1;
-        let mut cursor = dir_cursor + dir_len;
+        let mut cursor = self.src_cursor + dir_len;
 
-        // Skip non-newline whitespace
-        while j < self.tokens.len() && self.tokens[j].kind == SyntaxKind::Whitespace {
-            let ws_len: usize = self.tokens[j].len.into();
-            if self.text[cursor..cursor + ws_len].contains('\n') {
+        // Skip non-newline trivia (whitespace and comments)
+        while j < self.tokens.len() && self.tokens[j].kind.is_trivia() {
+            let t_text = self.tok_text_at(j, cursor);
+            if token_carries_newline(self.tokens[j].kind, t_text) {
                 break;
             }
-            cursor += ws_len;
+            cursor += t_text.len();
             j += 1;
         }
 
@@ -308,50 +330,50 @@ impl<'a> Preprocessor<'a> {
             return consumed;
         }
 
-        let name_tok = self.tokens[j];
-        let name_len: usize = name_tok.len.into();
-        let name = SmolStr::from(&self.text[cursor..cursor + name_len]);
-        cursor += name_len;
+        let name = SmolStr::from(self.tok_text_at(j, cursor));
+        cursor += usize::from(self.tokens[j].len);
         j += 1;
 
-        // Skip one optional non-newline whitespace token
-        if j < self.tokens.len() && self.tokens[j].kind == SyntaxKind::Whitespace {
-            let ws_len: usize = self.tokens[j].len.into();
-            if !self.text[cursor..cursor + ws_len].contains('\n') {
-                cursor += ws_len;
-                j += 1;
+        // Skip non-newline trivia between name and value
+        while j < self.tokens.len() && self.tokens[j].kind.is_trivia() {
+            let t_text = self.tok_text_at(j, cursor);
+            if token_carries_newline(self.tokens[j].kind, t_text) {
+                break;
             }
+            cursor += t_text.len();
+            j += 1;
         }
 
         // Collect value tokens until newline or EOF
-        let mut value_parts: Vec<&str> = Vec::new();
+        let mut value_toks: Vec<MacroTok> = Vec::new();
         while j < self.tokens.len() {
             let t = self.tokens[j];
             if t.kind == SyntaxKind::Eof {
                 break;
             }
-            let t_len: usize = t.len.into();
-            if t.kind == SyntaxKind::Whitespace && self.text[cursor..cursor + t_len].contains('\n')
-            {
+            let t_text = self.tok_text_at(j, cursor);
+            if token_carries_newline(t.kind, t_text) {
                 break;
             }
-            value_parts.push(&self.text[cursor..cursor + t_len]);
-            cursor += t_len;
+            value_toks.push(MacroTok {
+                token: t,
+                text: SmolStr::from(t_text),
+            });
+            cursor += t_text.len();
             j += 1;
         }
 
-        // Now consume the directive line (flushing identity, advancing cursors)
+        // Consume the directive line (flushing identity, advancing cursors)
         self.flush_identity();
         self.src_cursor = cursor;
         self.flush_start = cursor;
         let consumed = j - idx;
 
         if self.currently_emitting() {
-            let value = if value_parts.is_empty() {
+            let value = if value_toks.is_empty() {
                 MacroValue::Flag
             } else {
-                let joined: String = value_parts.concat();
-                MacroValue::ObjectLike(SmolStr::from(joined))
+                MacroValue::ObjectLike(Arc::new(MacroTokenSeq::from_vec(value_toks)))
             };
             self.env.define(name, value);
         }
@@ -362,18 +384,17 @@ impl<'a> Preprocessor<'a> {
     fn handle_undef(&mut self, idx: usize) -> usize {
         let dir_len: usize = self.tokens[idx].len.into();
         let dir_start = self.src_cursor;
-        let dir_cursor = self.src_cursor;
 
         let mut j = idx + 1;
-        let mut cursor = dir_cursor + dir_len;
+        let mut cursor = self.src_cursor + dir_len;
 
-        // Skip non-newline whitespace
-        while j < self.tokens.len() && self.tokens[j].kind == SyntaxKind::Whitespace {
-            let ws_len: usize = self.tokens[j].len.into();
-            if self.text[cursor..cursor + ws_len].contains('\n') {
+        // Skip non-newline trivia (whitespace and comments)
+        while j < self.tokens.len() && self.tokens[j].kind.is_trivia() {
+            let t_text = self.tok_text_at(j, cursor);
+            if token_carries_newline(self.tokens[j].kind, t_text) {
                 break;
             }
-            cursor += ws_len;
+            cursor += t_text.len();
             j += 1;
         }
 
@@ -461,7 +482,7 @@ impl<'a> Preprocessor<'a> {
                             file: resolved.file_id,
                             range: TextRange::new(TextSize::new(0), TextSize::new(inc_len as u32)),
                         },
-                        call_site,
+                        kind: SegmentKind::Include { call_site },
                     });
                 }
 
@@ -483,10 +504,12 @@ impl<'a> Preprocessor<'a> {
         self.strip_directive_line(idx)
     }
 
-    fn handle_unknown(&mut self, idx: usize, directive_text: &str) -> usize {
+    fn handle_known_directive(&mut self, idx: usize, kw: DirectiveKeyword) -> usize {
         let dir_len: usize = self.tokens[idx].len.into();
         let dir_start = self.src_cursor;
+        self.flush_identity();
         if self.currently_emitting() {
+            let event_seq = self.next_event_seq();
             self.directive_events.push(DirectiveEvent {
                 span: Span {
                     file: self.file,
@@ -495,10 +518,149 @@ impl<'a> Preprocessor<'a> {
                         TextSize::new((dir_start + dir_len) as u32),
                     ),
                 },
-                kind: DirectiveEventKind::Unknown(SmolStr::from(directive_text)),
+                kind: DirectiveEventKind::KnownDirective(kw),
+                origin: DirectiveEventOrigin::TopLevel,
+                expanded_offset: TextSize::new(self.expanded_text.len() as u32),
+                event_seq,
             });
         }
         self.strip_directive_line(idx)
+    }
+
+    fn handle_unrecognized_directive(&mut self, idx: usize, raw: &str) -> usize {
+        let dir_len: usize = self.tokens[idx].len.into();
+        let dir_start = self.src_cursor;
+        self.flush_identity();
+        if self.currently_emitting() {
+            let event_seq = self.next_event_seq();
+            self.directive_events.push(DirectiveEvent {
+                span: Span {
+                    file: self.file,
+                    range: TextRange::new(
+                        TextSize::new(dir_start as u32),
+                        TextSize::new((dir_start + dir_len) as u32),
+                    ),
+                },
+                kind: DirectiveEventKind::UnrecognizedDirective(SmolStr::from(raw)),
+                origin: DirectiveEventOrigin::TopLevel,
+                expanded_offset: TextSize::new(self.expanded_text.len() as u32),
+                event_seq,
+            });
+        }
+        self.strip_directive_line(idx)
+    }
+
+    fn handle_macro_use(&mut self, idx: usize, name: &str) -> usize {
+        let dir_len: usize = self.tokens[idx].len.into();
+        let call_site = Span {
+            file: self.file,
+            range: TextRange::new(
+                TextSize::new(self.src_cursor as u32),
+                TextSize::new((self.src_cursor + dir_len) as u32),
+            ),
+        };
+
+        let value = self.env.get(name).map(|d| d.value.clone());
+
+        match value {
+            None => {
+                self.flush_identity();
+                let event_seq = self.next_event_seq();
+                self.directive_events.push(DirectiveEvent {
+                    span: call_site,
+                    kind: DirectiveEventKind::UndefinedMacro(SmolStr::from(name)),
+                    origin: DirectiveEventOrigin::TopLevel,
+                    expanded_offset: TextSize::new(self.expanded_text.len() as u32),
+                    event_seq,
+                });
+                self.src_cursor += dir_len;
+                self.flush_start = self.src_cursor;
+                1
+            }
+            Some(MacroValue::Flag) => {
+                self.flush_identity();
+                self.src_cursor += dir_len;
+                self.flush_start = self.src_cursor;
+                1
+            }
+            Some(MacroValue::ObjectLike(seq)) => self.expand_macro_tokens(idx, call_site, &seq),
+        }
+    }
+
+    fn expand_macro_tokens(&mut self, _idx: usize, call_site: Span, seq: &MacroTokenSeq) -> usize {
+        debug_assert!(
+            self.currently_emitting(),
+            "expand_macro_tokens called while not emitting",
+        );
+        self.flush_identity();
+        let base_offset = TextSize::new(self.expanded_text.len() as u32);
+
+        let mut tmp_tokens = Vec::new();
+        let mut tmp_text = String::new();
+        let mut sink = ExpansionSink {
+            out_tokens: &mut tmp_tokens,
+            out_text: &mut tmp_text,
+            events: &mut self.directive_events,
+            next_event_seq: &mut self.event_seq_counter,
+        };
+        let result = expand_seq_into(
+            &self.env,
+            call_site,
+            seq,
+            0,
+            self.macro_recursion_limit,
+            &mut sink,
+            base_offset,
+        );
+
+        let dir_len = usize::from(call_site.range.len());
+
+        if let Err(msg) = result {
+            self.errors.push(PreprocError {
+                span: call_site,
+                message: msg,
+            });
+            self.src_cursor += dir_len;
+            self.flush_start = self.src_cursor;
+            return 1;
+        }
+
+        debug_assert!(
+            !tmp_tokens.iter().any(|t| t.kind == SyntaxKind::Directive),
+            "macro expansion must not produce Directive tokens",
+        );
+        debug_assert_eq!(
+            tmp_tokens.iter().map(|t| usize::from(t.len)).sum::<usize>(),
+            tmp_text.len(),
+            "macro expansion token lengths must sum to text length",
+        );
+
+        if !tmp_text.is_empty() {
+            let exp_start = TextSize::new(self.expanded_text.len() as u32);
+            for t in tmp_tokens {
+                self.out_tokens.push(t);
+            }
+            self.expanded_text.push_str(&tmp_text);
+            let exp_end = TextSize::new(self.expanded_text.len() as u32);
+
+            self.segments.push(Segment {
+                expanded_range: TextRange::new(exp_start, exp_end),
+                origin: call_site,
+                kind: SegmentKind::Macro,
+            });
+        }
+
+        self.src_cursor += dir_len;
+        self.flush_start = self.src_cursor;
+        1
+    }
+
+    fn strip_macro_token(&mut self, idx: usize) -> usize {
+        let dir_len: usize = self.tokens[idx].len.into();
+        self.flush_identity();
+        self.src_cursor += dir_len;
+        self.flush_start = self.src_cursor;
+        1
     }
 
     /// Strip a directive line from output: flush pending identity,
@@ -512,8 +674,8 @@ impl<'a> Preprocessor<'a> {
     }
 
     /// Scan forward from `(start_idx, start_cursor)` to the end of the
-    /// current logical directive line (newline-containing whitespace or
-    /// EOF). Returns `(end_idx, end_cursor)` -- pure scan, no mutation.
+    /// current logical directive line (newline-carrying token or EOF).
+    /// Returns `(end_idx, end_cursor)` -- pure scan, no mutation.
     fn scan_to_line_end(&self, start_idx: usize, start_cursor: usize) -> (usize, usize) {
         let mut j = start_idx;
         let mut cursor = start_cursor;
@@ -524,8 +686,7 @@ impl<'a> Preprocessor<'a> {
                 break;
             }
             let t_len: usize = t.len.into();
-            if t.kind == SyntaxKind::Whitespace && self.text[cursor..cursor + t_len].contains('\n')
-            {
+            if token_carries_newline(t.kind, &self.text[cursor..cursor + t_len]) {
                 break;
             }
             cursor += t_len;
@@ -547,12 +708,12 @@ impl<'a> Preprocessor<'a> {
         let mut j = dir_idx + 1;
         let mut cursor = dir_cursor + dir_len;
 
-        while j < self.tokens.len() && self.tokens[j].kind == SyntaxKind::Whitespace {
-            let ws_len: usize = self.tokens[j].len.into();
-            if self.text[cursor..cursor + ws_len].contains('\n') {
+        while j < self.tokens.len() && self.tokens[j].kind.is_trivia() {
+            let t_text = self.tok_text_at(j, cursor);
+            if token_carries_newline(self.tokens[j].kind, t_text) {
                 return None;
             }
-            cursor += ws_len;
+            cursor += t_text.len();
             j += 1;
         }
 
@@ -564,8 +725,20 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
+    /// Slice the text for `self.tokens[idx]` at byte position `byte_pos`.
+    fn tok_text_at(&self, idx: usize, byte_pos: usize) -> &str {
+        let len: usize = self.tokens[idx].len.into();
+        let slice = &self.text[byte_pos..byte_pos + len];
+        debug_assert_eq!(
+            slice.len(),
+            len,
+            "tok_text_at: slice length mismatch at idx={idx} byte_pos={byte_pos}",
+        );
+        slice
+    }
+
     /// Check if token at index `j` (at byte position `cursor`) is a
-    /// non-whitespace, non-EOF token still on the current line.
+    /// non-trivia, non-EOF token still on the current line.
     fn has_non_ws_token_on_line(&self, j: usize, cursor: usize) -> bool {
         if j >= self.tokens.len() {
             return false;
@@ -574,9 +747,9 @@ impl<'a> Preprocessor<'a> {
         if t.kind == SyntaxKind::Eof {
             return false;
         }
-        if t.kind == SyntaxKind::Whitespace {
+        if t.kind.is_trivia() {
             let t_len: usize = t.len.into();
-            if self.text[cursor..cursor + t_len].contains('\n') {
+            if token_carries_newline(t.kind, &self.text[cursor..cursor + t_len]) {
                 return false;
             }
         }
@@ -604,12 +777,112 @@ impl<'a> Preprocessor<'a> {
                 file: self.file,
                 range: TextRange::new(origin_start, origin_end),
             },
-            call_site: Span {
-                file: self.file,
-                range: TextRange::empty(TextSize::new(0)),
-            },
+            kind: SegmentKind::Identity,
         });
 
         self.flush_start = self.src_cursor;
     }
+}
+
+/// Mutable accumulators for recursive macro expansion, bundled to
+/// keep the `expand_seq_into` argument count manageable.
+struct ExpansionSink<'a> {
+    out_tokens: &'a mut Vec<Token>,
+    out_text: &'a mut String,
+    events: &'a mut Vec<DirectiveEvent>,
+    next_event_seq: &'a mut u32,
+}
+
+/// Recursively expand a macro token sequence, splicing non-directive
+/// tokens into the sink and stripping or recursing on directive tokens
+/// found in the body.
+///
+/// Precondition: only called when the preprocessor is emitting (i.e.,
+/// from `expand_macro_tokens` which is gated on `currently_emitting`).
+/// All events produced here are therefore from emitted text.
+fn expand_seq_into(
+    env: &MacroEnv,
+    call_site: Span,
+    seq: &MacroTokenSeq,
+    depth: usize,
+    recursion_limit: usize,
+    sink: &mut ExpansionSink<'_>,
+    base_offset: TextSize,
+) -> Result<(), SmolStr> {
+    if depth > recursion_limit {
+        return Err(SmolStr::from("macro expansion depth limit exceeded"));
+    }
+
+    for tok in seq.tokens() {
+        if tok.token.kind == SyntaxKind::Directive {
+            let offset = base_offset + TextSize::new(sink.out_text.len() as u32);
+            match classify_directive(&tok.text) {
+                DirectiveClass::MacroInvoke { name } => {
+                    let value = env.get(name).map(|d| d.value.clone());
+                    match value {
+                        None => {
+                            let event_seq = *sink.next_event_seq;
+                            *sink.next_event_seq += 1;
+                            sink.events.push(DirectiveEvent {
+                                span: call_site,
+                                kind: DirectiveEventKind::UndefinedMacro(SmolStr::from(name)),
+                                origin: DirectiveEventOrigin::MacroExpansion,
+                                expanded_offset: offset,
+                                event_seq,
+                            });
+                        }
+                        Some(MacroValue::Flag) => {}
+                        Some(MacroValue::ObjectLike(inner_seq)) => {
+                            expand_seq_into(
+                                env,
+                                call_site,
+                                &inner_seq,
+                                depth + 1,
+                                recursion_limit,
+                                sink,
+                                base_offset,
+                            )?;
+                        }
+                    }
+                }
+                DirectiveClass::Keyword(kw) => {
+                    let event_seq = *sink.next_event_seq;
+                    *sink.next_event_seq += 1;
+                    sink.events.push(DirectiveEvent {
+                        span: call_site,
+                        kind: DirectiveEventKind::KnownDirective(kw),
+                        origin: DirectiveEventOrigin::MacroExpansion,
+                        expanded_offset: offset,
+                        event_seq,
+                    });
+                }
+                DirectiveClass::Other { raw } => {
+                    let event_seq = *sink.next_event_seq;
+                    *sink.next_event_seq += 1;
+                    sink.events.push(DirectiveEvent {
+                        span: call_site,
+                        kind: DirectiveEventKind::UnrecognizedDirective(SmolStr::from(raw)),
+                        origin: DirectiveEventOrigin::MacroExpansion,
+                        expanded_offset: offset,
+                        event_seq,
+                    });
+                }
+            }
+        } else {
+            sink.out_tokens.push(tok.token);
+            sink.out_text.push_str(&tok.text);
+        }
+    }
+
+    Ok(())
+}
+
+/// Whether a token with the given kind and text carries a newline.
+///
+/// Covers all trivia kinds: `Whitespace` (always), `BlockComment`
+/// (multi-line), and `LineComment` (currently stops before `\n` in
+/// our lexer, but handled defensively). Non-trivia tokens never
+/// carry newlines in well-formed source.
+fn token_carries_newline(kind: SyntaxKind, text: &str) -> bool {
+    kind.is_trivia() && text.contains('\n')
 }

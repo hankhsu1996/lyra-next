@@ -48,6 +48,7 @@ fn run_preprocess(
         text,
         provider,
         starting_env: &env,
+        macro_recursion_limit: PreprocessInputs::DEFAULT_RECURSION_LIMIT,
     })
 }
 

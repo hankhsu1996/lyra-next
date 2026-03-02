@@ -2,6 +2,13 @@ use lyra_preprocess::{MacroEnv, MacroValue, PreprocessInputs, preprocess};
 use lyra_source::FileId;
 use smol_str::SmolStr;
 
+fn assert_object_like_text(value: Option<&MacroValue>, expected: &str) {
+    match value {
+        Some(MacroValue::ObjectLike(seq)) => assert_eq!(seq.text(), expected),
+        other => panic!("expected ObjectLike with text \"{expected}\", got {other:?}"),
+    }
+}
+
 struct NoIncludes;
 
 impl lyra_preprocess::IncludeProvider for NoIncludes {
@@ -22,6 +29,7 @@ fn pp_with_env(text: &str, env: &MacroEnv) -> lyra_preprocess::PreprocOutput {
         text,
         provider: &NoIncludes,
         starting_env: env,
+        macro_recursion_limit: PreprocessInputs::DEFAULT_RECURSION_LIMIT,
     })
 }
 
@@ -37,10 +45,7 @@ fn define_with_value() {
     assert!(out.expanded_text.contains("wire w;"));
     let def = out.final_env.get("WIDTH");
     assert!(def.is_some());
-    assert_eq!(
-        def.map(|d| &d.value),
-        Some(&MacroValue::ObjectLike(SmolStr::new("8")))
-    );
+    assert_object_like_text(def.map(|d| &d.value), "8");
 }
 
 #[test]
@@ -54,10 +59,7 @@ fn define_strips_directive_from_output() {
 fn define_value_stops_at_newline() {
     let out = pp("`define X val1 val2\nwire w;\n");
     let def = out.final_env.get("X");
-    assert_eq!(
-        def.map(|d| &d.value),
-        Some(&MacroValue::ObjectLike(SmolStr::new("val1 val2")))
-    );
+    assert_object_like_text(def.map(|d| &d.value), "val1 val2");
     assert!(out.expanded_text.contains("wire w;"));
 }
 
@@ -80,10 +82,7 @@ fn undef_nonexistent_is_silent() {
 #[test]
 fn define_redefines() {
     let out = pp("`define X 1\n`define X 2\n");
-    assert_eq!(
-        out.final_env.get("X").map(|d| &d.value),
-        Some(&MacroValue::ObjectLike(SmolStr::new("2")))
-    );
+    assert_object_like_text(out.final_env.get("X").map(|d| &d.value), "2");
 }
 
 #[test]

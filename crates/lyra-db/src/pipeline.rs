@@ -41,6 +41,7 @@ pub fn preprocess_file(
         text: file.text(db),
         provider: &provider,
         starting_env: &empty_env,
+        macro_recursion_limit: PreprocessInputs::DEFAULT_RECURSION_LIMIT,
     })
 }
 

@@ -23,6 +23,7 @@ fn pp_with_env(text: &str, env: &MacroEnv) -> lyra_preprocess::PreprocOutput {
         text,
         provider: &NoIncludes,
         starting_env: env,
+        macro_recursion_limit: PreprocessInputs::DEFAULT_RECURSION_LIMIT,
     })
 }
 

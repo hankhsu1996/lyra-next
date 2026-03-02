@@ -6,9 +6,9 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 5 -- Lexical Conventions
 
-### 5.6.4: Compiler directives -- macro expansion and non-conditional directives
+### 5.6.4: Compiler directives -- parameterized macros and non-conditional directive semantics
 
-The preprocessor handles `` `include `` (single-level), conditional compilation (`` `ifdef ``/`` `ifndef ``/`` `elsif ``/`` `else ``/`` `endif ``), and object-like `` `define ``/`` `undef ``. Macro definitions are captured but use-site expansion (`` `FOO `` in normal code) is not yet implemented. Non-conditional/non-define directives (`` `timescale ``, `` `default_nettype ``, `` `resetall ``, etc.) are silently stripped. Blocked by: text macro expansion at use sites, parameterized macros. Test: `lrm/ch05/5.6.4_compiler_directives`.
+Object-like macro expansion at use sites is implemented (recursive expansion with depth limit, token-bodied storage, undefined macro diagnostics). Remaining gaps: parameterized macros (`` `FOO(a, b) ``), line continuation in macro bodies, stringification/concatenation operators, non-conditional directive semantics via event consumption (`` `timescale ``, `` `default_nettype ``, etc.). Blocked by: parameterized macro parsing, directive event consumers. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
 ## Chapter 7 -- Aggregate Types
 
