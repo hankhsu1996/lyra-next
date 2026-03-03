@@ -6,7 +6,7 @@ Chapter status for IEEE 1800-2023. See `docs/lrm-signoff.md` for definitions.
 | --- | --------------------------------------- | ----------- | ------------ | --------------- |
 | 1   | Overview                                | N/A         |              | Informational   |
 | 2   | Normative references                    | N/A         |              | Informational   |
-| 3   | Design and verification building blocks | Not started |              |                 |
+| 3   | Design and verification building blocks | In progress | lrm/ch03/\*  |                 |
 | 4   | Scheduling semantics                    | N/A         |              | Simulation-only |
 | 5   | Lexical conventions                     | Signed off  | lrm/ch05/\*  | Lexer + parser  |
 | 6   | Data types                              | In progress | lrm/ch06/\*  |                 |
