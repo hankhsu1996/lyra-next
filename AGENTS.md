@@ -53,7 +53,7 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - `docs/cst-ast.md` -- rowan green/red tree, trivia handling, typed AST wrappers
 - `docs/parser-design.md` -- parser invariants, decisions, known improvements
 - `docs/roadmap.md` -- milestone-based capability plan and exit demos
-- `docs/progress.md` -- milestone completion checklist
+- `docs/lrm/progress.md` -- LRM signoff progress by chapter
 
 ## Architecture Rules
 
@@ -195,12 +195,9 @@ it probably belongs in that crate's docs instead.
 
 ## Planning and Execution
 
-- Keep planning lightweight with two docs only: `docs/roadmap.md` and
-  `docs/progress.md`.
-- `docs/roadmap.md` is future-facing milestone planning.
-- `docs/progress.md` tracks where we are against the roadmap. Check off items
-  when they ship. No dates or logs -- git history has that.
-- Update roadmap only when priorities change.
+- `docs/roadmap.md` describes milestone capabilities (historical context).
+- `docs/lrm/progress.md` tracks LRM signoff by chapter -- the active work queue.
+- Remaining gaps live in `docs/lrm/gaps.md`.
 
 ## Before Submitting Changes
 
