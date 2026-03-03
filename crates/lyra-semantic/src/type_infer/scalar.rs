@@ -1,4 +1,6 @@
-use lyra_ast::{BinExpr, CastExpr, CondExpr, Literal, LiteralKind, PrefixExpr, SyntaxPrefixOp};
+use lyra_ast::{
+    BinExpr, CastExpr, CondExpr, Literal, LiteralKind, PrefixExpr, SyntaxPrefixOp, TypeExpr,
+};
 
 use super::expr_type::{
     BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView, InferCtx, Signedness,
@@ -224,6 +226,45 @@ pub(super) fn infer_cond(
     }
 }
 
+pub(super) fn infer_type_expr(te: &TypeExpr, ctx: &dyn InferCtx) -> ExprType {
+    // type(data_type): resolve from the inner TypeSpec
+    if let Some(inner_ts) = te.inner_type_spec() {
+        // Try as a user-defined type first (typedef)
+        if let Some(utr) = crate::user_type_ref(&inner_ts) {
+            if let Some(ty) = ctx.resolve_type_arg(&utr) {
+                return ExprType::from_ty(&ty);
+            }
+            // Name parsed as TypeSpec but is not a type -- try as expression.
+            // The parser cannot distinguish type(variable) from type(typedef)
+            // syntactically; both produce TypeSpec { NameRef }. Resolve the
+            // NameRef as an expression to get the variable's type.
+            if let Some(nr) = inner_ts.type_name_ref() {
+                let expr_node = match nr {
+                    lyra_ast::TypeNameRef::Simple(r) => lyra_ast::Expr::from_ast(&r),
+                    lyra_ast::TypeNameRef::Qualified(q) => lyra_ast::Expr::from_ast(&q),
+                    lyra_ast::TypeNameRef::Dotted(_) => None,
+                };
+                if let Some(expr) = expr_node {
+                    return infer_expr(&expr, ctx, None);
+                }
+            }
+            return ExprType::error(ExprTypeErrorKind::CastTargetNotAType);
+        }
+        let ty = crate::extract_base_ty_from_typespec(&inner_ts, ctx.ast_id_map());
+        if matches!(ty, Ty::Error) {
+            return ExprType::error(ExprTypeErrorKind::CastTargetNotAType);
+        }
+        return ExprType::from_ty(&ty);
+    }
+
+    // type(expression): self-determined type
+    if let Some(inner_expr) = te.inner_expr() {
+        return infer_expr(&inner_expr, ctx, None);
+    }
+
+    ExprType::error(ExprTypeErrorKind::CastTargetNotAType)
+}
+
 pub(super) fn infer_cast(cast: &CastExpr, ctx: &dyn InferCtx) -> ExprType {
     // Infer the inner expression (for side effects / context propagation)
     if let Some(inner) = cast.inner_expr() {
@@ -234,6 +275,11 @@ pub(super) fn infer_cast(cast: &CastExpr, ctx: &dyn InferCtx) -> ExprType {
     let Some(typespec) = cast.cast_type() else {
         return ExprType::error(ExprTypeErrorKind::CastTargetNotAType);
     };
+
+    // type(...)' (expr) cast: resolve through the TypeExpr
+    if let Some(te) = typespec.type_expr() {
+        return infer_type_expr(&te, ctx);
+    }
 
     // Try user-defined type (enum/typedef name) via resolve_type_arg
     if let Some(utr) = crate::user_type_ref(&typespec)

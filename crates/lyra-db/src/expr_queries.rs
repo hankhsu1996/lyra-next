@@ -169,6 +169,25 @@ pub(crate) fn infer_expr_with_expected_inline(
     lyra_semantic::type_infer::infer_expr_with_expected(expr, Some(expected), &ctx, None)
 }
 
+/// Inline (non-cached) self-determined inference for an arbitrary expression.
+///
+/// Used by `type_of_symbol_raw` to resolve `type(expr)` in declarations.
+pub(crate) fn infer_expr_in_file(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: crate::SourceFile,
+    ast_id_map: &AstIdMap,
+    expr: &Expr,
+) -> ExprType {
+    let ctx = DbInferCtx {
+        db,
+        unit,
+        source_file,
+        ast_id_map,
+    };
+    lyra_semantic::type_infer::infer_expr(expr, &ctx, None)
+}
+
 /// Const-eval-safe expression typing (Salsa-tracked with cycle recovery).
 ///
 /// This query must NOT call `resolve_index_file`, `type_of_symbol`,

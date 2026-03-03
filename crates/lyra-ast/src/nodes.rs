@@ -252,6 +252,9 @@ ast_nodes! {
     StreamWithClause(SyntaxKind::StreamWithClause) { @custom }
     StreamRange(SyntaxKind::StreamRange) { @custom }
 
+    // Type operator (LRM 6.23)
+    TypeExpr(SyntaxKind::TypeExpr) { @custom }
+
     // Strength specifications (LRM 6.3.2)
     DriveStrength(SyntaxKind::DriveStrength) { @custom }
     ChargeStrength(SyntaxKind::ChargeStrength) { @custom }

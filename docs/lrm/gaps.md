@@ -56,9 +56,9 @@ Lifetime qualifiers are stored on function/task symbols, defaulting to static wh
 
 Basic assignment compatibility checking exists (width truncation, enum-to-enum, array structural matching). The formal LRM type compatibility classifications (matching types 6.22.1, equivalent types 6.22.2, assignment-compatible 6.22.3, cast-compatible 6.22.4) are not implemented as distinct queries. Blocked by: formal type identity and equivalence predicates, typedef-through resolution for equivalence. Test: `lrm/ch06/6.22_type_compatibility`.
 
-### 6.23: Type operator
+### 6.23: Type operator -- deferred features
 
-The `type()` operator (used to reference the type of an expression or data object) is not supported at any layer. No parser grammar, AST node, or semantic handling exists. Blocked by: parser grammar for type reference expressions, type query in the semantic layer. Test: `lrm/ch06/6.23_type_operator`.
+`type(data_type)` and `type(expr)` implemented for declarations and casts. Remaining: `type(this)`, generate `case(type(x))` matching, type equality/inequality semantics. Tests: `lrm/ch06/6.23_type_operator`.
 
 ### 6.24.2: $cast dynamic casting
 

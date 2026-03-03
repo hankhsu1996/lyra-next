@@ -400,7 +400,9 @@ fn detect_wildcard_conflicts(
 fn ns_list(expected: ExpectedNs) -> ([Namespace; 2], usize) {
     match expected {
         ExpectedNs::Exact(ns) => ([ns, ns], 1),
-        ExpectedNs::TypeThenValue => ([Namespace::Type, Namespace::Value], 2),
+        ExpectedNs::TypeThenValue | ExpectedNs::TypeOrValue => {
+            ([Namespace::Type, Namespace::Value], 2)
+        }
     }
 }
 
@@ -529,8 +531,10 @@ fn resolve_simple(
     }
 
     // For type-position lookups, fall back to the definition namespace.
-    if matches!(expected, ExpectedNs::TypeThenValue)
-        && let Some((def_id, _)) = ctx.global.resolve_definition(name)
+    if matches!(
+        expected,
+        ExpectedNs::TypeThenValue | ExpectedNs::TypeOrValue
+    ) && let Some((def_id, _)) = ctx.global.resolve_definition(name)
     {
         return CoreResolveResult::Resolved(CoreResolution::Def { def: def_id });
     }
@@ -882,7 +886,9 @@ fn find_realizing_use_site(
         // Must match namespace
         let ns_match = match entry.expected_ns {
             ExpectedNs::Exact(expected_ns) => expected_ns == ns,
-            ExpectedNs::TypeThenValue => ns == Namespace::Type || ns == Namespace::Value,
+            ExpectedNs::TypeThenValue | ExpectedNs::TypeOrValue => {
+                ns == Namespace::Type || ns == Namespace::Value
+            }
         };
         if !ns_match {
             continue;
