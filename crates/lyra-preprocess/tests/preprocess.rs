@@ -5,4 +5,5 @@ mod preprocess {
     mod fn_macro;
     mod identity;
     mod include;
+    mod stringify_concat;
 }

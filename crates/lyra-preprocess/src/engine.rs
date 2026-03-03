@@ -7,19 +7,15 @@ use smol_str::SmolStr;
 
 use crate::args::parse_args_from_tokens;
 use crate::directive::{DirectiveClass, DirectiveKeyword, classify_directive};
+use crate::engine_cond::{CondState, ElseError, ElsifError};
 use crate::env::{MacroEnv, MacroTemplate, MacroTok, MacroTokenSeq, MacroValue};
 use crate::expand::{ExpansionCtx, ExpansionSink, expand_seq_into};
+use crate::operators;
 use crate::source_map::{Segment, SegmentKind, SourceMap};
 use crate::{
     DirectiveEvent, DirectiveEventKind, DirectiveEventOrigin, IncludeGraph, IncludeProvider,
     PreprocError, PreprocOutput, PreprocessInputs, find_include_path,
 };
-
-struct CondFrame {
-    allow_emit: bool,
-    taken: bool,
-    saw_else: bool,
-}
 
 enum DefineParamsResult {
     Ok {
@@ -43,7 +39,7 @@ pub(crate) struct Preprocessor<'a> {
     macro_recursion_limit: usize,
 
     env: MacroEnv,
-    cond_stack: Vec<CondFrame>,
+    cond: CondState,
 
     out_tokens: Vec<Token>,
     expanded_text: String,
@@ -66,7 +62,7 @@ impl<'a> Preprocessor<'a> {
             provider: inputs.provider,
             macro_recursion_limit: inputs.macro_recursion_limit,
             env: inputs.starting_env.clone(),
-            cond_stack: Vec::new(),
+            cond: CondState::new(),
             out_tokens: Vec::with_capacity(inputs.tokens.len()),
             expanded_text: String::with_capacity(inputs.text.len()),
             segments: Vec::new(),
@@ -99,7 +95,7 @@ impl<'a> Preprocessor<'a> {
                 continue;
             }
 
-            if self.currently_emitting() {
+            if self.cond.currently_emitting() {
                 self.out_tokens.push(tok);
             } else {
                 self.flush_identity();
@@ -110,7 +106,7 @@ impl<'a> Preprocessor<'a> {
             i += 1;
         }
 
-        if !self.cond_stack.is_empty() {
+        if !self.cond.is_empty() {
             let eof = TextSize::new(self.text.len() as u32);
             self.push_error(
                 TextRange::empty(eof),
@@ -130,10 +126,6 @@ impl<'a> Preprocessor<'a> {
             final_env: self.env,
             directive_events: self.directive_events,
         }
-    }
-
-    fn currently_emitting(&self) -> bool {
-        self.cond_stack.last().is_none_or(|f| f.allow_emit)
     }
 
     fn next_event_seq(&mut self) -> u32 {
@@ -164,7 +156,7 @@ impl<'a> Preprocessor<'a> {
             "`include" => self.handle_include(idx),
             _ => match classify_directive(directive_text) {
                 DirectiveClass::MacroInvoke { name } => {
-                    if self.currently_emitting() {
+                    if self.cond.currently_emitting() {
                         self.handle_macro_use(idx, name)
                     } else {
                         self.strip_macro_token(idx)
@@ -176,142 +168,85 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    fn handle_ifdef(&mut self, idx: usize, invert: bool) -> usize {
+    fn directive_range_and_len(&self, idx: usize) -> (TextRange, usize) {
         let dir_len: usize = self.tokens[idx].len.into();
-        let dir_start = self.src_cursor;
+        let range = TextRange::new(
+            TextSize::new(self.src_cursor as u32),
+            TextSize::new((self.src_cursor + dir_len) as u32),
+        );
+        (range, dir_len)
+    }
 
-        // Extract name before consuming the line
+    fn handle_ifdef(&mut self, idx: usize, invert: bool) -> usize {
+        let (dir_range, dir_len) = self.directive_range_and_len(idx);
         let name = self.extract_directive_name(idx, self.src_cursor, dir_len);
         let consumed = self.strip_directive_line(idx);
-
         let predicate = if let Some(n) = &name {
-            let defined = self.env.is_defined(n);
-            if invert { !defined } else { defined }
+            let d = self.env.is_defined(n);
+            if invert { !d } else { d }
         } else {
             let label = if invert { "`ifndef" } else { "`ifdef" };
             self.push_error(
-                TextRange::new(
-                    TextSize::new(dir_start as u32),
-                    TextSize::new((dir_start + dir_len) as u32),
-                ),
+                dir_range,
                 SmolStr::from(format!("{label} missing macro name")),
             );
             false
         };
-
-        let parent = self.currently_emitting();
-        self.cond_stack.push(CondFrame {
-            allow_emit: parent && predicate,
-            taken: predicate,
-            saw_else: false,
-        });
-
+        self.cond.push_ifdef(predicate);
         consumed
     }
 
     fn handle_elsif(&mut self, idx: usize) -> usize {
-        let dir_len: usize = self.tokens[idx].len.into();
-        let dir_start = self.src_cursor;
-
+        let (dir_range, dir_len) = self.directive_range_and_len(idx);
         let name = self.extract_directive_name(idx, self.src_cursor, dir_len);
         let consumed = self.strip_directive_line(idx);
-
-        let dir_range = TextRange::new(
-            TextSize::new(dir_start as u32),
-            TextSize::new((dir_start + dir_len) as u32),
-        );
-
-        let Some((frame, parent_frames)) = self.cond_stack.split_last_mut() else {
-            self.push_error(
-                dir_range,
-                SmolStr::from("`elsif without matching `ifdef/`ifndef"),
-            );
-            return consumed;
-        };
-
-        let parent_emit = match parent_frames.last() {
-            Some(p) => p.allow_emit,
-            None => true,
-        };
-
-        if frame.saw_else {
-            self.push_error(dir_range, SmolStr::from("`elsif after `else"));
-            return consumed;
-        }
-
-        let mut missing_name = false;
-        let predicate = if let Some(n) = &name {
-            self.env.is_defined(n)
-        } else {
-            missing_name = true;
-            false
-        };
-
-        if frame.taken {
-            frame.allow_emit = false;
-        } else {
-            frame.allow_emit = parent_emit && predicate;
-            if predicate {
-                frame.taken = true;
+        let predicate = name.as_deref().map(|n| self.env.is_defined(n));
+        match self.cond.apply_elsif(predicate) {
+            Ok(()) => {
+                if name.is_none() {
+                    self.push_error(dir_range, SmolStr::from("`elsif missing macro name"));
+                }
+            }
+            Err(ElsifError::NoMatchingIfdef) => {
+                self.push_error(
+                    dir_range,
+                    SmolStr::from("`elsif without matching `ifdef/`ifndef"),
+                );
+            }
+            Err(ElsifError::ElsifAfterElse) => {
+                self.push_error(dir_range, SmolStr::from("`elsif after `else"));
             }
         }
-
-        if missing_name {
-            self.push_error(dir_range, SmolStr::from("`elsif missing macro name"));
-        }
-
         consumed
     }
 
     fn handle_else(&mut self, idx: usize) -> usize {
-        let dir_len: usize = self.tokens[idx].len.into();
-        let dir_start = self.src_cursor;
+        let (dir_range, _) = self.directive_range_and_len(idx);
         let consumed = self.strip_directive_line(idx);
-
-        let dir_range = TextRange::new(
-            TextSize::new(dir_start as u32),
-            TextSize::new((dir_start + dir_len) as u32),
-        );
-
-        let Some((frame, parent_frames)) = self.cond_stack.split_last_mut() else {
-            self.push_error(
-                dir_range,
-                SmolStr::from("`else without matching `ifdef/`ifndef"),
-            );
-            return consumed;
-        };
-
-        let parent_emit = match parent_frames.last() {
-            Some(p) => p.allow_emit,
-            None => true,
-        };
-
-        if frame.saw_else {
-            self.push_error(dir_range, SmolStr::from("duplicate `else"));
-            return consumed;
+        match self.cond.apply_else() {
+            Ok(()) => {}
+            Err(ElseError::NoMatchingIfdef) => {
+                self.push_error(
+                    dir_range,
+                    SmolStr::from("`else without matching `ifdef/`ifndef"),
+                );
+            }
+            Err(ElseError::DuplicateElse) => {
+                self.push_error(dir_range, SmolStr::from("duplicate `else"));
+            }
         }
-
-        frame.saw_else = true;
-        frame.allow_emit = parent_emit && !frame.taken;
-
         consumed
     }
 
     fn handle_endif(&mut self, idx: usize) -> usize {
-        let dir_len: usize = self.tokens[idx].len.into();
-        let dir_start = self.src_cursor;
+        let (dir_range, _) = self.directive_range_and_len(idx);
         let consumed = self.strip_directive_line(idx);
-
-        if self.cond_stack.pop().is_none() {
+        if !self.cond.pop_endif() {
             self.push_error(
-                TextRange::new(
-                    TextSize::new(dir_start as u32),
-                    TextSize::new((dir_start + dir_len) as u32),
-                ),
+                dir_range,
                 SmolStr::from("`endif without matching `ifdef/`ifndef"),
             );
         }
-
         consumed
     }
 
@@ -335,7 +270,7 @@ impl<'a> Preprocessor<'a> {
         // Check for missing name
         if !self.has_non_ws_token_on_line(j, cursor) {
             let consumed = self.strip_directive_line(idx);
-            if self.currently_emitting() {
+            if self.cond.currently_emitting() {
                 self.push_error(
                     TextRange::new(
                         TextSize::new(dir_start as u32),
@@ -351,8 +286,7 @@ impl<'a> Preprocessor<'a> {
         cursor += usize::from(self.tokens[j].len);
         j += 1;
 
-        // Adjacency check: if the *immediate* next token (no trivia skip)
-        // is LParen, this is a function-like macro definition.
+        // Adjacency: immediate LParen (no trivia skip) means function-like.
         let mut params: Option<Vec<SmolStr>> = None;
         if j < self.tokens.len() && self.tokens[j].kind == SyntaxKind::LParen {
             match self.parse_define_params(j, cursor) {
@@ -374,7 +308,7 @@ impl<'a> Preprocessor<'a> {
                     self.flush_identity();
                     self.src_cursor = end_cursor;
                     self.flush_start = end_cursor;
-                    if self.currently_emitting() {
+                    if self.cond.currently_emitting() {
                         self.push_error(range, message);
                     }
                     return end_j - idx;
@@ -390,7 +324,7 @@ impl<'a> Preprocessor<'a> {
         self.flush_start = body_end_cursor;
         let consumed = body_end_j - idx;
 
-        if self.currently_emitting() {
+        if self.cond.currently_emitting() {
             let value = match params {
                 Some(param_names) => {
                     let body = MacroTokenSeq::from_vec(value_toks);
@@ -433,7 +367,7 @@ impl<'a> Preprocessor<'a> {
 
         if !self.has_non_ws_token_on_line(j, cursor) {
             let consumed = self.strip_directive_line(idx);
-            if self.currently_emitting() {
+            if self.cond.currently_emitting() {
                 self.push_error(
                     TextRange::new(
                         TextSize::new(dir_start as u32),
@@ -448,8 +382,7 @@ impl<'a> Preprocessor<'a> {
         let name_len: usize = self.tokens[j].len.into();
         let name = &self.text[cursor..cursor + name_len];
 
-        // Consume the directive before modifying env (so src_cursor is
-        // at the right place for flush_identity)
+        // Consume directive before modifying env (src_cursor must be current for flush)
         let name_owned = SmolStr::from(name);
         cursor += name_len;
         let end_j = j + 1;
@@ -457,14 +390,13 @@ impl<'a> Preprocessor<'a> {
         self.flush_identity();
         self.src_cursor = cursor;
         self.flush_start = cursor;
-        // Scan past any remaining tokens on the line (after name)
-        // to handle `undef FOO extra` -- just consume the whole line
+        // Scan past remaining tokens on line (`undef FOO extra`)
         let extra = self.scan_to_line_end(end_j, cursor);
         self.src_cursor = extra.1;
         self.flush_start = extra.1;
         let consumed = extra.0 - idx;
 
-        if self.currently_emitting() {
+        if self.cond.currently_emitting() {
             self.env.undef(&name_owned);
         }
 
@@ -472,7 +404,7 @@ impl<'a> Preprocessor<'a> {
     }
 
     fn handle_include(&mut self, idx: usize) -> usize {
-        if !self.currently_emitting() {
+        if !self.cond.currently_emitting() {
             return self.strip_directive_line(idx);
         }
 
@@ -541,7 +473,7 @@ impl<'a> Preprocessor<'a> {
         let dir_len: usize = self.tokens[idx].len.into();
         let dir_start = self.src_cursor;
         self.flush_identity();
-        if self.currently_emitting() {
+        if self.cond.currently_emitting() {
             let event_seq = self.next_event_seq();
             self.directive_events.push(DirectiveEvent {
                 span: Span {
@@ -564,7 +496,7 @@ impl<'a> Preprocessor<'a> {
         let dir_len: usize = self.tokens[idx].len.into();
         let dir_start = self.src_cursor;
         self.flush_identity();
-        if self.currently_emitting() {
+        if self.cond.currently_emitting() {
             let event_seq = self.next_event_seq();
             self.directive_events.push(DirectiveEvent {
                 span: Span {
@@ -743,7 +675,7 @@ impl<'a> Preprocessor<'a> {
         tokens_consumed: usize,
     ) -> usize {
         debug_assert!(
-            self.currently_emitting(),
+            self.cond.currently_emitting(),
             "expand_macro_tokens called while not emitting",
         );
         self.flush_identity();
@@ -786,6 +718,33 @@ impl<'a> Preprocessor<'a> {
             tmp_text.len(),
             "macro expansion token lengths must sum to text length",
         );
+
+        // Resolve macro operators (stringify, concat) if any are present
+        if operators::has_macro_operators(&tmp_tokens) {
+            let macro_toks = operators::tokens_to_macro_toks(&tmp_tokens, &tmp_text);
+            let (resolved, op_errors) = operators::resolve_macro_operators(&macro_toks);
+            for e in op_errors {
+                self.errors.push(PreprocError {
+                    span: operators::expansion_span(call_site, e.exp_range),
+                    message: e.message,
+                });
+            }
+            tmp_tokens.clear();
+            tmp_text.clear();
+            for mt in &resolved {
+                tmp_tokens.push(mt.token);
+                tmp_text.push_str(&mt.text);
+            }
+        }
+
+        // Release invariant: output must not contain preprocess-only tokens.
+        if operators::has_macro_operators(&tmp_tokens) {
+            self.push_error(
+                call_site.range,
+                SmolStr::from("preprocessor bug: macro operator tokens survived into output"),
+            );
+            operators::strip_preprocess_only(&mut tmp_tokens, &mut tmp_text);
+        }
 
         if !tmp_text.is_empty() {
             let exp_start = TextSize::new(self.expanded_text.len() as u32);

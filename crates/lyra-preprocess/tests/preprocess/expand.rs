@@ -9,7 +9,7 @@ use lyra_source::{FileId, TextSize};
 use smol_str::SmolStr;
 
 fn tokens_from_text(text: &str) -> MacroTokenSeq {
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let mut result = Vec::new();
     let mut cursor = 0usize;
     for t in &tokens {
@@ -39,7 +39,7 @@ fn pp(text: &str) -> lyra_preprocess::PreprocOutput {
 }
 
 fn pp_with_env(text: &str, env: &MacroEnv) -> lyra_preprocess::PreprocOutput {
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     preprocess(&PreprocessInputs {
         file: FileId(0),
         tokens: &tokens,

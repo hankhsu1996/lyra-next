@@ -1,8 +1,10 @@
 mod args;
 mod directive;
 mod engine;
+mod engine_cond;
 mod env;
 mod expand;
+mod operators;
 mod source_map;
 
 use lyra_lexer::{SyntaxKind, Token};
@@ -114,6 +116,10 @@ impl PreprocessInputs<'_> {
 }
 
 /// Bundled output of preprocessing a single file.
+///
+/// `tokens` are parser-ready: they contain only the standard language
+/// token set (no preprocess-only operator kinds). The parser consumes
+/// `tokens` and `expanded_text` directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreprocOutput {
     pub tokens: Vec<Token>,

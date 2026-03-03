@@ -58,7 +58,7 @@ impl MacroTokenSeq {
     #[cfg(test)]
     pub fn from_text(text: &str) -> Self {
         use lyra_lexer::SyntaxKind;
-        let tokens = lyra_lexer::lex(text);
+        let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
         let mut result = Vec::new();
         let mut cursor = 0usize;
         for t in &tokens {
