@@ -510,6 +510,27 @@ impl SyntaxKind {
             Self::Whitespace | Self::LineComment | Self::BlockComment
         )
     }
+
+    /// Whether this kind is a traditional net-type keyword (LRM 6.7).
+    ///
+    /// Includes `wire`, `tri`, `wand`, `wor`, `tri0`, `tri1`, `trireg`,
+    /// `supply0`, `supply1`, `uwire`. Does NOT include `interconnect`
+    /// (which is a distinct declaration form, LRM 6.6.8).
+    pub fn is_net_type_kw(self) -> bool {
+        matches!(
+            self,
+            Self::WireKw
+                | Self::TriKw
+                | Self::WandKw
+                | Self::WorKw
+                | Self::Tri0Kw
+                | Self::Tri1Kw
+                | Self::TriregKw
+                | Self::Supply0Kw
+                | Self::Supply1Kw
+                | Self::UwireKw
+        )
+    }
 }
 
 /// First node kind value -- tokens are `< NODE_START`, nodes `>= NODE_START`.

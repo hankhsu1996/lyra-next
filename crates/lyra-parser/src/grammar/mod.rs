@@ -2,6 +2,7 @@ mod declarations;
 mod expressions;
 mod generate;
 mod items;
+mod net;
 mod ports;
 mod statements;
 mod strength;

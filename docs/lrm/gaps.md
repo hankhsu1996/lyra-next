@@ -20,9 +20,9 @@ Drive strength and charge strength syntax is parsed (DriveStrength, ChargeStreng
 
 `nettype` declarations parse and collect as first-class symbols in the type namespace. Remaining: alias-vs-define semantic classification (resolution-based), `Ty` integration for using nettypes in net declarations, resolve function signature validation and multi-driver semantics. Blocked by: name resolution query for alias classification, type system integration. Test: `lrm/ch06/6.6.7_user_defined_nettypes`.
 
-### 6.6.8: Generic interconnect
+### 6.6.8: Generic interconnect -- semantic constraints
 
-`interconnect` net type is not parsed. The keyword is in the lexer but no parser or semantic support exists. Blocked by: parser grammar, interconnect type representation, automatic type resolution semantics. Test: `lrm/ch06/6.6.8_generic_interconnect`.
+`interconnect` declarations parse, produce `Net` symbols with `NetKind::Interconnect`, and reject strength specifications at parse time. Remaining: automatic type resolution semantics (interconnect type is determined by what is connected to it, not declared), elaboration-time driver/receiver resolution. Test: `lrm/ch06/6.6.8_generic_interconnect`.
 
 ### 6.10: Implicit declarations
 

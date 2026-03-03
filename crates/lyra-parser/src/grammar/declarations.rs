@@ -3,7 +3,7 @@ use lyra_lexer::SyntaxKind;
 use crate::parser::{CompletedMarker, Parser};
 
 use super::ports::type_param_declarator;
-use super::{expressions, strength};
+use super::{expressions, net, strength};
 
 // `parameter` or `localparam` declaration as a module item (with semicolon).
 pub(crate) fn param_decl(p: &mut Parser) {
@@ -50,8 +50,17 @@ pub(crate) fn net_decl(p: &mut Parser) {
     let net_kw = p.current();
     p.bump(); // net type keyword (wire, tri, etc.)
     // Optional strength specification (LRM 6.3.2)
+    // Interconnect nets do not allow strength (LRM 6.6.8).
     if p.at(SyntaxKind::LParen) {
-        if net_kw == SyntaxKind::TriregKw && strength::is_charge_strength_kw(p.nth(1)) {
+        if net_kw == SyntaxKind::InterconnectKw {
+            if strength::is_drive_strength_kw(p.nth(1)) {
+                p.error(net::INTERCONNECT_STRENGTH_MSG);
+                strength::drive_strength(p);
+            } else if strength::is_charge_strength_kw(p.nth(1)) {
+                p.error(net::INTERCONNECT_STRENGTH_MSG);
+                strength::charge_strength(p);
+            }
+        } else if net_kw == SyntaxKind::TriregKw && strength::is_charge_strength_kw(p.nth(1)) {
             strength::charge_strength(p);
         } else if strength::is_drive_strength_kw(p.nth(1)) {
             strength::drive_strength(p);
@@ -444,7 +453,7 @@ pub(crate) fn at_cast_type(kind: SyntaxKind) -> bool {
 /// Does NOT handle bare `Ident Ident` (ambiguous with module instantiation).
 pub(crate) fn at_unambiguous_data_decl_start(p: &Parser) -> bool {
     let k = p.current();
-    if is_data_type_keyword(k) || is_net_type(k) {
+    if is_data_type_keyword(k) || net::is_net_type_kw(k) {
         return true;
     }
     matches!(
@@ -489,20 +498,4 @@ pub(crate) fn at_udt_data_decl_start(p: &Parser) -> bool {
                 | SyntaxKind::Semicolon
                 | SyntaxKind::ColonColon
         )
-}
-
-fn is_net_type(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::WireKw
-            | SyntaxKind::TriKw
-            | SyntaxKind::WandKw
-            | SyntaxKind::WorKw
-            | SyntaxKind::Tri0Kw
-            | SyntaxKind::Tri1Kw
-            | SyntaxKind::TriregKw
-            | SyntaxKind::Supply0Kw
-            | SyntaxKind::Supply1Kw
-            | SyntaxKind::UwireKw
-    )
 }

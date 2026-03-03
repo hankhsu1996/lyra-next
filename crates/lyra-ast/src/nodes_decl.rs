@@ -11,6 +11,7 @@ use crate::nodes::{
     PackageDecl, ParamDecl, QualifiedName, TaskDecl, TfPortDecl, VarDecl,
 };
 use crate::support::{self, AstChildren};
+use crate::type_spec::TypeSpecKeyword;
 
 impl PackageDecl {
     pub fn name(&self) -> Option<SyntaxToken> {
@@ -210,6 +211,45 @@ impl TaskDecl {
 
     pub fn statements(&self) -> AstChildren<StmtNode> {
         support::children(&self.syntax)
+    }
+}
+
+/// Discriminator for the leading keyword of a net declaration.
+///
+/// Separates `interconnect` (LRM 6.6.8) from traditional net-type keywords
+/// (`wire`, `tri`, etc.) so downstream consumers can apply kind-specific
+/// rules without re-inspecting raw tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NetDeclKind {
+    /// `interconnect` declaration (LRM 6.6.8).
+    Interconnect,
+    /// Traditional net-type keyword (`wire`, `tri`, etc.).
+    NetType(TypeSpecKeyword),
+    /// CST is malformed -- no recognizable net keyword found.
+    Unknown,
+}
+
+impl NetDecl {
+    /// Classify the net declaration by its leading keyword token.
+    ///
+    /// The keyword lives inside the `TypeSpec` child (first child node).
+    /// This walks one level deep to find it rather than searching all
+    /// descendants.
+    pub fn kind(&self) -> NetDeclKind {
+        let first_child = self.syntax.first_child();
+        let kw_kind = first_child
+            .as_ref()
+            .into_iter()
+            .flat_map(|n| n.children_with_tokens())
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|tok| !tok.kind().is_trivia())
+            .map(|tok| tok.kind());
+        match kw_kind {
+            Some(SyntaxKind::InterconnectKw) => NetDeclKind::Interconnect,
+            Some(k) if k.is_net_type_kw() => TypeSpecKeyword::from_token_kind(k)
+                .map_or(NetDeclKind::Unknown, NetDeclKind::NetType),
+            _ => NetDeclKind::Unknown,
+        }
     }
 }
 
