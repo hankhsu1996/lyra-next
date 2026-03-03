@@ -270,6 +270,19 @@ pub fn type_of_symbol_raw<'db>(
         );
     }
 
+    // type(...) in declaration: resolve declared type via inference (LRM 6.23)
+    if let Some(ts) = container.type_spec()
+        && let Some(te) = ts.type_expr()
+    {
+        let base_ty = resolve_type_expr_base(db, unit, source_file, map, &te);
+        let dim_src = match &container {
+            TypeDeclSite::Port(port) => Some(UnpackedDimSource::Port(port.clone())),
+            _ => declarator.clone().map(UnpackedDimSource::Declarator),
+        };
+        let ty = wrap_unpacked_dims(base_ty, dim_src.as_ref(), map);
+        return classify(ty, sym.kind);
+    }
+
     // No user-defined type -- pure extraction
     extract_type_from_container(&container, declarator.as_ref(), map)
 }
@@ -511,6 +524,67 @@ fn expand_typedef(
         lyra_semantic::wrap_unpacked(base_ty, &use_site_unpacked),
         caller_kind,
     )
+}
+
+/// Resolve a name inside `type(name)` to its type.
+///
+/// Tries typedef resolution first. If the name resolves to a variable
+/// or parameter instead of a type, returns the variable's type.
+// Resolve the base type of a `type(...)` operator in a declaration (LRM 6.23).
+fn resolve_type_expr_base(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    map: &lyra_ast::AstIdMap,
+    te: &lyra_ast::TypeExpr,
+) -> Ty {
+    use lyra_semantic::user_type_ref;
+    if let Some(inner_expr) = te.inner_expr() {
+        let et = crate::expr_queries::infer_expr_in_file(db, unit, source_file, map, &inner_expr);
+        return et.ty;
+    }
+    if let Some(inner_ts) = te.inner_type_spec() {
+        if let Some(utr) = user_type_ref(&inner_ts) {
+            return resolve_type_expr_name(db, unit, source_file, map, &utr);
+        }
+        return lyra_semantic::extract_base_ty_from_typespec(&inner_ts, map);
+    }
+    Ty::Error
+}
+
+fn resolve_type_expr_name(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    id_map: &lyra_ast::AstIdMap,
+    utr: &UserTypeRef,
+) -> Ty {
+    let resolve_node = crate::resolve_helpers::utr_syntax(utr);
+    let resolve = resolve_index_file(db, source_file, unit);
+    let Some(name_site_id) = id_map.erased_ast_id(resolve_node) else {
+        return Ty::Error;
+    };
+    let Some(resolution) = resolve.resolutions.get(&name_site_id) else {
+        return Ty::Error;
+    };
+    match &resolution.target {
+        lyra_semantic::resolve_index::ResolvedTarget::Symbol(sym_id) => {
+            let sym_ref = SymbolRef::new(db, unit, *sym_id);
+            let sym_type = type_of_symbol(db, sym_ref);
+            match sym_type {
+                lyra_semantic::types::SymbolType::TypeAlias(ty)
+                | lyra_semantic::types::SymbolType::Value(ty) => ty,
+                lyra_semantic::types::SymbolType::Net(net) => net.data,
+                lyra_semantic::types::SymbolType::Error(_) => Ty::Error,
+            }
+        }
+        lyra_semantic::resolve_index::ResolvedTarget::Def(def_id) => {
+            crate::ty_resolve::def_target_ty(db, unit, *def_id)
+        }
+        lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
+            Ty::Enum(target.enum_id)
+        }
+    }
 }
 
 fn classify(ty: Ty, kind: lyra_semantic::symbols::SymbolKind) -> lyra_semantic::types::SymbolType {

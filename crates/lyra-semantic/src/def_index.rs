@@ -28,6 +28,10 @@ pub enum ExpectedNs {
     /// Type position: try Type first, fall back to Value.
     /// Used for user-defined type names in `TypeSpec`.
     TypeThenValue,
+    /// Type operator `type(name)`: try Type first, fall back to Value.
+    /// Unlike `TypeThenValue`, resolving to Value does not emit a
+    /// "not a type" diagnostic (LRM 6.23).
+    TypeOrValue,
 }
 
 /// Per-file definition index: symbols, scopes, definition entries.

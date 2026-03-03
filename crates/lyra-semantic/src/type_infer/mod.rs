@@ -43,6 +43,7 @@ pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx
         ExprKind::StreamExpr(s) => aggregate::infer_stream(&s, ctx),
         ExprKind::CastExpr(c) => scalar::infer_cast(&c, ctx),
         ExprKind::NewExpr(ne) => infer_new_expr(&ne, None),
+        ExprKind::TypeExpr(te) => scalar::infer_type_expr(&te, ctx),
     };
     reject_void_value(result)
 }

@@ -111,7 +111,7 @@
   {"section": "6.22.4", "chapter": 6, "title": "Cast compatible", "parent": "6.22", "children": [], "ownable": false},
   {"section": "6.22.5", "chapter": 6, "title": "Type incompatible", "parent": "6.22", "children": [], "ownable": false},
   {"section": "6.22.6", "chapter": 6, "title": "Matching nettypes", "parent": "6.22", "children": [], "ownable": false},
-  {"section": "6.23", "chapter": 6, "title": "Type operator", "parent": "6", "children": [], "ownable": false},
+  {"section": "6.23", "chapter": 6, "title": "Type operator", "parent": "6", "children": [], "ownable": true},
   {"section": "6.24", "chapter": 6, "title": "Casting", "parent": "6", "children": ["6.24.1","6.24.2","6.24.3"], "ownable": false},
   {"section": "6.24.1", "chapter": 6, "title": "Cast operator", "parent": "6.24", "children": [], "ownable": false},
   {"section": "6.24.2", "chapter": 6, "title": "$cast dynamic casting", "parent": "6.24", "children": [], "ownable": false},

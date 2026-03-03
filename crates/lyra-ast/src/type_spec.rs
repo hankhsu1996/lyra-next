@@ -11,7 +11,7 @@ use crate::expr::Expr;
 use crate::node::AstNode;
 use crate::nodes::{
     ChargeStrength, DottedName, DriveStrength, EnumType, NameRef, PackedDimension, Port,
-    QualifiedName, StructType, TypeSpec, TypedefDecl, UnpackedDimension,
+    QualifiedName, StructType, TypeExpr, TypeSpec, TypedefDecl, UnpackedDimension,
 };
 use crate::support::{self, AstChildren};
 
@@ -77,6 +77,11 @@ impl TypeSpec {
 
     /// Optional charge strength on trireg net type specs (LRM 6.3.2).
     pub fn charge_strength(&self) -> Option<ChargeStrength> {
+        support::child(&self.syntax)
+    }
+
+    /// The `type(...)` operator child, if this `TypeSpec` wraps a type expression.
+    pub fn type_expr(&self) -> Option<TypeExpr> {
         support::child(&self.syntax)
     }
 
@@ -230,6 +235,20 @@ pub enum TypeNameRef {
     Simple(NameRef),
     Qualified(QualifiedName),
     Dotted(DottedName),
+}
+
+// TypeExpr accessors (LRM 6.23)
+
+impl TypeExpr {
+    /// The inner `TypeSpec` child when the operand is a data type.
+    pub fn inner_type_spec(&self) -> Option<TypeSpec> {
+        support::child(&self.syntax)
+    }
+
+    /// The inner expression child when the operand is an expression.
+    pub fn inner_expr(&self) -> Option<Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
 }
 
 // EnumType accessors (moved from nodes.rs)

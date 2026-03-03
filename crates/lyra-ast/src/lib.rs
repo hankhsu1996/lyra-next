@@ -31,7 +31,8 @@ pub use nodes::{
     PrimitiveDecl, ProgramBody, ProgramDecl, QualifiedName, RangeExpr, RepeatStmt, ReplicExpr,
     SourceFile, StreamExpr, StreamOperandItem, StreamOperands, StreamRange, StreamSliceSize,
     StreamWithClause, StructMember, StructType, SystemTfArgList, SystemTfCall, TaskDecl,
-    TfPortDecl, TimingControl, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
+    TfPortDecl, TimingControl, TypeExpr, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl,
+    WhileStmt,
 };
 pub use nodes_expr::{
     RangeKind, StreamDir, StreamRangeOp, SyntaxAssignOp, SyntaxBinaryOp, SyntaxPrefixOp,

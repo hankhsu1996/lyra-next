@@ -88,7 +88,32 @@ fn lhs(p: &mut Parser, mode: ExprMode) -> Option<CompletedMarker> {
     Some(postfix(p, cm))
 }
 
+// type(...) in expression context: standalone TypeExpr or type(...)'(expr) cast.
+fn type_expr_or_cast(p: &mut Parser) -> CompletedMarker {
+    let state = p.save_state();
+    let m = p.start();
+    super::declarations::type_expr(p);
+    if p.at(SyntaxKind::Tick) && p.nth(1) == SyntaxKind::LParen {
+        // Cast: wrap the TypeExpr in a TypeSpec, then CastExpr.
+        let ts = m.complete(p, SyntaxKind::TypeSpec);
+        let cm = ts.precede(p);
+        p.bump(); // '
+        p.bump(); // (
+        expr(p);
+        p.expect(SyntaxKind::RParen);
+        return cm.complete(p, SyntaxKind::CastExpr);
+    }
+    // Standalone type expression
+    m.abandon(p);
+    p.restore_state(state);
+    super::declarations::type_expr(p)
+}
+
 fn atom(p: &mut Parser) -> Option<CompletedMarker> {
+    if p.at(SyntaxKind::TypeKw) && p.nth(1) == SyntaxKind::LParen {
+        return Some(type_expr_or_cast(p));
+    }
+
     // Cast expression: data_type ' ( expr )
     // Speculatively parse a type; commit only if followed by Tick + LParen.
     if super::declarations::at_cast_type(p.current()) {

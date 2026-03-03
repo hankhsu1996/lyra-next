@@ -21,16 +21,84 @@ use crate::symbols::{Constness, Lifetime, Namespace, Symbol, SymbolKind};
 use crate::types::Ty;
 
 pub(crate) fn collect_type_spec_refs(ctx: &mut DefContext<'_>, ts: &TypeSpec, scope: ScopeId) {
-    let node = ts.syntax();
+    // type(...) operator: names inside can be types or values; collect
+    // inner expression refs as value-namespace and inner type refs recursively.
+    if let Some(te) = ts.type_expr() {
+        if let Some(inner_ts) = te.inner_type_spec() {
+            // type(data_type_or_name): register inner NameRef with TypeOrValue
+            if let Some(utr) = crate::type_extract::user_type_ref(&inner_ts) {
+                register_type_expr_use_site(ctx, &utr, scope);
+            }
+            collect_typespec_dim_refs(ctx, &inner_ts, scope);
+        } else {
+            // type(expr): collect expression name refs
+            for child in te.syntax().children() {
+                if child.kind() != SyntaxKind::TypeSpec {
+                    collect_name_refs(ctx, &child, scope);
+                }
+            }
+        }
+        return;
+    }
     if let Some(utr) = crate::type_extract::user_type_ref(ts) {
         register_type_use_site(ctx, &utr, scope);
     }
-    for child in node.children() {
+    collect_typespec_dim_refs(ctx, ts, scope);
+}
+
+// Walk dimension children of a TypeSpec and collect name refs from expressions
+// inside packed/unpacked dimensions.
+fn collect_typespec_dim_refs(ctx: &mut DefContext<'_>, ts: &TypeSpec, scope: ScopeId) {
+    for child in ts.syntax().children() {
         match child.kind() {
             SyntaxKind::PackedDimension | SyntaxKind::UnpackedDimension => {
                 collect_name_refs(ctx, &child, scope);
             }
             _ => {}
+        }
+    }
+}
+
+/// Register a use site for a name inside `type(...)` (LRM 6.23).
+///
+/// Uses `ExpectedNs::TypeOrValue`: try Type first, fall back to Value
+/// without the "not a type" diagnostic.
+fn register_type_expr_use_site(
+    ctx: &mut DefContext<'_>,
+    utr: &crate::type_extract::UserTypeRef,
+    scope: ScopeId,
+) {
+    match utr {
+        crate::type_extract::UserTypeRef::Simple(nr)
+        | crate::type_extract::UserTypeRef::InterfaceModport { iface: nr, .. } => {
+            if let Some(ident) = nr.ident()
+                && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
+            {
+                ctx.use_sites.push(UseSite {
+                    path: NamePath::Simple(SmolStr::new(ident.text())),
+                    expected_ns: ExpectedNs::TypeOrValue,
+                    scope,
+                    name_ref_site: ast_id.erase(),
+                    order_key: 0,
+                });
+            }
+        }
+        crate::type_extract::UserTypeRef::Qualified(qn) => {
+            if let Some(ast_id) = ctx.ast_id_map.ast_id(qn) {
+                let segments: Box<[SmolStr]> = qn
+                    .segments()
+                    .map(|ident| SmolStr::new(ident.text()))
+                    .collect();
+                if !segments.is_empty() {
+                    ctx.use_sites.push(UseSite {
+                        path: NamePath::Qualified { segments },
+                        expected_ns: ExpectedNs::TypeOrValue,
+                        scope,
+                        name_ref_site: ast_id.erase(),
+                        order_key: 0,
+                    });
+                }
+            }
         }
     }
 }
@@ -459,6 +527,19 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
                     }
                 } else {
                     collect_name_refs(ctx, &cast_child, scope);
+                }
+            }
+        } else if child.kind() == SyntaxKind::TypeExpr {
+            // Standalone type(...) in expression context: inner names can be
+            // types or values (TypeOrValue namespace).
+            if let Some(te) = lyra_ast::TypeExpr::cast(child) {
+                if let Some(inner_ts) = te.inner_type_spec() {
+                    if let Some(utr) = crate::type_extract::user_type_ref(&inner_ts) {
+                        register_type_expr_use_site(ctx, &utr, scope);
+                    }
+                    collect_typespec_dim_refs(ctx, &inner_ts, scope);
+                } else if let Some(inner_expr) = te.inner_expr() {
+                    collect_name_refs(ctx, inner_expr.syntax(), scope);
                 }
             }
         } else if child.kind() == SyntaxKind::TypeSpec {

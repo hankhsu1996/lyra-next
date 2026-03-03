@@ -238,7 +238,7 @@ pub(crate) fn check_type_mismatch(
     path: &NamePath,
     primary: DiagSpan,
 ) -> Option<SemanticDiag> {
-    if matches!(expected_ns, ExpectedNs::TypeThenValue) && actual_ns == Namespace::Value {
+    if expected_ns == ExpectedNs::TypeThenValue && actual_ns == Namespace::Value {
         Some(SemanticDiag {
             kind: SemanticDiagKind::NotAType {
                 name: SmolStr::new(path.display_name()),

@@ -495,6 +495,9 @@ pub enum SyntaxKind {
     // User-defined nettype declaration (LRM 6.6.7)
     NettypeDecl,
 
+    // Type operator (LRM 6.23)
+    TypeExpr,
+
     #[doc(hidden)]
     __Last,
 }

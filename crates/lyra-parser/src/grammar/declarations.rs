@@ -1,6 +1,6 @@
 use lyra_lexer::SyntaxKind;
 
-use crate::parser::Parser;
+use crate::parser::{CompletedMarker, Parser};
 
 use super::{expressions, strength};
 
@@ -117,9 +117,43 @@ fn var_declarator(p: &mut Parser) {
     m.complete(p, SyntaxKind::Declarator);
 }
 
+// Parse `type(operand)` into a TypeExpr node (LRM 6.23).
+//
+// Operand disambiguation: attempt type_spec first under checkpoint if the
+// next token plausibly starts a type; accept as type(data_type) only if it
+// ends right before `)`. Otherwise rollback and parse as expr().
+pub(crate) fn type_expr(p: &mut Parser) -> CompletedMarker {
+    let m = p.start();
+    p.bump(); // TypeKw
+    p.expect(SyntaxKind::LParen);
+
+    if is_data_type_keyword(p.current())
+        || p.at(SyntaxKind::Ident)
+        || (p.at(SyntaxKind::TypeKw) && p.nth(1) == SyntaxKind::LParen)
+    {
+        let state = p.save_state();
+        type_spec(p);
+        if !p.at(SyntaxKind::RParen) {
+            p.restore_state(state);
+            expressions::expr(p);
+        }
+    } else {
+        expressions::expr(p);
+    }
+
+    p.expect(SyntaxKind::RParen);
+    m.complete(p, SyntaxKind::TypeExpr)
+}
+
 // Parse a type specifier: `logic`, `reg`, `bit`, `logic [7:0]`, `Ident`, etc.
 pub(crate) fn type_spec(p: &mut Parser) {
     let m = p.start();
+    // type(operand) as a complete type reference (LRM 6.23)
+    if p.at(SyntaxKind::TypeKw) && p.nth(1) == SyntaxKind::LParen {
+        type_expr(p);
+        m.complete(p, SyntaxKind::TypeSpec);
+        return;
+    }
     if p.at(SyntaxKind::EnumKw) {
         enum_type(p);
     } else if p.at(SyntaxKind::StructKw) || p.at(SyntaxKind::UnionKw) {
@@ -391,7 +425,7 @@ pub(crate) fn is_data_type_keyword(kind: SyntaxKind) -> bool {
 /// Whether `kind` can start a cast target type (`data_type` production).
 /// Covers keyword types and user-defined type names (Ident).
 pub(crate) fn at_cast_type(kind: SyntaxKind) -> bool {
-    is_scalar_type_keyword(kind) || kind == SyntaxKind::Ident
+    is_scalar_type_keyword(kind) || kind == SyntaxKind::Ident || kind == SyntaxKind::TypeKw
 }
 
 /// Tokens that unambiguously start a data declaration.

@@ -64,6 +64,10 @@ impl UserTypeRef {
 
 /// Extract the user-defined type reference from a `TypeSpec`, if any.
 pub fn user_type_ref(typespec: &TypeSpec) -> Option<UserTypeRef> {
+    // type(user_type): delegate to inner TypeSpec
+    if let Some(te) = typespec.type_expr() {
+        return te.inner_type_spec().and_then(|ts| user_type_ref(&ts));
+    }
     match typespec.type_name_ref()? {
         TypeNameRef::Simple(nr) => Some(UserTypeRef::Simple(nr)),
         TypeNameRef::Qualified(qn) => Some(UserTypeRef::Qualified(qn)),
@@ -283,6 +287,14 @@ fn extract_typedef_decl(td: &TypedefDecl, ast_id_map: &AstIdMap) -> SymbolType {
 /// Used by callable signature extraction (in `lyra-db`) to type TF port parameters
 /// without going through the full `extract_type_from_container` path.
 pub fn extract_base_ty_from_typespec(typespec: &TypeSpec, ast_id_map: &AstIdMap) -> Ty {
+    // type(data_type): recurse into inner TypeSpec for complete extraction
+    if let Some(te) = typespec.type_expr() {
+        if let Some(inner_ts) = te.inner_type_spec() {
+            return extract_base_ty_from_typespec(&inner_ts, ast_id_map);
+        }
+        // type(expr): not extractable without inference
+        return Ty::Error;
+    }
     let (base_ty, signed_override) = extract_typespec_base(typespec);
     let packed = extract_packed_dims(typespec, ast_id_map);
     build_base_ty(base_ty, signed_override, packed)
@@ -296,6 +308,14 @@ pub fn extract_base_ty_from_type_ref(tr: &lyra_ast::TypeRef, ast_id_map: &AstIdM
 
 /// Extract the base type keyword and optional signing override from a `TypeSpec`.
 fn extract_typespec_base(typespec: &TypeSpec) -> (Option<Ty>, Option<Signing>) {
+    // type(data_type): peel into the inner TypeSpec
+    if let Some(te) = typespec.type_expr() {
+        if let Some(inner_ts) = te.inner_type_spec() {
+            return extract_typespec_base(&inner_ts);
+        }
+        // type(expr): not extractable without inference; handled by DB/type_infer
+        return (None, None);
+    }
     let base_ty = typespec.type_keyword().and_then(keyword_to_ty);
     let signing = typespec.signing();
     (base_ty, signing)
