@@ -41,6 +41,9 @@ pub enum CheckKind {
     CastExpr,
     StreamOperandItem,
     CallExpr,
+    NetDecl,
+    TypedefDecl,
+    PortDecl,
 }
 
 /// Salsa-cached checks index for a file.
@@ -59,6 +62,11 @@ fn build_checks_index(root: &SyntaxNode, id_map: &AstIdMap) -> ChecksIndex {
     };
     if let Some(sf) = SourceFile::cast(root.clone()) {
         for module in sf.modules() {
+            if let Some(pl) = module.port_list() {
+                for port in pl.ports() {
+                    builder.push(port.syntax(), CheckKind::PortDecl, AccessMode::Read);
+                }
+            }
             if let Some(body) = module.body() {
                 builder.collect_module_body(&body);
             }
@@ -92,6 +100,12 @@ impl IndexBuilder<'_> {
         }
         for vd in body.var_decls() {
             self.push(vd.syntax(), CheckKind::VarDecl, AccessMode::Read);
+        }
+        for nd in body.net_decls() {
+            self.push(nd.syntax(), CheckKind::NetDecl, AccessMode::Read);
+        }
+        for td in body.typedef_decls() {
+            self.push(td.syntax(), CheckKind::TypedefDecl, AccessMode::Read);
         }
         for always in body.always_blocks() {
             if let Some(stmt) = always.body() {

@@ -28,6 +28,7 @@ ast_nodes! {
         module_instantiations: [ModuleInstantiation],
         function_decls: [FunctionDecl],
         task_decls: [TaskDecl],
+        typedef_decls: [TypedefDecl],
     }
 
     PortList(SyntaxKind::PortList) {

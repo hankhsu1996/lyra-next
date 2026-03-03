@@ -97,6 +97,9 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::IllegalDriveStrengthBothHighz { strength_site } => {
             misc::lower_illegal_drive_strength(*strength_site, source_map, diags);
         }
+        TypeCheckItem::QueueBoundNotConst { .. } | TypeCheckItem::QueueBoundNotPositive { .. } => {
+            misc::lower_queue_bound_item(item, source_map, diags);
+        }
     }
 }
 
