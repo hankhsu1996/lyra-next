@@ -8,9 +8,10 @@ use lyra_parser::SyntaxToken;
 use crate::node::AstNode;
 use crate::nodes::{
     AssignStmt, BinExpr, BlockStmt, CaseItem, CaseStmt, ContinuousAssign, DriveStrength, ForStmt,
-    ForeachStmt, ForeachVarList, ForeverStmt, IfStmt, NameRef, RepeatStmt, SyntaxAssignOp,
-    TimingControl, WhileStmt,
+    ForeachStmt, ForeachVarList, ForeverStmt, IfStmt, NameRef, RepeatStmt, TimingControl,
+    WhileStmt,
 };
+use crate::nodes_expr::SyntaxAssignOp;
 use crate::support::{self, AstChildren};
 
 impl BlockStmt {
