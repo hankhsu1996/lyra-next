@@ -7,6 +7,7 @@ use super::expressions;
 use super::generate;
 use super::ports;
 use super::statements;
+use super::strength;
 use super::subprograms;
 
 // Parse a package declaration: `package [lifetime] name ; { item } endpackage [: name]`
@@ -329,6 +330,10 @@ pub(super) fn module_item(p: &mut Parser) -> bool {
 fn continuous_assign(p: &mut Parser) {
     let m = p.start();
     p.bump(); // assign
+    // Optional drive strength (LRM 6.3.2)
+    if p.at(SyntaxKind::LParen) && strength::is_drive_strength_kw(p.nth(1)) {
+        strength::drive_strength(p);
+    }
     expressions::expr(p);
     p.expect(SyntaxKind::Assign);
     expressions::expr(p);

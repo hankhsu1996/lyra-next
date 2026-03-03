@@ -246,6 +246,10 @@ ast_nodes! {
     StreamOperandItem(SyntaxKind::StreamOperandItem) { @custom }
     StreamWithClause(SyntaxKind::StreamWithClause) { @custom }
     StreamRange(SyntaxKind::StreamRange) { @custom }
+
+    // Strength specifications (LRM 6.3.2)
+    DriveStrength(SyntaxKind::DriveStrength) { @custom }
+    ChargeStrength(SyntaxKind::ChargeStrength) { @custom }
 }
 
 // Custom accessors

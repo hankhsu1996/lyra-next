@@ -2,7 +2,7 @@ use lyra_lexer::SyntaxKind;
 
 use crate::parser::Parser;
 
-use super::expressions;
+use super::{expressions, strength};
 
 // `parameter` or `localparam` declaration as a module item (with semicolon).
 pub(crate) fn param_decl(p: &mut Parser) {
@@ -35,7 +35,16 @@ fn param_declarator(p: &mut Parser) {
 pub(crate) fn net_decl(p: &mut Parser) {
     let m = p.start();
     let ts = p.start();
+    let net_kw = p.current();
     p.bump(); // net type keyword (wire, tri, etc.)
+    // Optional strength specification (LRM 6.3.2)
+    if p.at(SyntaxKind::LParen) {
+        if net_kw == SyntaxKind::TriregKw && strength::is_charge_strength_kw(p.nth(1)) {
+            strength::charge_strength(p);
+        } else if strength::is_drive_strength_kw(p.nth(1)) {
+            strength::drive_strength(p);
+        }
+    }
     // Optional signing
     if p.at(SyntaxKind::SignedKw) || p.at(SyntaxKind::UnsignedKw) {
         p.bump();

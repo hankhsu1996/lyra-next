@@ -12,9 +12,9 @@ Object-like and parameterized (function-like) macro expansion at use sites is im
 
 ## Chapter 6 -- Data Types
 
-### 6.3.2: Strengths -- charge strength and drive strength
+### 6.3.2: Strengths -- semantic legality validation
 
-Drive strength (`(strong0, pull1)`, etc.) and charge strength (`small`, `medium`, `large`) on net declarations are not parsed. Keywords are recognized by the lexer but no grammar rules exist. Valid SV code using strength specifications produces parse errors. Blocked by: parser grammar for strength specifications, AST representation, type-level strength tracking. Test: `lrm/ch06/6.3.2_strengths`.
+Drive strength and charge strength syntax is parsed (DriveStrength, ChargeStrength CST nodes). Remaining: semantic validation of illegal combinations (e.g. `(highz0, highz1)`), ordering constraints, and type-level strength tracking. Blocked by: semantic strength validation pass. Test: `lrm/ch06/6.3.2.1_charge_strength`, `lrm/ch06/6.3.2.2_drive_strength`.
 
 ### 6.6.7: User-defined nettypes
 

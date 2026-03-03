@@ -7,9 +7,9 @@ use lyra_parser::SyntaxToken;
 
 use crate::node::AstNode;
 use crate::nodes::{
-    AssignStmt, BinExpr, BlockStmt, CaseItem, CaseStmt, ContinuousAssign, ForStmt, ForeachStmt,
-    ForeachVarList, ForeverStmt, IfStmt, NameRef, RepeatStmt, SyntaxAssignOp, TimingControl,
-    WhileStmt,
+    AssignStmt, BinExpr, BlockStmt, CaseItem, CaseStmt, ContinuousAssign, DriveStrength, ForStmt,
+    ForeachStmt, ForeachVarList, ForeverStmt, IfStmt, NameRef, RepeatStmt, SyntaxAssignOp,
+    TimingControl, WhileStmt,
 };
 use crate::support::{self, AstChildren};
 
@@ -321,6 +321,11 @@ impl ContinuousAssign {
 
     /// Optional timing control (delay) on the assign.
     pub fn timing_control(&self) -> Option<TimingControl> {
+        support::child(&self.syntax)
+    }
+
+    /// Optional drive strength on the assign (LRM 6.3.2).
+    pub fn drive_strength(&self) -> Option<DriveStrength> {
         support::child(&self.syntax)
     }
 }
