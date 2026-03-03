@@ -17,6 +17,10 @@ pub(crate) enum SystemFnKind {
     ShortRealToBits,
     BitsToReal,
     BitsToShortReal,
+    /// `$left`, `$right`, `$low`, `$high`, `$size`, `$increment` (LRM 20.7)
+    ArrayQuery,
+    /// `$dimensions`, `$unpacked_dimensions` (LRM 20.7)
+    ArrayQueryCount,
 }
 
 pub(crate) struct SystemFnEntry {
@@ -214,49 +218,49 @@ static BUILTINS: &[SystemFnEntry] = &[
         name: "$left",
         min_args: 1,
         max_args: Some(2),
-        kind: SystemFnKind::ReturnsInt,
+        kind: SystemFnKind::ArrayQuery,
     },
     SystemFnEntry {
         name: "$right",
         min_args: 1,
         max_args: Some(2),
-        kind: SystemFnKind::ReturnsInt,
+        kind: SystemFnKind::ArrayQuery,
     },
     SystemFnEntry {
         name: "$low",
         min_args: 1,
         max_args: Some(2),
-        kind: SystemFnKind::ReturnsInt,
+        kind: SystemFnKind::ArrayQuery,
     },
     SystemFnEntry {
         name: "$high",
         min_args: 1,
         max_args: Some(2),
-        kind: SystemFnKind::ReturnsInt,
+        kind: SystemFnKind::ArrayQuery,
     },
     SystemFnEntry {
         name: "$size",
         min_args: 1,
         max_args: Some(2),
-        kind: SystemFnKind::ReturnsInt,
+        kind: SystemFnKind::ArrayQuery,
     },
     SystemFnEntry {
         name: "$increment",
         min_args: 1,
         max_args: Some(2),
-        kind: SystemFnKind::ReturnsInt,
+        kind: SystemFnKind::ArrayQuery,
     },
     SystemFnEntry {
         name: "$dimensions",
         min_args: 1,
         max_args: Some(1),
-        kind: SystemFnKind::ReturnsInt,
+        kind: SystemFnKind::ArrayQueryCount,
     },
     SystemFnEntry {
         name: "$unpacked_dimensions",
         min_args: 1,
         max_args: Some(1),
-        kind: SystemFnKind::ReturnsInt,
+        kind: SystemFnKind::ArrayQueryCount,
     },
     // Real conversion functions (LRM 20.5)
     SystemFnEntry {
@@ -348,6 +352,9 @@ pub(crate) fn infer_system_call(stf: &SystemTfCall, ctx: &dyn InferCtx) -> ExprT
         SystemFnKind::RealToBits => infer_one_arg_returns_bits(&args, ctx, 64),
         SystemFnKind::ShortRealToBits => infer_one_arg_returns_bits(&args, ctx, 32),
         SystemFnKind::BitsToShortReal => infer_one_arg_returns_shortreal(&args, ctx),
+        SystemFnKind::ArrayQuery | SystemFnKind::ArrayQueryCount => {
+            ExprType::from_ty(&crate::types::Ty::int())
+        }
     }
 }
 

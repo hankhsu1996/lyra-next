@@ -183,6 +183,14 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 32,
     };
+    pub const ARRAY_QUERY_DYN_TYPE_FORM: Self = Self {
+        namespace: "lyra.type",
+        number: 33,
+    };
+    pub const ARRAY_QUERY_VAR_SIZED_DIM: Self = Self {
+        namespace: "lyra.type",
+        number: 34,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,
