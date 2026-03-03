@@ -5,6 +5,7 @@ mod generate_item;
 mod node;
 mod nodes;
 mod nodes_decl;
+mod nodes_expr;
 mod nodes_stmt;
 mod port;
 mod strength;
@@ -27,11 +28,13 @@ pub use nodes::{
     ModportDecl, ModportExprPort, ModportItem, ModportPort, ModportPortKind, ModuleBody,
     ModuleDecl, ModuleInstantiation, NameRef, NetDecl, NewExpr, PackageBody, PackageDecl,
     PackedDimension, ParamDecl, ParamPortList, ParenExpr, Port, PortList, PrefixExpr,
-    PrimitiveDecl, ProgramBody, ProgramDecl, QualifiedName, RangeExpr, RangeKind, RepeatStmt,
-    ReplicExpr, SourceFile, StreamDir, StreamExpr, StreamOperandItem, StreamOperands, StreamRange,
-    StreamRangeOp, StreamSliceSize, StreamWithClause, StructMember, StructType, SyntaxAssignOp,
-    SyntaxBinaryOp, SyntaxPrefixOp, SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl,
-    TimingControl, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
+    PrimitiveDecl, ProgramBody, ProgramDecl, QualifiedName, RangeExpr, RepeatStmt, ReplicExpr,
+    SourceFile, StreamExpr, StreamOperandItem, StreamOperands, StreamRange, StreamSliceSize,
+    StreamWithClause, StructMember, StructType, SystemTfArgList, SystemTfCall, TaskDecl,
+    TfPortDecl, TimingControl, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
+};
+pub use nodes_expr::{
+    RangeKind, StreamDir, StreamRangeOp, SyntaxAssignOp, SyntaxBinaryOp, SyntaxPrefixOp,
 };
 pub use port::PortDirection;
 pub use support::{AstChildren, expr_children, field_exprs};
