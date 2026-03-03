@@ -67,6 +67,9 @@ pub(crate) fn lower_type_check_item(
         | TypeCheckItem::StreamUnpackOperandUnsupported { .. } => {
             lower_stream_unpack_operand(item, source_map, diags);
         }
+        TypeCheckItem::StreamUnpackGreedyRemainder { .. } => {
+            lower_stream_unpack_greedy_remainder(item, source_map, diags);
+        }
         TypeCheckItem::StreamUnpackWidthMismatch { .. } => {
             lower_stream_unpack_width_mismatch(item, source_map, diags);
         }
@@ -907,6 +910,48 @@ fn lower_stream_unpack_operand(
             kind: lyra_diag::LabelKind::Primary,
             span,
             message: lyra_diag::Message::new(msg_id, msg_args),
+        }),
+    );
+}
+
+fn lower_stream_unpack_greedy_remainder(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::StreamUnpackGreedyRemainder {
+        assign_site,
+        greedy_site,
+        remaining,
+        elem_width,
+        ..
+    } = item
+    else {
+        return;
+    };
+    let Some(assign_span) = source_map.map_span(assign_site.text_range()) else {
+        return;
+    };
+    let greedy_span = source_map
+        .map_span(greedy_site.text_range())
+        .unwrap_or(assign_span);
+    let msg = lyra_diag::Message::new(
+        lyra_diag::MessageId::StreamUnpackGreedyRemainder,
+        vec![
+            lyra_diag::Arg::Width(*remaining),
+            lyra_diag::Arg::Width(*elem_width),
+        ],
+    );
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::DiagnosticCode::STREAM_UNPACK_GREEDY_REMAINDER,
+            msg.clone(),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span: greedy_span,
+            message: msg,
         }),
     );
 }

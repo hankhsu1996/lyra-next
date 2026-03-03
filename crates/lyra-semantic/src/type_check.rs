@@ -151,6 +151,13 @@ pub enum TypeCheckItem {
         operand_site: Site,
         operand_ty: Ty,
     },
+    StreamUnpackGreedyRemainder {
+        assign_site: Site,
+        greedy_site: Site,
+        rhs_site: Site,
+        remaining: u32,
+        elem_width: u32,
+    },
     StreamUnpackWidthMismatch {
         assign_site: Site,
         op_range: Option<TextRange>,

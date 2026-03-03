@@ -64,6 +64,7 @@ pub enum MessageId {
     ArrayIncompatible,
     StreamUnpackOperandInvalid,
     StreamUnpackOperandUnsupported,
+    StreamUnpackGreedyRemainder,
     StreamUnpackWidthMismatch,
     AssignToConst,
     ConstMissingInit,
@@ -263,6 +264,7 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::ArrayIncompatible
         | MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
+        | MessageId::StreamUnpackGreedyRemainder
         | MessageId::StreamUnpackWidthMismatch
         | MessageId::AssignToConst
         | MessageId::ConstMissingInit
@@ -334,19 +336,9 @@ fn render_type_message(msg: &Message) -> String {
         | MessageId::EnumRangeBoundNotEvaluable
         | MessageId::EnumRangeCountNegative
         | MessageId::EnumRangeTooLarge => render_record_message(msg),
-        MessageId::EnumAssignFromNonEnum => {
-            let rhs_ty = name();
-            let lhs_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            format!("cannot assign {rhs_ty} to enum `{lhs_name}` without an explicit cast")
-        }
-        MessageId::EnumAssignWrongEnum => {
-            let rhs_name = name();
-            let lhs_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            format!("cannot assign enum `{rhs_name}` to enum `{lhs_name}` without an explicit cast")
-        }
-        MessageId::EnumTypeHere => {
-            format!("enum type `{}`", name())
-        }
+        MessageId::EnumAssignFromNonEnum
+        | MessageId::EnumAssignWrongEnum
+        | MessageId::EnumTypeHere => render_enum_assign_message(msg),
         MessageId::ConversionArgCategory | MessageId::ConversionWidthMismatch => {
             render_conversion_message(msg)
         }
@@ -394,6 +386,7 @@ fn render_type_message(msg: &Message) -> String {
         | MessageId::ArrayIncompatible => render_array_message(msg),
         MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
+        | MessageId::StreamUnpackGreedyRemainder
         | MessageId::StreamUnpackWidthMismatch => render_stream_unpack_message(msg),
         MessageId::AssignToConst => {
             format!("cannot assign to const variable `{}`", name())
@@ -423,10 +416,37 @@ fn render_stream_unpack_message(msg: &Message) -> String {
             let ty_name = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
             format!("streaming unpack operand type `{ty_name}` has no fixed streaming width")
         }
+        MessageId::StreamUnpackGreedyRemainder => {
+            let remaining = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
+            let elem_width = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
+            format!(
+                "streaming unpack leaves {remaining} bits for dynamic target of {elem_width}-bit elements"
+            )
+        }
         MessageId::StreamUnpackWidthMismatch => {
             let lhs_w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
             let rhs_w = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
             format!("streaming unpack target is {lhs_w} bits but source is {rhs_w} bits")
+        }
+        _ => String::new(),
+    }
+}
+
+fn render_enum_assign_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
+        MessageId::EnumAssignFromNonEnum => {
+            let rhs_ty = name();
+            let lhs_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("cannot assign {rhs_ty} to enum `{lhs_name}` without an explicit cast")
+        }
+        MessageId::EnumAssignWrongEnum => {
+            let rhs_name = name();
+            let lhs_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("cannot assign enum `{rhs_name}` to enum `{lhs_name}` without an explicit cast")
+        }
+        MessageId::EnumTypeHere => {
+            format!("enum type `{}`", name())
         }
         _ => String::new(),
     }
