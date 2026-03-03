@@ -2,7 +2,7 @@ use lyra_ast::HasSyntax;
 use lyra_semantic::resolve_index::ResolvedTarget;
 use lyra_semantic::symbols::GlobalSymbolId;
 use lyra_semantic::type_infer::ExprType;
-use lyra_semantic::types::{InterfaceIdentity, SymbolType, Ty};
+use lyra_semantic::types::{InterfaceIdentity, NetKind, SymbolType, Ty};
 use smol_str::SmolStr;
 
 use crate::expr_queries::ExprRef;
@@ -188,7 +188,11 @@ impl<'db> TyFmt<'db> {
             SymbolType::Value(ty) => self.ty(ty),
             SymbolType::TypeAlias(ty) => SmolStr::new(format!("type = {}", self.ty(ty))),
             SymbolType::Net(net) => {
-                SmolStr::new(format!("{} {}", net.kind.keyword_str(), self.ty(&net.data)))
+                if net.kind == NetKind::Interconnect {
+                    SmolStr::new_static(net.kind.keyword_str())
+                } else {
+                    SmolStr::new(format!("{} {}", net.kind.keyword_str(), self.ty(&net.data)))
+                }
             }
             SymbolType::Error(_) => SmolStr::new_static("<error>"),
         }

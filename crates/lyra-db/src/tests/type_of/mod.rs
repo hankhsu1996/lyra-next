@@ -3,6 +3,7 @@ mod basic;
 mod dims;
 mod foreach;
 mod interface;
+mod nettype;
 mod typedef;
 
 use lyra_semantic::record::{Packing, RecordKind};

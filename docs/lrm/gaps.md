@@ -16,13 +16,13 @@ Macro expansion supports object-like and function-like macros, argument substitu
 
 Drive strength and charge strength syntax is parsed (DriveStrength, ChargeStrength CST nodes). Remaining: semantic validation of illegal combinations (e.g. `(highz0, highz1)`), ordering constraints, and type-level strength tracking. Blocked by: semantic strength validation pass. Test: `lrm/ch06/6.3.2.1_charge_strength`, `lrm/ch06/6.3.2.2_drive_strength`.
 
-### 6.6.7: User-defined nettypes
+### 6.6.7: User-defined nettypes -- resolve function and multi-driver semantics
 
-`nettype` declarations parse and collect as first-class symbols in the type namespace. Remaining: alias-vs-define semantic classification (resolution-based), `Ty` integration for using nettypes in net declarations, resolve function signature validation and multi-driver semantics. Blocked by: name resolution query for alias classification, type system integration. Test: `lrm/ch06/6.6.7_user_defined_nettypes`.
+`nettype` declarations parse, collect as type-namespace symbols, and resolve through the alias expansion chain (define form, alias form, cross-package use). Remaining: resolve function signature validation, multi-driver semantics, net-declaration-specific legality rules. Blocked by: callable signature matching for resolve functions, driver/receiver model. Test: `lrm/ch06/6.6.7_user_defined_nettypes`.
 
-### 6.6.8: Generic interconnect -- semantic constraints
+### 6.6.8: Generic interconnect -- elaboration semantics
 
-`interconnect` declarations parse, produce `Net` symbols with `NetKind::Interconnect`, and reject strength specifications at parse time. Remaining: automatic type resolution semantics (interconnect type is determined by what is connected to it, not declared), elaboration-time driver/receiver resolution. Test: `lrm/ch06/6.6.8_generic_interconnect`.
+`interconnect` declarations parse, produce `Net` symbols with `NetKind::Interconnect`, reject strength specifications at parse time, and display honestly (no fabricated base type). Remaining: connection-determined type resolution at elaboration time, driver/receiver semantics. Blocked by: elaboration-time port binding model. Test: `lrm/ch06/6.6.8_generic_interconnect`.
 
 ### 6.10: Implicit declarations
 

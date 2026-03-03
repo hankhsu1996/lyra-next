@@ -1,7 +1,7 @@
 use lyra_ast::{
-    AstIdMap, Declarator, Expr, ExprKind, NameRef, NetDecl, NetDeclKind, PackedDimension,
-    ParamDecl, Port, QualifiedName, Signing, TypeDeclSite, TypeNameRef, TypeSpec, TypeSpecKeyword,
-    TypedefDecl, UnpackedDimKind, UnpackedDimension, VarDecl,
+    AstIdMap, Declarator, Expr, ExprKind, NameRef, NetDecl, NetDeclKind, NettypeDecl,
+    PackedDimension, ParamDecl, Port, QualifiedName, Signing, TypeDeclSite, TypeNameRef, TypeSpec,
+    TypeSpecKeyword, TypedefDecl, UnpackedDimKind, UnpackedDimension, VarDecl,
 };
 use smol_str::SmolStr;
 
@@ -28,7 +28,7 @@ pub fn extract_type_from_container(
         TypeDeclSite::ParamDecl(p) => extract_param_decl(p, ast_id_map),
         TypeDeclSite::Port(p) => extract_port(p, ast_id_map),
         TypeDeclSite::TypedefDecl(td) => extract_typedef_decl(td, ast_id_map),
-        TypeDeclSite::NettypeDecl(_) => SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
+        TypeDeclSite::NettypeDecl(nd) => extract_nettype_decl(nd, ast_id_map),
     }
 }
 
@@ -279,6 +279,26 @@ fn extract_typedef_decl(td: &TypedefDecl, ast_id_map: &AstIdMap) -> SymbolType {
     let unpacked = extract_unpacked_dims_from_typedef(td, ast_id_map);
     let ty = build_base_ty(base_ty, signed_override, packed);
     SymbolType::TypeAlias(wrap_unpacked(ty, &unpacked))
+}
+
+/// Extract a `SymbolType` from a `NettypeDecl` (define form only).
+///
+/// Handles `nettype <data_type> <identifier>`. The alias form
+/// (`nettype <nettype_id> <identifier>`) is routed through `expand_typedef`
+/// by the DB layer before reaching this function, because the `TypeSpec`
+/// contains a user-type reference that the container-generic precheck
+/// in `type_of_symbol_raw` catches first.
+fn extract_nettype_decl(nd: &NettypeDecl, ast_id_map: &AstIdMap) -> SymbolType {
+    let Some(ts) = nd.type_spec() else {
+        return SymbolType::Error(SymbolTypeError::InternalError);
+    };
+    if ts.type_name_ref().is_some() {
+        return SymbolType::Error(SymbolTypeError::InternalError);
+    }
+    let (base_ty, signed_override) = extract_typespec_base(&ts);
+    let packed = extract_packed_dims(&ts, ast_id_map);
+    let ty = build_base_ty(base_ty, signed_override, packed);
+    SymbolType::TypeAlias(ty)
 }
 
 /// Extract the base `Ty` from a `TypeSpec`, including signing and packed dims.
