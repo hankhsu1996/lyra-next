@@ -394,6 +394,34 @@ pub(crate) fn at_unambiguous_data_decl_start(p: &Parser) -> bool {
             && p.nth(3) == SyntaxKind::Ident)
 }
 
+/// Bare user-defined type name unambiguously starting a data declaration.
+/// Two forms:
+///   Ident # -- parameterized type (context decides if also instantiation)
+///   Ident (Ident|EscapedIdent) <continuation> -- type followed by
+///     declarator name and a token that continues a declaration
+///
+/// The continuation set covers declaration-specific patterns: unpacked
+/// dimension `[`, initializer `=`, list `,`, terminator `;`, scope `::`.
+/// `(` is deliberately excluded because `Ident Ident (` is ambiguous with
+/// module instantiation; callers handle that case separately.
+pub(crate) fn at_udt_data_decl_start(p: &Parser) -> bool {
+    if p.current() != SyntaxKind::Ident {
+        return false;
+    }
+    if p.nth(1) == SyntaxKind::Hash {
+        return true;
+    }
+    matches!(p.nth(1), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
+        && matches!(
+            p.nth(2),
+            SyntaxKind::LBracket
+                | SyntaxKind::Assign
+                | SyntaxKind::Comma
+                | SyntaxKind::Semicolon
+                | SyntaxKind::ColonColon
+        )
+}
+
 fn is_net_type(kind: SyntaxKind) -> bool {
     matches!(
         kind,

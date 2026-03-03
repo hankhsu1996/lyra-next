@@ -80,6 +80,14 @@ fn package_item(p: &mut Parser) -> bool {
             }
             true
         }
+        SyntaxKind::Ident => {
+            if declarations::at_udt_data_decl_start(p) {
+                declarations::var_decl(p);
+            } else {
+                p.error_bump("unexpected token in package body");
+            }
+            true
+        }
         _ => {
             p.error_bump("unexpected token in package body");
             !p.at_end()
@@ -296,16 +304,15 @@ pub(super) fn module_item(p: &mut Parser) -> bool {
             true
         }
         SyntaxKind::Ident => {
-            // Ambiguous: bare Ident not caught by classifier (no ColonColon).
-            // Heuristic: Ident # -> instantiation, Ident Ident ( -> instantiation.
-            if p.nth(1) == SyntaxKind::Hash {
+            if at_module_instantiation_start(p) {
                 module_instantiation(p);
-            } else if p.nth(1) == SyntaxKind::Ident {
-                if p.nth(2) == SyntaxKind::LParen {
-                    module_instantiation(p);
-                } else {
-                    declarations::var_decl(p);
-                }
+            } else if declarations::at_udt_data_decl_start(p) {
+                declarations::var_decl(p);
+            } else if matches!(p.nth(1), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
+                && p.nth(2) == SyntaxKind::LParen
+            {
+                // Non-parameterized instantiation: ModName inst_name(...)
+                module_instantiation(p);
             } else {
                 p.error_bump("unexpected token in module body");
             }
@@ -349,6 +356,19 @@ fn initial_block(p: &mut Parser) {
     p.bump(); // initial
     statements::stmt(p);
     m.complete(p, SyntaxKind::InitialBlock);
+}
+
+/// Unambiguous module instantiation starts (only `#` forms):
+///   Ident # -- parameterized instantiation
+///   Ident (Ident|EscapedIdent) # -- instance with param override
+fn at_module_instantiation_start(p: &Parser) -> bool {
+    if p.current() != SyntaxKind::Ident {
+        return false;
+    }
+    if p.nth(1) == SyntaxKind::Hash {
+        return true;
+    }
+    matches!(p.nth(1), SyntaxKind::Ident | SyntaxKind::EscapedIdent) && p.nth(2) == SyntaxKind::Hash
 }
 
 // Module instantiation: `mod_name [#(params)] inst_name (ports) ;`
