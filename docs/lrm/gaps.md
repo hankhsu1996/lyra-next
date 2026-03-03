@@ -138,10 +138,6 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 ## Chapter 12 -- Procedural Programming Statements
 
-### 12.7.3: Foreach -- package-qualified postfix headers
-
-Simple indexed (`a[0][j]`), field-access (`s.arr[i]`), and multi-dim partial-index (`m[0][i,j]`) foreach headers are supported. Remaining gap: package-qualified base with postfix selects (`pkg::obj.field[i]`). Blocked by: cross-package field access typing. Test: `lrm/ch12/12.7.3_foreach_loop_statements/cases/indexed_array_ref`.
-
 ## Chapter 20 -- System Functions
 
 ### 20.6.2: $bits constant evaluation -- unsupported type categories

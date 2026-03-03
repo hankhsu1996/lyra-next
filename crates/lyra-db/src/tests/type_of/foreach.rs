@@ -305,6 +305,32 @@ fn foreach_array_expr_partial_index_peels_one_dim() {
     );
 }
 
+// Foreach over package-qualified field: p::obj.arr[i]
+#[test]
+fn foreach_var_package_qualified_field() {
+    let db = LyraDatabase::default();
+    let pkg_file = new_file(
+        &db,
+        0,
+        "package p;\
+         typedef struct { int arr [3]; } obj_t;\
+         obj_t obj;\
+         endpackage",
+    );
+    let mod_file = new_file(
+        &db,
+        1,
+        "module m;\
+         initial foreach (p::obj.arr[i]) begin end\
+         endmodule",
+    );
+    let unit = new_compilation_unit(&db, vec![pkg_file, mod_file]);
+    assert_eq!(
+        get_type(&db, mod_file, unit, "i"),
+        SymbolType::Value(Ty::int())
+    );
+}
+
 // Foreach var slot out of range -> Error
 #[test]
 fn foreach_var_slot_out_of_range() {
