@@ -67,6 +67,8 @@ pub enum MessageId {
     StreamUnpackWidthMismatch,
     AssignToConst,
     ConstMissingInit,
+    VoidObjectType,
+    VoidUsedAsValue,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -260,7 +262,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::StreamUnpackOperandUnsupported
         | MessageId::StreamUnpackWidthMismatch
         | MessageId::AssignToConst
-        | MessageId::ConstMissingInit => render_type_message(msg),
+        | MessageId::ConstMissingInit
+        | MessageId::VoidObjectType
+        | MessageId::VoidUsedAsValue => render_type_message(msg),
         _ => render_other_message(msg),
     }
 }
@@ -387,6 +391,8 @@ fn render_type_message(msg: &Message) -> String {
             format!("cannot assign to const variable `{}`", name())
         }
         MessageId::ConstMissingInit => "const variable must have an initializer".into(),
+        MessageId::VoidObjectType => "void cannot be used as an object type".into(),
+        MessageId::VoidUsedAsValue => "void expression cannot be used as a value".into(),
         _ => String::new(),
     }
 }

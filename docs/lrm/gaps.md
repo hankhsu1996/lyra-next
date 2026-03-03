@@ -28,10 +28,6 @@ Drive strength and charge strength syntax is parsed (DriveStrength, ChargeStreng
 
 Undeclared identifiers used in net contexts should implicitly declare a 1-bit wire (or the type set by `` `default_nettype ``). No implicit net creation exists. The preprocessor recognizes the `default_nettype` directive keyword but does not consume it. Blocked by: `default_nettype` directive event consumption (Ch 5.6.4 gap), name resolution special-case for implicit nets. Test: `lrm/ch06/6.10_implicit_declarations`.
 
-### 6.13: Void data type
-
-`Ty::Void` exists in the type system and `void` parses as a type specifier. Void-in-expression detection works for built-in method calls. Missing: enforcement that `void` cannot be used as a variable type (only valid as function/task return type), void function call semantics in expression vs statement context beyond built-in methods. Blocked by: declaration-site type validation, broader statement/expression context checking. Test: `lrm/ch06/6.13_void_data_type`.
-
 ### 6.14: Chandle data type
 
 `Ty::Chandle` exists in the type system and `chandle` parses as a type specifier. Expressions of chandle type produce `UnsupportedExprKind`. Missing: chandle variable declarations with `null` initialization, `null` comparison, passing chandle to/from DPI-C functions, chandle as argument/return type in foreign function declarations. Blocked by: DPI-C support (Ch 35), null literal handling. Test: `lrm/ch06/6.14_chandle_data_type`.

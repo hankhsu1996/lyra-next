@@ -38,7 +38,7 @@ fn expr_type_function_call_int_return() {
 }
 
 #[test]
-fn expr_type_function_call_void_return() {
+fn expr_type_function_call_void_return_in_expr_context() {
     let db = LyraDatabase::default();
     let file = new_file(
         &db,
@@ -52,7 +52,34 @@ fn expr_type_function_call_void_return() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::from_ty(&Ty::Void)
+        ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr)
+    );
+}
+
+#[test]
+fn void_function_call_in_stmt_context_no_diag() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         function void do_nothing();\n\
+         endfunction\n\
+         initial begin do_nothing(); end\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = crate::diagnostics::type_diagnostics(&db, file, unit);
+    let void_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.code == lyra_diag::DiagnosticCode::VOID_USED_AS_VALUE
+                || d.code == lyra_diag::DiagnosticCode::VOID_OBJECT_TYPE
+        })
+        .collect();
+    assert!(
+        void_diags.is_empty(),
+        "void call in statement context should produce no void diagnostics, got: {void_diags:?}"
     );
 }
 

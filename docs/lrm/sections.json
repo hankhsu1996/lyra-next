@@ -59,7 +59,7 @@
   {"section": "6.11.3", "chapter": 6, "title": "Signed and unsigned integer types", "parent": "6.11", "children": [], "ownable": true},
   {"section": "6.12", "chapter": 6, "title": "Real, shortreal, and realtime data types", "parent": "6", "children": ["6.12.1"], "ownable": false},
   {"section": "6.12.1", "chapter": 6, "title": "Conversion", "parent": "6.12", "children": [], "ownable": true},
-  {"section": "6.13", "chapter": 6, "title": "Void data type", "parent": "6", "children": [], "ownable": false},
+  {"section": "6.13", "chapter": 6, "title": "Void data type", "parent": "6", "children": [], "ownable": true},
   {"section": "6.14", "chapter": 6, "title": "Chandle data type", "parent": "6", "children": [], "ownable": false},
   {"section": "6.15", "chapter": 6, "title": "Class", "parent": "6", "children": [], "ownable": false},
   {"section": "6.16", "chapter": 6, "title": "String data type", "parent": "6", "children": ["6.16.0","6.16.1","6.16.2","6.16.3","6.16.4","6.16.5","6.16.6","6.16.7","6.16.8","6.16.9","6.16.10","6.16.11","6.16.12","6.16.13","6.16.14","6.16.15"], "ownable": false},

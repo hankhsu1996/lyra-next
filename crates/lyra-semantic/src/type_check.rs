@@ -11,7 +11,7 @@ use crate::enum_def::EnumId;
 use crate::modport_def::PortDirection;
 use crate::modport_facts::FieldAccessFacts;
 use crate::system_functions::{BitsArgKind, SystemFnKind, classify_bits_arg, lookup_builtin};
-use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprView};
+use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView};
 use crate::types::{SymbolType, Ty, UnpackedDim};
 
 /// Why an assignment target is readonly.
@@ -167,6 +167,13 @@ pub enum TypeCheckItem {
         decl_site: Site,
         name_span: NameSpan,
     },
+    VoidObjectType {
+        decl_site: Site,
+        name_span: NameSpan,
+    },
+    VoidUsedAsValue {
+        expr_site: Site,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -298,11 +305,25 @@ pub fn check_var_decl(
             });
         }
 
+        let sym_type = ctx.symbol_type_of_declarator(&decl);
+
+        // Void cannot be used as a variable type (LRM 6.13)
+        if matches!(sym_type, Some(SymbolType::Value(Ty::Void))) {
+            let name_span = decl
+                .ident_name_span()
+                .unwrap_or(NameSpan::new(decl_site.text_range()));
+            items.push(TypeCheckItem::VoidObjectType {
+                decl_site,
+                name_span,
+            });
+            continue;
+        }
+
         let Some(init_expr) = decl.init_expr() else {
             continue;
         };
 
-        let Some(sym_type) = ctx.symbol_type_of_declarator(&decl) else {
+        let Some(sym_type) = sym_type else {
             continue;
         };
 
@@ -311,6 +332,13 @@ pub fn check_var_decl(
 
         let lhs_type = ExprType::from_symbol_type(&sym_type);
         let rhs_type = type_rhs_for_assignment(ctx, &init_expr, &lhs_type.ty);
+
+        if is_void_used_as_expr(&rhs_type) {
+            items.push(TypeCheckItem::VoidUsedAsValue {
+                expr_site: rhs_site,
+            });
+            continue;
+        }
 
         if let Some(ne) = detect_new_expr(&init_expr) {
             check_new_expr(&ne, &lhs_type.ty, ctx, decl_site, lhs_site, rhs_site, items);
@@ -353,6 +381,12 @@ fn check_assignment_pair(
 
             let lhs_type = ctx.expr_type(&lhs_expr);
             let rhs_type = type_rhs_for_assignment(ctx, rhs, &lhs_type.ty);
+
+            if is_void_used_as_expr(&rhs_type) {
+                items.push(TypeCheckItem::VoidUsedAsValue {
+                    expr_site: rhs_site,
+                });
+            }
 
             if let Some(ne) = detect_new_expr(rhs) {
                 check_new_expr(&ne, &lhs_type.ty, ctx, stmt_site, lhs_site, rhs_site, items);
@@ -1024,6 +1058,10 @@ fn outermost_dim_compat(lhs: &UnpackedDim, rhs: &UnpackedDim) -> ArrayCompat {
         }
         _ => ArrayCompat::Incompatible,
     }
+}
+
+fn is_void_used_as_expr(ty: &ExprType) -> bool {
+    matches!(ty.view, ExprView::Error(ExprTypeErrorKind::VoidUsedAsExpr))
 }
 
 fn is_context_dependent(ty: &ExprType) -> bool {
