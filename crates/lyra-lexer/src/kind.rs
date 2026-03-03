@@ -487,6 +487,9 @@ pub enum SyntaxKind {
     DriveStrength,
     ChargeStrength,
 
+    // User-defined nettype declaration (LRM 6.6.7)
+    NettypeDecl,
+
     #[doc(hidden)]
     __Last,
 }

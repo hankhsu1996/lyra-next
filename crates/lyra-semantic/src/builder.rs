@@ -7,7 +7,9 @@ use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
 use crate::builder_order::{assign_order_keys, detect_duplicates};
-use crate::builder_types::{collect_name_refs, collect_type_spec_refs, collect_typedef};
+use crate::builder_types::{
+    collect_name_refs, collect_nettype_decl, collect_type_spec_refs, collect_typedef,
+};
 
 use crate::def_entry::{DefEntry, DefEntryBuilder, DefScope};
 use crate::def_index::{DefIndex, ForeachVarDef, Import, LocalDecl, LocalDeclId, UseSite};
@@ -17,6 +19,7 @@ use crate::global_index::DefinitionKind;
 use crate::instance_decl::InstanceDecl;
 use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId};
+use crate::nettype_def::NettypeDef;
 use crate::record::{RecordDef, SymbolOrigin};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{GlobalDefId, Lifetime, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
@@ -96,6 +99,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         record_defs: ctx.record_defs.into_boxed_slice(),
         record_by_site,
         instance_decls: ctx.instance_decls.into_boxed_slice(),
+        nettype_defs: ctx.nettype_defs.into_boxed_slice(),
         modport_defs: HashMap::new(),
         modport_name_map: HashMap::new(),
         export_decls: ctx.export_decls.into_boxed_slice(),
@@ -151,6 +155,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) enum_defs: Vec<EnumDef>,
     pub(crate) record_defs: Vec<RecordDef>,
     pub(crate) instance_decls: Vec<InstanceDecl>,
+    pub(crate) nettype_defs: Vec<NettypeDef>,
     pub(crate) raw_modport_defs: Vec<RawModportEntry>,
     pub(crate) export_decls: Vec<crate::def_index::ExportDecl>,
     pub(crate) foreach_var_defs: HashMap<crate::symbols::SymbolId, ForeachVarDef>,
@@ -179,6 +184,7 @@ impl<'a> DefContext<'a> {
             enum_defs: Vec::new(),
             record_defs: Vec::new(),
             instance_decls: Vec::new(),
+            nettype_defs: Vec::new(),
             raw_modport_defs: Vec::new(),
             export_decls: Vec::new(),
             foreach_var_defs: HashMap::new(),
@@ -240,6 +246,7 @@ impl<'a> DefContext<'a> {
                 SymbolKind::PortAnsi => sym.decl_site.kind() == SyntaxKind::Port,
                 SymbolKind::PortTf => sym.decl_site.kind() == SyntaxKind::TfPortDecl,
                 SymbolKind::Typedef => sym.decl_site.kind() == SyntaxKind::TypedefDecl,
+                SymbolKind::Nettype => sym.decl_site.kind() == SyntaxKind::NettypeDecl,
                 SymbolKind::EnumMember => sym.decl_site.kind() == SyntaxKind::EnumMember,
                 SymbolKind::Modport => sym.decl_site.kind() == SyntaxKind::ModportItem,
                 SymbolKind::Instance => sym.decl_site.kind() == SyntaxKind::ModuleInstantiation,
@@ -307,6 +314,7 @@ impl<'a> DefContext<'a> {
             SymbolKind::Function => SyntaxKind::FunctionDecl,
             SymbolKind::Task => SyntaxKind::TaskDecl,
             SymbolKind::Typedef => SyntaxKind::TypedefDecl,
+            SymbolKind::Nettype => SyntaxKind::NettypeDecl,
             SymbolKind::EnumMember => SyntaxKind::EnumMember,
             SymbolKind::Modport => SyntaxKind::ModportItem,
             SymbolKind::Module
@@ -680,6 +688,9 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         }
         SyntaxKind::TypedefDecl => {
             collect_typedef(ctx, node, scope);
+        }
+        SyntaxKind::NettypeDecl => {
+            collect_nettype_decl(ctx, node, scope);
         }
         SyntaxKind::AlwaysBlock | SyntaxKind::InitialBlock => {
             crate::builder_stmt::collect_procedural_block(ctx, node, scope);

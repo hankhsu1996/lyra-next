@@ -18,7 +18,7 @@ Drive strength and charge strength syntax is parsed (DriveStrength, ChargeStreng
 
 ### 6.6.7: User-defined nettypes
 
-`nettype` declarations (`nettype <type> <name> [with <resolve_function>]`) are not parsed. The keyword is in the lexer but no parser or semantic support exists. Blocked by: parser grammar, AST nodes, semantic representation for custom net resolution functions. Test: `lrm/ch06/6.6.7_user_defined_nettypes`.
+`nettype` declarations parse and collect as first-class symbols in the type namespace. Remaining: alias-vs-define semantic classification (resolution-based), `Ty` integration for using nettypes in net declarations, resolve function signature validation and multi-driver semantics. Blocked by: name resolution query for alias classification, type system integration. Test: `lrm/ch06/6.6.7_user_defined_nettypes`.
 
 ### 6.6.8: Generic interconnect
 

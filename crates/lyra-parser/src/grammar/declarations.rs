@@ -226,6 +226,20 @@ pub(crate) fn typedef_decl(p: &mut Parser) {
     m.complete(p, SyntaxKind::TypedefDecl);
 }
 
+// Parse a nettype declaration (LRM 6.6.7):
+//   nettype <type_spec> <name> [with <resolve_fn>] ;
+pub(crate) fn nettype_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // nettype
+    type_spec(p);
+    p.expect(SyntaxKind::Ident);
+    if p.eat(SyntaxKind::WithKw) {
+        p.expect(SyntaxKind::Ident);
+    }
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::NettypeDecl);
+}
+
 // Parse enum type body: `enum [base_type] '{' member {',' member} '}'`
 // Produces an EnumType child node within the enclosing TypeSpec.
 fn enum_type(p: &mut Parser) {

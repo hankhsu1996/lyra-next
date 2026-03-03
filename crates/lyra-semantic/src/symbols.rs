@@ -134,6 +134,8 @@ pub enum SymbolKind {
     /// lexical scope bindings; resolved via `DefIndex.instance_decls`
     /// fallback when the name is unresolved in value context.
     Instance,
+    /// User-defined nettype declaration (LRM 6.6.7).
+    Nettype,
 }
 
 impl SymbolKind {
@@ -160,7 +162,7 @@ impl SymbolKind {
             | Self::EnumMember
             | Self::Modport
             | Self::Instance => Namespace::Value,
-            Self::Typedef => Namespace::Type,
+            Self::Typedef | Self::Nettype => Namespace::Type,
         }
     }
 }
