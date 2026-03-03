@@ -10,8 +10,8 @@ use lyra_parser::SyntaxToken;
 use crate::expr::Expr;
 use crate::node::AstNode;
 use crate::nodes::{
-    DottedName, EnumType, NameRef, PackedDimension, Port, QualifiedName, StructType, TypeSpec,
-    TypedefDecl, UnpackedDimension,
+    ChargeStrength, DottedName, DriveStrength, EnumType, NameRef, PackedDimension, Port,
+    QualifiedName, StructType, TypeSpec, TypedefDecl, UnpackedDimension,
 };
 use crate::support::{self, AstChildren};
 
@@ -68,6 +68,16 @@ impl TypeSpec {
     pub fn type_keyword(&self) -> Option<TypeSpecKeyword> {
         self.keyword()
             .and_then(|tok| TypeSpecKeyword::from_token_kind(tok.kind()))
+    }
+
+    /// Optional drive strength on net type specs (LRM 6.3.2).
+    pub fn drive_strength(&self) -> Option<DriveStrength> {
+        support::child(&self.syntax)
+    }
+
+    /// Optional charge strength on trireg net type specs (LRM 6.3.2).
+    pub fn charge_strength(&self) -> Option<ChargeStrength> {
+        support::child(&self.syntax)
     }
 
     /// Signing modifier, if an explicit `signed` or `unsigned` keyword is present.

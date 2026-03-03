@@ -483,6 +483,10 @@ pub enum SyntaxKind {
     ForeachVarList,
     ForeachVarSlot,
 
+    // Strength specifications (LRM 6.3.2)
+    DriveStrength,
+    ChargeStrength,
+
     #[doc(hidden)]
     __Last,
 }

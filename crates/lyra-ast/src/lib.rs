@@ -7,6 +7,7 @@ mod nodes;
 mod nodes_decl;
 mod nodes_stmt;
 mod port;
+mod strength;
 mod support;
 mod type_decl_site;
 mod type_spec;
@@ -18,19 +19,19 @@ pub use generate_item::{GenerateBody, GenerateItem, GenerateScope};
 pub use node::{AstNode, HasSyntax, StmtNode, is_expression_kind, is_statement_kind};
 pub use nodes::{
     AlwaysBlock, ArgList, AssignStmt, BinExpr, BlockStmt, CallExpr, CaseItem, CaseStmt, CastExpr,
-    ConcatExpr, CondExpr, ConfigDecl, ContinuousAssign, Declarator, DottedName, EnumMember,
-    EnumType, ErrorNode, EventExpr, EventItem, ExportDecl, ExportItem, Expression, FieldExpr,
-    ForStmt, ForeachStmt, ForeachVarList, ForeachVarSlot, ForeverStmt, FunctionDecl,
-    GenerateRegion, HierarchicalInstance, IfStmt, ImportDecl, ImportItem, IndexExpr, InitialBlock,
-    InstancePort, InstancePortList, InterfaceBody, InterfaceDecl, Literal, ModportDecl,
-    ModportExprPort, ModportItem, ModportPort, ModportPortKind, ModuleBody, ModuleDecl,
-    ModuleInstantiation, NameRef, NetDecl, NewExpr, PackageBody, PackageDecl, PackedDimension,
-    ParamDecl, ParamPortList, ParenExpr, Port, PortList, PrefixExpr, PrimitiveDecl, ProgramBody,
-    ProgramDecl, QualifiedName, RangeExpr, RangeKind, RepeatStmt, ReplicExpr, SourceFile,
-    StreamDir, StreamExpr, StreamOperandItem, StreamOperands, StreamRange, StreamRangeOp,
-    StreamSliceSize, StreamWithClause, StructMember, StructType, SyntaxAssignOp, SyntaxBinaryOp,
-    SyntaxPrefixOp, SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl, TimingControl, TypeSpec,
-    TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
+    ChargeStrength, ConcatExpr, CondExpr, ConfigDecl, ContinuousAssign, Declarator, DottedName,
+    DriveStrength, EnumMember, EnumType, ErrorNode, EventExpr, EventItem, ExportDecl, ExportItem,
+    Expression, FieldExpr, ForStmt, ForeachStmt, ForeachVarList, ForeachVarSlot, ForeverStmt,
+    FunctionDecl, GenerateRegion, HierarchicalInstance, IfStmt, ImportDecl, ImportItem, IndexExpr,
+    InitialBlock, InstancePort, InstancePortList, InterfaceBody, InterfaceDecl, Literal,
+    ModportDecl, ModportExprPort, ModportItem, ModportPort, ModportPortKind, ModuleBody,
+    ModuleDecl, ModuleInstantiation, NameRef, NetDecl, NewExpr, PackageBody, PackageDecl,
+    PackedDimension, ParamDecl, ParamPortList, ParenExpr, Port, PortList, PrefixExpr,
+    PrimitiveDecl, ProgramBody, ProgramDecl, QualifiedName, RangeExpr, RangeKind, RepeatStmt,
+    ReplicExpr, SourceFile, StreamDir, StreamExpr, StreamOperandItem, StreamOperands, StreamRange,
+    StreamRangeOp, StreamSliceSize, StreamWithClause, StructMember, StructType, SyntaxAssignOp,
+    SyntaxBinaryOp, SyntaxPrefixOp, SystemTfArgList, SystemTfCall, TaskDecl, TfPortDecl,
+    TimingControl, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl, WhileStmt,
 };
 pub use port::PortDirection;
 pub use support::{AstChildren, expr_children, field_exprs};
