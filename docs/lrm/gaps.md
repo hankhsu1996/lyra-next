@@ -6,9 +6,9 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 5 -- Lexical Conventions
 
-### 5.6.4: Compiler directives -- stringification and non-conditional directive semantics
+### 5.6.4: Compiler directives -- non-conditional directive semantics
 
-Object-like and parameterized (function-like) macro expansion at use sites is implemented (recursive expansion with depth limit, token-bodied storage, compiled templates, argument parsing, nested fn-macro invocations in bodies, undefined macro diagnostics, line continuation via backslash-newline in definitions and parameter lists). Remaining gaps: stringification/concatenation operators (`` ` ``/`##`), non-conditional directive semantics via event consumption (`` `timescale ``, `` `default_nettype ``, etc.). Blocked by: directive event consumers. Test: `lrm/ch05/5.6.4_compiler_directives`.
+Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: triple-quote stringify (`` `""" ``) and non-conditional directive semantics via event consumption (`` `timescale ``, `` `default_nettype ``). Blocked by: directive event consumers. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
 ## Chapter 6 -- Data Types
 

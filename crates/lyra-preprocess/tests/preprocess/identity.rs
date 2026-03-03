@@ -2,7 +2,7 @@ use lyra_preprocess::preprocess_identity;
 use lyra_source::{FileId, TextRange, TextSize};
 
 fn sample_tokens() -> Vec<lyra_lexer::Token> {
-    lyra_lexer::lex("module top; endmodule")
+    lyra_lexer::lex_with_mode("module top; endmodule", lyra_lexer::LexMode::Preprocess)
 }
 
 #[test]
@@ -15,7 +15,7 @@ fn passthrough_tokens() {
 #[test]
 fn expanded_text_equals_source() {
     let text = "module top; endmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = preprocess_identity(FileId(0), &tokens, text);
     assert_eq!(output.expanded_text, text);
 }
@@ -23,7 +23,7 @@ fn expanded_text_equals_source() {
 #[test]
 fn identity_source_map() {
     let text = "module top; endmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = preprocess_identity(FileId(7), &tokens, text);
     let range = TextRange::new(TextSize::new(0), TextSize::new(6));
     let span = output
@@ -36,7 +36,7 @@ fn identity_source_map() {
 #[test]
 fn identity_map_point() {
     let text = "module top; endmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = preprocess_identity(FileId(3), &tokens, text);
     let span = output
         .source_map
@@ -49,7 +49,7 @@ fn identity_map_point() {
 #[test]
 fn identity_map_range() {
     let text = "module top; endmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = preprocess_identity(FileId(3), &tokens, text);
     let range = TextRange::new(TextSize::new(0), TextSize::new(6));
     let span = output.source_map.map_range(range);
@@ -62,7 +62,7 @@ fn identity_map_range() {
 #[test]
 fn empty_include_graph() {
     let text = "module top; endmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = preprocess_identity(FileId(0), &tokens, text);
     assert!(output.includes.is_empty());
     assert!(output.includes.dependencies().is_empty());
@@ -71,7 +71,7 @@ fn empty_include_graph() {
 #[test]
 fn no_errors() {
     let text = "module top; endmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = preprocess_identity(FileId(0), &tokens, text);
     assert!(output.errors.is_empty());
 }
@@ -79,7 +79,7 @@ fn no_errors() {
 #[test]
 fn map_point_out_of_bounds_returns_none() {
     let text = "module top; endmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = preprocess_identity(FileId(0), &tokens, text);
     let past_end = TextSize::new(text.len() as u32 + 1);
     assert!(output.source_map.map_point(past_end).is_none());

@@ -18,7 +18,7 @@ impl MapProvider {
     }
 
     fn add(&mut self, path: &str, file_id: FileId, text: &str) {
-        let tokens = lyra_lexer::lex(text);
+        let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
         self.files
             .insert(path.to_string(), (file_id, text.to_string(), tokens));
     }
@@ -58,7 +58,7 @@ fn include_splices_tokens() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     let has_wire = output.tokens.iter().any(|t| t.kind == SyntaxKind::WireKw);
@@ -77,7 +77,7 @@ fn expanded_text_matches_concatenation() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     assert_eq!(output.expanded_text, "module top; wire w;\nendmodule");
@@ -89,7 +89,7 @@ fn token_lengths_sum_to_expanded_text() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     let total: u32 = output
@@ -107,7 +107,7 @@ fn map_point_in_included_range() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     // "module top; " is 12 bytes, so included content starts at offset 12
@@ -129,7 +129,7 @@ fn map_point_in_main_file() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     let span = output
@@ -146,7 +146,7 @@ fn map_point_after_include_maps_correctly() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     // expanded: "module top; wire w;\nendmodule"
@@ -166,7 +166,7 @@ fn map_range_within_segment() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     let range = TextRange::new(TextSize::new(12), TextSize::new(19));
@@ -182,7 +182,7 @@ fn map_range_straddling_segments_returns_none() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     let range = TextRange::new(TextSize::new(10), TextSize::new(15));
@@ -199,7 +199,7 @@ fn include_graph_records_dependency() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     assert_eq!(output.includes.dependencies(), &[FileId(1)]);
@@ -210,7 +210,7 @@ fn unresolved_include_stripped_with_error() {
     let provider = MapProvider::new();
 
     let text = "module top; `include \"missing.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     // Directives are always stripped from output
@@ -228,7 +228,7 @@ fn unresolved_include_stripped_with_error() {
 #[test]
 fn scan_includes_finds_paths() {
     let text = "`include \"a.sv\"\nmodule top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let ranges = scan_includes(&tokens, text);
     let paths: Vec<&str> = ranges
         .iter()
@@ -240,7 +240,7 @@ fn scan_includes_finds_paths() {
 #[test]
 fn scan_includes_empty_for_no_includes() {
     let text = "module top; endmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let paths = scan_includes(&tokens, text);
     assert!(paths.is_empty());
 }
@@ -252,7 +252,7 @@ fn multiple_includes() {
     provider.add("b.sv", FileId(2), "wire b;");
 
     let text = "`include \"a.sv\"\n`include \"b.sv\"\nmodule top; endmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     assert_eq!(output.includes.dependencies(), &[FileId(1), FileId(2)]);
@@ -267,7 +267,7 @@ fn resolve_file_loc_main_file() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     let loc = output
@@ -284,7 +284,7 @@ fn resolve_file_loc_included_range() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     let loc = output
@@ -301,7 +301,7 @@ fn expansion_frame_identity_returns_none() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     assert!(
@@ -318,7 +318,7 @@ fn expansion_frame_included_position() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     let frame = output
@@ -337,7 +337,7 @@ fn expansion_frame_call_site_covers_directive() {
     provider.add("b.sv", FileId(1), "wire w;");
 
     let text = "module top; `include \"b.sv\"\nendmodule";
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     let output = run_preprocess(FileId(0), &tokens, text, &provider);
 
     let frame = output

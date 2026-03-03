@@ -3,10 +3,15 @@ use salsa::Setter;
 
 use crate::{IncludeMap, SourceFile};
 
-/// Lex a source file into tokens (including trivia and EOF).
+/// Lex a source file for preprocessing (including trivia and EOF).
+///
+/// Uses `LexMode::Preprocess` so that macro operator tokens are
+/// recognized as distinct tokens. The preprocessor strips all
+/// operator tokens before producing parser-ready output; the parser
+/// consumes `PreprocOutput::tokens`, not this result directly.
 #[salsa::tracked(return_ref)]
 pub fn lex_file(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_lexer::Token> {
-    lyra_lexer::lex(file.text(db))
+    lyra_lexer::lex_with_mode(file.text(db), lyra_lexer::LexMode::Preprocess)
 }
 
 /// Include provider that resolves paths via Salsa queries.

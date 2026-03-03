@@ -22,7 +22,7 @@ fn pp(text: &str) -> lyra_preprocess::PreprocOutput {
 }
 
 fn pp_with_env(text: &str, env: &MacroEnv) -> lyra_preprocess::PreprocOutput {
-    let tokens = lyra_lexer::lex(text);
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
     preprocess(&PreprocessInputs {
         file: FileId(0),
         tokens: &tokens,

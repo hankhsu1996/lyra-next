@@ -5,6 +5,18 @@ pub use kind::{NODE_START, SyntaxKind};
 
 use lyra_source::TextSize;
 
+/// Lexer mode: selects the token set for the consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LexMode {
+    /// Language lexing for the parser. Produces only the standard
+    /// token set; no preprocess-only operators are emitted.
+    Parse,
+    /// Lexing for preprocessor input. Recognizes macro operators
+    /// (`MacroStringify`, `MacroConcat`, `MacroEscapedQuote`) as
+    /// distinct tokens in addition to all standard tokens.
+    Preprocess,
+}
+
 /// A lexed token (kind + length).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token {
@@ -13,7 +25,15 @@ pub struct Token {
 }
 
 /// Lex the full source string into a list of tokens (including trivia).
+///
+/// Uses `LexMode::Parse` (standard parsing mode).
 pub fn lex(src: &str) -> Vec<Token> {
+    lex_with_mode(src, LexMode::Parse)
+}
+
+/// Lex with an explicit mode. `LexMode::Preprocess` recognizes macro
+/// operator tokens (`MacroStringify`, `MacroConcat`, `MacroEscapedQuote`).
+pub fn lex_with_mode(src: &str, mode: LexMode) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut rest = src;
     let mut prev_sig_kind = SyntaxKind::Eof;
@@ -21,7 +41,7 @@ pub fn lex(src: &str) -> Vec<Token> {
 
     while !rest.is_empty() {
         let after_at = prev_sig_kind == SyntaxKind::At;
-        let (kind, consumed) = lex_one(rest, after_at, attr_depth);
+        let (kind, consumed) = lex_one(rest, after_at, attr_depth, mode);
 
         if kind == SyntaxKind::AttrOpen {
             attr_depth += 1;
@@ -63,7 +83,7 @@ fn is_attr_depth_reset(kind: SyntaxKind) -> bool {
     )
 }
 
-fn lex_one(s: &str, after_at: bool, attr_depth: u32) -> (SyntaxKind, usize) {
+fn lex_one(s: &str, after_at: bool, attr_depth: u32, mode: LexMode) -> (SyntaxKind, usize) {
     let bytes = s.as_bytes();
     let c = bytes[0];
 
@@ -123,7 +143,7 @@ fn lex_one(s: &str, after_at: bool, attr_depth: u32) -> (SyntaxKind, usize) {
 
     // Compiler directive (`define, `ifdef, etc.)
     if c == b'`' {
-        return lex_directive(bytes);
+        return lex_directive(bytes, mode);
     }
 
     // Identifier / keyword
@@ -516,7 +536,24 @@ fn lex_system_ident(bytes: &[u8]) -> (SyntaxKind, usize) {
     (SyntaxKind::Ident, 1)
 }
 
-fn lex_directive(bytes: &[u8]) -> (SyntaxKind, usize) {
+fn lex_directive(bytes: &[u8], mode: LexMode) -> (SyntaxKind, usize) {
+    if mode == LexMode::Preprocess {
+        // `\`" -- escaped quote (4 bytes: ` \ ` ")
+        if bytes.get(1) == Some(&b'\\')
+            && bytes.get(2) == Some(&b'`')
+            && bytes.get(3) == Some(&b'"')
+        {
+            return (SyntaxKind::MacroEscapedQuote, 4);
+        }
+        // `" -- stringify toggle (2 bytes)
+        if bytes.get(1) == Some(&b'"') {
+            return (SyntaxKind::MacroStringify, 2);
+        }
+        // `` -- token concatenation (2 bytes)
+        if bytes.get(1) == Some(&b'`') {
+            return (SyntaxKind::MacroConcat, 2);
+        }
+    }
     if let Some(&c) = bytes.get(1)
         && (c.is_ascii_alphabetic() || c == b'_')
     {

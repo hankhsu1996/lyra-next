@@ -371,6 +371,11 @@ pub enum SyntaxKind {
     // Bare tick (cast expression prefix)
     Tick,
 
+    // Macro operators (only emitted in LexMode::Preprocess)
+    MacroStringify,
+    MacroConcat,
+    MacroEscapedQuote,
+
     // Node boundary
     #[doc(hidden)]
     __NodeStart,

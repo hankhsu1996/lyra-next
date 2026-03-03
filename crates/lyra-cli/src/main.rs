@@ -36,7 +36,7 @@ fn dump_tree(args: &[String]) -> ExitCode {
         }
     };
 
-    let tokens = lyra_lexer::lex(&source);
+    let tokens = lyra_lexer::lex_with_mode(&source, lyra_lexer::LexMode::Preprocess);
     let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, &source);
     let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
 
