@@ -230,10 +230,7 @@ pub fn type_of_symbol_raw<'db>(
         SymbolOrigin::Error => {
             return classify(Ty::Error, sym.kind);
         }
-        SymbolOrigin::Nettype(_) => {
-            return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
-        }
-        SymbolOrigin::TypeSpec => {}
+        SymbolOrigin::Nettype(_) | SymbolOrigin::TypeSpec => {}
     }
 
     // Foreach loop variables: derive type from the iterated array's dimension
@@ -492,27 +489,24 @@ fn resolve_symbol_base_ty(
     let target_def = def_index_file(db, target_file);
     let target_info = target_def.symbols.get(target_id.local);
 
-    match target_info.kind {
-        lyra_semantic::symbols::SymbolKind::Typedef
-        | lyra_semantic::symbols::SymbolKind::TypeParam => {
-            if matches!(user_type, UserTypeRef::InterfaceModport { .. }) {
-                return Err(SymbolType::Error(SymbolTypeError::ModportOnNonInterface));
-            }
-            let typedef_ref = SymbolRef::new(db, unit, target_id);
-            let typedef_type = type_of_symbol_raw(db, typedef_ref);
+    if is_alias_kind(target_info.kind) {
+        if matches!(user_type, UserTypeRef::InterfaceModport { .. }) {
+            return Err(SymbolType::Error(SymbolTypeError::ModportOnNonInterface));
+        }
+        let typedef_ref = SymbolRef::new(db, unit, target_id);
+        let typedef_type = type_of_symbol_raw(db, typedef_ref);
 
-            match &typedef_type {
-                SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => Ok(ty.clone()),
-                SymbolType::Error(e) => Err(SymbolType::Error(*e)),
-                SymbolType::Net(_) => Err(SymbolType::Error(
-                    SymbolTypeError::TypedefUnderlyingUnsupported,
-                )),
-            }
+        match &typedef_type {
+            SymbolType::TypeAlias(ty) | SymbolType::Value(ty) => Ok(ty.clone()),
+            SymbolType::Error(e) => Err(SymbolType::Error(*e)),
+            SymbolType::Net(_) => Err(SymbolType::Error(
+                SymbolTypeError::AliasUnderlyingUnsupported,
+            )),
         }
-        _ if matches!(user_type, UserTypeRef::InterfaceModport { .. }) => {
-            Err(SymbolType::Error(SymbolTypeError::ModportOnNonInterface))
-        }
-        _ => Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved)),
+    } else if matches!(user_type, UserTypeRef::InterfaceModport { .. }) {
+        Err(SymbolType::Error(SymbolTypeError::ModportOnNonInterface))
+    } else {
+        Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved))
     }
 }
 
@@ -638,12 +632,19 @@ fn resolve_type_expr_name(
     }
 }
 
+/// Whether this symbol kind can participate in alias chains (typedef expansion).
+fn is_alias_kind(kind: lyra_semantic::symbols::SymbolKind) -> bool {
+    matches!(
+        kind,
+        lyra_semantic::symbols::SymbolKind::Typedef
+            | lyra_semantic::symbols::SymbolKind::TypeParam
+            | lyra_semantic::symbols::SymbolKind::Nettype
+    )
+}
+
 fn classify(ty: Ty, kind: lyra_semantic::symbols::SymbolKind) -> lyra_semantic::types::SymbolType {
     use lyra_semantic::types::SymbolType;
-    if matches!(
-        kind,
-        lyra_semantic::symbols::SymbolKind::Typedef | lyra_semantic::symbols::SymbolKind::TypeParam
-    ) {
+    if is_alias_kind(kind) {
         SymbolType::TypeAlias(ty)
     } else {
         SymbolType::Value(ty)

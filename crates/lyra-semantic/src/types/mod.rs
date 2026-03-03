@@ -686,7 +686,11 @@ impl SymbolType {
         match self {
             SymbolType::Value(ty) => ty.pretty(),
             SymbolType::Net(net) => {
-                SmolStr::new(format!("{} {}", net.kind.keyword_str(), net.data.pretty()))
+                if net.kind == NetKind::Interconnect {
+                    SmolStr::new_static(net.kind.keyword_str())
+                } else {
+                    SmolStr::new(format!("{} {}", net.kind.keyword_str(), net.data.pretty()))
+                }
             }
             SymbolType::TypeAlias(ty) => SmolStr::new(format!("type = {}", ty.pretty())),
             SymbolType::Error(_) => SmolStr::new_static("<error>"),
@@ -707,8 +711,10 @@ pub enum SymbolTypeError {
     TypeParamNoDefault,
     /// `NameRef` in `TypeSpec` could not be resolved or is not a typedef.
     UserTypeUnresolved,
-    /// Typedef resolved but underlying type is not value-usable (net, error, etc.).
-    TypedefUnderlyingUnsupported,
+    /// Alias (typedef/nettype) resolved but underlying type is not value-usable (net, error, etc.).
+    AliasUnderlyingUnsupported,
+    /// Extraction reached a code path that should be unreachable (internal invariant violation).
+    InternalError,
     /// Port AST node is structurally broken (cannot read type info at all).
     PortTypeMissing,
     /// Modport name does not exist on the resolved interface.
