@@ -54,6 +54,8 @@ pub enum MessageId {
     MethodNoMethodsOnType,
     MethodArityMismatch,
     MethodArgTypeMismatch,
+    MethodWithClauseRequired,
+    MethodWithClauseNotAccepted,
     UnsupportedLhsForm,
     InvalidAssignmentLhs,
     NewExprNotDynArray,
@@ -255,6 +257,8 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::MethodNoMethodsOnType
         | MessageId::MethodArityMismatch
         | MessageId::MethodArgTypeMismatch
+        | MessageId::MethodWithClauseRequired
+        | MessageId::MethodWithClauseNotAccepted
         | MessageId::UnsupportedLhsForm
         | MessageId::InvalidAssignmentLhs
         | MessageId::NewExprNotDynArray
@@ -371,7 +375,9 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::MethodUnknown
         | MessageId::MethodNoMethodsOnType
         | MessageId::MethodArityMismatch
-        | MessageId::MethodArgTypeMismatch => render_method_message(msg),
+        | MessageId::MethodArgTypeMismatch
+        | MessageId::MethodWithClauseRequired
+        | MessageId::MethodWithClauseNotAccepted => render_method_message(msg),
         MessageId::UnsupportedLhsForm => "assignment target form is not yet type-checked".into(),
         MessageId::InvalidAssignmentLhs => "expression is not a valid assignment target".into(),
         MessageId::NewExprNotDynArray
@@ -539,6 +545,12 @@ fn render_method_message(msg: &Message) -> String {
         }
         MessageId::MethodArgTypeMismatch => {
             format!("argument type mismatch in call to method `{}`", name())
+        }
+        MessageId::MethodWithClauseRequired => {
+            format!("method `{}` requires a with clause", name())
+        }
+        MessageId::MethodWithClauseNotAccepted => {
+            format!("method `{}` does not accept a with clause", name())
         }
         _ => String::new(),
     }

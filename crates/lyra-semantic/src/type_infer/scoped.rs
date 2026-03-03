@@ -1,4 +1,4 @@
-use lyra_ast::{AstIdMap, Expr};
+use lyra_ast::{AstIdMap, Expr, ExprKind};
 use smol_str::SmolStr;
 
 use crate::member::{MemberInfo, MemberLookupError};
@@ -17,6 +17,10 @@ use super::expr_type::{BitVecType, CallableSigRef, ExprType, InferCtx, ResolveCa
 pub(crate) struct ScopedInferCtx<'a, const N: usize> {
     pub inner: &'a dyn InferCtx,
     pub bindings: [(SmolStr, ExprType); N],
+    /// The iterator variable name (e.g. `"item"` or a custom name from
+    /// `find(x) with (...)`). Only this name gets `.index()` pseudo-method
+    /// access (LRM 7.12.4).
+    pub iter_name: Option<SmolStr>,
 }
 
 impl<const N: usize> InferCtx for ScopedInferCtx<'_, N> {
@@ -68,5 +72,19 @@ impl<const N: usize> InferCtx for ScopedInferCtx<'_, N> {
 
     fn resolve_type_arg(&self, utr: &UserTypeRef) -> Option<Ty> {
         self.inner.resolve_type_arg(utr)
+    }
+
+    fn iter_method_return(&self, base_expr: &Expr, method_name: &str) -> Option<Ty> {
+        let iter_name = self.iter_name.as_deref()?;
+        if method_name != "index" {
+            return None;
+        }
+        if let Some(ExprKind::NameRef(nr)) = base_expr.classify()
+            && let Some(ident_tok) = nr.ident()
+            && ident_tok.text() == iter_name
+        {
+            return Some(Ty::int());
+        }
+        None
     }
 }

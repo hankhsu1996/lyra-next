@@ -74,7 +74,9 @@ pub fn check_method_call(call: &CallExpr, ctx: &dyn TypeCheckCtx, items: &mut Ve
         | ExprTypeErrorKind::MethodArityMismatch
         | ExprTypeErrorKind::MethodArgTypeMismatch
         | ExprTypeErrorKind::MethodArgNotIntegral
-        | ExprTypeErrorKind::MethodNotValidOnReceiver(_) => {
+        | ExprTypeErrorKind::MethodNotValidOnReceiver(_)
+        | ExprTypeErrorKind::WithClauseRequired
+        | ExprTypeErrorKind::WithClauseNotAccepted => {
             let call_name_span = NameSpan::new(field_tok.text_range());
             items.push(TypeCheckItem::MethodCallError {
                 call_name_span,

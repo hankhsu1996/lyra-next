@@ -1,4 +1,4 @@
-use lyra_ast::{CallExpr, Expr};
+use lyra_ast::{CallExpr, Expr, ExprKind};
 use smol_str::SmolStr;
 
 use crate::member::{
@@ -65,38 +65,73 @@ pub(crate) fn infer_builtin_method_call(
     ExprType::from_ty(result_ty)
 }
 
-/// Type-check the optional `with (expr)` clause on a 7.12 array method.
+/// Type-check the `with (expr)` clause on a 7.12 array method.
 ///
-/// Binds the implicit `item` variable to the element type, then infers
-/// the with-expression. For reduction methods (LRM 7.12.3), returns the
-/// with-expression type as the override return type.
+/// This is the sole place where the with-clause `ScopedInferCtx` is
+/// constructed. All iterator variable binding and `item.index()` access
+/// flows through the scoped context created here.
+///
+/// Handles four cases:
+/// - `with` on a non-accepting method (`reverse`/`shuffle`) -> `WithClauseNotAccepted`
+/// - Missing `with` on methods that require it -> `WithClauseRequired`
+/// - `map` -> wraps with-expression type in a dynamic array
+/// - Reduction methods -> returns with-expression type as override
 fn check_array_with_clause(
     call: &CallExpr,
     ak: ArrayMethodKind,
     receiver: Option<&ReceiverInfo>,
     ctx: &dyn InferCtx,
 ) -> Option<ExprType> {
-    let with_clause = call.with_clause()?;
-    let with_expr = with_clause.with_expr()?;
     let Some(ReceiverInfo::Array(recv)) = receiver else {
         return None;
     };
     if !ak.accepts_with_clause() {
+        if call.with_clause().is_some() {
+            return Some(ExprType::error(ExprTypeErrorKind::WithClauseNotAccepted));
+        }
         return None;
     }
+    let Some(with_clause) = call.with_clause() else {
+        if ak.requires_with_clause() {
+            return Some(ExprType::error(ExprTypeErrorKind::WithClauseRequired));
+        }
+        return None;
+    };
+    let with_expr = with_clause.with_expr()?;
+    let iter_name = extract_iter_name(call);
     let item_type = ExprType::from_ty(&recv.elem_ty);
     let scoped = ScopedInferCtx {
         inner: ctx,
-        bindings: [(SmolStr::new_static("item"), item_type)],
+        bindings: [(iter_name.clone(), item_type)],
+        iter_name: Some(iter_name),
     };
     let with_type = infer_expr(&with_expr, &scoped, None);
     if let ExprView::Error(_) = &with_type.view {
         return Some(with_type);
     }
+    if matches!(ak, ArrayMethodKind::Map) {
+        return Some(ExprType::from_ty(&Ty::Array {
+            elem: Box::new(with_type.ty),
+            dim: crate::types::UnpackedDim::Unsized,
+        }));
+    }
     if ak.is_reduction() {
         return Some(with_type);
     }
     None
+}
+
+/// Extract the custom iterator variable name from the first argument of
+/// a locator/map method call, or fall back to `"item"` (LRM 7.12 default).
+fn extract_iter_name(call: &CallExpr) -> SmolStr {
+    if let Some(al) = call.arg_list()
+        && let Some(first_arg) = al.args().next()
+        && let Some(ExprKind::NameRef(nr)) = first_arg.classify()
+        && let Some(ident_tok) = nr.ident()
+    {
+        return SmolStr::new(ident_tok.text());
+    }
+    SmolStr::new_static("item")
 }
 
 fn check_array_method_args(

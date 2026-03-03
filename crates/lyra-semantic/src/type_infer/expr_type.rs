@@ -116,6 +116,8 @@ pub enum ExprTypeErrorKind {
     InternalStreamOperandError,
     UnsupportedIncDec,
     NewExprNeedsExpectedDynArray,
+    WithClauseRequired,
+    WithClauseNotAccepted,
 }
 
 /// How an expression's type is viewed for operations.
@@ -319,6 +321,14 @@ pub trait InferCtx {
     /// Resolve a `UserTypeRef` as a type (typedef/enum/struct name).
     /// Used by system functions like `$bits` that accept type arguments.
     fn resolve_type_arg(&self, utr: &UserTypeRef) -> Option<Ty>;
+
+    /// Check if `base_expr.method_name` is an iterator pseudo-method.
+    ///
+    /// Returns the return type if the base is an iterator binding and
+    /// the method is recognized. Only `ScopedInferCtx` overrides this.
+    fn iter_method_return(&self, _base_expr: &Expr, _method_name: &str) -> Option<Ty> {
+        None
+    }
 }
 
 /// Extract an integral view from an `ExprType`, auto-casting enums to
