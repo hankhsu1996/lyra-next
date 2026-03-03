@@ -7,8 +7,8 @@ use lyra_parser::SyntaxToken;
 
 use crate::node::StmtNode;
 use crate::nodes::{
-    ExportItem, FunctionDecl, ImportDecl, ImportItem, NetDecl, NettypeDecl, PackageBody,
-    PackageDecl, ParamDecl, QualifiedName, TaskDecl, TfPortDecl, VarDecl,
+    ExportItem, FunctionDecl, ImportDecl, ImportItem, InterfaceBody, NetDecl, NettypeDecl,
+    PackageBody, PackageDecl, ParamDecl, ProgramBody, QualifiedName, TaskDecl, TfPortDecl, VarDecl,
 };
 use crate::support::{self, AstChildren};
 use crate::type_spec::TypeSpecKeyword;
@@ -37,6 +37,18 @@ impl PackageBody {
     }
 
     pub fn import_decls(&self) -> AstChildren<ImportDecl> {
+        support::children(&self.syntax)
+    }
+}
+
+impl InterfaceBody {
+    pub fn net_decls(&self) -> AstChildren<NetDecl> {
+        support::children(&self.syntax)
+    }
+}
+
+impl ProgramBody {
+    pub fn net_decls(&self) -> AstChildren<NetDecl> {
         support::children(&self.syntax)
     }
 }

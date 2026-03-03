@@ -72,6 +72,7 @@ pub enum MessageId {
     VoidUsedAsValue,
     ArrayQueryDynTypeForm,
     ArrayQueryVarSizedDimByNumber,
+    IllegalDriveStrengthBothHighz,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -271,7 +272,8 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::VoidObjectType
         | MessageId::VoidUsedAsValue
         | MessageId::ArrayQueryDynTypeForm
-        | MessageId::ArrayQueryVarSizedDimByNumber => render_type_message(msg),
+        | MessageId::ArrayQueryVarSizedDimByNumber
+        | MessageId::IllegalDriveStrengthBothHighz => render_type_message(msg),
         _ => render_other_message(msg),
     }
 }
@@ -352,16 +354,10 @@ fn render_type_message(msg: &Message) -> String {
             let w = msg.args.first().and_then(Arg::as_width).unwrap_or(0);
             format!("expected width: {w} bits")
         }
-        MessageId::ModportDirectionViolation => {
-            let direction = name();
-            let access = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            format!("modport member declared '{direction}' cannot be used in {access} context")
-        }
-        MessageId::ModportRefUnsupported => {
-            "direction enforcement for 'ref' modport members is not yet supported".into()
-        }
-        MessageId::ModportEmptyPortAccess => "modport port has no connection (empty parens)".into(),
-        MessageId::ModportExprNotAssignable => "modport expression target is not assignable".into(),
+        MessageId::ModportDirectionViolation
+        | MessageId::ModportRefUnsupported
+        | MessageId::ModportEmptyPortAccess
+        | MessageId::ModportExprNotAssignable => render_modport_message(msg),
         MessageId::EnumCastOutOfRange => {
             let value = name();
             let enum_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -402,6 +398,9 @@ fn render_type_message(msg: &Message) -> String {
                 "{} dimension argument refers to a variable-sized dimension",
                 name()
             )
+        }
+        MessageId::IllegalDriveStrengthBothHighz => {
+            "drive strength (highz0, highz1) is not allowed".into()
         }
         _ => String::new(),
     }
@@ -541,6 +540,23 @@ fn render_method_message(msg: &Message) -> String {
         MessageId::MethodArgTypeMismatch => {
             format!("argument type mismatch in call to method `{}`", name())
         }
+        _ => String::new(),
+    }
+}
+
+fn render_modport_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
+        MessageId::ModportDirectionViolation => {
+            let direction = name();
+            let access = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("modport member declared '{direction}' cannot be used in {access} context")
+        }
+        MessageId::ModportRefUnsupported => {
+            "direction enforcement for 'ref' modport members is not yet supported".into()
+        }
+        MessageId::ModportEmptyPortAccess => "modport port has no connection (empty parens)".into(),
+        MessageId::ModportExprNotAssignable => "modport expression target is not assignable".into(),
         _ => String::new(),
     }
 }

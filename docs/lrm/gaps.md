@@ -12,9 +12,9 @@ Macro expansion supports object-like and function-like macros, argument substitu
 
 ## Chapter 6 -- Data Types
 
-### 6.3.2: Strengths -- semantic legality validation
+### 6.3.2: Strengths -- type-level strength tracking
 
-Drive strength and charge strength syntax is parsed (DriveStrength, ChargeStrength CST nodes). Remaining: semantic validation of illegal combinations (e.g. `(highz0, highz1)`), ordering constraints, and type-level strength tracking. Blocked by: semantic strength validation pass. Test: `lrm/ch06/6.3.2.1_charge_strength`, `lrm/ch06/6.3.2.2_drive_strength`.
+Drive strength and charge strength syntax is parsed. Illegal both-highz drive strength combinations are diagnosed on net declarations and continuous assigns. Remaining: type-level strength tracking and propagation into the typed net representation. Blocked by: typed net strength model. Test: `lrm/ch06/6.3.2.1_charge_strength`, `lrm/ch06/6.3.2.2_drive_strength`.
 
 ### 6.6.7: User-defined nettypes -- resolve function and multi-driver semantics
 

@@ -193,6 +193,9 @@ pub enum TypeCheckItem {
         dim_arg_site: Site,
         fn_name: smol_str::SmolStr,
     },
+    IllegalDriveStrengthBothHighz {
+        strength_site: Site,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -277,6 +280,19 @@ pub fn check_continuous_assign(
     let rhs = ca.rhs();
     if let (Some(l), Some(r)) = (&lhs, &rhs) {
         check_assignment_pair(self_site, op_range, l, r, ctx, items);
+    }
+}
+
+/// Check a `DriveStrength` node for the illegal both-highz combination (LRM 6.3.2).
+pub fn check_drive_strength_semantics(
+    ds: &lyra_ast::DriveStrength,
+    map: &AstIdMap,
+    fallback_site: Site,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    if ds.is_both_highz() {
+        let strength_site = require_site(site::opt_site_of(map, ds), fallback_site, items);
+        items.push(TypeCheckItem::IllegalDriveStrengthBothHighz { strength_site });
     }
 }
 

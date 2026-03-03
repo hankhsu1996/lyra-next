@@ -92,6 +92,9 @@ pub(crate) fn lower_type_check_item(
         | TypeCheckItem::ArrayQueryVarSizedDimByNumber { .. } => {
             lower_array_query_item(item, source_map, diags);
         }
+        TypeCheckItem::IllegalDriveStrengthBothHighz { strength_site } => {
+            lower_illegal_drive_strength(*strength_site, source_map, diags);
+        }
     }
 }
 
@@ -1192,6 +1195,30 @@ fn lower_array_query_item(
             kind: lyra_diag::LabelKind::Primary,
             span: label_span,
             message: lyra_diag::Message::new(msg_id, msg_args),
+        }),
+    );
+}
+
+fn lower_illegal_drive_strength(
+    strength_site: lyra_semantic::Site,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let Some(span) = source_map.map_span(strength_site.text_range()) else {
+        return;
+    };
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::DiagnosticCode::ILLEGAL_DRIVE_STRENGTH_BOTH_HIGHZ,
+            lyra_diag::Message::simple(lyra_diag::MessageId::IllegalDriveStrengthBothHighz),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span,
+            message: lyra_diag::Message::simple(
+                lyra_diag::MessageId::IllegalDriveStrengthBothHighz,
+            ),
         }),
     );
 }

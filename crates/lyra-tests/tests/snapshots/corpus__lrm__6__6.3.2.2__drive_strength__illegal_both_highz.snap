@@ -1,0 +1,11 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (4 diagnostics)
+  error[lyra.type[35]] 10:6..10:6: drive strength (highz0, highz1) is not allowed
+  error[lyra.type[35]] 12:6..12:6: drive strength (highz0, highz1) is not allowed
+  error[lyra.type[35]] 16:8..16:8: drive strength (highz0, highz1) is not allowed
+  error[lyra.type[35]] 18:8..18:8: drive strength (highz0, highz1) is not allowed
+---
+unit (0 diagnostics)
