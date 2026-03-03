@@ -27,6 +27,13 @@ fn param_port_decl(p: &mut Parser) {
     if p.at(SyntaxKind::ParameterKw) || p.at(SyntaxKind::LocalparamKw) {
         p.bump();
     }
+    // Type parameter: `parameter type T [= type_spec]`
+    if p.at(SyntaxKind::TypeKw) {
+        p.bump();
+        type_param_declarator_list(p);
+        m.complete(p, SyntaxKind::ParamDecl);
+        return;
+    }
     // Optional type
     if is_type_start(p.current()) && p.current() != SyntaxKind::Ident {
         type_spec(p);
@@ -39,6 +46,23 @@ fn param_port_decl(p: &mut Parser) {
     }
     d.complete(p, SyntaxKind::Declarator);
     m.complete(p, SyntaxKind::ParamDecl);
+}
+
+// Parse type parameter declarator list: `T [= type_spec] { , T [= type_spec] }`
+fn type_param_declarator_list(p: &mut Parser) {
+    type_param_declarator(p);
+    while p.eat(SyntaxKind::Comma) {
+        type_param_declarator(p);
+    }
+}
+
+pub(crate) fn type_param_declarator(p: &mut Parser) {
+    let d = p.start();
+    p.expect(SyntaxKind::Ident);
+    if p.eat(SyntaxKind::Assign) {
+        type_spec(p);
+    }
+    d.complete(p, SyntaxKind::Declarator);
 }
 
 // Parse ANSI port declaration list: `( port_decl { , port_decl } )`

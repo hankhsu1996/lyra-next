@@ -703,8 +703,8 @@ pub enum SymbolTypeError {
     UnsupportedSymbolKind,
     /// Salsa cycle recovery for typedef chains.
     TypedefCycle,
-    /// `parameter type T` -- not yet implemented.
-    TypeParameterUnsupported,
+    /// `parameter type T` with no default and no override.
+    TypeParamNoDefault,
     /// `NameRef` in `TypeSpec` could not be resolved or is not a typedef.
     UserTypeUnresolved,
     /// Typedef resolved but underlying type is not value-usable (net, error, etc.).

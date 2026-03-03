@@ -47,14 +47,6 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 7,
     };
-    pub const VOID_MEMBER_NON_TAGGED: Self = Self {
-        namespace: "lyra.semantic",
-        number: 13,
-    };
-    pub const ILLEGAL_UNION_MEMBER_TYPE: Self = Self {
-        namespace: "lyra.semantic",
-        number: 14,
-    };
     pub const ENUM_RANGE_INVALID: Self = Self {
         namespace: "lyra.semantic",
         number: 9,
@@ -202,6 +194,18 @@ impl DiagnosticCode {
     pub const ENUM_SIZED_LITERAL_WIDTH: Self = Self {
         namespace: "lyra.semantic",
         number: 12,
+    };
+    pub const VOID_MEMBER_NON_TAGGED: Self = Self {
+        namespace: "lyra.semantic",
+        number: 13,
+    };
+    pub const ILLEGAL_UNION_MEMBER_TYPE: Self = Self {
+        namespace: "lyra.semantic",
+        number: 14,
+    };
+    pub const TYPE_PARAM_NO_DEFAULT: Self = Self {
+        namespace: "lyra.semantic",
+        number: 15,
     };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",

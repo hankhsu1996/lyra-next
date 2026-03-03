@@ -233,7 +233,8 @@ fn extract_net_decl(
 
 fn extract_param_decl(param: &ParamDecl, ast_id_map: &AstIdMap) -> SymbolType {
     if param.type_keyword().is_some() {
-        return SymbolType::Error(SymbolTypeError::TypeParameterUnsupported);
+        // Type parameters are handled via SymbolKind::TypeParam in type_of_symbol_raw
+        return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
     }
 
     match param.type_spec() {

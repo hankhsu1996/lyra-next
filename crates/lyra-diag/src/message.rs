@@ -90,6 +90,7 @@ pub enum MessageId {
     GenerateIterationLimit,
     ModportConflict,
     WildcardLocalConflict,
+    TypeParamNoDefault,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -282,6 +283,9 @@ fn render_other_message(msg: &Message) -> String {
             format!(
                 "local declaration of `{sym_name}` conflicts with wildcard import from package `{pkg}`"
             )
+        }
+        MessageId::TypeParamNoDefault => {
+            format!("type parameter `{}` requires a default type", name())
         }
         MessageId::RealizedHere => format!("wildcard import of `{}` realized here", name()),
         MessageId::WildcardImportHere => "wildcard import here".into(),

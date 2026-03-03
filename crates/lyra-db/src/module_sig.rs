@@ -30,6 +30,10 @@ pub(crate) struct ParamSig {
     pub(crate) kind: ParamKind,
     pub(crate) has_default: bool,
     pub(crate) default_expr: Option<lyra_ast::ErasedAstId>,
+    /// Default type site for type parameters (`parameter type T = int`).
+    /// Separate from `default_expr` to avoid overloading expression fields
+    /// with type data.
+    pub(crate) default_type_site: Option<lyra_ast::ErasedAstId>,
     pub(crate) name_range: TextRange,
 }
 

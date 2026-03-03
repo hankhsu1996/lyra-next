@@ -416,6 +416,29 @@ impl Declarator {
         }
         None
     }
+
+    /// The default type spec after `=` in a type parameter declarator.
+    ///
+    /// For `parameter type T = int`, returns the `TypeSpec` for `int`.
+    pub fn default_type_spec(&self) -> Option<TypeSpec> {
+        let mut seen_assign = false;
+        for child in self.syntax.children_with_tokens() {
+            if child
+                .as_token()
+                .is_some_and(|t| t.kind() == SyntaxKind::Assign)
+            {
+                seen_assign = true;
+                continue;
+            }
+            if seen_assign
+                && let Some(node) = child.as_node()
+                && node.kind() == SyntaxKind::TypeSpec
+            {
+                return TypeSpec::cast(node.clone());
+            }
+        }
+        None
+    }
 }
 
 impl ArgList {

@@ -2,12 +2,24 @@ use lyra_lexer::SyntaxKind;
 
 use crate::parser::{CompletedMarker, Parser};
 
+use super::ports::type_param_declarator;
 use super::{expressions, strength};
 
 // `parameter` or `localparam` declaration as a module item (with semicolon).
 pub(crate) fn param_decl(p: &mut Parser) {
     let m = p.start();
     p.bump(); // parameter | localparam
+    // Type parameter: `parameter type T [= type_spec] ;`
+    if p.at(SyntaxKind::TypeKw) {
+        p.bump();
+        type_param_declarator(p);
+        while p.eat(SyntaxKind::Comma) {
+            type_param_declarator(p);
+        }
+        p.expect(SyntaxKind::Semicolon);
+        m.complete(p, SyntaxKind::ParamDecl);
+        return;
+    }
     if is_data_type_keyword(p.current())
         || p.at(SyntaxKind::SignedKw)
         || p.at(SyntaxKind::UnsignedKw)
