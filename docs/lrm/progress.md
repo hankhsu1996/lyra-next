@@ -9,13 +9,13 @@ Chapter status for IEEE 1800-2023. See `docs/lrm-signoff.md` for definitions.
 | 3   | Design and verification building blocks | Not started |              |                 |
 | 4   | Scheduling semantics                    | N/A         |              | Simulation-only |
 | 5   | Lexical conventions                     | Signed off  | lrm/ch05/\*  | Lexer + parser  |
-| 6   | Data types                              | Not started |              |                 |
-| 7   | Aggregate data types                    | Not started |              |                 |
+| 6   | Data types                              | In progress | lrm/ch06/\*  |                 |
+| 7   | Aggregate data types                    | In progress | lrm/ch07/\*  |                 |
 | 8   | Classes                                 | Not started |              |                 |
 | 9   | Processes                               | Not started |              |                 |
 | 10  | Assignment statements                   | Not started |              |                 |
-| 11  | Operators and expressions               | Not started |              |                 |
-| 12  | Procedural programming statements       | Not started |              |                 |
+| 11  | Operators and expressions               | In progress | lrm/ch11/\*  |                 |
+| 12  | Procedural programming statements       | In progress | lrm/ch12/\*  |                 |
 | 13  | Tasks and functions                     | Not started |              |                 |
 | 14  | Clocking blocks                         | Not started |              |                 |
 | 15  | Interprocess synchronization            | Not started |              |                 |
@@ -23,12 +23,12 @@ Chapter status for IEEE 1800-2023. See `docs/lrm-signoff.md` for definitions.
 | 17  | Checkers                                | Not started |              |                 |
 | 18  | Constrained random value generation     | Not started |              |                 |
 | 19  | Covergroups                             | Not started |              |                 |
-| 20  | Utility system tasks and functions      | Not started |              |                 |
+| 20  | Utility system tasks and functions      | In progress | lrm/ch20/\*  |                 |
 | 21  | Input/output system tasks and functions | Not started |              |                 |
 | 22  | Compiler directives                     | Not started |              | Preprocessor    |
 | 23  | Modules and hierarchy                   | Not started |              |                 |
 | 24  | Programs                                | Not started |              |                 |
-| 25  | Interfaces                              | Not started |              |                 |
+| 25  | Interfaces                              | In progress | lrm/ch25/\*  |                 |
 | 26  | Packages                                | In progress | lrm/ch26/\*  |                 |
 | 27  | Generate constructs                     | Not started |              |                 |
 | 28  | Gate-level and switch-level modeling    | Not started |              |                 |

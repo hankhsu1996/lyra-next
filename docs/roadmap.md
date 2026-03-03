@@ -1,7 +1,7 @@
 # Roadmap
 
 Milestone-based plan for Lyra Next. Each milestone enables a set of
-capabilities. Current status lives in `docs/progress.md`.
+capabilities. LRM signoff status lives in `docs/lrm/progress.md`.
 
 This repo is the **semantic engine**: front-end pipeline correctness,
 semantic checks, diagnostics, and a batch driver. IDE surfaces (LSP,
