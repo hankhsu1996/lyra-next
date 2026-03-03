@@ -20,6 +20,7 @@ pub mod member;
 pub mod modport_def;
 pub mod modport_facts;
 pub mod name_graph;
+pub mod nettype_def;
 pub mod record;
 mod resolve;
 pub mod resolve_index;

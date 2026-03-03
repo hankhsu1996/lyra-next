@@ -1,6 +1,6 @@
 use lyra_ast::{
-    AstIdMap, AstNode, EnumMember, EnumType, HasSyntax, NameRef, QualifiedName, StructType,
-    TypeSpec, TypedefDecl,
+    AstIdMap, AstNode, EnumMember, EnumType, HasSyntax, NameRef, NettypeDecl, QualifiedName,
+    StructType, TypeSpec, TypedefDecl,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -11,6 +11,7 @@ use crate::builder::DefContext;
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::enum_def::{EnumBase, EnumDef, EnumDefIdx, EnumMemberDef, EnumMemberRangeKind};
+use crate::nettype_def::{NettypeDef, NettypeDefIdx, ResolveFnRef};
 use crate::record::{
     Packing, RecordDef, RecordDefIdx, RecordField, RecordKind, SymbolOrigin, TypeRef,
     extract_typeref_from_typespec,
@@ -104,7 +105,8 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
             SymbolOrigin::TypeSpec
             | SymbolOrigin::Error
             | SymbolOrigin::EnumVariant(_)
-            | SymbolOrigin::Instance(_) => {}
+            | SymbolOrigin::Instance(_)
+            | SymbolOrigin::Nettype(_) => {}
         }
         let typedef_type_site = td
             .type_spec()
@@ -123,6 +125,57 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
         });
         ctx.register_binding(sym_id);
     }
+}
+
+pub(crate) fn collect_nettype_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_nettype_decl",
+            node.kind()
+        ));
+        return;
+    };
+    let Some(nd) = NettypeDecl::cast(node.clone()) else {
+        return;
+    };
+    if let Some(ts) = nd.type_spec() {
+        collect_type_spec_refs(ctx, &ts, scope);
+    }
+    let Some(name_tok) = nd.name() else {
+        return;
+    };
+    let nettype_name = SmolStr::new(name_tok.text());
+    let Some(first_type_site) = nd
+        .type_spec()
+        .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()))
+    else {
+        ctx.emit_internal_error("missing TypeSpec anchor in NettypeDecl", decl_site);
+        return;
+    };
+    let resolve_fn = nd.resolve_fn_token().map(|tok| ResolveFnRef {
+        name: SmolStr::new(tok.text()),
+        span: NameSpan::new(tok.text_range()),
+    });
+    let idx = NettypeDefIdx(ctx.nettype_defs.len() as u32);
+    ctx.nettype_defs.push(NettypeDef {
+        decl_site,
+        name: nettype_name.clone(),
+        first_type_site,
+        resolve_fn,
+    });
+    let sym_id = ctx.push_symbol(Symbol {
+        name: nettype_name,
+        kind: SymbolKind::Nettype,
+        constness: Constness::Mutable,
+        lifetime: Lifetime::Static,
+        decl_site,
+        name_site: decl_site,
+        type_site: Some(first_type_site),
+        name_span: NameSpan::new(name_tok.text_range()),
+        scope,
+        origin: SymbolOrigin::Nettype(idx),
+    });
+    ctx.register_binding(sym_id);
 }
 
 // Detect enum/struct type in a declaration's TypeSpec child.

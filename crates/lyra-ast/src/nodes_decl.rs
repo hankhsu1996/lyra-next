@@ -7,8 +7,8 @@ use lyra_parser::SyntaxToken;
 
 use crate::node::StmtNode;
 use crate::nodes::{
-    ExportItem, FunctionDecl, ImportDecl, ImportItem, NetDecl, PackageBody, PackageDecl, ParamDecl,
-    QualifiedName, TaskDecl, TfPortDecl, VarDecl,
+    ExportItem, FunctionDecl, ImportDecl, ImportItem, NetDecl, NettypeDecl, PackageBody,
+    PackageDecl, ParamDecl, QualifiedName, TaskDecl, TfPortDecl, VarDecl,
 };
 use crate::support::{self, AstChildren};
 
@@ -210,5 +210,24 @@ impl TaskDecl {
 
     pub fn statements(&self) -> AstChildren<StmtNode> {
         support::children(&self.syntax)
+    }
+}
+
+impl NettypeDecl {
+    /// The optional resolve function name token after the `with` keyword.
+    pub fn resolve_fn_token(&self) -> Option<SyntaxToken> {
+        let mut saw_with = false;
+        for elem in self.syntax.children_with_tokens() {
+            if let Some(tok) = elem.as_token() {
+                if tok.kind() == SyntaxKind::WithKw {
+                    saw_with = true;
+                } else if saw_with
+                    && matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent)
+                {
+                    return Some(tok.clone());
+                }
+            }
+        }
+        None
     }
 }

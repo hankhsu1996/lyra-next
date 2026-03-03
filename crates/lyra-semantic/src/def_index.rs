@@ -11,6 +11,7 @@ use crate::global_index::DefinitionKind;
 use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
 use crate::modport_def::{ModportDef, ModportDefId};
+use crate::nettype_def::{NettypeDef, NettypeDefIdx};
 use crate::record::{RecordDef, RecordDefIdx, RecordId};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTree};
 use crate::symbols::{GlobalDefId, Namespace, SymbolId, SymbolTable};
@@ -62,6 +63,7 @@ pub struct DefIndex {
     pub record_defs: Box<[RecordDef]>,
     pub record_by_site: HashMap<Site, RecordDefIdx>,
     pub instance_decls: Box<[InstanceDecl]>,
+    pub nettype_defs: Box<[NettypeDef]>,
     pub modport_defs: HashMap<ModportDefId, ModportDef>,
     pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportDecl]>,
@@ -102,6 +104,10 @@ impl DefIndex {
 
     pub fn instance_decl(&self, idx: InstanceDeclIdx) -> &InstanceDecl {
         &self.instance_decls[idx.0 as usize]
+    }
+
+    pub fn nettype_def(&self, idx: NettypeDefIdx) -> &NettypeDef {
+        &self.nettype_defs[idx.0 as usize]
     }
 
     pub fn modport_by_name(&self, iface: InterfaceDefId, name: &str) -> Option<&ModportDef> {

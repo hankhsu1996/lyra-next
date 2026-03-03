@@ -227,6 +227,9 @@ pub fn type_of_symbol_raw<'db>(
         SymbolOrigin::Error => {
             return classify(Ty::Error, sym.kind);
         }
+        SymbolOrigin::Nettype(_) => {
+            return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
+        }
         SymbolOrigin::TypeSpec => {}
     }
 

@@ -183,6 +183,11 @@ ast_nodes! {
         type_spec: TypeSpec,
     }
 
+    NettypeDecl(SyntaxKind::NettypeDecl) {
+        name: token([Ident, EscapedIdent]),
+        type_spec: TypeSpec,
+    }
+
     InterfaceDecl(SyntaxKind::InterfaceDecl) {
         name: token([Ident, EscapedIdent]),
         param_port_list: ParamPortList,

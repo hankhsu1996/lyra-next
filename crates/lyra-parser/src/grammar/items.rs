@@ -65,6 +65,10 @@ fn package_item(p: &mut Parser) -> bool {
             declarations::typedef_decl(p);
             true
         }
+        SyntaxKind::NettypeKw => {
+            declarations::nettype_decl(p);
+            true
+        }
         SyntaxKind::FunctionKw => {
             subprograms::function_decl(p);
             true
@@ -258,6 +262,10 @@ pub(super) fn module_item(p: &mut Parser) -> bool {
         }
         SyntaxKind::TypedefKw => {
             declarations::typedef_decl(p);
+            true
+        }
+        SyntaxKind::NettypeKw => {
+            declarations::nettype_decl(p);
             true
         }
         SyntaxKind::GenerateKw => {

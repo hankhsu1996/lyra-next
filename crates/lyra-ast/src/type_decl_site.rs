@@ -1,7 +1,9 @@
 use lyra_parser::SyntaxNode;
 
 use crate::node::{AstNode, HasSyntax};
-use crate::nodes::{Declarator, NetDecl, ParamDecl, Port, TypeSpec, TypedefDecl, VarDecl};
+use crate::nodes::{
+    Declarator, NetDecl, NettypeDecl, ParamDecl, Port, TypeSpec, TypedefDecl, VarDecl,
+};
 
 /// A declaration node that carries a `TypeSpec`.
 ///
@@ -15,6 +17,7 @@ pub enum TypeDeclSite {
     ParamDecl(ParamDecl),
     Port(Port),
     TypedefDecl(TypedefDecl),
+    NettypeDecl(NettypeDecl),
 }
 
 impl TypeDeclSite {
@@ -33,6 +36,8 @@ impl TypeDeclSite {
             Some(Self::Port(Port::cast(node.clone())?))
         } else if TypedefDecl::can_cast(kind) {
             Some(Self::TypedefDecl(TypedefDecl::cast(node.clone())?))
+        } else if NettypeDecl::can_cast(kind) {
+            Some(Self::NettypeDecl(NettypeDecl::cast(node.clone())?))
         } else {
             None
         }
@@ -46,6 +51,7 @@ impl TypeDeclSite {
             Self::ParamDecl(n) => n.syntax(),
             Self::Port(n) => n.syntax(),
             Self::TypedefDecl(n) => n.syntax(),
+            Self::NettypeDecl(n) => n.syntax(),
         }
     }
 
@@ -57,6 +63,7 @@ impl TypeDeclSite {
             Self::ParamDecl(n) => n.type_spec(),
             Self::Port(n) => n.type_spec(),
             Self::TypedefDecl(n) => n.type_spec(),
+            Self::NettypeDecl(n) => n.type_spec(),
         }
     }
 

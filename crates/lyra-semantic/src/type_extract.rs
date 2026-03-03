@@ -28,6 +28,7 @@ pub fn extract_type_from_container(
         TypeDeclSite::ParamDecl(p) => extract_param_decl(p, ast_id_map),
         TypeDeclSite::Port(p) => extract_port(p, ast_id_map),
         TypeDeclSite::TypedefDecl(td) => extract_typedef_decl(td, ast_id_map),
+        TypeDeclSite::NettypeDecl(_) => SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
     }
 }
 
