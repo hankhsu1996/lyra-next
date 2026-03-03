@@ -191,6 +191,14 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 35,
     };
+    pub const QUEUE_BOUND_NOT_CONST: Self = Self {
+        namespace: "lyra.type",
+        number: 36,
+    };
+    pub const QUEUE_BOUND_NOT_POSITIVE: Self = Self {
+        namespace: "lyra.type",
+        number: 37,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,

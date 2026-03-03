@@ -11,6 +11,7 @@ use crate::modport_def::PortDirection;
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView};
 use crate::types::{SymbolType, Ty, UnpackedDim};
 
+pub use crate::type_check_dim::{check_net_decl, check_port_decl, check_typedef_decl};
 pub use crate::type_check_expr::{
     check_cast_expr, check_field_direction, check_method_call, check_stream_operand,
 };
@@ -196,6 +197,13 @@ pub enum TypeCheckItem {
     IllegalDriveStrengthBothHighz {
         strength_site: Site,
     },
+    QueueBoundNotConst {
+        bound_site: Site,
+    },
+    QueueBoundNotPositive {
+        bound_site: Site,
+        bound: i64,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -239,6 +247,9 @@ pub trait TypeCheckCtx {
     ///
     /// Avoids the need to synthesize an `ExprType` from a raw `Ty`.
     fn fixed_stream_width_bits_of_ty(&self, ty: &Ty) -> Option<u32>;
+    /// Evaluate a constant integer expression by `Site`, returning the full
+    /// `ConstInt` result (including error discrimination).
+    fn const_eval_int_by_site_full(&self, site: Site) -> crate::types::ConstInt;
     /// Check whether an assignment target resolves to a readonly symbol.
     fn readonly_target_kind(&self, expr_site: Site) -> Option<(ReadonlyKind, smol_str::SmolStr)>;
 }
@@ -333,6 +344,11 @@ pub fn check_var_decl(
     let decl_site = require_site(site::opt_site_of(map, var_decl), fallback, items);
     let is_const = var_decl.const_token().is_some();
     for decl in var_decl.declarators() {
+        // Check unpacked dimension legality (queue bounds, etc.)
+        for dim in decl.unpacked_dimensions() {
+            crate::type_check_dim::check_unpacked_dim_legality(ctx, &dim, items);
+        }
+
         // Const variable must have an initializer (LRM 6.20.6)
         if is_const && decl.init_expr().is_none() {
             let name_span = decl

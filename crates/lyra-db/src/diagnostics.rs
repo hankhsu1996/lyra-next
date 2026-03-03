@@ -191,70 +191,7 @@ pub fn type_diagnostics(
         let Some(node) = map.get_node(&root, entry.site) else {
             continue;
         };
-        let fallback = entry.site;
-        match entry.kind {
-            CheckKind::ContinuousAssign => {
-                if let Some(ca) = lyra_ast::ContinuousAssign::cast(node) {
-                    lyra_semantic::type_check::check_continuous_assign(
-                        &ca, &ctx, fallback, &mut items,
-                    );
-                    if let Some(ds) = ca.drive_strength() {
-                        lyra_semantic::type_check::check_drive_strength_semantics(
-                            &ds, map, fallback, &mut items,
-                        );
-                    }
-                }
-            }
-            CheckKind::AssignStmt => {
-                if let Some(assign) = lyra_ast::AssignStmt::cast(node) {
-                    lyra_semantic::type_check::check_assign_stmt(
-                        &assign, &ctx, fallback, &mut items,
-                    );
-                }
-            }
-            CheckKind::VarDecl => {
-                if let Some(vd) = lyra_ast::VarDecl::cast(node) {
-                    lyra_semantic::type_check::check_var_decl(&vd, &ctx, fallback, &mut items);
-                }
-            }
-            CheckKind::SystemTfCall => {
-                if let Some(stf) = lyra_ast::SystemTfCall::cast(node) {
-                    lyra_semantic::type_check::check_system_call(&stf, &ctx, fallback, &mut items);
-                }
-            }
-            CheckKind::FieldExpr => {
-                if let Some(field) = lyra_ast::FieldExpr::cast(node) {
-                    lyra_semantic::type_check::check_field_direction(
-                        &field,
-                        &ctx,
-                        facts,
-                        entry.access,
-                        &mut items,
-                    );
-                }
-            }
-            CheckKind::CastExpr => {
-                if let Some(cast) = lyra_ast::CastExpr::cast(node) {
-                    lyra_semantic::type_check::check_cast_expr(&cast, &ctx, fallback, &mut items);
-                }
-            }
-            CheckKind::StreamOperandItem => {
-                if let Some(soi) = lyra_ast::StreamOperandItem::cast(node) {
-                    lyra_semantic::type_check::check_stream_operand(
-                        &soi,
-                        &ctx,
-                        fallback,
-                        entry.access,
-                        &mut items,
-                    );
-                }
-            }
-            CheckKind::CallExpr => {
-                if let Some(call) = lyra_ast::CallExpr::cast(node) {
-                    lyra_semantic::type_check::check_method_call(&call, &ctx, &mut items);
-                }
-            }
-        }
+        dispatch_check_entry(entry, node, map, facts, &ctx, &mut items);
     }
 
     check_drive_strength_in_file(&root, map, &mut items);
@@ -272,6 +209,91 @@ pub fn type_diagnostics(
         );
     }
     diags
+}
+
+fn dispatch_check_entry(
+    entry: &crate::checks_index::CheckEntry,
+    node: lyra_parser::SyntaxNode,
+    map: &lyra_ast::AstIdMap,
+    facts: &lyra_semantic::modport_facts::FieldAccessFacts,
+    ctx: &DbTypeCheckCtx<'_>,
+    items: &mut Vec<lyra_semantic::type_check::TypeCheckItem>,
+) {
+    let fallback = entry.site;
+    match entry.kind {
+        CheckKind::ContinuousAssign => {
+            if let Some(ca) = lyra_ast::ContinuousAssign::cast(node) {
+                lyra_semantic::type_check::check_continuous_assign(&ca, ctx, fallback, items);
+                if let Some(ds) = ca.drive_strength() {
+                    lyra_semantic::type_check::check_drive_strength_semantics(
+                        &ds, map, fallback, items,
+                    );
+                }
+            }
+        }
+        CheckKind::AssignStmt => {
+            if let Some(assign) = lyra_ast::AssignStmt::cast(node) {
+                lyra_semantic::type_check::check_assign_stmt(&assign, ctx, fallback, items);
+            }
+        }
+        CheckKind::VarDecl => {
+            if let Some(vd) = lyra_ast::VarDecl::cast(node) {
+                lyra_semantic::type_check::check_var_decl(&vd, ctx, fallback, items);
+            }
+        }
+        CheckKind::SystemTfCall => {
+            if let Some(stf) = lyra_ast::SystemTfCall::cast(node) {
+                lyra_semantic::type_check::check_system_call(&stf, ctx, fallback, items);
+            }
+        }
+        CheckKind::FieldExpr => {
+            if let Some(field) = lyra_ast::FieldExpr::cast(node) {
+                lyra_semantic::type_check::check_field_direction(
+                    &field,
+                    ctx,
+                    facts,
+                    entry.access,
+                    items,
+                );
+            }
+        }
+        CheckKind::CastExpr => {
+            if let Some(cast) = lyra_ast::CastExpr::cast(node) {
+                lyra_semantic::type_check::check_cast_expr(&cast, ctx, fallback, items);
+            }
+        }
+        CheckKind::StreamOperandItem => {
+            if let Some(soi) = lyra_ast::StreamOperandItem::cast(node) {
+                lyra_semantic::type_check::check_stream_operand(
+                    &soi,
+                    ctx,
+                    fallback,
+                    entry.access,
+                    items,
+                );
+            }
+        }
+        CheckKind::CallExpr => {
+            if let Some(call) = lyra_ast::CallExpr::cast(node) {
+                lyra_semantic::type_check::check_method_call(&call, ctx, items);
+            }
+        }
+        CheckKind::NetDecl => {
+            if let Some(nd) = lyra_ast::NetDecl::cast(node) {
+                lyra_semantic::type_check::check_net_decl(&nd, ctx, fallback, items);
+            }
+        }
+        CheckKind::TypedefDecl => {
+            if let Some(td) = lyra_ast::TypedefDecl::cast(node) {
+                lyra_semantic::type_check::check_typedef_decl(&td, ctx, fallback, items);
+            }
+        }
+        CheckKind::PortDecl => {
+            if let Some(port) = lyra_ast::Port::cast(node) {
+                lyra_semantic::type_check::check_port_decl(&port, ctx, fallback, items);
+            }
+        }
+    }
 }
 
 fn check_drive_strength_in_net_decls(
@@ -433,6 +455,14 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
             lyra_semantic::types::ConstInt::Known(v) => Some(v),
             _ => None,
         }
+    }
+
+    fn const_eval_int_by_site_full(
+        &self,
+        site: lyra_semantic::Site,
+    ) -> lyra_semantic::types::ConstInt {
+        let expr_ref = crate::const_eval::ConstExprRef::new(self.db, self.unit, site);
+        crate::const_eval::eval_const_int(self.db, expr_ref)
     }
 
     fn enum_known_value_set(

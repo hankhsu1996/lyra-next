@@ -73,6 +73,8 @@ pub enum MessageId {
     ArrayQueryDynTypeForm,
     ArrayQueryVarSizedDimByNumber,
     IllegalDriveStrengthBothHighz,
+    QueueBoundNotConst,
+    QueueBoundNotPositive,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -273,7 +275,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::VoidUsedAsValue
         | MessageId::ArrayQueryDynTypeForm
         | MessageId::ArrayQueryVarSizedDimByNumber
-        | MessageId::IllegalDriveStrengthBothHighz => render_type_message(msg),
+        | MessageId::IllegalDriveStrengthBothHighz
+        | MessageId::QueueBoundNotConst
+        | MessageId::QueueBoundNotPositive => render_type_message(msg),
         _ => render_other_message(msg),
     }
 }
@@ -401,6 +405,11 @@ fn render_type_message(msg: &Message) -> String {
         }
         MessageId::IllegalDriveStrengthBothHighz => {
             "drive strength (highz0, highz1) is not allowed".into()
+        }
+        MessageId::QueueBoundNotConst => "queue bound must be a constant positive integer".into(),
+        MessageId::QueueBoundNotPositive => {
+            let value = name();
+            format!("queue bound must be a positive integer, got {value}")
         }
         _ => String::new(),
     }

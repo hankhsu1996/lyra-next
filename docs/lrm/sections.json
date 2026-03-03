@@ -199,7 +199,7 @@
   {"section": "7.10.2.7", "chapter": 7, "title": "Push_back()", "parent": "7.10.2", "children": [], "ownable": false},
   {"section": "7.10.3", "chapter": 7, "title": "Persistence of references to elements of a queue", "parent": "7.10", "children": [], "ownable": false},
   {"section": "7.10.4", "chapter": 7, "title": "Updating a queue using assignment and unpacked array concatenation", "parent": "7.10", "children": [], "ownable": false},
-  {"section": "7.10.5", "chapter": 7, "title": "Bounded queues", "parent": "7.10", "children": [], "ownable": false},
+  {"section": "7.10.5", "chapter": 7, "title": "Bounded queues", "parent": "7.10", "children": [], "ownable": true},
   {"section": "7.11", "chapter": 7, "title": "Array querying functions", "parent": "7", "children": [], "ownable": true},
   {"section": "7.12", "chapter": 7, "title": "Array manipulation methods", "parent": "7", "children": ["7.12.1","7.12.2","7.12.3","7.12.4","7.12.5"], "ownable": false},
   {"section": "7.12.1", "chapter": 7, "title": "Array locator methods", "parent": "7.12", "children": [], "ownable": false},

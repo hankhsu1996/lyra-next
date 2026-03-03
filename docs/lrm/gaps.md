@@ -120,9 +120,9 @@ Associative array literal syntax (`'{key1: val1, key2: val2}`) is not supported.
 
 Queue concatenation (`{q1, q2}`, `{q, item}`) and queue slicing are not supported. The concatenation operator currently requires integral operands only. Queue-specific concatenation and assignment patterns (e.g., `q = {q[0:1], item, q[3:$]}`) are not type-checked. Blocked by: non-integral concatenation support, queue slice semantics. Test: `lrm/ch07/7.10.1_queue_operators`.
 
-### 7.10.5: Bounded queues -- runtime enforcement
+### 7.10.5: Bounded queues -- struct member coverage
 
-Bounded queue declarations (`int q[$:255]`) are parsed and the bound is stored in the type system (`UnpackedDim::Queue { bound }`). Runtime enforcement of the maximum size constraint is not modeled. Diagnostics for statically detectable bound violations (e.g., initializing with more elements than the bound) are not emitted. Blocked by: queue bound validation at assignment/method-call sites. Test: `lrm/ch07/7.10.5_bounded_queues`.
+Compile-time legality of the bounded queue bound (constant positive integer) is validated for var, net, typedef, and port declarations. Remaining: struct member declarations are not walked for unpacked dimension legality. Blocked by: struct member AST accessor and CheckKind integration. Test: `lrm/ch07/7.10.5_bounded_queues`.
 
 ### 7.12: Array manipulation methods -- deferred features
 

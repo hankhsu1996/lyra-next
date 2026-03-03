@@ -276,6 +276,59 @@ pub(super) fn lower_illegal_drive_strength(
     );
 }
 
+pub(super) fn lower_queue_bound_item(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    match item {
+        TypeCheckItem::QueueBoundNotConst { bound_site } => {
+            let Some(span) = source_map.map_span(bound_site.text_range()) else {
+                return;
+            };
+            diags.push(
+                lyra_diag::Diagnostic::new(
+                    lyra_diag::Severity::Error,
+                    lyra_diag::DiagnosticCode::QUEUE_BOUND_NOT_CONST,
+                    lyra_diag::Message::simple(lyra_diag::MessageId::QueueBoundNotConst),
+                )
+                .with_label(lyra_diag::Label {
+                    kind: lyra_diag::LabelKind::Primary,
+                    span,
+                    message: lyra_diag::Message::simple(lyra_diag::MessageId::QueueBoundNotConst),
+                }),
+            );
+        }
+        TypeCheckItem::QueueBoundNotPositive { bound_site, bound } => {
+            let Some(span) = source_map.map_span(bound_site.text_range()) else {
+                return;
+            };
+            let args = vec![lyra_diag::Arg::Name(smol_str::SmolStr::new(
+                bound.to_string(),
+            ))];
+            diags.push(
+                lyra_diag::Diagnostic::new(
+                    lyra_diag::Severity::Error,
+                    lyra_diag::DiagnosticCode::QUEUE_BOUND_NOT_POSITIVE,
+                    lyra_diag::Message::new(
+                        lyra_diag::MessageId::QueueBoundNotPositive,
+                        args.clone(),
+                    ),
+                )
+                .with_label(lyra_diag::Label {
+                    kind: lyra_diag::LabelKind::Primary,
+                    span,
+                    message: lyra_diag::Message::new(
+                        lyra_diag::MessageId::QueueBoundNotPositive,
+                        args,
+                    ),
+                }),
+            );
+        }
+        _ => {}
+    }
+}
+
 fn emit_simple_modport_diag(
     source_map: &lyra_preprocess::SourceMap,
     diags: &mut Vec<lyra_diag::Diagnostic>,
