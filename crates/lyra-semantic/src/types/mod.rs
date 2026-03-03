@@ -730,6 +730,7 @@ pub enum NetKind {
     Supply0,
     Supply1,
     Uwire,
+    Interconnect,
 }
 
 impl NetKind {
@@ -745,6 +746,7 @@ impl NetKind {
             Self::Supply0 => "supply0",
             Self::Supply1 => "supply1",
             Self::Uwire => "uwire",
+            Self::Interconnect => "interconnect",
         }
     }
 }

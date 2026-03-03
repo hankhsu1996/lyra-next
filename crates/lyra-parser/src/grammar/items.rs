@@ -78,7 +78,7 @@ fn package_item(p: &mut Parser) -> bool {
             true
         }
         _ if declarations::at_unambiguous_data_decl_start(p) => {
-            if subprograms::is_net_type(p.current()) {
+            if super::net::is_net_type_kw(p.current()) {
                 declarations::net_decl(p);
             } else {
                 declarations::var_decl(p);
@@ -305,7 +305,7 @@ pub(super) fn module_item(p: &mut Parser) -> bool {
             true
         }
         _ if declarations::at_unambiguous_data_decl_start(p) => {
-            if subprograms::is_net_type(p.current()) {
+            if super::net::is_net_type_kw(p.current()) {
                 declarations::net_decl(p);
             } else {
                 declarations::var_decl(p);

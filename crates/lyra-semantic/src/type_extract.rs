@@ -1,7 +1,7 @@
 use lyra_ast::{
-    AstIdMap, Declarator, Expr, ExprKind, NameRef, NetDecl, PackedDimension, ParamDecl, Port,
-    QualifiedName, Signing, TypeDeclSite, TypeNameRef, TypeSpec, TypeSpecKeyword, TypedefDecl,
-    UnpackedDimKind, UnpackedDimension, VarDecl,
+    AstIdMap, Declarator, Expr, ExprKind, NameRef, NetDecl, NetDeclKind, PackedDimension,
+    ParamDecl, Port, QualifiedName, Signing, TypeDeclSite, TypeNameRef, TypeSpec, TypeSpecKeyword,
+    TypedefDecl, UnpackedDimKind, UnpackedDimension, VarDecl,
 };
 use smol_str::SmolStr;
 
@@ -195,9 +195,7 @@ fn extract_net_decl(
     declarator: Option<&Declarator>,
     ast_id_map: &AstIdMap,
 ) -> SymbolType {
-    let net_kind = net
-        .type_spec()
-        .and_then(|ts| net_keyword_from_typespec(&ts));
+    let net_kind = net_kind_from_decl_kind(net.kind());
     let Some(net_kind) = net_kind else {
         return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind);
     };
@@ -474,18 +472,23 @@ fn keyword_to_integral_kw(kw: TypeSpecKeyword) -> Option<IntegralKw> {
     }
 }
 
-fn net_keyword_from_typespec(typespec: &TypeSpec) -> Option<NetKind> {
-    match typespec.type_keyword()? {
-        TypeSpecKeyword::Wire => Some(NetKind::Wire),
-        TypeSpecKeyword::Tri => Some(NetKind::Tri),
-        TypeSpecKeyword::Wand => Some(NetKind::Wand),
-        TypeSpecKeyword::Wor => Some(NetKind::Wor),
-        TypeSpecKeyword::Tri0 => Some(NetKind::Tri0),
-        TypeSpecKeyword::Tri1 => Some(NetKind::Tri1),
-        TypeSpecKeyword::Trireg => Some(NetKind::Trireg),
-        TypeSpecKeyword::Supply0 => Some(NetKind::Supply0),
-        TypeSpecKeyword::Supply1 => Some(NetKind::Supply1),
-        TypeSpecKeyword::Uwire => Some(NetKind::Uwire),
-        _ => None,
+/// Map `NetDeclKind` (from the AST declaration head) to semantic `NetKind`.
+fn net_kind_from_decl_kind(dk: NetDeclKind) -> Option<NetKind> {
+    match dk {
+        NetDeclKind::Interconnect => Some(NetKind::Interconnect),
+        NetDeclKind::NetType(kw) => match kw {
+            TypeSpecKeyword::Wire => Some(NetKind::Wire),
+            TypeSpecKeyword::Tri => Some(NetKind::Tri),
+            TypeSpecKeyword::Wand => Some(NetKind::Wand),
+            TypeSpecKeyword::Wor => Some(NetKind::Wor),
+            TypeSpecKeyword::Tri0 => Some(NetKind::Tri0),
+            TypeSpecKeyword::Tri1 => Some(NetKind::Tri1),
+            TypeSpecKeyword::Trireg => Some(NetKind::Trireg),
+            TypeSpecKeyword::Supply0 => Some(NetKind::Supply0),
+            TypeSpecKeyword::Supply1 => Some(NetKind::Supply1),
+            TypeSpecKeyword::Uwire => Some(NetKind::Uwire),
+            _ => None,
+        },
+        NetDeclKind::Unknown => None,
     }
 }

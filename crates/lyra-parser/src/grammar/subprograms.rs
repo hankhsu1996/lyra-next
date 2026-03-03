@@ -247,19 +247,3 @@ fn modport_ports(p: &mut Parser) {
         }
     }
 }
-
-pub(super) fn is_net_type(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::WireKw
-            | SyntaxKind::TriKw
-            | SyntaxKind::WandKw
-            | SyntaxKind::WorKw
-            | SyntaxKind::Tri0Kw
-            | SyntaxKind::Tri1Kw
-            | SyntaxKind::TriregKw
-            | SyntaxKind::Supply0Kw
-            | SyntaxKind::Supply1Kw
-            | SyntaxKind::UwireKw
-    )
-}

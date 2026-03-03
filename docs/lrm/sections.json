@@ -43,7 +43,7 @@
   {"section": "6.6.5", "chapter": 6, "title": "Tri0 and tri1 nets", "parent": "6.6", "children": [], "ownable": false},
   {"section": "6.6.6", "chapter": 6, "title": "Supply nets", "parent": "6.6", "children": [], "ownable": false},
   {"section": "6.6.7", "chapter": 6, "title": "User-defined nettypes", "parent": "6.6", "children": [], "ownable": true},
-  {"section": "6.6.8", "chapter": 6, "title": "Generic interconnect", "parent": "6.6", "children": [], "ownable": false},
+  {"section": "6.6.8", "chapter": 6, "title": "Generic interconnect", "parent": "6.6", "children": [], "ownable": true},
   {"section": "6.7", "chapter": 6, "title": "Net declarations", "parent": "6", "children": ["6.7.1","6.7.2","6.7.3"], "ownable": false},
   {"section": "6.7.1", "chapter": 6, "title": "Net declarations with built-in net types", "parent": "6.7", "children": [], "ownable": false},
   {"section": "6.7.2", "chapter": 6, "title": "Net declarations with user-defined nettypes", "parent": "6.7", "children": [], "ownable": false},

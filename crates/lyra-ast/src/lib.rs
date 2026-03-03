@@ -34,6 +34,7 @@ pub use nodes::{
     TfPortDecl, TimingControl, TypeExpr, TypeSpec, TypedefDecl, UnpackedDimension, VarDecl,
     WhileStmt,
 };
+pub use nodes_decl::NetDeclKind;
 pub use nodes_expr::{
     RangeKind, StreamDir, StreamRangeOp, SyntaxAssignOp, SyntaxBinaryOp, SyntaxPrefixOp,
 };
