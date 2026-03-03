@@ -40,10 +40,6 @@ Class declarations (`class`/`endclass`) are not parsed. Keywords are in the lexe
 
 `Ty::Event` exists in the type system and `event` parses as a type specifier. Expressions of event type produce `UnsupportedExprKind`. Missing: event trigger operator (`->`), event wait (`@event_var`), event `or` composition, `null` assignment, event variable in sensitivity lists. Blocked by: event trigger/wait parsing and semantic checking, process/timing control support. Test: `lrm/ch06/6.17_event_data_type`.
 
-### 6.20.3: Type parameters
-
-`parameter type` declarations are parsed and detected but diagnosed as unsupported (`TypeParameterUnsupported`). Type parameters resolve to error. Blocked by: parameterized type representation in the type system, elaboration-time type substitution. Test: `lrm/ch06/6.20.3_type_parameters`.
-
 ### 6.20.5: Specify parameters
 
 `specparam` declarations have no semantic tracking. No specify block support exists in the parser. Blocked by: specify block parsing (Ch 32), specparam scope and constant model. Test: `lrm/ch06/6.20.5_specify_parameters`.
@@ -70,7 +66,7 @@ Casting between bit-stream compatible types (aggregates, arrays, strings cast to
 
 ### 6.25: Parameterized data types
 
-Parameterized data types (class or type specialization via `#(type T = int)`) are not supported. Type parameters are diagnosed as unsupported (see 6.20.3). Blocked by: type parameter support, elaboration-time type substitution, parameterized class/interface infrastructure. Test: `lrm/ch06/6.25_parameterized_data_types`.
+Type parameter declarations and default resolution are implemented (6.20.3). Remaining: elaboration-time type substitution when instantiating modules with type parameter overrides, parameterized class/interface infrastructure. Blocked by: instantiation-time override substitution, parameterized class support (Ch 8). Test: `lrm/ch06/6.25_parameterized_data_types`.
 
 ## Chapter 7 -- Aggregate Data Types
 

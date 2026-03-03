@@ -97,8 +97,24 @@ pub fn file_diagnostics(
         diags.extend(record_diagnostics(db, rref).iter().cloned());
     }
 
-    // Type-extraction internal errors (MissingSite in normalized types)
-    for (sym_id, _sym) in def.symbols.iter() {
+    // Per-symbol diagnostics: internal errors and type-param-no-default.
+    collect_symbol_diagnostics(db, file, unit, def, pp, &mut diags);
+
+    diags
+}
+
+/// Collect per-symbol diagnostics: type-extraction internal errors and
+/// type-parameter-no-default (demand-driven via the type system).
+fn collect_symbol_diagnostics(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+    def: &lyra_semantic::def_index::DefIndex,
+    pp: &lyra_preprocess::PreprocOutput,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let file_id = file.file_id(db);
+    for (sym_id, sym) in def.symbols.iter() {
         let gsym = lyra_semantic::symbols::GlobalSymbolId {
             file: file_id,
             local: sym_id,
@@ -110,9 +126,40 @@ pub fn file_diagnostics(
                 diags.push(crate::lower_diag::internal_error_diag(&fact.detail, span));
             }
         }
+        // Type parameter without a default type: check via the type system
+        // result rather than raw symbol inspection so the diagnostic is
+        // demand-driven and will naturally go away when type parameter
+        // overrides are implemented. Only check TypeParam symbols to avoid
+        // emitting duplicates for variables that reference the type param.
+        if sym.kind == lyra_semantic::symbols::SymbolKind::TypeParam
+            && matches!(
+                type_of_symbol(db, sym_ref),
+                SymbolType::Error(lyra_semantic::types::SymbolTypeError::TypeParamNoDefault)
+            )
+        {
+            let range = sym.name_span.text_range();
+            if let Some(span) = pp.source_map.map_span(range) {
+                diags.push(
+                    lyra_diag::Diagnostic::new(
+                        lyra_diag::Severity::Error,
+                        lyra_diag::DiagnosticCode::TYPE_PARAM_NO_DEFAULT,
+                        lyra_diag::Message::new(
+                            lyra_diag::MessageId::TypeParamNoDefault,
+                            vec![lyra_diag::Arg::Name(sym.name.clone())],
+                        ),
+                    )
+                    .with_label(lyra_diag::Label {
+                        kind: lyra_diag::LabelKind::Primary,
+                        span,
+                        message: lyra_diag::Message::new(
+                            lyra_diag::MessageId::TypeParamNoDefault,
+                            vec![lyra_diag::Arg::Name(sym.name.clone())],
+                        ),
+                    }),
+                );
+            }
+        }
     }
-
-    diags
 }
 
 /// Per-file type-check diagnostics (Salsa-cached).

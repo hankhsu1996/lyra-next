@@ -242,7 +242,9 @@ impl<'a> DefContext<'a> {
                     SyntaxKind::VarDecl | SyntaxKind::ForeachStmt
                 ),
                 SymbolKind::Net => sym.decl_site.kind() == SyntaxKind::NetDecl,
-                SymbolKind::Parameter => sym.decl_site.kind() == SyntaxKind::ParamDecl,
+                SymbolKind::Parameter | SymbolKind::TypeParam => {
+                    sym.decl_site.kind() == SyntaxKind::ParamDecl
+                }
                 SymbolKind::PortAnsi => sym.decl_site.kind() == SyntaxKind::Port,
                 SymbolKind::PortTf => sym.decl_site.kind() == SyntaxKind::TfPortDecl,
                 SymbolKind::Typedef => sym.decl_site.kind() == SyntaxKind::TypedefDecl,
@@ -306,9 +308,11 @@ impl<'a> DefContext<'a> {
         name: &str,
     ) {
         let expected_name_kind = match kind {
-            SymbolKind::Variable | SymbolKind::Net | SymbolKind::Parameter | SymbolKind::PortTf => {
-                SyntaxKind::Declarator
-            }
+            SymbolKind::Variable
+            | SymbolKind::Net
+            | SymbolKind::Parameter
+            | SymbolKind::TypeParam
+            | SymbolKind::PortTf => SyntaxKind::Declarator,
             SymbolKind::PortAnsi => SyntaxKind::Port,
             SymbolKind::Instance => SyntaxKind::HierarchicalInstance,
             SymbolKind::Function => SyntaxKind::FunctionDecl,

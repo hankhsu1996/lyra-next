@@ -194,6 +194,9 @@ pub fn type_of_symbol_raw<'db>(
         | SymbolKind::Function
         | SymbolKind::Task
         | SymbolKind::Modport => return SymbolType::Error(SymbolTypeError::UnsupportedSymbolKind),
+        SymbolKind::TypeParam => {
+            return type_of_type_param(db, unit, source_file, sym);
+        }
         _ => {}
     }
 
@@ -327,6 +330,53 @@ fn type_of_instance(
     }
 }
 
+/// Resolve the type of a type parameter from its default `TypeSpec`.
+///
+/// Reads the `type_site` (default `TypeSpec`) from the symbol and routes
+/// through the standard type extraction pipeline. Returns `TypeAlias`
+/// so the type is usable in type-name context.
+fn type_of_type_param(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    sym: &lyra_semantic::symbols::Symbol,
+) -> lyra_semantic::types::SymbolType {
+    use lyra_ast::AstNode;
+    use lyra_semantic::types::{SymbolType, SymbolTypeError};
+    use lyra_semantic::{extract_base_ty_from_typespec, user_type_ref};
+
+    let Some(type_site_id) = sym.type_site else {
+        return SymbolType::Error(SymbolTypeError::TypeParamNoDefault);
+    };
+
+    let parse = parse_file(db, source_file);
+    let map = ast_id_map(db, source_file);
+
+    let Some(ts_node) = map.get_node(&parse.syntax(), type_site_id) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+    let Some(ts) = lyra_ast::TypeSpec::cast(ts_node) else {
+        return SymbolType::Error(SymbolTypeError::MissingDecl);
+    };
+
+    // User-defined type in the default: resolve through typedef chain
+    if let Some(utr) = user_type_ref(&ts) {
+        return expand_typedef(
+            db,
+            unit,
+            source_file,
+            &utr,
+            None,
+            map,
+            lyra_semantic::symbols::SymbolKind::TypeParam,
+        );
+    }
+
+    // Keyword type default: extract directly
+    let ty = extract_base_ty_from_typespec(&ts, map);
+    SymbolType::TypeAlias(ty)
+}
+
 /// Derive the type of a foreach loop variable from the iterated array's dimension.
 ///
 /// Types the full array header expression via `type_of_expr`, decomposes its
@@ -443,7 +493,8 @@ fn resolve_symbol_base_ty(
     let target_info = target_def.symbols.get(target_id.local);
 
     match target_info.kind {
-        lyra_semantic::symbols::SymbolKind::Typedef => {
+        lyra_semantic::symbols::SymbolKind::Typedef
+        | lyra_semantic::symbols::SymbolKind::TypeParam => {
             if matches!(user_type, UserTypeRef::InterfaceModport { .. }) {
                 return Err(SymbolType::Error(SymbolTypeError::ModportOnNonInterface));
             }
@@ -589,7 +640,10 @@ fn resolve_type_expr_name(
 
 fn classify(ty: Ty, kind: lyra_semantic::symbols::SymbolKind) -> lyra_semantic::types::SymbolType {
     use lyra_semantic::types::SymbolType;
-    if kind == lyra_semantic::symbols::SymbolKind::Typedef {
+    if matches!(
+        kind,
+        lyra_semantic::symbols::SymbolKind::Typedef | lyra_semantic::symbols::SymbolKind::TypeParam
+    ) {
         SymbolType::TypeAlias(ty)
     } else {
         SymbolType::Value(ty)

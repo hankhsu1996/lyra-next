@@ -502,7 +502,15 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
         ));
         return;
     };
-    let param_type_site = lyra_ast::ParamDecl::cast(node.clone())
+    let param_decl = lyra_ast::ParamDecl::cast(node.clone());
+    let is_type_param = param_decl.as_ref().is_some_and(|pd| pd.is_type_param());
+
+    if is_type_param {
+        collect_type_param_decl(ctx, node, scope, decl_site);
+        return;
+    }
+
+    let param_type_site = param_decl
         .and_then(|pd| pd.type_spec())
         .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
     for child in node.children() {
@@ -540,6 +548,53 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
             }
             // Collect name refs in default value expressions
             collect_name_refs(ctx, &child, scope);
+        }
+    }
+}
+
+fn collect_type_param_decl(
+    ctx: &mut DefContext<'_>,
+    node: &SyntaxNode,
+    scope: ScopeId,
+    decl_site: lyra_ast::ErasedAstId,
+) {
+    for child in node.children() {
+        if child.kind() != SyntaxKind::Declarator {
+            continue;
+        }
+        let Some(decl) = Declarator::cast(child.clone()) else {
+            continue;
+        };
+        let Some(name_tok) = decl.name() else {
+            continue;
+        };
+        let Some(decl_name_site) = ctx.ast_id_map.erased_ast_id(&child) else {
+            ctx.emit_internal_error_unanchored(&format!(
+                "erased_ast_id returned None for {:?} in collect_type_param_decl declarator",
+                child.kind()
+            ));
+            continue;
+        };
+        // The type_site for a type param is its default TypeSpec (if any)
+        let default_type_site = decl
+            .default_type_spec()
+            .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
+        let sym_id = ctx.push_symbol(Symbol {
+            name: SmolStr::new(name_tok.text()),
+            kind: SymbolKind::TypeParam,
+            constness: Constness::Mutable,
+            lifetime: Lifetime::Static,
+            decl_site,
+            name_site: decl_name_site,
+            type_site: default_type_site,
+            name_span: NameSpan::new(name_tok.text_range()),
+            scope,
+            origin: SymbolOrigin::TypeSpec,
+        });
+        ctx.register_binding(sym_id);
+        // Collect type refs in the default TypeSpec for resolution
+        if let Some(ts) = decl.default_type_spec() {
+            collect_type_spec_refs(ctx, &ts, scope);
         }
     }
 }

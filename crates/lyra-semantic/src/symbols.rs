@@ -134,6 +134,9 @@ pub enum SymbolKind {
     /// lexical scope bindings; resolved via `DefIndex.instance_decls`
     /// fallback when the name is unresolved in value context.
     Instance,
+    /// Type parameter (`parameter type T = int`). Lives in the Type
+    /// namespace so it can be referenced as a type name.
+    TypeParam,
     /// User-defined nettype declaration (LRM 6.6.7).
     Nettype,
 }
@@ -162,7 +165,7 @@ impl SymbolKind {
             | Self::EnumMember
             | Self::Modport
             | Self::Instance => Namespace::Value,
-            Self::Typedef | Self::Nettype => Namespace::Type,
+            Self::Typedef | Self::TypeParam | Self::Nettype => Namespace::Type,
         }
     }
 }

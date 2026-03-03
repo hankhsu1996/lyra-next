@@ -191,9 +191,18 @@ fn extract_param_sigs(
                 .name()
                 .map(|t| t.text_range())
                 .unwrap_or_default();
-            let init = declarator.init_expr();
-            let has_default = init.is_some();
-            let default_expr = init.and_then(|expr| id_map.erased_ast_id(expr.syntax()));
+
+            let (has_default, default_expr, default_type_site) = if is_type_param {
+                let ts = declarator.default_type_spec();
+                let has_default = ts.is_some();
+                let ts_site = ts.and_then(|t| id_map.erased_ast_id(t.syntax()));
+                (has_default, None, ts_site)
+            } else {
+                let init = declarator.init_expr();
+                let has_default = init.is_some();
+                let expr_site = init.and_then(|expr| id_map.erased_ast_id(expr.syntax()));
+                (has_default, expr_site, None)
+            };
 
             params.push(crate::module_sig::ParamSig {
                 name: param_name,
@@ -204,6 +213,7 @@ fn extract_param_sigs(
                 },
                 has_default,
                 default_expr,
+                default_type_site,
                 name_range,
             });
         }
