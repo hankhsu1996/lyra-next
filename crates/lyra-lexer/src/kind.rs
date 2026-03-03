@@ -498,6 +498,9 @@ pub enum SyntaxKind {
     // Type operator (LRM 6.23)
     TypeExpr,
 
+    // Array manipulation `with (expr)` clause (LRM 7.12)
+    ArrayManipWithClause,
+
     #[doc(hidden)]
     __Last,
 }

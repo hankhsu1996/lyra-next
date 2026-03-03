@@ -17,6 +17,7 @@ pub mod lhs;
 
 pub(crate) mod literal;
 pub mod member;
+pub mod member_name;
 pub mod modport_def;
 pub mod modport_facts;
 pub mod name_graph;

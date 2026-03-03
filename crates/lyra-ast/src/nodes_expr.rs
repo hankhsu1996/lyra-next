@@ -305,12 +305,25 @@ impl FieldExpr {
         support::expr_child(&self.syntax, 0)
     }
 
+    /// The member name token after the dot.
+    ///
+    /// Accepts identifiers and keyword tokens used as method names
+    /// by LRM 7.12 array manipulation methods (`and`, `or`, `xor`, `unique`).
     pub fn field_name(&self) -> Option<SyntaxToken> {
-        // The field name is the last identifier token (simple or escaped)
         self.syntax
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
+            .filter(|tok| {
+                matches!(
+                    tok.kind(),
+                    SyntaxKind::Ident
+                        | SyntaxKind::EscapedIdent
+                        | SyntaxKind::AndKw
+                        | SyntaxKind::OrKw
+                        | SyntaxKind::XorKw
+                        | SyntaxKind::UniqueKw
+                )
+            })
             .last()
     }
 }
@@ -351,6 +364,18 @@ impl CallExpr {
     }
 
     pub fn callee(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    /// The optional `with (expr)` clause (LRM 7.12).
+    pub fn with_clause(&self) -> Option<crate::nodes::ArrayManipWithClause> {
+        support::child(&self.syntax)
+    }
+}
+
+impl crate::nodes::ArrayManipWithClause {
+    /// The expression inside `with (expr)`.
+    pub fn with_expr(&self) -> Option<crate::expr::Expr> {
         support::expr_child(&self.syntax, 0)
     }
 }

@@ -255,6 +255,9 @@ ast_nodes! {
     // Type operator (LRM 6.23)
     TypeExpr(SyntaxKind::TypeExpr) { @custom }
 
+    // Array manipulation `with (expr)` clause (LRM 7.12)
+    ArrayManipWithClause(SyntaxKind::ArrayManipWithClause) { @custom }
+
     // Strength specifications (LRM 6.3.2)
     DriveStrength(SyntaxKind::DriveStrength) { @custom }
     ChargeStrength(SyntaxKind::ChargeStrength) { @custom }

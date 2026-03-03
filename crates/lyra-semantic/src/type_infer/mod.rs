@@ -4,6 +4,7 @@ mod call;
 mod expr_type;
 mod range;
 mod scalar;
+pub(crate) mod scoped;
 
 pub(crate) use expr_type::try_integral_view;
 pub use expr_type::{

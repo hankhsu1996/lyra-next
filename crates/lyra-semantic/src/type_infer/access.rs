@@ -1,8 +1,10 @@
 use lyra_ast::{FieldExpr, IndexExpr};
+use smol_str::SmolStr;
 
 use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx};
 use super::infer_expr;
 use crate::member::{MemberKind, MemberLookupError};
+use crate::member_name::MemberNameToken;
 use crate::types::Ty;
 
 /// What kind of indexing operation `a[i]` performs on a given base type.
@@ -77,7 +79,11 @@ pub(super) fn infer_field_access(field_expr: &FieldExpr, ctx: &dyn InferCtx) -> 
         return lhs_type;
     }
 
-    match ctx.member_lookup(&lhs_type.ty, field_tok.text()) {
+    let member = MemberNameToken {
+        kind: field_tok.kind(),
+        text: SmolStr::new(field_tok.text()),
+    };
+    match ctx.member_lookup(&lhs_type.ty, &member) {
         Ok(info) => match info.kind {
             MemberKind::BuiltinMethod(_) => ExprType::error(ExprTypeErrorKind::MethodRequiresCall),
             _ => ExprType::from_ty(&info.ty),

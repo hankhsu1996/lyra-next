@@ -218,6 +218,22 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
     }
 }
 
+/// Whether a token can appear as a method/member name after `.`.
+///
+/// LRM 7.12 array manipulation methods use keyword tokens (`and`, `or`,
+/// `xor`, `unique`) as method names.
+fn is_member_name_token(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::Ident
+            | SyntaxKind::EscapedIdent
+            | SyntaxKind::AndKw
+            | SyntaxKind::OrKw
+            | SyntaxKind::XorKw
+            | SyntaxKind::UniqueKw
+    )
+}
+
 // Postfix: call `(...)`, index `[...]`, field `.name`
 fn postfix(p: &mut Parser, mut lhs: CompletedMarker) -> CompletedMarker {
     loop {
@@ -225,6 +241,9 @@ fn postfix(p: &mut Parser, mut lhs: CompletedMarker) -> CompletedMarker {
             SyntaxKind::LParen => {
                 let m = lhs.precede(p);
                 arg_list(p);
+                if p.at(SyntaxKind::WithKw) {
+                    array_manip_with_clause(p);
+                }
                 lhs = m.complete(p, SyntaxKind::CallExpr);
             }
             SyntaxKind::LBracket => {
@@ -233,13 +252,27 @@ fn postfix(p: &mut Parser, mut lhs: CompletedMarker) -> CompletedMarker {
             SyntaxKind::Dot => {
                 let m = lhs.precede(p);
                 p.bump(); // .
-                p.expect(SyntaxKind::Ident);
+                if is_member_name_token(p.current()) {
+                    p.bump();
+                } else {
+                    p.error("expected member name");
+                }
                 lhs = m.complete(p, SyntaxKind::FieldExpr);
             }
             _ => break,
         }
     }
     lhs
+}
+
+/// Parse `with ( expr )` clause for array manipulation methods (LRM 7.12).
+fn array_manip_with_clause(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // with
+    p.expect(SyntaxKind::LParen);
+    expr(p);
+    p.expect(SyntaxKind::RParen);
+    m.complete(p, SyntaxKind::ArrayManipWithClause);
 }
 
 /// Consume `+:` or `-:` as indexed part-select operator tokens.
