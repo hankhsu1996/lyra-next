@@ -1,9 +1,11 @@
 use lyra_ast::{CallExpr, Expr};
+use smol_str::SmolStr;
 
 use crate::member::{
     ArrayMethodKind, ArrayReceiverInfo, ArrayReceiverKind, AssocKey, BuiltinMethodKind,
     ReceiverInfo, StringMethodKind,
 };
+use crate::type_infer::scoped::ScopedInferCtx;
 use crate::type_infer::{
     ExprType, ExprTypeErrorKind, ExprView, InferCtx, infer_expr, try_integral_view,
 };
@@ -48,6 +50,9 @@ pub(crate) fn infer_builtin_method_call(
             if let Some(err) = check_array_method_args(ak, &args, receiver, ctx) {
                 return err;
             }
+            if let Some(override_ty) = check_array_with_clause(call, ak, receiver, ctx) {
+                return override_ty;
+            }
             if ak.returns_void() {
                 return ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr);
             }
@@ -58,6 +63,40 @@ pub(crate) fn infer_builtin_method_call(
     }
 
     ExprType::from_ty(result_ty)
+}
+
+/// Type-check the optional `with (expr)` clause on a 7.12 array method.
+///
+/// Binds the implicit `item` variable to the element type, then infers
+/// the with-expression. For reduction methods (LRM 7.12.3), returns the
+/// with-expression type as the override return type.
+fn check_array_with_clause(
+    call: &CallExpr,
+    ak: ArrayMethodKind,
+    receiver: Option<&ReceiverInfo>,
+    ctx: &dyn InferCtx,
+) -> Option<ExprType> {
+    let with_clause = call.with_clause()?;
+    let with_expr = with_clause.with_expr()?;
+    let Some(ReceiverInfo::Array(recv)) = receiver else {
+        return None;
+    };
+    if !ak.accepts_with_clause() {
+        return None;
+    }
+    let item_type = ExprType::from_ty(&recv.elem_ty);
+    let scoped = ScopedInferCtx {
+        inner: ctx,
+        bindings: [(SmolStr::new_static("item"), item_type)],
+    };
+    let with_type = infer_expr(&with_expr, &scoped, None);
+    if let ExprView::Error(_) = &with_type.view {
+        return Some(with_type);
+    }
+    if ak.is_reduction() {
+        return Some(with_type);
+    }
+    None
 }
 
 fn check_array_method_args(
@@ -79,10 +118,7 @@ fn check_array_method_args(
         | ArrayMethodKind::Prev => check_assoc_key_arg(args, recv, ctx, true),
         ArrayMethodKind::Insert => check_insert_args(args, recv, ctx),
         ArrayMethodKind::PushFront | ArrayMethodKind::PushBack => check_elem_arg(args, recv, ctx),
-        ArrayMethodKind::Size
-        | ArrayMethodKind::Num
-        | ArrayMethodKind::PopFront
-        | ArrayMethodKind::PopBack => None,
+        _ => None,
     }
 }
 

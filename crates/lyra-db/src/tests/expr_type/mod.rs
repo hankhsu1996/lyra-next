@@ -1,3 +1,4 @@
+mod array_manip;
 mod calls;
 mod indexing;
 mod literals;

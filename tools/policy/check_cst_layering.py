@@ -62,6 +62,9 @@ C003_ALLOWED: dict[str, frozenset[str]] = {
         "builder_items.rs",
         "builder_stmt.rs",
         "builder_types.rs",
+        # Token-kind-first method resolution for keyword-named methods
+        "member_name.rs",
+        "member.rs",
     }),
     "crates/lyra-db/src/": frozenset(),
 }

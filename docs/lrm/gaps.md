@@ -106,9 +106,9 @@ Queue concatenation (`{q1, q2}`, `{q, item}`) and queue slicing are not supporte
 
 Bounded queue declarations (`int q[$:255]`) are parsed and the bound is stored in the type system (`UnpackedDim::Queue { bound }`). Runtime enforcement of the maximum size constraint is not modeled. Diagnostics for statically detectable bound violations (e.g., initializing with more elements than the bound) are not emitted. Blocked by: queue bound validation at assignment/method-call sites. Test: `lrm/ch07/7.10.5_bounded_queues`.
 
-### 7.12: Array manipulation methods
+### 7.12: Array manipulation methods -- deferred features
 
-Locator methods (`find`, `find_index`, `find_first`, `find_first_index`, `find_last`, `find_last_index`), ordering methods (`sort`, `rsort`, `reverse`, `shuffle`), reduction methods (`sum`, `product`, `and`, `or`, `xor`), and iterator index querying are not implemented. None of these are in the `ArrayMethodKind` enum. These methods use `with (expression)` clauses that introduce an iterator variable, requiring special scoping. Blocked by: method enum extension, `with` clause parsing and iterator variable scoping, return type computation (locators return queues). Test: `lrm/ch07/7.12_array_manipulation_methods`.
+All 7.12 method kinds (locator, ordering, reduction) are in the method table with receiver validation, return type computation, and arity checks. `with (expr)` clause parsing and iterator variable scoping via `ScopedInferCtx` are implemented. Reduction methods override the return type with the with-expression type per LRM 7.12.3. Remaining gaps: iterator index querying (`item.index` -- 7.12.4), array mapping method (`map` -- 7.12.5), and diagnostics for missing required `with` clause on locator methods. Test: `lrm/ch07/7.12_array_manipulation_methods`.
 
 ## Chapter 11 -- Operators and Expressions
 

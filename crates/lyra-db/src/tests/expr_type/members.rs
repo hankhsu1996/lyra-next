@@ -850,7 +850,7 @@ fn expr_type_assoc_wildcard_exists_rejected() {
 }
 
 #[test]
-fn expr_type_fixed_array_size_rejected() {
+fn expr_type_fixed_array_size() {
     let db = LyraDatabase::default();
     let file = new_file(
         &db,
@@ -863,9 +863,7 @@ fn expr_type_fixed_array_size_rejected() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
-        ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(
-            MethodInvalidReason::WrongArrayKind
-        )),
+        ExprType::from_ty(&Ty::int()),
     );
 }
 

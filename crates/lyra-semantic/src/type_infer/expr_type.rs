@@ -3,6 +3,7 @@ use smol_str::SmolStr;
 
 use crate::enum_def::EnumId;
 use crate::member::{MemberInfo, MemberLookupError, MethodInvalidReason};
+use crate::member_name::MemberNameToken;
 use crate::symbols::{GlobalSymbolId, SymbolKind};
 use crate::type_extract::UserTypeRef;
 use crate::types::{
@@ -307,8 +308,12 @@ pub trait InferCtx {
     fn resolve_callable(&self, callee: &Expr) -> Result<GlobalSymbolId, ResolveCallableError>;
     /// Get the signature of a callable symbol.
     fn callable_sig(&self, sym: GlobalSymbolId) -> Option<CallableSigRef>;
-    /// Look up a member (field) on a type.
-    fn member_lookup(&self, ty: &Ty, member_name: &str) -> Result<MemberInfo, MemberLookupError>;
+    /// Look up a member (field or method) on a type.
+    fn member_lookup(
+        &self,
+        ty: &Ty,
+        member: &MemberNameToken,
+    ) -> Result<MemberInfo, MemberLookupError>;
     /// Get the integral view of an enum's base type.
     fn enum_integral_view(&self, id: &EnumId) -> Option<BitVecType>;
     /// Resolve a `UserTypeRef` as a type (typedef/enum/struct name).
