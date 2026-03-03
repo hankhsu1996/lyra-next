@@ -85,6 +85,10 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::VoidUsedAsValue { expr_site } => {
             lower_void_used_as_value(*expr_site, source_map, diags);
         }
+        TypeCheckItem::ArrayQueryDynTypeForm { .. }
+        | TypeCheckItem::ArrayQueryVarSizedDimByNumber { .. } => {
+            lower_array_query_item(item, source_map, diags);
+        }
     }
 }
 
@@ -1092,6 +1096,57 @@ fn lower_void_used_as_value(
             kind: lyra_diag::LabelKind::Primary,
             span,
             message: lyra_diag::Message::simple(lyra_diag::MessageId::VoidUsedAsValue),
+        }),
+    );
+}
+
+fn lower_array_query_item(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let (call_site, label_site, code, msg_id, fn_name) = match item {
+        TypeCheckItem::ArrayQueryDynTypeForm {
+            call_site,
+            arg_site,
+            fn_name,
+        } => (
+            call_site,
+            arg_site,
+            lyra_diag::DiagnosticCode::ARRAY_QUERY_DYN_TYPE_FORM,
+            lyra_diag::MessageId::ArrayQueryDynTypeForm,
+            fn_name,
+        ),
+        TypeCheckItem::ArrayQueryVarSizedDimByNumber {
+            call_site,
+            dim_arg_site,
+            fn_name,
+        } => (
+            call_site,
+            dim_arg_site,
+            lyra_diag::DiagnosticCode::ARRAY_QUERY_VAR_SIZED_DIM,
+            lyra_diag::MessageId::ArrayQueryVarSizedDimByNumber,
+            fn_name,
+        ),
+        _ => return,
+    };
+    let Some(call_span) = source_map.map_span(call_site.text_range()) else {
+        return;
+    };
+    let label_span = source_map
+        .map_span(label_site.text_range())
+        .unwrap_or(call_span);
+    let msg_args = vec![lyra_diag::Arg::Name(fn_name.clone())];
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            code,
+            lyra_diag::Message::new(msg_id, msg_args.clone()),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span: label_span,
+            message: lyra_diag::Message::new(msg_id, msg_args),
         }),
     );
 }

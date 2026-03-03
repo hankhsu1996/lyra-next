@@ -140,9 +140,9 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 `$bits` const-eval handles packed integral types (all packed dims), real types, enums (base type width), packed records (struct=sum, union=max), unpacked records (bit-stream sum/max including per-field declarator dims), and fixed-size unpacked arrays (recursive element width * length). Strings and dynamic arrays return const-eval error (not yet surfaced as user-visible diagnostic). Unsupported: chandle, event, void, and interfaces (implementation-defined or not applicable per LRM). Test: `lrm/ch20/20.6.2_expression_size_system_function`.
 
-### 20.7: Array query functions -- runtime evaluation
+### 20.7: Array query functions -- runtime evaluation and type-form on dynamic types
 
-Typing (arity validation, return type) and const-eval for fixed packed/unpacked dimensions implemented for `$left`, `$right`, `$low`, `$high`, `$size`, `$increment`, `$dimensions`, `$unpacked_dimensions`. Remaining gaps: runtime evaluation (`$left`/`$right`/`$size` on dynamic arrays, queues, and associative arrays with current state) and type-form with dynamically-sized type identifiers. Test: `lrm/ch20/20.7_array_querying_system_functions`.
+Typing (arity validation, return type) and const-eval for fixed packed/unpacked dimensions implemented for all eight array query functions. Compile-time legality check for dimension-by-number selecting a variable-sized dimension is implemented and integration-tested. Type-form legality check for range queries on dynamically-sized types is implemented in the type checker and unit-tested, but cannot be integration-tested because typedef names do not resolve in system call arguments (pre-existing limitation shared with `$bits`; blocked on system-call type-arg resolution). Remaining gaps: runtime state-dependent evaluation (simulator scope), type-form integration test coverage (blocked on typedef resolution). Tests: `lrm/ch07/7.11_array_query_functions/cases/`.
 
 ## Chapter 25 -- Interfaces
 

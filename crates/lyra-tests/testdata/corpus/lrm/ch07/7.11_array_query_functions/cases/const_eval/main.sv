@@ -3,7 +3,7 @@
 // Tests $dimensions, $unpacked_dimensions, $left, $right, $low, $high,
 // $size, $increment on fixed packed/unpacked types via const-eval.
 
-module array_query_functions;
+module array_query_const_eval;
 
   // $dimensions on keyword types
   parameter D_INT = $dimensions(int);           // 1 (implicit [31:0])
@@ -53,5 +53,15 @@ module array_query_functions;
   // $left on int (implicit [31:0])
   parameter L_INT = $left(int);                 // 31
   parameter SZ_INT = $size(int);                // 32
+
+  // $dimensions / $unpacked_dimensions on dynamic arrays (count queries)
+  int dyn_arr [];
+  parameter D_DYN = $dimensions(dyn_arr);
+  parameter UD_DYN = $unpacked_dimensions(dyn_arr);
+
+  // $dimensions / $unpacked_dimensions on queues
+  int queue_var [$];
+  parameter D_Q = $dimensions(queue_var);
+  parameter UD_Q = $unpacked_dimensions(queue_var);
 
 endmodule

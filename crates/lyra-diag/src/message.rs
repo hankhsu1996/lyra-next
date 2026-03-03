@@ -69,6 +69,8 @@ pub enum MessageId {
     ConstMissingInit,
     VoidObjectType,
     VoidUsedAsValue,
+    ArrayQueryDynTypeForm,
+    ArrayQueryVarSizedDimByNumber,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -264,7 +266,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::AssignToConst
         | MessageId::ConstMissingInit
         | MessageId::VoidObjectType
-        | MessageId::VoidUsedAsValue => render_type_message(msg),
+        | MessageId::VoidUsedAsValue
+        | MessageId::ArrayQueryDynTypeForm
+        | MessageId::ArrayQueryVarSizedDimByNumber => render_type_message(msg),
         _ => render_other_message(msg),
     }
 }
@@ -393,6 +397,15 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::ConstMissingInit => "const variable must have an initializer".into(),
         MessageId::VoidObjectType => "void cannot be used as an object type".into(),
         MessageId::VoidUsedAsValue => "void expression cannot be used as a value".into(),
+        MessageId::ArrayQueryDynTypeForm => {
+            format!("{} cannot be used on a dynamically-sized type", name())
+        }
+        MessageId::ArrayQueryVarSizedDimByNumber => {
+            format!(
+                "{} dimension argument refers to a variable-sized dimension",
+                name()
+            )
+        }
         _ => String::new(),
     }
 }
