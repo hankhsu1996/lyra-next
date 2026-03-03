@@ -2,6 +2,7 @@ mod generate;
 mod identity;
 mod instances;
 mod interface;
+mod interface_params;
 mod params;
 mod ports;
 mod signature;

@@ -166,10 +166,6 @@ Import/export of subroutines through modports. Neither parsing nor semantic anal
 
 `extern forkjoin task` declaration in interfaces. Not supported. Test: `lrm/ch25/25.7.4_extern_forkjoin`.
 
-### 25.8: Parameterized interfaces
-
-Interface parameter override at instantiation site. Parser/elaboration may partially work but untested in LRM corpus. Test: `lrm/ch25/25.8_parameterized_interfaces`.
-
 ### 25.9: Virtual interfaces
 
 `virtual interface` type declaration, assignment, and access. Not supported at any layer. Test: `lrm/ch25/25.9_virtual_interfaces`.
