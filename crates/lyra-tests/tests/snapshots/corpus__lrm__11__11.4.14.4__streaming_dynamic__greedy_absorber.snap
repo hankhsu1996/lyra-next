@@ -1,0 +1,11 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+assertion_line: 477
+expression: ws.dump_diagnostics()
+---
+// file: test.sv (3 diagnostics)
+  error[lyra.type[27]] 33:11..33:11: streaming unpack leaves 56 bits for dynamic target of 32-bit elements
+  error[lyra.type[27]] 38:11..38:11: streaming unpack leaves 56 bits for dynamic target of 32-bit elements
+  error[lyra.type[28]] 43:22..43:22: streaming unpack target is 32 bits but source is 8 bits
+---
+unit (0 diagnostics)

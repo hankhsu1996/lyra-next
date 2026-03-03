@@ -42,9 +42,8 @@ module streaming_unpack;
     {>> {8'd0}} = src16;
     //   ^ error[lyra.type[25]]: streaming unpack operand is not a valid assignment target
 
-    // Unsupported operand: dynamic array has no fixed width
+    // Greedy absorber: 1-bit element dynamic array absorbs 16 bits (LRM 11.4.14.4)
     {>> {dyn_arr}} = src16;
-    //   ^ error[lyra.type[26]]: streaming unpack operand type `logic []` has no fixed streaming width
 
     // with clause on non-array scalar LHS
     {>> {a with [0]}} = src16;

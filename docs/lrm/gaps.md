@@ -112,10 +112,6 @@ Locator methods (`find`, `find_index`, `find_first`, `find_first_index`, `find_l
 
 ## Chapter 11 -- Operators and Expressions
 
-### 11.4.14.4: Dynamic array resize on streaming unpack
-
-When a dynamic array appears in a streaming unpack target, the LRM says it is resized to absorb the remaining bits after all fixed-width targets are satisfied. Currently dynamic arrays on unpack are rejected with `type[26]` "no fixed streaming width". Implementing this requires computing remaining width and resizing the target. Test: extend `lrm/ch11/11.4.14.4_streaming_dynamic`.
-
 ### 11.4.14.1: Non-integral operand bitstream conversion
 
 Streaming of arrays, structs, unions, and strings follows recursive bitstream conversion rules (LRM 11.4.14.1). Only integral operands are supported. Blocked by: bitstream type conversion. Test: `lrm/ch11/11.4.14.1_streaming_aggregate`.
