@@ -2,6 +2,8 @@ mod args;
 mod directive;
 mod engine;
 mod engine_cond;
+mod engine_define;
+mod engine_expand;
 mod env;
 mod expand;
 mod operators;
