@@ -27,7 +27,7 @@ pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx
     let Some(ek) = peeled.classify() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    match ek {
+    let result = match ek {
         ExprKind::NameRef(_) | ExprKind::QualifiedName(_) => ctx.type_of_name(&peeled),
         ExprKind::Literal(l) => scalar::infer_literal(&l, expected),
         ExprKind::PrefixExpr(p) => scalar::infer_prefix(&p, ctx, expected),
@@ -43,6 +43,19 @@ pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx
         ExprKind::StreamExpr(s) => aggregate::infer_stream(&s, ctx),
         ExprKind::CastExpr(c) => scalar::infer_cast(&c, ctx),
         ExprKind::NewExpr(ne) => infer_new_expr(&ne, None),
+    };
+    reject_void_value(result)
+}
+
+/// Reject `Ty::Void` in expression (value) context.
+///
+/// Void is legal only as a callable return type and in statement context.
+/// Any expression position that requires a value rejects it uniformly.
+fn reject_void_value(et: ExprType) -> ExprType {
+    if matches!(et.ty, Ty::Void) {
+        ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr)
+    } else {
+        et
     }
 }
 

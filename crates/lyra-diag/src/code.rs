@@ -175,6 +175,14 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 30,
     };
+    pub const VOID_OBJECT_TYPE: Self = Self {
+        namespace: "lyra.type",
+        number: 31,
+    };
+    pub const VOID_USED_AS_VALUE: Self = Self {
+        namespace: "lyra.type",
+        number: 32,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,
