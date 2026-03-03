@@ -225,6 +225,8 @@ pub enum ArrayMethodKind {
     And,
     Or,
     Xor,
+    // 7.12.5 array mapping method (SV-2023)
+    Map,
 }
 
 /// Return shape for 7.12 methods (before receiver-specific `Ty` construction).
@@ -279,6 +281,7 @@ impl ArrayMethodKind {
             "shuffle" => Some(Self::Shuffle),
             "sum" => Some(Self::Sum),
             "product" => Some(Self::Product),
+            "map" => Some(Self::Map),
             _ => None,
         }
     }
@@ -289,6 +292,22 @@ impl ArrayMethodKind {
     /// a with clause except `reverse` and `shuffle`.
     pub fn accepts_with_clause(self) -> bool {
         self.is_manip_method() && !matches!(self, Self::Reverse | Self::Shuffle)
+    }
+
+    /// Whether this method requires a `with (expr)` clause.
+    ///
+    /// Per LRM 7.12, locator methods and `map` require a with clause.
+    pub fn requires_with_clause(self) -> bool {
+        matches!(
+            self,
+            Self::Find
+                | Self::FindIndex
+                | Self::FindFirst
+                | Self::FindFirstIndex
+                | Self::FindLast
+                | Self::FindLastIndex
+                | Self::Map
+        )
     }
 
     /// Whether this is a 7.12 array manipulation method.
@@ -314,6 +333,7 @@ impl ArrayMethodKind {
                 | Self::And
                 | Self::Or
                 | Self::Xor
+                | Self::Map
         )
     }
 
@@ -391,18 +411,15 @@ impl ArrayMethodKind {
     }
 
     /// `(min_arity, max_arity)` of the method arguments (not counting receiver).
+    ///
+    /// Locator and map methods accept an optional iterator variable name
+    /// as first argument (e.g. `find(x) with (x > 0)`) per LRM 7.12.
     pub fn arity(self) -> (usize, usize) {
         match self {
             Self::Size
             | Self::Num
             | Self::PopFront
             | Self::PopBack
-            | Self::Find
-            | Self::FindIndex
-            | Self::FindFirst
-            | Self::FindFirstIndex
-            | Self::FindLast
-            | Self::FindLastIndex
             | Self::Min
             | Self::Max
             | Self::Unique
@@ -416,7 +433,14 @@ impl ArrayMethodKind {
             | Self::And
             | Self::Or
             | Self::Xor => (0, 0),
-            Self::Delete => (0, 1),
+            Self::Find
+            | Self::FindIndex
+            | Self::FindFirst
+            | Self::FindFirstIndex
+            | Self::FindLast
+            | Self::FindLastIndex
+            | Self::Map
+            | Self::Delete => (0, 1),
             Self::Exists
             | Self::First
             | Self::Last
@@ -445,7 +469,8 @@ impl ArrayMethodKind {
             | Self::Or
             | Self::Xor
             | Self::PopFront
-            | Self::PopBack => ArrayMethodReturn::Elem,
+            | Self::PopBack
+            | Self::Map => ArrayMethodReturn::Elem,
             Self::Size
             | Self::Num
             | Self::Exists

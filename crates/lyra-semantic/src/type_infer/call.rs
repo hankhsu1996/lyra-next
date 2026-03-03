@@ -9,6 +9,7 @@ use super::infer_expr;
 use crate::coerce::IntegralCtx;
 use crate::member::{MemberInfo, MemberKind, MemberLookupError};
 use crate::member_name::MemberNameToken;
+use crate::types::Ty;
 
 pub(super) fn infer_call(call: &CallExpr, ctx: &dyn InferCtx) -> ExprType {
     let Some(callee_expr) = call.callee() else {
@@ -94,6 +95,11 @@ fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
+    // Iterator pseudo-methods (e.g. item.index()) -- LRM 7.12.4
+    if let Some(ret_ty) = ctx.iter_method_return(&lhs_node, field_tok.text()) {
+        return infer_iter_method_call(call, &ret_ty, ctx);
+    }
+
     let lhs_type = infer_expr(&lhs_node, ctx, None);
     if let ExprView::Error(_) = &lhs_type.view {
         return lhs_type;
@@ -122,4 +128,29 @@ fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx
             ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(reason))
         }
     }
+}
+
+/// Validate and type an iterator pseudo-method call (LRM 7.12.4).
+///
+/// Accepts 0 or 1 integral arguments (dimension index). The dimension
+/// argument is validated as integral but currently not used to select a
+/// dimension -- full multi-dimensional semantics require the foreach /
+/// multi-dim iterator model which is not yet implemented.
+fn infer_iter_method_call(call: &CallExpr, ret_ty: &Ty, ctx: &dyn InferCtx) -> ExprType {
+    let arg_list = call.arg_list();
+    let mut args = arg_list.iter().flat_map(|al| al.args());
+    let first = args.next();
+    if args.next().is_some() {
+        return ExprType::error(ExprTypeErrorKind::MethodArityMismatch);
+    }
+    if let Some(arg) = first {
+        let arg_type = infer_expr(&arg, ctx, None);
+        if let ExprView::Error(_) = &arg_type.view {
+            return arg_type;
+        }
+        if super::try_integral_view(&arg_type, ctx).is_none() {
+            return ExprType::error(ExprTypeErrorKind::MethodArgNotIntegral);
+        }
+    }
+    ExprType::from_ty(ret_ty)
 }

@@ -27,6 +27,10 @@ pub(super) fn lower_method_call_error(
         | ExprTypeErrorKind::MethodNotValidOnReceiver(_) => {
             lyra_diag::MessageId::MethodArgTypeMismatch
         }
+        ExprTypeErrorKind::WithClauseRequired => lyra_diag::MessageId::MethodWithClauseRequired,
+        ExprTypeErrorKind::WithClauseNotAccepted => {
+            lyra_diag::MessageId::MethodWithClauseNotAccepted
+        }
         _ => return,
     };
     let msg_args = vec![lyra_diag::Arg::Name(method_name.clone())];
