@@ -1,0 +1,110 @@
+mod array;
+mod call;
+mod enum_diag;
+mod misc;
+mod stream;
+
+use lyra_semantic::type_check::TypeCheckItem;
+
+pub(crate) fn lower_type_check_item(
+    db: &dyn salsa::Database,
+    unit: crate::CompilationUnit,
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    seen: &mut std::collections::HashSet<(
+        lyra_ast::ErasedAstId,
+        lyra_ast::ErasedAstId,
+        lyra_ast::ErasedAstId,
+    )>,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    match item {
+        TypeCheckItem::AssignTruncation { .. } => {
+            array::lower_assign_truncation(item, source_map, seen, diags);
+        }
+        TypeCheckItem::BitsNonDataType { .. } => {
+            call::lower_bits_non_data_type(item, source_map, diags);
+        }
+        TypeCheckItem::EnumAssignFromNonEnum { .. } | TypeCheckItem::EnumAssignWrongEnum { .. } => {
+            enum_diag::lower_enum_assign_item(db, unit, item, source_map, diags);
+        }
+        TypeCheckItem::ConversionArgCategory { .. }
+        | TypeCheckItem::ConversionWidthMismatch { .. } => {
+            call::lower_conversion_item(item, source_map, diags);
+        }
+        TypeCheckItem::ModportDirectionViolation { .. }
+        | TypeCheckItem::ModportRefUnsupported { .. }
+        | TypeCheckItem::ModportEmptyPortAccess { .. }
+        | TypeCheckItem::ModportExprNotAssignable { .. } => {
+            misc::lower_modport_item(item, source_map, diags);
+        }
+        TypeCheckItem::EnumCastOutOfRange { .. } => {
+            enum_diag::lower_enum_cast_item(db, unit, item, source_map, diags);
+        }
+        TypeCheckItem::StreamWithNonArray { .. } => {
+            stream::lower_stream_with_non_array(item, source_map, diags);
+        }
+        TypeCheckItem::MethodCallError { .. } => {
+            call::lower_method_call_error(item, source_map, diags);
+        }
+        TypeCheckItem::UnsupportedLhsForm { .. } | TypeCheckItem::InvalidLhs { .. } => {
+            misc::lower_lhs_item(item, source_map, diags);
+        }
+        TypeCheckItem::InternalError { .. } => {
+            misc::lower_internal_type_check_error(item, source_map, diags);
+        }
+        TypeCheckItem::NewExprNotDynArray { .. }
+        | TypeCheckItem::NewExprTooManyInitArgs { .. }
+        | TypeCheckItem::NewExprSizeNotLongint { .. }
+        | TypeCheckItem::NewExprSizeNegative { .. } => {
+            call::lower_new_expr_item(item, source_map, diags);
+        }
+        TypeCheckItem::NewExprInitIncompat { .. } => {
+            call::lower_new_expr_init_incompat(item, source_map, diags);
+        }
+        TypeCheckItem::ArrayIncompatible { .. } => {
+            array::lower_array_incompat(item, source_map, diags);
+        }
+        TypeCheckItem::StreamUnpackOperandInvalid { .. }
+        | TypeCheckItem::StreamUnpackOperandUnsupported { .. } => {
+            stream::lower_stream_unpack_operand(item, source_map, diags);
+        }
+        TypeCheckItem::StreamUnpackGreedyRemainder { .. } => {
+            stream::lower_stream_unpack_greedy_remainder(item, source_map, diags);
+        }
+        TypeCheckItem::StreamUnpackWidthMismatch { .. } => {
+            stream::lower_stream_unpack_width_mismatch(item, source_map, diags);
+        }
+        TypeCheckItem::AssignToReadonly { .. } => {
+            misc::lower_assign_to_readonly(item, source_map, diags);
+        }
+        TypeCheckItem::ConstMissingInit { .. } => {
+            misc::lower_const_missing_init(item, source_map, diags);
+        }
+        TypeCheckItem::VoidObjectType {
+            decl_site,
+            name_span,
+        } => {
+            misc::lower_void_object_type(*decl_site, *name_span, source_map, diags);
+        }
+        TypeCheckItem::VoidUsedAsValue { expr_site } => {
+            misc::lower_void_used_as_value(*expr_site, source_map, diags);
+        }
+        TypeCheckItem::ArrayQueryDynTypeForm { .. }
+        | TypeCheckItem::ArrayQueryVarSizedDimByNumber { .. } => {
+            array::lower_array_query_item(item, source_map, diags);
+        }
+        TypeCheckItem::IllegalDriveStrengthBothHighz { strength_site } => {
+            misc::lower_illegal_drive_strength(*strength_site, source_map, diags);
+        }
+    }
+}
+
+pub(crate) fn lower_enum_value_diag(
+    vd: &lyra_semantic::enum_def::EnumValueDiag,
+    file_id: lyra_source::FileId,
+    ast_id_map: &lyra_ast::AstIdMap,
+    source_map: &lyra_preprocess::SourceMap,
+) -> Option<lyra_diag::Diagnostic> {
+    enum_diag::lower_enum_value_diag(vd, file_id, ast_id_map, source_map)
+}
