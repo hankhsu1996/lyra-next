@@ -187,6 +187,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 34,
     };
+    pub const ILLEGAL_DRIVE_STRENGTH_BOTH_HIGHZ: Self = Self {
+        namespace: "lyra.type",
+        number: 35,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,

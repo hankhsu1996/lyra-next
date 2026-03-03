@@ -1,4 +1,4 @@
-use lyra_ast::{AstIdMap, AstNode, Expr, HasSyntax};
+use lyra_ast::{AstIdMap, AstNode, Expr, HasSyntax, SourceFile as AstSourceFile};
 use lyra_semantic::coerce::IntegralCtx;
 use lyra_semantic::type_check::TypeCheckCtx;
 use lyra_semantic::type_infer::ExprType;
@@ -198,6 +198,11 @@ pub fn type_diagnostics(
                     lyra_semantic::type_check::check_continuous_assign(
                         &ca, &ctx, fallback, &mut items,
                     );
+                    if let Some(ds) = ca.drive_strength() {
+                        lyra_semantic::type_check::check_drive_strength_semantics(
+                            &ds, map, fallback, &mut items,
+                        );
+                    }
                 }
             }
             CheckKind::AssignStmt => {
@@ -252,6 +257,8 @@ pub fn type_diagnostics(
         }
     }
 
+    check_drive_strength_in_file(&root, map, &mut items);
+
     let mut seen = std::collections::HashSet::new();
     let mut diags = Vec::new();
     for item in &items {
@@ -265,6 +272,56 @@ pub fn type_diagnostics(
         );
     }
     diags
+}
+
+fn check_drive_strength_in_net_decls(
+    net_decls: impl IntoIterator<Item = lyra_ast::NetDecl>,
+    map: &lyra_ast::AstIdMap,
+    items: &mut Vec<lyra_semantic::type_check::TypeCheckItem>,
+) {
+    for nd in net_decls {
+        let Some(fallback) = map.id_of(&nd) else {
+            continue;
+        };
+        if let Some(ts) = nd.type_spec()
+            && let Some(ds) = ts.drive_strength()
+        {
+            lyra_semantic::type_check::check_drive_strength_semantics(&ds, map, fallback, items);
+        }
+    }
+}
+
+/// Drive strength legality on net declarations (LRM 6.3.2).
+///
+/// Walks modules, interfaces, programs, and packages present in this file.
+fn check_drive_strength_in_file(
+    root: &lyra_parser::SyntaxNode,
+    map: &lyra_ast::AstIdMap,
+    items: &mut Vec<lyra_semantic::type_check::TypeCheckItem>,
+) {
+    let Some(sf) = AstSourceFile::cast(root.clone()) else {
+        return;
+    };
+    for module in sf.modules() {
+        if let Some(body) = module.body() {
+            check_drive_strength_in_net_decls(body.net_decls(), map, items);
+        }
+    }
+    for iface in sf.interfaces() {
+        if let Some(body) = iface.body() {
+            check_drive_strength_in_net_decls(body.net_decls(), map, items);
+        }
+    }
+    for prog in sf.programs() {
+        if let Some(body) = prog.body() {
+            check_drive_strength_in_net_decls(body.net_decls(), map, items);
+        }
+    }
+    for pkg in sf.packages() {
+        if let Some(body) = pkg.body() {
+            check_drive_strength_in_net_decls(body.net_decls(), map, items);
+        }
+    }
 }
 
 struct DbTypeCheckCtx<'a> {
