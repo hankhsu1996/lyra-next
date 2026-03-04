@@ -152,10 +152,6 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 Ternary `?:` with `matches` pattern-matching operator. Requires same infrastructure as 12.6.2. Blocked by: tagged union construction, `matches` operator parsing. Test: `lrm/ch12/12.6.3_pattern_matching_conditional`.
 
-### 12.7.5: Do...while loop
-
-`do ... while (cond);` loop syntax. Parser does not recognize `do` as a statement keyword. Blocked by: parser support for do-while statement. Test: `lrm/ch12/12.7.5_do_while_loop`.
-
 ### 12.8: Jump statements
 
 `break`, `continue`, and `return` statements. Parser does not recognize these as statement keywords. Blocked by: parser support for jump statements. Test: `lrm/ch12/12.8_jump_statements`.

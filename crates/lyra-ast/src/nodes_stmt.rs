@@ -7,9 +7,9 @@ use lyra_parser::SyntaxToken;
 
 use crate::node::AstNode;
 use crate::nodes::{
-    AssignStmt, BinExpr, BlockStmt, CaseItem, CaseStmt, ContinuousAssign, DriveStrength, ForStmt,
-    ForeachStmt, ForeachVarList, ForeverStmt, IfStmt, NameRef, RepeatStmt, TimingControl,
-    WhileStmt,
+    AssignStmt, BinExpr, BlockStmt, CaseItem, CaseStmt, ContinuousAssign, DoWhileStmt,
+    DriveStrength, ForStmt, ForeachStmt, ForeachVarList, ForeverStmt, IfStmt, NameRef, RepeatStmt,
+    TimingControl, WhileStmt,
 };
 use crate::nodes_expr::SyntaxAssignOp;
 use crate::support::{self, AstChildren};
@@ -253,6 +253,30 @@ impl ForeverStmt {
     /// The loop body.
     pub fn body(&self) -> Option<crate::node::StmtNode> {
         support::child(&self.syntax)
+    }
+}
+
+impl DoWhileStmt {
+    /// The loop body (statement between `do` and `while`).
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        support::child(&self.syntax)
+    }
+
+    /// The condition expression inside `while (...)`.
+    pub fn condition(&self) -> Option<crate::expr::Expr> {
+        let mut past_while = false;
+        for el in self.syntax.children_with_tokens() {
+            match el {
+                rowan::NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WhileKw => {
+                    past_while = true;
+                }
+                rowan::NodeOrToken::Node(node) if past_while => {
+                    return crate::expr::Expr::cast(node);
+                }
+                _ => {}
+            }
+        }
+        None
     }
 }
 

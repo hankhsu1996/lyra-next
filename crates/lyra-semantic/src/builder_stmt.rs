@@ -61,6 +61,7 @@ pub(crate) fn collect_statement(
         | SyntaxKind::WhileStmt
         | SyntaxKind::RepeatStmt
         | SyntaxKind::ForeverStmt
+        | SyntaxKind::DoWhileStmt
         | SyntaxKind::TimingControl => {
             for child in node.children() {
                 collect_statement(ctx, &child, scope);

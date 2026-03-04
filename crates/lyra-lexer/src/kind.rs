@@ -408,6 +408,7 @@ pub enum SyntaxKind {
     WhileStmt,
     RepeatStmt,
     ForeverStmt,
+    DoWhileStmt,
     AssignStmt,
     TimingControl,
     EventExpr,
