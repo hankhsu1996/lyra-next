@@ -8,8 +8,8 @@ use lyra_parser::SyntaxToken;
 use crate::nodes::{
     ArgList, BinExpr, CallExpr, CastExpr, ConcatExpr, CondExpr, EnumMember, EnumMemberRange,
     Expression, FieldExpr, IndexExpr, Literal, NewExpr, ParenExpr, PrefixExpr, RangeExpr,
-    ReplicExpr, StreamExpr, StreamOperandItem, StreamOperands, StreamRange, StreamWithClause,
-    TypeSpec,
+    ReplicExpr, StreamExpr, StreamOperandItem, StreamOperands, StreamRange, StreamSliceSize,
+    StreamWithClause, TypeSpec,
 };
 use crate::support;
 
@@ -407,11 +407,28 @@ impl StreamExpr {
         }
     }
 
+    /// The optional `slice_size` child node.
+    pub fn slice_size(&self) -> Option<StreamSliceSize> {
+        support::child(&self.syntax)
+    }
+
     /// Iterate streaming operand items in source order.
     pub fn operand_items(&self) -> impl Iterator<Item = StreamOperandItem> {
         self.stream_operands()
             .into_iter()
             .flat_map(|ops| ops.items())
+    }
+}
+
+impl StreamSliceSize {
+    /// The type specifier child, present when the slice size is a type.
+    pub fn type_spec(&self) -> Option<TypeSpec> {
+        support::child(&self.syntax)
+    }
+
+    /// The expression child, present when the slice size is an expression.
+    pub fn expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 }
 

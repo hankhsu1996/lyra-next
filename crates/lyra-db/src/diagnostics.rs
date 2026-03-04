@@ -285,6 +285,11 @@ fn dispatch_check_entry(
                 );
             }
         }
+        CheckKind::StreamExpr => {
+            if let Some(stream) = lyra_ast::StreamExpr::cast(node) {
+                lyra_semantic::type_check::check_stream_slice_size_const(&stream, ctx, items);
+            }
+        }
         CheckKind::CallExpr => {
             if let Some(call) = lyra_ast::CallExpr::cast(node) {
                 lyra_semantic::type_check::check_method_call(&call, ctx, items);

@@ -105,6 +105,9 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::RecordAssignWrongRecord { .. } => {
             record::lower_record_assign_item(db, unit, item, source_map, diags);
         }
+        TypeCheckItem::StreamSliceSizeNotConst { .. } => {
+            stream::lower_stream_slice_size_not_const(item, source_map, diags);
+        }
     }
 }
 

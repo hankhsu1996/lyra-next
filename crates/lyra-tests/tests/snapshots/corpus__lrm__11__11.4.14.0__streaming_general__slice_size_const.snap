@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.type[40]] 22:16..22:16: streaming slice_size must be a constant expression
+---
+unit (0 diagnostics)

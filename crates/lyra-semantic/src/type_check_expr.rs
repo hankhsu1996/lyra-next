@@ -5,7 +5,7 @@ use crate::site;
 use crate::type_check::{AccessKind, AccessMode, TypeCheckCtx, TypeCheckItem, require_site};
 use crate::type_infer::ExprView;
 use crate::types::Ty;
-use lyra_ast::{CallExpr, CastExpr, Expr, ExprKind, StreamOperandItem};
+use lyra_ast::{CallExpr, CastExpr, Expr, ExprKind, StreamExpr, StreamOperandItem};
 use lyra_source::NameSpan;
 
 /// Check a `CastExpr` for enum cast-out-of-range.
@@ -239,5 +239,33 @@ pub fn check_stream_operand(
         let map = ctx.ast_id_map();
         let with_site = require_site(site::opt_site_of(map, &with_clause), fallback, items);
         items.push(TypeCheckItem::StreamWithNonArray { with_site });
+    }
+}
+
+/// Check that an expression-form `slice_size` in a streaming operator is constant.
+///
+/// Only validates when the slice size is an expression (e.g. a literal or
+/// parenthesized expression). Type-form slice sizes (bare identifiers parsed
+/// as `TypeSpec`) are not checked here.
+pub fn check_stream_slice_size_const(
+    stream: &StreamExpr,
+    ctx: &dyn TypeCheckCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    use crate::types::{ConstEvalError, ConstInt};
+
+    let Some(ss) = stream.slice_size() else {
+        return;
+    };
+    let Some(slice_expr) = ss.expr() else {
+        return;
+    };
+    let Some(slice_size_site) = site::opt_site_of(ctx.ast_id_map(), &slice_expr) else {
+        return;
+    };
+    if let ConstInt::Error(ConstEvalError::NonConstant) =
+        ctx.const_eval_int_by_site_full(slice_size_site)
+    {
+        items.push(TypeCheckItem::StreamSliceSizeNotConst { slice_size_site });
     }
 }

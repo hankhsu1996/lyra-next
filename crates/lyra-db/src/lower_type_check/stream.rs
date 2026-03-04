@@ -25,6 +25,31 @@ pub(super) fn lower_stream_with_non_array(
     );
 }
 
+pub(super) fn lower_stream_slice_size_not_const(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::StreamSliceSizeNotConst { slice_size_site } = item else {
+        return;
+    };
+    let Some(span) = source_map.map_span(slice_size_site.text_range()) else {
+        return;
+    };
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::DiagnosticCode::STREAM_SLICE_SIZE_NOT_CONST,
+            lyra_diag::Message::simple(lyra_diag::MessageId::StreamSliceSizeNotConst),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span,
+            message: lyra_diag::Message::simple(lyra_diag::MessageId::StreamSliceSizeNotConst),
+        }),
+    );
+}
+
 pub(super) fn lower_stream_unpack_operand(
     item: &TypeCheckItem,
     source_map: &lyra_preprocess::SourceMap,
