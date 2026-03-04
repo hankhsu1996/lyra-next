@@ -8,6 +8,7 @@ use lyra_source::{NameSpan, TextRange};
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
 use crate::modport_def::PortDirection;
+use crate::record::RecordId;
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView};
 use crate::types::{SymbolType, Ty, UnpackedDim};
 
@@ -209,6 +210,13 @@ pub enum TypeCheckItem {
     QueueBoundNotPositive {
         bound_site: Site,
         bound: i64,
+    },
+    RecordAssignWrongRecord {
+        assign_site: Site,
+        lhs_site: Site,
+        rhs_site: Site,
+        lhs_record: RecordId,
+        rhs_record: RecordId,
     },
 }
 
@@ -545,6 +553,21 @@ fn check_assignment_compat(
                 });
             }
         }
+    }
+
+    // Record assignment compatibility check (LRM 7.2.2): identity only.
+    match (&lhs.ty, &rhs.ty) {
+        (Ty::Record(lhs_id), Ty::Record(rhs_id)) if lhs_id == rhs_id => {}
+        (Ty::Record(lhs_id), Ty::Record(rhs_id)) => {
+            items.push(TypeCheckItem::RecordAssignWrongRecord {
+                assign_site,
+                lhs_site,
+                rhs_site,
+                lhs_record: *lhs_id,
+                rhs_record: *rhs_id,
+            });
+        }
+        _ => {}
     }
 
     // Array assignment compatibility check (both sides must be arrays)

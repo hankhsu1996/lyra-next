@@ -99,6 +99,8 @@ pub enum MessageId {
     WildcardLocalConflict,
     TypeParamNoDefault,
     NonIntegralPackedMember,
+    RecordAssignWrongRecord,
+    RecordTypeHere,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -285,7 +287,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::IllegalDriveStrengthBothHighz
         | MessageId::QueueBoundNotConst
         | MessageId::QueueBoundNotPositive
-        | MessageId::NonIntegralPackedMember => render_type_message(msg),
+        | MessageId::NonIntegralPackedMember
+        | MessageId::RecordAssignWrongRecord
+        | MessageId::RecordTypeHere => render_type_message(msg),
         _ => render_other_message(msg),
     }
 }
@@ -354,6 +358,9 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::EnumAssignFromNonEnum
         | MessageId::EnumAssignWrongEnum
         | MessageId::EnumTypeHere => render_enum_assign_message(msg),
+        MessageId::RecordAssignWrongRecord | MessageId::RecordTypeHere => {
+            render_record_assign_message(msg)
+        }
         MessageId::ConversionArgCategory | MessageId::ConversionWidthMismatch => {
             render_conversion_message(msg)
         }
@@ -467,6 +474,27 @@ fn render_enum_assign_message(msg: &Message) -> String {
         }
         MessageId::EnumTypeHere => {
             format!("enum type `{}`", name())
+        }
+        _ => String::new(),
+    }
+}
+
+// Args contract (set in lower_type_check/record.rs):
+//   RecordAssignWrongRecord: [rhs_kind, rhs_name, lhs_kind, lhs_name]
+//   RecordTypeHere:          [kind, name]
+fn render_record_assign_message(msg: &Message) -> String {
+    match msg.id {
+        MessageId::RecordAssignWrongRecord => {
+            let rhs_kind = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            let rhs_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            let lhs_kind = msg.args.get(2).and_then(Arg::as_name).unwrap_or("?");
+            let lhs_name = msg.args.get(3).and_then(Arg::as_name).unwrap_or("?");
+            format!("cannot assign {rhs_kind} `{rhs_name}` to {lhs_kind} `{lhs_name}`")
+        }
+        MessageId::RecordTypeHere => {
+            let kind = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            let record_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("{kind} type `{record_name}`")
         }
         _ => String::new(),
     }

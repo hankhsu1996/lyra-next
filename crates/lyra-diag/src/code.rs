@@ -203,6 +203,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 38,
     };
+    pub const RECORD_ASSIGN_INCOMPAT: Self = Self {
+        namespace: "lyra.type",
+        number: 39,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,

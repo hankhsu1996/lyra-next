@@ -2,6 +2,7 @@ mod array;
 mod call;
 mod enum_diag;
 mod misc;
+mod record;
 mod stream;
 
 use lyra_semantic::type_check::TypeCheckItem;
@@ -100,6 +101,9 @@ pub(crate) fn lower_type_check_item(
         }
         TypeCheckItem::QueueBoundNotConst { .. } | TypeCheckItem::QueueBoundNotPositive { .. } => {
             misc::lower_queue_bound_item(item, source_map, diags);
+        }
+        TypeCheckItem::RecordAssignWrongRecord { .. } => {
+            record::lower_record_assign_item(db, unit, item, source_map, diags);
         }
     }
 }
