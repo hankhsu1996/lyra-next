@@ -385,6 +385,11 @@ impl DoWhileStmt {
 }
 
 impl ReturnStmt {
+    /// The `return` keyword token.
+    pub fn return_kw(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::ReturnKw)
+    }
+
     /// The return value expression, if present.
     pub fn value(&self) -> Option<crate::expr::Expr> {
         support::expr_children(&self.syntax).next()

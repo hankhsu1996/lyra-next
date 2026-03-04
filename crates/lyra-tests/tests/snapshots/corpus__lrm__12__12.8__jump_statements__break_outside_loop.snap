@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.semantic[18]] 4:4..4:4: `break` statement outside of a loop
+  error[lyra.semantic[18]] 7:6..7:6: `break` statement outside of a loop
+---
+unit (0 diagnostics)
