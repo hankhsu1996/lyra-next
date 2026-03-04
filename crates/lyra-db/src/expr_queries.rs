@@ -745,21 +745,37 @@ fn modport_member_lookup(
             receiver: None,
         });
     }
-    let exists_in_iface = ctx
+    // LRM 25.10: members not permissible in modport (parameter, localparam)
+    // remain accessible through modport-qualified port references.
+    if let Some(sym) = ctx.def.scopes.resolve(
+        &ctx.def.symbols,
+        ctx.iface_scope,
+        lyra_semantic::symbols::Namespace::Value,
+        member_name,
+    ) {
+        if ctx.def.symbols.get(sym).kind == lyra_semantic::symbols::SymbolKind::Parameter {
+            let global_member = GlobalSymbolId {
+                file: ctx.file_id,
+                local: sym,
+            };
+            let ty = match (ctx.resolve_sym_type)(ctx.db, ctx.unit, global_member) {
+                lyra_semantic::types::SymbolType::Value(ty) => ty,
+                lyra_semantic::types::SymbolType::Net(net) => net.data.clone(),
+                _ => return Err(MemberLookupError::UnknownMember),
+            };
+            return Ok(MemberInfo {
+                ty,
+                kind: MemberKind::InterfaceMember { member: sym },
+                receiver: None,
+            });
+        }
+        return Err(MemberLookupError::NotInModport);
+    }
+    if ctx
         .def
-        .scopes
-        .resolve(
-            &ctx.def.symbols,
-            ctx.iface_scope,
-            lyra_semantic::symbols::Namespace::Value,
-            member_name,
-        )
+        .modport_by_name(concrete_iface, member_name)
         .is_some()
-        || ctx
-            .def
-            .modport_by_name(concrete_iface, member_name)
-            .is_some();
-    if exists_in_iface {
+    {
         return Err(MemberLookupError::NotInModport);
     }
     Err(MemberLookupError::UnknownMember)
