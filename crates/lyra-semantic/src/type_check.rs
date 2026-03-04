@@ -11,6 +11,7 @@ use crate::modport_def::PortDirection;
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView};
 use crate::types::{SymbolType, Ty, UnpackedDim};
 
+use crate::type_check_dim::check_type_spec_member_dims;
 pub use crate::type_check_dim::{check_net_decl, check_port_decl, check_typedef_decl};
 pub use crate::type_check_expr::{
     check_cast_expr, check_field_direction, check_method_call, check_stream_operand,
@@ -402,6 +403,10 @@ pub fn check_var_decl(
         if !matches!(rhs_type.ty, Ty::Error) {
             check_assignment_compat(&lhs_type, &rhs_type, decl_site, lhs_site, rhs_site, items);
         }
+    }
+
+    if let Some(ts) = var_decl.type_spec() {
+        check_type_spec_member_dims(ctx, &ts, items);
     }
 }
 
