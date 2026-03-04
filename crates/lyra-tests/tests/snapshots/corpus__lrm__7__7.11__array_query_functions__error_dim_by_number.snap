@@ -3,7 +3,7 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (2 diagnostics)
-  error[lyra.type[34]] 11:21..11:21: $size dimension argument refers to a variable-sized dimension
-  error[lyra.type[34]] 17:21..17:21: $size dimension argument refers to a variable-sized dimension
+  error[lyra.type.array_query_var_sized_dim] 11:21..11:21: $size dimension argument refers to a variable-sized dimension
+  error[lyra.type.array_query_var_sized_dim] 17:21..17:21: $size dimension argument refers to a variable-sized dimension
 ---
 unit (0 diagnostics)

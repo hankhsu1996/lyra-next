@@ -1,366 +1,261 @@
-use core::fmt;
+/// A diagnostic code is a fully-qualified string key that uniquely identifies
+/// a diagnostic kind. Keys use dotted hierarchy (e.g. `"lyra.type.width_mismatch"`).
+pub type DiagKey = &'static str;
 
-/// Identity code for a diagnostic, composed of a namespace and a number.
-///
-/// Namespace strings use dotted hierarchy (e.g. `"lyra.parse"`).
-/// Numbers are unique within a namespace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DiagnosticCode {
-    pub namespace: &'static str,
-    pub number: u32,
-}
+// Parse diagnostics
+pub const PARSE_ERROR: DiagKey = "lyra.parse.error";
+pub const PREPROCESS_ERROR: DiagKey = "lyra.preprocess.error";
 
-impl DiagnosticCode {
-    pub const PARSE_ERROR: Self = Self {
-        namespace: "lyra.parse",
-        number: 1,
-    };
-    pub const PREPROCESS_ERROR: Self = Self {
-        namespace: "lyra.preprocess",
-        number: 1,
-    };
-    pub const UNRESOLVED_NAME: Self = Self {
-        namespace: "lyra.semantic",
-        number: 1,
-    };
-    pub const DUPLICATE_DEFINITION: Self = Self {
-        namespace: "lyra.semantic",
-        number: 2,
-    };
-    pub const PACKAGE_NOT_FOUND: Self = Self {
-        namespace: "lyra.semantic",
-        number: 3,
-    };
-    pub const MEMBER_NOT_FOUND: Self = Self {
-        namespace: "lyra.semantic",
-        number: 4,
-    };
-    pub const AMBIGUOUS_IMPORT: Self = Self {
-        namespace: "lyra.semantic",
-        number: 5,
-    };
-    pub const UNSUPPORTED_QUALIFIED_PATH: Self = Self {
-        namespace: "lyra.semantic",
-        number: 6,
-    };
-    pub const IMPORT_CONFLICT: Self = Self {
-        namespace: "lyra.semantic",
-        number: 7,
-    };
-    pub const ENUM_RANGE_INVALID: Self = Self {
-        namespace: "lyra.semantic",
-        number: 9,
-    };
-    pub const WIDTH_MISMATCH: Self = Self {
-        namespace: "lyra.type",
-        number: 1,
-    };
-    pub const BITS_NON_DATA_TYPE: Self = Self {
-        namespace: "lyra.type",
-        number: 6,
-    };
-    pub const ENUM_ASSIGN_INCOMPAT: Self = Self {
-        namespace: "lyra.type",
-        number: 7,
-    };
-    pub const UNDECLARED_TYPE: Self = Self {
-        namespace: "lyra.type",
-        number: 2,
-    };
-    pub const NOT_A_TYPE: Self = Self {
-        namespace: "lyra.type",
-        number: 3,
-    };
-    pub const ILLEGAL_ENUM_BASE: Self = Self {
-        namespace: "lyra.type",
-        number: 4,
-    };
-    pub const ENUM_BASE_DIMS_NOT_CONST: Self = Self {
-        namespace: "lyra.type",
-        number: 5,
-    };
-    pub const CONVERSION_ARG_TYPE: Self = Self {
-        namespace: "lyra.type",
-        number: 8,
-    };
-    pub const PACKED_UNION_WIDTH: Self = Self {
-        namespace: "lyra.type",
-        number: 9,
-    };
-    pub const MODPORT_DIRECTION: Self = Self {
-        namespace: "lyra.type",
-        number: 10,
-    };
-    pub const MODPORT_REF_UNSUPPORTED: Self = Self {
-        namespace: "lyra.type",
-        number: 11,
-    };
-    pub const ENUM_CAST_OUT_OF_RANGE: Self = Self {
-        namespace: "lyra.type",
-        number: 12,
-    };
-    pub const STREAM_WITH_NON_ARRAY: Self = Self {
-        namespace: "lyra.type",
-        number: 13,
-    };
-    pub const MODPORT_EMPTY_PORT: Self = Self {
-        namespace: "lyra.type",
-        number: 14,
-    };
-    pub const MODPORT_EXPR_NOT_ASSIGNABLE: Self = Self {
-        namespace: "lyra.type",
-        number: 15,
-    };
-    pub const METHOD_CALL_ERROR: Self = Self {
-        namespace: "lyra.type",
-        number: 16,
-    };
-    pub const UNSUPPORTED_LHS_FORM: Self = Self {
-        namespace: "lyra.type",
-        number: 17,
-    };
-    pub const INVALID_ASSIGNMENT_LHS: Self = Self {
-        namespace: "lyra.type",
-        number: 18,
-    };
-    pub const NEW_EXPR_NOT_DYN_ARRAY: Self = Self {
-        namespace: "lyra.type",
-        number: 19,
-    };
-    pub const NEW_EXPR_TOO_MANY_INIT_ARGS: Self = Self {
-        namespace: "lyra.type",
-        number: 20,
-    };
-    pub const NEW_EXPR_SIZE_NOT_LONGINT: Self = Self {
-        namespace: "lyra.type",
-        number: 21,
-    };
-    pub const NEW_EXPR_SIZE_NEGATIVE: Self = Self {
-        namespace: "lyra.type",
-        number: 22,
-    };
-    pub const NEW_EXPR_INIT_INCOMPAT: Self = Self {
-        namespace: "lyra.type",
-        number: 23,
-    };
-    pub const ARRAY_INCOMPAT: Self = Self {
-        namespace: "lyra.type",
-        number: 24,
-    };
-    pub const STREAM_UNPACK_OPERAND_INVALID: Self = Self {
-        namespace: "lyra.type",
-        number: 25,
-    };
-    pub const STREAM_UNPACK_OPERAND_UNSUPPORTED: Self = Self {
-        namespace: "lyra.type",
-        number: 26,
-    };
-    pub const STREAM_UNPACK_GREEDY_REMAINDER: Self = Self {
-        namespace: "lyra.type",
-        number: 27,
-    };
-    pub const STREAM_UNPACK_WIDTH_MISMATCH: Self = Self {
-        namespace: "lyra.type",
-        number: 28,
-    };
-    pub const ASSIGN_TO_CONST: Self = Self {
-        namespace: "lyra.type",
-        number: 29,
-    };
-    pub const CONST_MISSING_INIT: Self = Self {
-        namespace: "lyra.type",
-        number: 30,
-    };
-    pub const VOID_OBJECT_TYPE: Self = Self {
-        namespace: "lyra.type",
-        number: 31,
-    };
-    pub const VOID_USED_AS_VALUE: Self = Self {
-        namespace: "lyra.type",
-        number: 32,
-    };
-    pub const ARRAY_QUERY_DYN_TYPE_FORM: Self = Self {
-        namespace: "lyra.type",
-        number: 33,
-    };
-    pub const ARRAY_QUERY_VAR_SIZED_DIM: Self = Self {
-        namespace: "lyra.type",
-        number: 34,
-    };
-    pub const ILLEGAL_DRIVE_STRENGTH_BOTH_HIGHZ: Self = Self {
-        namespace: "lyra.type",
-        number: 35,
-    };
-    pub const QUEUE_BOUND_NOT_CONST: Self = Self {
-        namespace: "lyra.type",
-        number: 36,
-    };
-    pub const QUEUE_BOUND_NOT_POSITIVE: Self = Self {
-        namespace: "lyra.type",
-        number: 37,
-    };
-    pub const MEMBER_NOT_IN_MODPORT: Self = Self {
-        namespace: "lyra.type",
-        number: 38,
-    };
-    pub const RECORD_ASSIGN_INCOMPAT: Self = Self {
-        namespace: "lyra.type",
-        number: 39,
-    };
-    pub const STREAM_SLICE_SIZE_NOT_CONST: Self = Self {
-        namespace: "lyra.type",
-        number: 40,
-    };
-    pub const UNPACKED_RECORD_INTEGRAL_ASSIGN: Self = Self {
-        namespace: "lyra.type",
-        number: 41,
-    };
-    pub const ENUM_DUPLICATE_VALUE: Self = Self {
-        namespace: "lyra.semantic",
-        number: 10,
-    };
-    pub const ENUM_VALUE_OVERFLOW: Self = Self {
-        namespace: "lyra.semantic",
-        number: 11,
-    };
-    pub const ENUM_SIZED_LITERAL_WIDTH: Self = Self {
-        namespace: "lyra.semantic",
-        number: 12,
-    };
-    pub const VOID_MEMBER_NON_TAGGED: Self = Self {
-        namespace: "lyra.semantic",
-        number: 13,
-    };
-    pub const ILLEGAL_UNION_MEMBER_TYPE: Self = Self {
-        namespace: "lyra.semantic",
-        number: 14,
-    };
-    pub const TYPE_PARAM_NO_DEFAULT: Self = Self {
-        namespace: "lyra.semantic",
-        number: 15,
-    };
-    pub const NON_INTEGRAL_PACKED_MEMBER: Self = Self {
-        namespace: "lyra.semantic",
-        number: 16,
-    };
-    pub const NOT_A_SUBROUTINE: Self = Self {
-        namespace: "lyra.semantic",
-        number: 17,
-    };
-    pub const BREAK_OUTSIDE_LOOP: Self = Self {
-        namespace: "lyra.semantic",
-        number: 18,
-    };
-    pub const CONTINUE_OUTSIDE_LOOP: Self = Self {
-        namespace: "lyra.semantic",
-        number: 19,
-    };
-    pub const RETURN_OUTSIDE_CALLABLE: Self = Self {
-        namespace: "lyra.semantic",
-        number: 20,
-    };
-    pub const RETURN_VALUE_IN_VOID: Self = Self {
-        namespace: "lyra.semantic",
-        number: 21,
-    };
-    pub const RETURN_MISSING_VALUE: Self = Self {
-        namespace: "lyra.semantic",
-        number: 22,
-    };
-    pub const ASSIGN_TO_FOREACH_VAR: Self = Self {
-        namespace: "lyra.semantic",
-        number: 23,
-    };
-    pub const FOREACH_VAR_SAME_AS_ARRAY: Self = Self {
-        namespace: "lyra.semantic",
-        number: 24,
-    };
-    pub const FOREACH_TOO_MANY_VARS: Self = Self {
-        namespace: "lyra.semantic",
-        number: 25,
-    };
-    pub const UNRESOLVED_MODULE_INST: Self = Self {
-        namespace: "lyra.elab",
-        number: 1,
-    };
-    pub const NOT_INSTANTIABLE: Self = Self {
-        namespace: "lyra.elab",
-        number: 2,
-    };
-    pub const UNKNOWN_PORT: Self = Self {
-        namespace: "lyra.elab",
-        number: 3,
-    };
-    pub const DUPLICATE_PORT_CONN: Self = Self {
-        namespace: "lyra.elab",
-        number: 4,
-    };
-    pub const TOO_MANY_POSITIONAL_PORTS: Self = Self {
-        namespace: "lyra.elab",
-        number: 5,
-    };
-    pub const MISSING_PORT_CONN: Self = Self {
-        namespace: "lyra.elab",
-        number: 6,
-    };
-    pub const PORT_WIDTH_MISMATCH: Self = Self {
-        namespace: "lyra.elab",
-        number: 7,
-    };
-    pub const ELAB_RECURSION_LIMIT: Self = Self {
-        namespace: "lyra.elab",
-        number: 8,
-    };
-    pub const UNKNOWN_PARAM: Self = Self {
-        namespace: "lyra.elab",
-        number: 9,
-    };
-    pub const DUPLICATE_PARAM_OVERRIDE: Self = Self {
-        namespace: "lyra.elab",
-        number: 10,
-    };
-    pub const TOO_MANY_POSITIONAL_PARAMS: Self = Self {
-        namespace: "lyra.elab",
-        number: 11,
-    };
-    pub const PARAM_NOT_CONST: Self = Self {
-        namespace: "lyra.elab",
-        number: 12,
-    };
-    pub const GEN_COND_NOT_CONST: Self = Self {
-        namespace: "lyra.elab",
-        number: 13,
-    };
-    pub const GENVAR_NOT_CONST: Self = Self {
-        namespace: "lyra.elab",
-        number: 14,
-    };
-    pub const DUPLICATE_GEN_BLOCK_NAME: Self = Self {
-        namespace: "lyra.elab",
-        number: 15,
-    };
-    pub const GENERATE_ITERATION_LIMIT: Self = Self {
-        namespace: "lyra.elab",
-        number: 16,
-    };
-    pub const MODPORT_CONFLICT: Self = Self {
-        namespace: "lyra.elab",
-        number: 17,
-    };
+// Semantic diagnostics
+pub const UNRESOLVED_NAME: DiagKey = "lyra.semantic.unresolved_name";
+pub const DUPLICATE_DEFINITION: DiagKey = "lyra.semantic.duplicate_definition";
+pub const PACKAGE_NOT_FOUND: DiagKey = "lyra.semantic.package_not_found";
+pub const MEMBER_NOT_FOUND: DiagKey = "lyra.semantic.member_not_found";
+pub const AMBIGUOUS_IMPORT: DiagKey = "lyra.semantic.ambiguous_import";
+pub const UNSUPPORTED_QUALIFIED_PATH: DiagKey = "lyra.semantic.unsupported_qualified_path";
+pub const IMPORT_CONFLICT: DiagKey = "lyra.semantic.import_conflict";
+pub const ENUM_RANGE_INVALID: DiagKey = "lyra.semantic.enum_range_invalid";
+pub const ENUM_DUPLICATE_VALUE: DiagKey = "lyra.semantic.enum_duplicate_value";
+pub const ENUM_VALUE_OVERFLOW: DiagKey = "lyra.semantic.enum_value_overflow";
+pub const ENUM_SIZED_LITERAL_WIDTH: DiagKey = "lyra.semantic.enum_sized_literal_width";
+pub const VOID_MEMBER_NON_TAGGED: DiagKey = "lyra.semantic.void_member_non_tagged";
+pub const ILLEGAL_UNION_MEMBER_TYPE: DiagKey = "lyra.semantic.illegal_union_member_type";
+pub const TYPE_PARAM_NO_DEFAULT: DiagKey = "lyra.semantic.type_param_no_default";
+pub const NON_INTEGRAL_PACKED_MEMBER: DiagKey = "lyra.semantic.non_integral_packed_member";
+pub const NOT_A_SUBROUTINE: DiagKey = "lyra.semantic.not_a_subroutine";
+pub const BREAK_OUTSIDE_LOOP: DiagKey = "lyra.semantic.break_outside_loop";
+pub const CONTINUE_OUTSIDE_LOOP: DiagKey = "lyra.semantic.continue_outside_loop";
+pub const RETURN_OUTSIDE_CALLABLE: DiagKey = "lyra.semantic.return_outside_callable";
+pub const RETURN_VALUE_IN_VOID: DiagKey = "lyra.semantic.return_value_in_void";
+pub const RETURN_MISSING_VALUE: DiagKey = "lyra.semantic.return_missing_value";
+pub const ASSIGN_TO_FOREACH_VAR: DiagKey = "lyra.semantic.assign_to_foreach_var";
+pub const FOREACH_VAR_SAME_AS_ARRAY: DiagKey = "lyra.semantic.foreach_var_same_as_array";
+pub const FOREACH_TOO_MANY_VARS: DiagKey = "lyra.semantic.foreach_too_many_vars";
 
-    pub const INTERNAL_ERROR: Self = Self {
-        namespace: "lyra.internal",
-        number: 1,
-    };
+// Type diagnostics
+pub const WIDTH_MISMATCH: DiagKey = "lyra.type.width_mismatch";
+pub const UNDECLARED_TYPE: DiagKey = "lyra.type.undeclared_type";
+pub const NOT_A_TYPE: DiagKey = "lyra.type.not_a_type";
+pub const ILLEGAL_ENUM_BASE: DiagKey = "lyra.type.illegal_enum_base";
+pub const ENUM_BASE_DIMS_NOT_CONST: DiagKey = "lyra.type.enum_base_dims_not_const";
+pub const BITS_NON_DATA_TYPE: DiagKey = "lyra.type.bits_non_data_type";
+pub const ENUM_ASSIGN_INCOMPAT: DiagKey = "lyra.type.enum_assign_incompat";
+pub const CONVERSION_ARG_TYPE: DiagKey = "lyra.type.conversion_arg_type";
+pub const PACKED_UNION_WIDTH: DiagKey = "lyra.type.packed_union_width";
+pub const MODPORT_DIRECTION: DiagKey = "lyra.type.modport_direction";
+pub const MODPORT_REF_UNSUPPORTED: DiagKey = "lyra.type.modport_ref_unsupported";
+pub const ENUM_CAST_OUT_OF_RANGE: DiagKey = "lyra.type.enum_cast_out_of_range";
+pub const STREAM_WITH_NON_ARRAY: DiagKey = "lyra.type.stream_with_non_array";
+pub const MODPORT_EMPTY_PORT: DiagKey = "lyra.type.modport_empty_port";
+pub const MODPORT_EXPR_NOT_ASSIGNABLE: DiagKey = "lyra.type.modport_expr_not_assignable";
+pub const METHOD_CALL_ERROR: DiagKey = "lyra.type.method_call_error";
+pub const UNSUPPORTED_LHS_FORM: DiagKey = "lyra.type.unsupported_lhs_form";
+pub const INVALID_ASSIGNMENT_LHS: DiagKey = "lyra.type.invalid_assignment_lhs";
+pub const NEW_EXPR_NOT_DYN_ARRAY: DiagKey = "lyra.type.new_expr_not_dyn_array";
+pub const NEW_EXPR_TOO_MANY_INIT_ARGS: DiagKey = "lyra.type.new_expr_too_many_init_args";
+pub const NEW_EXPR_SIZE_NOT_LONGINT: DiagKey = "lyra.type.new_expr_size_not_longint";
+pub const NEW_EXPR_SIZE_NEGATIVE: DiagKey = "lyra.type.new_expr_size_negative";
+pub const NEW_EXPR_INIT_INCOMPAT: DiagKey = "lyra.type.new_expr_init_incompat";
+pub const ARRAY_INCOMPAT: DiagKey = "lyra.type.array_incompat";
+pub const STREAM_UNPACK_OPERAND_INVALID: DiagKey = "lyra.type.stream_unpack_operand_invalid";
+pub const STREAM_UNPACK_OPERAND_UNSUPPORTED: DiagKey =
+    "lyra.type.stream_unpack_operand_unsupported";
+pub const STREAM_UNPACK_GREEDY_REMAINDER: DiagKey = "lyra.type.stream_unpack_greedy_remainder";
+pub const STREAM_UNPACK_WIDTH_MISMATCH: DiagKey = "lyra.type.stream_unpack_width_mismatch";
+pub const ASSIGN_TO_CONST: DiagKey = "lyra.type.assign_to_const";
+pub const CONST_MISSING_INIT: DiagKey = "lyra.type.const_missing_init";
+pub const VOID_OBJECT_TYPE: DiagKey = "lyra.type.void_object_type";
+pub const VOID_USED_AS_VALUE: DiagKey = "lyra.type.void_used_as_value";
+pub const ARRAY_QUERY_DYN_TYPE_FORM: DiagKey = "lyra.type.array_query_dyn_type_form";
+pub const ARRAY_QUERY_VAR_SIZED_DIM: DiagKey = "lyra.type.array_query_var_sized_dim";
+pub const ILLEGAL_DRIVE_STRENGTH_BOTH_HIGHZ: DiagKey =
+    "lyra.type.illegal_drive_strength_both_highz";
+pub const QUEUE_BOUND_NOT_CONST: DiagKey = "lyra.type.queue_bound_not_const";
+pub const QUEUE_BOUND_NOT_POSITIVE: DiagKey = "lyra.type.queue_bound_not_positive";
+pub const MEMBER_NOT_IN_MODPORT: DiagKey = "lyra.type.member_not_in_modport";
+pub const RECORD_ASSIGN_INCOMPAT: DiagKey = "lyra.type.record_assign_incompat";
+pub const STREAM_SLICE_SIZE_NOT_CONST: DiagKey = "lyra.type.stream_slice_size_not_const";
+pub const UNPACKED_RECORD_INTEGRAL_ASSIGN: DiagKey = "lyra.type.unpacked_record_integral_assign";
 
-    /// Format as `"namespace[number]"`, e.g. `"lyra.semantic[1]"`.
-    pub fn as_str(&self) -> String {
-        format!("{}[{}]", self.namespace, self.number)
+// Elaboration diagnostics
+pub const UNRESOLVED_MODULE_INST: DiagKey = "lyra.elab.unresolved_module_inst";
+pub const NOT_INSTANTIABLE: DiagKey = "lyra.elab.not_instantiable";
+pub const UNKNOWN_PORT: DiagKey = "lyra.elab.unknown_port";
+pub const DUPLICATE_PORT_CONN: DiagKey = "lyra.elab.duplicate_port_conn";
+pub const TOO_MANY_POSITIONAL_PORTS: DiagKey = "lyra.elab.too_many_positional_ports";
+pub const MISSING_PORT_CONN: DiagKey = "lyra.elab.missing_port_conn";
+pub const ELAB_RECURSION_LIMIT: DiagKey = "lyra.elab.elab_recursion_limit";
+pub const UNKNOWN_PARAM: DiagKey = "lyra.elab.unknown_param";
+pub const DUPLICATE_PARAM_OVERRIDE: DiagKey = "lyra.elab.duplicate_param_override";
+pub const TOO_MANY_POSITIONAL_PARAMS: DiagKey = "lyra.elab.too_many_positional_params";
+pub const PARAM_NOT_CONST: DiagKey = "lyra.elab.param_not_const";
+pub const GEN_COND_NOT_CONST: DiagKey = "lyra.elab.gen_cond_not_const";
+pub const GENVAR_NOT_CONST: DiagKey = "lyra.elab.genvar_not_const";
+pub const GENERATE_ITERATION_LIMIT: DiagKey = "lyra.elab.generate_iteration_limit";
+pub const MODPORT_CONFLICT: DiagKey = "lyra.elab.modport_conflict";
+
+// Internal diagnostics
+pub const INTERNAL_ERROR: DiagKey = "lyra.internal.error";
+
+/// Authoritative list of all diagnostic keys.
+pub const ALL_KEYS: &[DiagKey] = &[
+    PARSE_ERROR,
+    PREPROCESS_ERROR,
+    UNRESOLVED_NAME,
+    DUPLICATE_DEFINITION,
+    PACKAGE_NOT_FOUND,
+    MEMBER_NOT_FOUND,
+    AMBIGUOUS_IMPORT,
+    UNSUPPORTED_QUALIFIED_PATH,
+    IMPORT_CONFLICT,
+    ENUM_RANGE_INVALID,
+    ENUM_DUPLICATE_VALUE,
+    ENUM_VALUE_OVERFLOW,
+    ENUM_SIZED_LITERAL_WIDTH,
+    VOID_MEMBER_NON_TAGGED,
+    ILLEGAL_UNION_MEMBER_TYPE,
+    TYPE_PARAM_NO_DEFAULT,
+    NON_INTEGRAL_PACKED_MEMBER,
+    NOT_A_SUBROUTINE,
+    BREAK_OUTSIDE_LOOP,
+    CONTINUE_OUTSIDE_LOOP,
+    RETURN_OUTSIDE_CALLABLE,
+    RETURN_VALUE_IN_VOID,
+    RETURN_MISSING_VALUE,
+    ASSIGN_TO_FOREACH_VAR,
+    FOREACH_VAR_SAME_AS_ARRAY,
+    FOREACH_TOO_MANY_VARS,
+    WIDTH_MISMATCH,
+    UNDECLARED_TYPE,
+    NOT_A_TYPE,
+    ILLEGAL_ENUM_BASE,
+    ENUM_BASE_DIMS_NOT_CONST,
+    BITS_NON_DATA_TYPE,
+    ENUM_ASSIGN_INCOMPAT,
+    CONVERSION_ARG_TYPE,
+    PACKED_UNION_WIDTH,
+    MODPORT_DIRECTION,
+    MODPORT_REF_UNSUPPORTED,
+    ENUM_CAST_OUT_OF_RANGE,
+    STREAM_WITH_NON_ARRAY,
+    MODPORT_EMPTY_PORT,
+    MODPORT_EXPR_NOT_ASSIGNABLE,
+    METHOD_CALL_ERROR,
+    UNSUPPORTED_LHS_FORM,
+    INVALID_ASSIGNMENT_LHS,
+    NEW_EXPR_NOT_DYN_ARRAY,
+    NEW_EXPR_TOO_MANY_INIT_ARGS,
+    NEW_EXPR_SIZE_NOT_LONGINT,
+    NEW_EXPR_SIZE_NEGATIVE,
+    NEW_EXPR_INIT_INCOMPAT,
+    ARRAY_INCOMPAT,
+    STREAM_UNPACK_OPERAND_INVALID,
+    STREAM_UNPACK_OPERAND_UNSUPPORTED,
+    STREAM_UNPACK_GREEDY_REMAINDER,
+    STREAM_UNPACK_WIDTH_MISMATCH,
+    ASSIGN_TO_CONST,
+    CONST_MISSING_INIT,
+    VOID_OBJECT_TYPE,
+    VOID_USED_AS_VALUE,
+    ARRAY_QUERY_DYN_TYPE_FORM,
+    ARRAY_QUERY_VAR_SIZED_DIM,
+    ILLEGAL_DRIVE_STRENGTH_BOTH_HIGHZ,
+    QUEUE_BOUND_NOT_CONST,
+    QUEUE_BOUND_NOT_POSITIVE,
+    MEMBER_NOT_IN_MODPORT,
+    RECORD_ASSIGN_INCOMPAT,
+    STREAM_SLICE_SIZE_NOT_CONST,
+    UNPACKED_RECORD_INTEGRAL_ASSIGN,
+    UNRESOLVED_MODULE_INST,
+    NOT_INSTANTIABLE,
+    UNKNOWN_PORT,
+    DUPLICATE_PORT_CONN,
+    TOO_MANY_POSITIONAL_PORTS,
+    MISSING_PORT_CONN,
+    ELAB_RECURSION_LIMIT,
+    UNKNOWN_PARAM,
+    DUPLICATE_PARAM_OVERRIDE,
+    TOO_MANY_POSITIONAL_PARAMS,
+    PARAM_NOT_CONST,
+    GEN_COND_NOT_CONST,
+    GENVAR_NOT_CONST,
+    GENERATE_ITERATION_LIMIT,
+    MODPORT_CONFLICT,
+    INTERNAL_ERROR,
+];
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn all_keys_unique() {
+        let mut seen = HashSet::new();
+        for key in ALL_KEYS {
+            assert!(seen.insert(key), "duplicate diagnostic key: {key}");
+        }
     }
-}
 
-impl fmt::Display for DiagnosticCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}[{}]", self.namespace, self.number)
+    #[test]
+    fn all_keys_well_formed() {
+        const ALLOWED_DOMAINS: &[&str] = &[
+            "parse",
+            "preprocess",
+            "semantic",
+            "type",
+            "elab",
+            "internal",
+        ];
+
+        for key in ALL_KEYS {
+            assert!(
+                key.starts_with("lyra."),
+                "key must start with 'lyra.': {key}"
+            );
+            let parts: Vec<&str> = key.split('.').collect();
+            assert!(
+                parts.len() == 3,
+                "key must have exactly 3 dotted segments: {key}"
+            );
+            assert!(
+                parts.iter().all(|p| !p.is_empty()),
+                "key must not have empty segments: {key}"
+            );
+            let domain = parts[1];
+            assert!(
+                ALLOWED_DOMAINS.contains(&domain),
+                "unknown domain '{domain}' in key {key}; add to ALLOWED_DOMAINS if intentional"
+            );
+            let slug = parts[2];
+            assert!(
+                slug.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "slug must be lower_snake_case: {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn all_keys_complete() {
+        let source = include_str!("code.rs");
+        let const_count = source
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim();
+                trimmed.starts_with("pub const ")
+                    && trimmed.contains(": DiagKey")
+                    && !trimmed.contains("ALL_KEYS")
+            })
+            .count();
+        assert_eq!(
+            ALL_KEYS.len(),
+            const_count,
+            "ALL_KEYS has {} entries but source has {} pub const DiagKey declarations; \
+             did you forget to add a new key to ALL_KEYS?",
+            ALL_KEYS.len(),
+            const_count
+        );
     }
 }

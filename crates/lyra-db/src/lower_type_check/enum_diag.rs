@@ -29,7 +29,7 @@ pub(super) fn lower_enum_cast_item(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Warning,
-            lyra_diag::DiagnosticCode::ENUM_CAST_OUT_OF_RANGE,
+            lyra_diag::code::ENUM_CAST_OUT_OF_RANGE,
             lyra_diag::Message::new(lyra_diag::MessageId::EnumCastOutOfRange, msg_args.clone()),
         )
         .with_label(lyra_diag::Label {
@@ -114,7 +114,7 @@ pub(super) fn lower_enum_value_diag(
                 lyra_diag::Arg::Name(member_name.clone()),
             ];
             let mut d = error_with_primary(
-                lyra_diag::DiagnosticCode::ENUM_DUPLICATE_VALUE,
+                lyra_diag::code::ENUM_DUPLICATE_VALUE,
                 lyra_diag::MessageId::EnumDuplicateValue,
                 msg_args,
                 span,
@@ -148,7 +148,7 @@ pub(super) fn lower_enum_value_diag(
                 lyra_diag::Arg::Name(smol_str::SmolStr::new(sign_str)),
             ];
             Some(error_with_primary(
-                lyra_diag::DiagnosticCode::ENUM_VALUE_OVERFLOW,
+                lyra_diag::code::ENUM_VALUE_OVERFLOW,
                 lyra_diag::MessageId::EnumValueOverflow,
                 msg_args,
                 span,
@@ -165,7 +165,7 @@ pub(super) fn lower_enum_value_diag(
                 lyra_diag::Arg::Width(*base_width),
             ];
             Some(error_with_primary(
-                lyra_diag::DiagnosticCode::ENUM_SIZED_LITERAL_WIDTH,
+                lyra_diag::code::ENUM_SIZED_LITERAL_WIDTH,
                 lyra_diag::MessageId::EnumSizedLiteralWidthMismatch,
                 msg_args,
                 span,
@@ -201,7 +201,7 @@ fn enum_assign_diag(
 ) -> lyra_diag::Diagnostic {
     lyra_diag::Diagnostic::new(
         lyra_diag::Severity::Error,
-        lyra_diag::DiagnosticCode::ENUM_ASSIGN_INCOMPAT,
+        lyra_diag::code::ENUM_ASSIGN_INCOMPAT,
         lyra_diag::Message::new(
             msg_id,
             vec![
@@ -243,7 +243,7 @@ fn anchor_span(
 }
 
 fn error_with_primary(
-    code: lyra_diag::DiagnosticCode,
+    code: lyra_diag::DiagKey,
     msg_id: lyra_diag::MessageId,
     msg_args: Vec<lyra_diag::Arg>,
     span: lyra_source::Span,

@@ -19,14 +19,14 @@ module array_assignment_compat;
   int fixed_c [3];
   initial begin
     fixed_a = fixed_c;
-  //         ^ error[lyra.type[24]]
+  //         ^ error[lyra.type.array_incompat]
   end
 
   // Error: element type mismatch
   logic [7:0] elem_mis [];
   initial begin
     dyn_a = elem_mis;
-  //       ^ error[lyra.type[24]]
+  //       ^ error[lyra.type.array_incompat]
   end
 
 endmodule

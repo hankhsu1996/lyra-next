@@ -19,5 +19,5 @@ endinterface
 
 module interconnect_strength_rejected;
   interconnect (strong1, pull0) x;
-  //           ^ error[lyra.parse[1]]: strength specification is not allowed on interconnect nets
+  //           ^ error[lyra.parse.error]: strength specification is not allowed on interconnect nets
 endmodule

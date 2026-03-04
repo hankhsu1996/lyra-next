@@ -6,4 +6,4 @@ expression: ws.dump_diagnostics()
 // file: b.sv (0 diagnostics)
 ---
 unit (1 diagnostic)
-  error[lyra.semantic[2]] b.sv 1:10..1:10: duplicate definition `foo`
+  error[lyra.semantic.duplicate_definition] b.sv 1:10..1:10: duplicate definition `foo`

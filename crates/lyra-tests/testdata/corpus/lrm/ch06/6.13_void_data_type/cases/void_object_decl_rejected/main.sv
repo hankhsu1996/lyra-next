@@ -3,6 +3,6 @@
 module void_object_decl_rejected;
 
   void x;
-  //   ^ error[lyra.type[31]]: void cannot be used as an object type
+  //   ^ error[lyra.type.void_object_type]: void cannot be used as an object type
 
 endmodule

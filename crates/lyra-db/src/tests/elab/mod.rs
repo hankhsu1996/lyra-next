@@ -7,7 +7,7 @@ mod params;
 mod ports;
 mod signature;
 
-use lyra_diag::DiagnosticCode;
+use lyra_diag::code;
 use lyra_semantic::types::ConstInt;
 use smol_str::SmolStr;
 

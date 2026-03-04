@@ -64,7 +64,7 @@ pub(super) fn lower_array_incompat(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::ARRAY_INCOMPAT,
+            lyra_diag::code::ARRAY_INCOMPAT,
             lyra_diag::Message::new(lyra_diag::MessageId::ArrayIncompatible, msg_args.clone()),
         )
         .with_label(lyra_diag::Label {
@@ -88,7 +88,7 @@ pub(super) fn lower_array_query_item(
         } => (
             call_site,
             arg_site,
-            lyra_diag::DiagnosticCode::ARRAY_QUERY_DYN_TYPE_FORM,
+            lyra_diag::code::ARRAY_QUERY_DYN_TYPE_FORM,
             lyra_diag::MessageId::ArrayQueryDynTypeForm,
             fn_name,
         ),
@@ -99,7 +99,7 @@ pub(super) fn lower_array_query_item(
         } => (
             call_site,
             dim_arg_site,
-            lyra_diag::DiagnosticCode::ARRAY_QUERY_VAR_SIZED_DIM,
+            lyra_diag::code::ARRAY_QUERY_VAR_SIZED_DIM,
             lyra_diag::MessageId::ArrayQueryVarSizedDimByNumber,
             fn_name,
         ),
@@ -140,7 +140,7 @@ fn truncation_diag(
     };
     lyra_diag::Diagnostic::new(
         lyra_diag::Severity::Warning,
-        lyra_diag::DiagnosticCode::WIDTH_MISMATCH,
+        lyra_diag::code::WIDTH_MISMATCH,
         lyra_diag::Message::new(lyra_diag::MessageId::WidthMismatch, width_args()),
     )
     .with_label(lyra_diag::Label {

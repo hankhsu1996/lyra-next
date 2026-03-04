@@ -3,6 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.semantic[24]] 9:17..9:17: foreach loop variable has same name as iterated array `arr`
+  error[lyra.semantic.foreach_var_same_as_array] 9:17..9:17: foreach loop variable has same name as iterated array `arr`
 ---
 unit (0 diagnostics)

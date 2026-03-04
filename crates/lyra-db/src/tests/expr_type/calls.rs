@@ -73,8 +73,8 @@ fn void_function_call_in_stmt_context_no_diag() {
     let void_diags: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.code == lyra_diag::DiagnosticCode::VOID_USED_AS_VALUE
-                || d.code == lyra_diag::DiagnosticCode::VOID_OBJECT_TYPE
+            d.code == lyra_diag::code::VOID_USED_AS_VALUE
+                || d.code == lyra_diag::code::VOID_OBJECT_TYPE
         })
         .collect();
     assert!(

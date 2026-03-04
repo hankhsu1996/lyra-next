@@ -14,7 +14,7 @@ pub(super) fn lower_stream_with_non_array(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::STREAM_WITH_NON_ARRAY,
+            lyra_diag::code::STREAM_WITH_NON_ARRAY,
             lyra_diag::Message::simple(lyra_diag::MessageId::StreamWithNonArray),
         )
         .with_label(lyra_diag::Label {
@@ -39,7 +39,7 @@ pub(super) fn lower_stream_slice_size_not_const(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::STREAM_SLICE_SIZE_NOT_CONST,
+            lyra_diag::code::STREAM_SLICE_SIZE_NOT_CONST,
             lyra_diag::Message::simple(lyra_diag::MessageId::StreamSliceSizeNotConst),
         )
         .with_label(lyra_diag::Label {
@@ -58,7 +58,7 @@ pub(super) fn lower_stream_unpack_operand(
     let (site, code, msg_id, msg_args) = match item {
         TypeCheckItem::StreamUnpackOperandInvalid { operand_site } => (
             *operand_site,
-            lyra_diag::DiagnosticCode::STREAM_UNPACK_OPERAND_INVALID,
+            lyra_diag::code::STREAM_UNPACK_OPERAND_INVALID,
             lyra_diag::MessageId::StreamUnpackOperandInvalid,
             vec![],
         ),
@@ -67,7 +67,7 @@ pub(super) fn lower_stream_unpack_operand(
             operand_ty,
         } => (
             *operand_site,
-            lyra_diag::DiagnosticCode::STREAM_UNPACK_OPERAND_UNSUPPORTED,
+            lyra_diag::code::STREAM_UNPACK_OPERAND_UNSUPPORTED,
             lyra_diag::MessageId::StreamUnpackOperandUnsupported,
             vec![lyra_diag::Arg::Name(operand_ty.pretty())],
         ),
@@ -121,7 +121,7 @@ pub(super) fn lower_stream_unpack_greedy_remainder(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::STREAM_UNPACK_GREEDY_REMAINDER,
+            lyra_diag::code::STREAM_UNPACK_GREEDY_REMAINDER,
             msg.clone(),
         )
         .with_label(lyra_diag::Label {
@@ -167,7 +167,7 @@ pub(super) fn lower_stream_unpack_width_mismatch(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::STREAM_UNPACK_WIDTH_MISMATCH,
+            lyra_diag::code::STREAM_UNPACK_WIDTH_MISMATCH,
             lyra_diag::Message::new(
                 lyra_diag::MessageId::StreamUnpackWidthMismatch,
                 width_args(),

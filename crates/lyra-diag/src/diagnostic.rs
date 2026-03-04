@@ -1,6 +1,6 @@
 use lyra_source::Span;
 
-use crate::code::DiagnosticCode;
+use crate::code::DiagKey;
 use crate::label::{Label, LabelKind, TextEdit};
 use crate::message::{self, Message};
 
@@ -29,7 +29,7 @@ pub enum DiagnosticOrigin {
 pub struct Diagnostic {
     pub origin: DiagnosticOrigin,
     pub severity: Severity,
-    pub code: DiagnosticCode,
+    pub code: DiagKey,
     pub message: Message,
     pub labels: Vec<Label>,
     pub notes: Vec<Message>,
@@ -37,7 +37,7 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn new(severity: Severity, code: DiagnosticCode, message: Message) -> Self {
+    pub fn new(severity: Severity, code: DiagKey, message: Message) -> Self {
         Self {
             origin: DiagnosticOrigin::User,
             severity,

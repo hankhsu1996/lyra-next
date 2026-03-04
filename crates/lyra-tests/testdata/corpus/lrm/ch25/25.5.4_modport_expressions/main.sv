@@ -37,25 +37,25 @@ endmodule
 // Illegal: write to input expression port
 module write_to_input_expr(bus.view_a i);
   always_comb i.A = 4'b0;
-  //            ^ error[lyra.type[10]]: modport member declared 'input' cannot be used in write context
+  //            ^ error[lyra.type.modport_direction]: modport member declared 'input' cannot be used in write context
 endmodule
 
 // Illegal: read from output expression port
 module read_from_output_expr(bus.view_a i);
   logic [3:0] v;
   always_comb v = i.B;
-  //                ^ error[lyra.type[10]]: modport member declared 'output' cannot be used in read context
+  //                ^ error[lyra.type.modport_direction]: modport member declared 'output' cannot be used in read context
 endmodule
 
 // Illegal: any access to empty-parens port
 module read_empty_port(bus.view_c i);
   logic v;
   always_comb v = i.E;
-  //                ^ error[lyra.type[14]]: modport port has no connection (empty parens)
+  //                ^ error[lyra.type.modport_empty_port]: modport port has no connection (empty parens)
 endmodule
 
 // Illegal: write through non-lvalue expression target
 module write_nonlvalue(bus.view_d i);
   always_comb i.N = 1;
-  //            ^ error[lyra.type[15]]: modport expression target is not assignable
+  //            ^ error[lyra.type.modport_expr_not_assignable]: modport expression target is not assignable
 endmodule

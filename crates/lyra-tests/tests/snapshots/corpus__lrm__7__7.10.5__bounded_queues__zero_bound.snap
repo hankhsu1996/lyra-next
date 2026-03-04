@@ -3,6 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.type[37]] 1:12..1:12: queue bound must be a positive integer, got 0
+  error[lyra.type.queue_bound_not_positive] 1:12..1:12: queue bound must be a positive integer, got 0
 ---
 unit (0 diagnostics)

@@ -164,7 +164,7 @@ fn collect_symbol_diagnostics(
                 diags.push(
                     lyra_diag::Diagnostic::new(
                         lyra_diag::Severity::Error,
-                        lyra_diag::DiagnosticCode::TYPE_PARAM_NO_DEFAULT,
+                        lyra_diag::code::TYPE_PARAM_NO_DEFAULT,
                         lyra_diag::Message::new(
                             lyra_diag::MessageId::TypeParamNoDefault,
                             vec![lyra_diag::Arg::Name(sym.name.clone())],
@@ -626,7 +626,7 @@ pub fn unit_diagnostics(
                             diags.push(
                                 lyra_diag::Diagnostic::new(
                                     lyra_diag::Severity::Error,
-                                    lyra_diag::DiagnosticCode::DUPLICATE_DEFINITION,
+                                    lyra_diag::code::DUPLICATE_DEFINITION,
                                     lyra_diag::Message::new(
                                         lyra_diag::MessageId::DuplicateDefinitionInUnit,
                                         vec![lyra_diag::Arg::Name(name.clone())],

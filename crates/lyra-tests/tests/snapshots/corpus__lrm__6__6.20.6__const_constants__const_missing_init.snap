@@ -1,9 +1,8 @@
 ---
 source: crates/lyra-tests/tests/corpus.rs
-assertion_line: 477
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.type[30]] 6:12..6:12: const variable must have an initializer
+  error[lyra.type.const_missing_init] 6:12..6:12: const variable must have an initializer
 ---
 unit (0 diagnostics)

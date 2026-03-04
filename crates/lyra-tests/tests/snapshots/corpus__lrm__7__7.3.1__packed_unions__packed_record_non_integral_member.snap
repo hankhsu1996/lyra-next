@@ -3,11 +3,11 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (6 diagnostics)
-  error[lyra.semantic[16]] 41:9..41:9: union member `r` is not an integral type (real) in packed union
-  error[lyra.semantic[16]] 47:11..47:11: union member `s` is not an integral type (string) in packed union
-  error[lyra.semantic[16]] 53:9..53:9: struct member `r` is not an integral type (real) in packed struct
-  error[lyra.semantic[16]] 64:22..64:22: union member `us` is not an integral type (unpacked struct) in packed union
-  error[lyra.semantic[16]] 70:16..70:16: struct member `arr` is not an integral type (unpacked array) in packed struct
-  error[lyra.semantic[16]] 75:9..75:9: union member `r` is not an integral type (real) in soft packed union
+  error[lyra.semantic.non_integral_packed_member] 41:9..41:9: union member `r` is not an integral type (real) in packed union
+  error[lyra.semantic.non_integral_packed_member] 47:11..47:11: union member `s` is not an integral type (string) in packed union
+  error[lyra.semantic.non_integral_packed_member] 53:9..53:9: struct member `r` is not an integral type (real) in packed struct
+  error[lyra.semantic.non_integral_packed_member] 64:22..64:22: union member `us` is not an integral type (unpacked struct) in packed union
+  error[lyra.semantic.non_integral_packed_member] 70:16..70:16: struct member `arr` is not an integral type (unpacked array) in packed struct
+  error[lyra.semantic.non_integral_packed_member] 75:9..75:9: union member `r` is not an integral type (real) in soft packed union
 ---
 unit (0 diagnostics)

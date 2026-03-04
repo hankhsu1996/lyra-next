@@ -3,6 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.semantic[15]] 4:46..4:46: type parameter `T` requires a default type
+  error[lyra.semantic.type_param_no_default] 4:46..4:46: type parameter `T` requires a default type
 ---
 unit (0 diagnostics)

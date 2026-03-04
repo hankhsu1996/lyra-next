@@ -9,5 +9,5 @@ endpackage
 module m;
   import Q::*;
   import P::C;
-  //    ^ error[lyra.semantic[7]]: import of `C` from package `P` conflicts with wildcard import from package `Q`
+  //    ^ error[lyra.semantic.import_conflict]: import of `C` from package `P` conflicts with wildcard import from package `Q`
 endmodule

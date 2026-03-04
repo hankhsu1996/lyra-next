@@ -20,5 +20,5 @@ endmodule
 // Error: import nonexistent member
 module bad_member;
   import P::nonexistent;
-  //    ^ error[lyra.semantic[4]]: member `nonexistent` not found in package `P`
+  //    ^ error[lyra.semantic.member_not_found]: member `nonexistent` not found in package `P`
 endmodule

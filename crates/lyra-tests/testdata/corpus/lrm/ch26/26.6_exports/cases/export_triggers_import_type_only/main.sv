@@ -7,6 +7,6 @@ endpackage
 package p2;
   import p1::*;
   export p1::foo_t;
-  //    ^ error[lyra.semantic[7]]: import of `foo_t` from package `p1` conflicts with local declaration
+  //    ^ error[lyra.semantic.import_conflict]: import of `foo_t` from package `p1` conflicts with local declaration
   typedef logic foo_t;
 endpackage

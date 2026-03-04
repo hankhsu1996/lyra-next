@@ -1,6 +1,6 @@
 use lyra_diag::{
-    Arg, Diagnostic, DiagnosticCode, DiagnosticOrigin, Label, LabelKind, Message, MessageId,
-    Severity,
+    Arg, DiagKey, Diagnostic, DiagnosticOrigin, Label, LabelKind, Message, MessageId, Severity,
+    code,
 };
 use lyra_preprocess::PreprocOutput;
 use lyra_semantic::def_index::DefIndex;
@@ -47,7 +47,7 @@ pub(crate) fn lower_file_diagnostics(
         diags.push(
             Diagnostic::new(
                 Severity::Error,
-                DiagnosticCode::PREPROCESS_ERROR,
+                code::PREPROCESS_ERROR,
                 Message::new(MessageId::PreprocessError, vec![Arg::Name(text.clone())]),
             )
             .with_label(Label {
@@ -64,7 +64,7 @@ pub(crate) fn lower_file_diagnostics(
         diags.push(
             Diagnostic::new(
                 Severity::Error,
-                DiagnosticCode::PARSE_ERROR,
+                code::PARSE_ERROR,
                 Message::new(MessageId::ParseError, vec![Arg::Name(text.clone())]),
             )
             .with_label(Label {
@@ -109,7 +109,7 @@ pub(crate) fn lower_semantic_diag(
 ) -> Diagnostic {
     match &diag.kind {
         SemanticDiagKind::UnresolvedName { name } => lower_name_diag(
-            DiagnosticCode::UNRESOLVED_NAME,
+            code::UNRESOLVED_NAME,
             MessageId::UnresolvedName,
             MessageId::NotFoundInScope,
             name,
@@ -127,13 +127,13 @@ pub(crate) fn lower_semantic_diag(
             source_map,
         ),
         SemanticDiagKind::PackageNotFound { package } => lower_args_diag(
-            DiagnosticCode::PACKAGE_NOT_FOUND,
+            code::PACKAGE_NOT_FOUND,
             MessageId::PackageNotFound,
             vec![Arg::Name(package.clone())],
             primary_span,
         ),
         SemanticDiagKind::MemberNotFound { package, member } => lower_args_diag(
-            DiagnosticCode::MEMBER_NOT_FOUND,
+            code::MEMBER_NOT_FOUND,
             MessageId::MemberNotFound,
             vec![Arg::Name(package.clone()), Arg::Name(member.clone())],
             primary_span,
@@ -142,20 +142,20 @@ pub(crate) fn lower_semantic_diag(
             lower_ambiguous_wildcard(name, candidates, primary_span)
         }
         SemanticDiagKind::UnsupportedQualifiedPath { path } => lower_args_diag(
-            DiagnosticCode::UNSUPPORTED_QUALIFIED_PATH,
+            code::UNSUPPORTED_QUALIFIED_PATH,
             MessageId::UnsupportedQualifiedPath,
             vec![Arg::Name(path.clone())],
             primary_span,
         ),
         SemanticDiagKind::UndeclaredType { name } => lower_name_diag(
-            DiagnosticCode::UNDECLARED_TYPE,
+            code::UNDECLARED_TYPE,
             MessageId::UndeclaredType,
             MessageId::NotFoundAsType,
             name,
             primary_span,
         ),
         SemanticDiagKind::NotAType { name } => lower_name_diag(
-            DiagnosticCode::NOT_A_TYPE,
+            code::NOT_A_TYPE,
             MessageId::NotAType,
             MessageId::ValueNotType,
             name,
@@ -172,7 +172,7 @@ pub(crate) fn lower_semantic_diag(
             lower_record_enum_diag(&diag.kind, primary_span)
         }
         SemanticDiagKind::NotASubroutine { name } => lower_name_diag(
-            DiagnosticCode::NOT_A_SUBROUTINE,
+            code::NOT_A_SUBROUTINE,
             MessageId::NotASubroutine,
             MessageId::NotASubroutine,
             name,
@@ -190,45 +190,45 @@ pub(crate) fn lower_semantic_diag(
 fn lower_record_enum_diag(kind: &SemanticDiagKind, primary_span: Span) -> Diagnostic {
     match kind {
         SemanticDiagKind::VoidMemberNonTagged { name } => lower_name_diag(
-            DiagnosticCode::VOID_MEMBER_NON_TAGGED,
+            code::VOID_MEMBER_NON_TAGGED,
             MessageId::VoidMemberNonTagged,
             MessageId::OnlyInTaggedUnion,
             name,
             primary_span,
         ),
         SemanticDiagKind::IllegalUnionMemberType { name, category } => lower_args_diag(
-            DiagnosticCode::ILLEGAL_UNION_MEMBER_TYPE,
+            code::ILLEGAL_UNION_MEMBER_TYPE,
             MessageId::IllegalUnionMemberType,
             vec![Arg::Name(name.clone()), Arg::Category(category.clone())],
             primary_span,
         ),
         SemanticDiagKind::IllegalEnumBaseType { name } => lower_name_diag(
-            DiagnosticCode::ILLEGAL_ENUM_BASE,
+            code::ILLEGAL_ENUM_BASE,
             MessageId::IllegalEnumBaseType,
             MessageId::IllegalEnumBaseType,
             name,
             primary_span,
         ),
         SemanticDiagKind::EnumBaseDimsNotConstant => lower_args_diag(
-            DiagnosticCode::ENUM_BASE_DIMS_NOT_CONST,
+            code::ENUM_BASE_DIMS_NOT_CONST,
             MessageId::EnumBaseDimsNotConstant,
             vec![],
             primary_span,
         ),
         SemanticDiagKind::EnumRangeBoundNotEvaluable => lower_args_diag(
-            DiagnosticCode::ENUM_RANGE_INVALID,
+            code::ENUM_RANGE_INVALID,
             MessageId::EnumRangeBoundNotEvaluable,
             vec![],
             primary_span,
         ),
         SemanticDiagKind::EnumRangeCountNegative { count } => lower_args_diag(
-            DiagnosticCode::ENUM_RANGE_INVALID,
+            code::ENUM_RANGE_INVALID,
             MessageId::EnumRangeCountNegative,
             vec![Arg::Name(SmolStr::new(format!("{count}")))],
             primary_span,
         ),
         SemanticDiagKind::EnumRangeTooLarge { count } => lower_args_diag(
-            DiagnosticCode::ENUM_RANGE_INVALID,
+            code::ENUM_RANGE_INVALID,
             MessageId::EnumRangeTooLarge,
             vec![Arg::Name(SmolStr::new(format!("{count}")))],
             primary_span,
@@ -239,7 +239,7 @@ fn lower_record_enum_diag(kind: &SemanticDiagKind, primary_span: Span) -> Diagno
             packing,
             category,
         } => lower_args_diag(
-            DiagnosticCode::NON_INTEGRAL_PACKED_MEMBER,
+            code::NON_INTEGRAL_PACKED_MEMBER,
             MessageId::NonIntegralPackedMember,
             vec![
                 Arg::Category(record_kind.clone()),
@@ -317,7 +317,7 @@ pub(crate) fn lower_wildcard_local_conflicts(
 
         let mut d = Diagnostic::new(
             Severity::Error,
-            DiagnosticCode::IMPORT_CONFLICT,
+            code::IMPORT_CONFLICT,
             Message::new(
                 MessageId::WildcardLocalConflict,
                 vec![Arg::Name(name.clone()), Arg::Name(pkg)],
@@ -404,7 +404,7 @@ fn lower_single_import_conflict(
 
     let d = match &conflict.kind {
         ImportConflictKind::ExplicitVsLocal { package, .. } => lower_args_diag(
-            DiagnosticCode::IMPORT_CONFLICT,
+            code::IMPORT_CONFLICT,
             MessageId::ExplicitImportConflictsWithLocal,
             vec![Arg::Name(conflict.name.clone()), Arg::Name(package.clone())],
             span,
@@ -414,7 +414,7 @@ fn lower_single_import_conflict(
             wildcard_package,
             ..
         } => lower_args_diag(
-            DiagnosticCode::IMPORT_CONFLICT,
+            code::IMPORT_CONFLICT,
             MessageId::ExplicitConflictsWithWildcard,
             vec![
                 Arg::Name(conflict.name.clone()),
@@ -436,7 +436,7 @@ fn lower_duplicate_def(
 ) -> Diagnostic {
     let mut d = Diagnostic::new(
         Severity::Error,
-        DiagnosticCode::DUPLICATE_DEFINITION,
+        code::DUPLICATE_DEFINITION,
         Message::new(
             MessageId::DuplicateDefinition,
             vec![Arg::Name(name.clone())],
@@ -462,7 +462,7 @@ fn lower_ambiguous_wildcard(name: &SmolStr, candidates: &[SmolStr], span: Span) 
     let pkgs = candidates.join("`, `");
     Diagnostic::new(
         Severity::Error,
-        DiagnosticCode::AMBIGUOUS_IMPORT,
+        code::AMBIGUOUS_IMPORT,
         Message::new(
             MessageId::AmbiguousWildcardImport,
             vec![
@@ -484,7 +484,7 @@ pub(crate) fn internal_error_diag(detail: &str, span: Span) -> Diagnostic {
     let msg_args = vec![Arg::Detail(text)];
     Diagnostic::new(
         Severity::Error,
-        DiagnosticCode::INTERNAL_ERROR,
+        code::INTERNAL_ERROR,
         Message::new(MessageId::InternalError, msg_args.clone()),
     )
     .with_label(Label {
@@ -496,7 +496,7 @@ pub(crate) fn internal_error_diag(detail: &str, span: Span) -> Diagnostic {
 }
 
 fn lower_name_diag(
-    code: DiagnosticCode,
+    code: DiagKey,
     msg_id: MessageId,
     label_id: MessageId,
     name: &SmolStr,
@@ -514,12 +514,7 @@ fn lower_name_diag(
     })
 }
 
-fn lower_args_diag(
-    code: DiagnosticCode,
-    msg_id: MessageId,
-    args: Vec<Arg>,
-    span: Span,
-) -> Diagnostic {
+fn lower_args_diag(code: DiagKey, msg_id: MessageId, args: Vec<Arg>, span: Span) -> Diagnostic {
     Diagnostic::new(Severity::Error, code, Message::new(msg_id, args.clone())).with_label(Label {
         kind: LabelKind::Primary,
         span,
@@ -573,26 +568,22 @@ pub(crate) fn lower_jump_check_items(
         }
         let (span, _) = map_span_or_fallback(file_id, source_map, kw.text_range());
         let (code, msg_id) = match item {
-            JumpCheckItem::BreakOutsideLoop { .. } => (
-                DiagnosticCode::BREAK_OUTSIDE_LOOP,
-                MessageId::BreakOutsideLoop,
-            ),
-            JumpCheckItem::ContinueOutsideLoop { .. } => (
-                DiagnosticCode::CONTINUE_OUTSIDE_LOOP,
-                MessageId::ContinueOutsideLoop,
-            ),
+            JumpCheckItem::BreakOutsideLoop { .. } => {
+                (code::BREAK_OUTSIDE_LOOP, MessageId::BreakOutsideLoop)
+            }
+            JumpCheckItem::ContinueOutsideLoop { .. } => {
+                (code::CONTINUE_OUTSIDE_LOOP, MessageId::ContinueOutsideLoop)
+            }
             JumpCheckItem::ReturnOutsideCallable { .. } => (
-                DiagnosticCode::RETURN_OUTSIDE_CALLABLE,
+                code::RETURN_OUTSIDE_CALLABLE,
                 MessageId::ReturnOutsideCallable,
             ),
-            JumpCheckItem::ReturnValueInVoid { .. } => (
-                DiagnosticCode::RETURN_VALUE_IN_VOID,
-                MessageId::ReturnValueInVoid,
-            ),
-            JumpCheckItem::ReturnMissingValue { .. } => (
-                DiagnosticCode::RETURN_MISSING_VALUE,
-                MessageId::ReturnMissingValue,
-            ),
+            JumpCheckItem::ReturnValueInVoid { .. } => {
+                (code::RETURN_VALUE_IN_VOID, MessageId::ReturnValueInVoid)
+            }
+            JumpCheckItem::ReturnMissingValue { .. } => {
+                (code::RETURN_MISSING_VALUE, MessageId::ReturnMissingValue)
+            }
         };
         diags.push(
             Diagnostic::new(Severity::Error, code, Message::simple(msg_id)).with_label(Label {
@@ -623,7 +614,7 @@ pub(crate) fn lower_foreach_check_items(
                 }
                 (
                     lhs_name_span.text_range(),
-                    DiagnosticCode::ASSIGN_TO_FOREACH_VAR,
+                    code::ASSIGN_TO_FOREACH_VAR,
                     Message::new(
                         MessageId::AssignToForeachVar,
                         vec![Arg::Name(var_name.clone())],
@@ -639,7 +630,7 @@ pub(crate) fn lower_foreach_check_items(
                 }
                 (
                     var_name_span.text_range(),
-                    DiagnosticCode::FOREACH_VAR_SAME_AS_ARRAY,
+                    code::FOREACH_VAR_SAME_AS_ARRAY,
                     Message::new(
                         MessageId::ForeachVarSameAsArray,
                         vec![Arg::Name(array_name.clone())],
@@ -656,7 +647,7 @@ pub(crate) fn lower_foreach_check_items(
                 }
                 (
                     excess_var_span.text_range(),
-                    DiagnosticCode::FOREACH_TOO_MANY_VARS,
+                    code::FOREACH_TOO_MANY_VARS,
                     Message::new(
                         MessageId::ForeachTooManyVars,
                         vec![
@@ -681,7 +672,7 @@ pub(crate) fn lower_foreach_check_items(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lyra_diag::{DiagnosticCode, DiagnosticOrigin, MessageId};
+    use lyra_diag::{DiagnosticOrigin, MessageId, code};
 
     #[test]
     fn internal_errors_lowered_end_to_end() {
@@ -710,7 +701,7 @@ mod tests {
             .collect();
         assert_eq!(internal.len(), 1, "should have exactly one internal diag");
         let d = &internal[0];
-        assert_eq!(d.code, DiagnosticCode::INTERNAL_ERROR);
+        assert_eq!(d.code, code::INTERNAL_ERROR);
         assert_eq!(d.message.id, MessageId::InternalError);
         let rendered = d.render_message();
         assert!(

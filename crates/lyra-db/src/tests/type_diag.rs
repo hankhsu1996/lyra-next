@@ -30,7 +30,7 @@ fn truncation_continuous_assign() {
     let msg = diag_message(&diags[0]);
     assert!(msg.contains("4-bit"), "msg: {msg}");
     assert!(msg.contains("8-bit"), "msg: {msg}");
-    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::WIDTH_MISMATCH);
+    assert_eq!(diags[0].code, lyra_diag::code::WIDTH_MISMATCH);
 }
 
 #[test]
@@ -87,10 +87,7 @@ fn concat_lhs_unsupported_warning() {
     let src = "module m; logic [3:0] a; logic [3:0] b; logic [7:0] c; assign {a, b} = c; endmodule";
     let diags = type_diag_warnings(src);
     assert_eq!(diags.len(), 1, "concat LHS emits unsupported warning");
-    assert_eq!(
-        diags[0].code,
-        lyra_diag::DiagnosticCode::UNSUPPORTED_LHS_FORM
-    );
+    assert_eq!(diags[0].code, lyra_diag::code::UNSUPPORTED_LHS_FORM);
 }
 
 #[test]
@@ -102,10 +99,7 @@ fn concat_lhs_wider_rhs_unsupported_warning() {
         1,
         "concat LHS emits unsupported warning, not truncation"
     );
-    assert_eq!(
-        diags[0].code,
-        lyra_diag::DiagnosticCode::UNSUPPORTED_LHS_FORM
-    );
+    assert_eq!(diags[0].code, lyra_diag::code::UNSUPPORTED_LHS_FORM);
 }
 
 #[test]
@@ -229,10 +223,7 @@ fn enum_from_integral_error() {
     let msg = diag_message(&diags[0]);
     assert!(msg.contains("cannot assign"), "msg: {msg}");
     assert!(msg.contains('E'), "msg: {msg}");
-    assert_eq!(
-        diags[0].code,
-        lyra_diag::DiagnosticCode::ENUM_ASSIGN_INCOMPAT
-    );
+    assert_eq!(diags[0].code, lyra_diag::code::ENUM_ASSIGN_INCOMPAT);
 }
 
 #[test]
@@ -258,10 +249,7 @@ fn enum_cross_type_assign_error() {
     assert!(msg.contains("cannot assign"), "msg: {msg}");
     assert!(msg.contains("E2"), "msg: {msg}");
     assert!(msg.contains("E1"), "msg: {msg}");
-    assert_eq!(
-        diags[0].code,
-        lyra_diag::DiagnosticCode::ENUM_ASSIGN_INCOMPAT
-    );
+    assert_eq!(diags[0].code, lyra_diag::code::ENUM_ASSIGN_INCOMPAT);
 }
 
 #[test]
@@ -299,7 +287,7 @@ fn enum_unresolved_rhs_no_cascade() {
     let diags = all_file_diags(src);
     let enum_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == lyra_diag::DiagnosticCode::ENUM_ASSIGN_INCOMPAT)
+        .filter(|d| d.code == lyra_diag::code::ENUM_ASSIGN_INCOMPAT)
         .collect();
     assert!(
         enum_diags.is_empty(),
@@ -307,7 +295,7 @@ fn enum_unresolved_rhs_no_cascade() {
     );
     let unresolved: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == lyra_diag::DiagnosticCode::UNRESOLVED_NAME)
+        .filter(|d| d.code == lyra_diag::code::UNRESOLVED_NAME)
         .collect();
     assert_eq!(
         unresolved.len(),
@@ -325,10 +313,7 @@ fn enum_cast_out_of_range_warning() {
     let msg = diag_message(&diags[0]);
     assert!(msg.contains('2'), "msg: {msg}");
     assert!(msg.contains('E'), "msg: {msg}");
-    assert_eq!(
-        diags[0].code,
-        lyra_diag::DiagnosticCode::ENUM_CAST_OUT_OF_RANGE
-    );
+    assert_eq!(diags[0].code, lyra_diag::code::ENUM_CAST_OUT_OF_RANGE);
 }
 
 #[test]
@@ -361,7 +346,7 @@ fn string_unknown_method_diagnostic() {
     let msg = diag_message(&diags[0]);
     assert!(msg.contains("unknown method"), "msg: {msg}");
     assert!(msg.contains("foo"), "msg: {msg}");
-    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::METHOD_CALL_ERROR);
+    assert_eq!(diags[0].code, lyra_diag::code::METHOD_CALL_ERROR);
 }
 
 #[test]
@@ -376,7 +361,7 @@ fn string_arity_mismatch_diagnostic() {
     let msg = diag_message(&diags[0]);
     assert!(msg.contains("wrong number"), "msg: {msg}");
     assert!(msg.contains("len"), "msg: {msg}");
-    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::METHOD_CALL_ERROR);
+    assert_eq!(diags[0].code, lyra_diag::code::METHOD_CALL_ERROR);
 }
 
 // new[] constructor tests
@@ -420,10 +405,7 @@ fn new_expr_not_dyn_array() {
         1,
         "fixed array with new[] should error: {diags:?}"
     );
-    assert_eq!(
-        diags[0].code,
-        lyra_diag::DiagnosticCode::NEW_EXPR_NOT_DYN_ARRAY
-    );
+    assert_eq!(diags[0].code, lyra_diag::code::NEW_EXPR_NOT_DYN_ARRAY);
 }
 
 #[test]
@@ -431,10 +413,7 @@ fn new_expr_size_negative() {
     let src = "module m; int a[]; initial begin a = new[-1]; end endmodule";
     let diags = type_diag_errors(src);
     assert_eq!(diags.len(), 1, "negative size should error: {diags:?}");
-    assert_eq!(
-        diags[0].code,
-        lyra_diag::DiagnosticCode::NEW_EXPR_SIZE_NEGATIVE
-    );
+    assert_eq!(diags[0].code, lyra_diag::code::NEW_EXPR_SIZE_NEGATIVE);
 }
 
 // Array assignment compatibility tests
@@ -498,7 +477,7 @@ fn array_incompat_fixed_size_mismatch() {
         1,
         "fixed size mismatch should error: {diags:?}"
     );
-    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::ARRAY_INCOMPAT);
+    assert_eq!(diags[0].code, lyra_diag::code::ARRAY_INCOMPAT);
 }
 
 #[test]
@@ -510,7 +489,7 @@ fn array_incompat_element_type_mismatch() {
         1,
         "element type mismatch should error: {diags:?}"
     );
-    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::ARRAY_INCOMPAT);
+    assert_eq!(diags[0].code, lyra_diag::code::ARRAY_INCOMPAT);
 }
 
 #[test]
@@ -518,5 +497,5 @@ fn array_incompat_inner_dim_mismatch() {
     let src = "module m; int a[][5]; int b[3][6]; initial begin a = b; end endmodule";
     let diags = type_diag_errors(src);
     assert_eq!(diags.len(), 1, "inner dim mismatch should error: {diags:?}");
-    assert_eq!(diags[0].code, lyra_diag::DiagnosticCode::ARRAY_INCOMPAT);
+    assert_eq!(diags[0].code, lyra_diag::code::ARRAY_INCOMPAT);
 }

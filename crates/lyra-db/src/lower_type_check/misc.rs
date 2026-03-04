@@ -32,7 +32,7 @@ pub(super) fn lower_modport_item(
             diags.push(
                 lyra_diag::Diagnostic::new(
                     lyra_diag::Severity::Error,
-                    lyra_diag::DiagnosticCode::MODPORT_DIRECTION,
+                    lyra_diag::code::MODPORT_DIRECTION,
                     lyra_diag::Message::new(
                         lyra_diag::MessageId::ModportDirectionViolation,
                         msg_args.clone(),
@@ -54,7 +54,7 @@ pub(super) fn lower_modport_item(
                 diags,
                 *member_name_span,
                 lyra_diag::Severity::Warning,
-                lyra_diag::DiagnosticCode::MODPORT_REF_UNSUPPORTED,
+                lyra_diag::code::MODPORT_REF_UNSUPPORTED,
                 lyra_diag::MessageId::ModportRefUnsupported,
             );
         }
@@ -64,7 +64,7 @@ pub(super) fn lower_modport_item(
                 diags,
                 *member_name_span,
                 lyra_diag::Severity::Error,
-                lyra_diag::DiagnosticCode::MODPORT_EMPTY_PORT,
+                lyra_diag::code::MODPORT_EMPTY_PORT,
                 lyra_diag::MessageId::ModportEmptyPortAccess,
             );
         }
@@ -74,7 +74,7 @@ pub(super) fn lower_modport_item(
                 diags,
                 *member_name_span,
                 lyra_diag::Severity::Error,
-                lyra_diag::DiagnosticCode::MODPORT_EXPR_NOT_ASSIGNABLE,
+                lyra_diag::code::MODPORT_EXPR_NOT_ASSIGNABLE,
                 lyra_diag::MessageId::ModportExprNotAssignable,
             );
         }
@@ -89,7 +89,7 @@ pub(super) fn lower_modport_item(
             diags.push(
                 lyra_diag::Diagnostic::new(
                     lyra_diag::Severity::Error,
-                    lyra_diag::DiagnosticCode::MEMBER_NOT_IN_MODPORT,
+                    lyra_diag::code::MEMBER_NOT_IN_MODPORT,
                     lyra_diag::Message::new(lyra_diag::MessageId::MemberNotInModport, args.clone()),
                 )
                 .with_label(lyra_diag::Label {
@@ -114,12 +114,12 @@ pub(super) fn lower_lhs_item(
     let (site, code, msg_id) = match item {
         TypeCheckItem::UnsupportedLhsForm { lhs_site } => (
             *lhs_site,
-            lyra_diag::DiagnosticCode::UNSUPPORTED_LHS_FORM,
+            lyra_diag::code::UNSUPPORTED_LHS_FORM,
             lyra_diag::MessageId::UnsupportedLhsForm,
         ),
         TypeCheckItem::InvalidLhs { lhs_site } => (
             *lhs_site,
-            lyra_diag::DiagnosticCode::INVALID_ASSIGNMENT_LHS,
+            lyra_diag::code::INVALID_ASSIGNMENT_LHS,
             lyra_diag::MessageId::InvalidAssignmentLhs,
         ),
         _ => return,
@@ -177,7 +177,7 @@ pub(super) fn lower_assign_to_readonly(
         .unwrap_or(assign_span);
     let (code, msg_id) = match kind {
         lyra_semantic::type_check::ReadonlyKind::Const => (
-            lyra_diag::DiagnosticCode::ASSIGN_TO_CONST,
+            lyra_diag::code::ASSIGN_TO_CONST,
             lyra_diag::MessageId::AssignToConst,
         ),
     };
@@ -217,7 +217,7 @@ pub(super) fn lower_const_missing_init(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::CONST_MISSING_INIT,
+            lyra_diag::code::CONST_MISSING_INIT,
             lyra_diag::Message::simple(lyra_diag::MessageId::ConstMissingInit),
         )
         .with_label(lyra_diag::Label {
@@ -243,7 +243,7 @@ pub(super) fn lower_void_object_type(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::VOID_OBJECT_TYPE,
+            lyra_diag::code::VOID_OBJECT_TYPE,
             lyra_diag::Message::simple(lyra_diag::MessageId::VoidObjectType),
         )
         .with_label(lyra_diag::Label {
@@ -265,7 +265,7 @@ pub(super) fn lower_void_used_as_value(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::VOID_USED_AS_VALUE,
+            lyra_diag::code::VOID_USED_AS_VALUE,
             lyra_diag::Message::simple(lyra_diag::MessageId::VoidUsedAsValue),
         )
         .with_label(lyra_diag::Label {
@@ -287,7 +287,7 @@ pub(super) fn lower_illegal_drive_strength(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::ILLEGAL_DRIVE_STRENGTH_BOTH_HIGHZ,
+            lyra_diag::code::ILLEGAL_DRIVE_STRENGTH_BOTH_HIGHZ,
             lyra_diag::Message::simple(lyra_diag::MessageId::IllegalDriveStrengthBothHighz),
         )
         .with_label(lyra_diag::Label {
@@ -313,7 +313,7 @@ pub(super) fn lower_queue_bound_item(
             diags.push(
                 lyra_diag::Diagnostic::new(
                     lyra_diag::Severity::Error,
-                    lyra_diag::DiagnosticCode::QUEUE_BOUND_NOT_CONST,
+                    lyra_diag::code::QUEUE_BOUND_NOT_CONST,
                     lyra_diag::Message::simple(lyra_diag::MessageId::QueueBoundNotConst),
                 )
                 .with_label(lyra_diag::Label {
@@ -333,7 +333,7 @@ pub(super) fn lower_queue_bound_item(
             diags.push(
                 lyra_diag::Diagnostic::new(
                     lyra_diag::Severity::Error,
-                    lyra_diag::DiagnosticCode::QUEUE_BOUND_NOT_POSITIVE,
+                    lyra_diag::code::QUEUE_BOUND_NOT_POSITIVE,
                     lyra_diag::Message::new(
                         lyra_diag::MessageId::QueueBoundNotPositive,
                         args.clone(),
@@ -358,7 +358,7 @@ fn emit_simple_modport_diag(
     diags: &mut Vec<lyra_diag::Diagnostic>,
     name_span: lyra_source::NameSpan,
     severity: lyra_diag::Severity,
-    code: lyra_diag::DiagnosticCode,
+    code: lyra_diag::DiagKey,
     message_id: lyra_diag::MessageId,
 ) {
     let Some(span) = source_map.map_span(name_span.text_range()) else {

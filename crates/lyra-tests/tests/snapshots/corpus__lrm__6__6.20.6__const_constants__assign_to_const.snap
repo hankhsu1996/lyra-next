@@ -1,9 +1,8 @@
 ---
 source: crates/lyra-tests/tests/corpus.rs
-assertion_line: 477
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.type[29]] 8:4..8:4: cannot assign to const variable `x`
+  error[lyra.type.assign_to_const] 8:4..8:4: cannot assign to const variable `x`
 ---
 unit (0 diagnostics)

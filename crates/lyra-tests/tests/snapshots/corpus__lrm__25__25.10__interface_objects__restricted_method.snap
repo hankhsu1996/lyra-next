@@ -3,6 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.type[38]] 11:22..11:22: member `hidden_fn` is not accessible through this modport
+  error[lyra.type.member_not_in_modport] 11:22..11:22: member `hidden_fn` is not accessible through this modport
 ---
 unit (0 diagnostics)

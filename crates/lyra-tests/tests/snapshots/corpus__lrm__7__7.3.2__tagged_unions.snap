@@ -3,7 +3,7 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (2 diagnostics)
-  error[lyra.semantic[13]] 26:8..26:8: void member `bad_field` is only allowed in tagged unions
-  error[lyra.semantic[13]] 33:8..33:8: void member `bad_field` is only allowed in tagged unions
+  error[lyra.semantic.void_member_non_tagged] 26:8..26:8: void member `bad_field` is only allowed in tagged unions
+  error[lyra.semantic.void_member_non_tagged] 33:8..33:8: void member `bad_field` is only allowed in tagged unions
 ---
 unit (0 diagnostics)

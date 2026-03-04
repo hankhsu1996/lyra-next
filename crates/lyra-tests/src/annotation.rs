@@ -180,7 +180,7 @@ fn match_file_annotations(
             if matched[*idx] {
                 return false;
             }
-            if !annot.severity.matches(d.severity) || d.code.as_str() != annot.code {
+            if !annot.severity.matches(d.severity) || d.code != annot.code {
                 return false;
             }
             let Some(span) = d.primary_span() else {
@@ -243,7 +243,7 @@ fn match_unit_annotations(
             if matched[*idx] {
                 return false;
             }
-            if !annot.severity.matches(d.severity) || d.code.as_str() != annot.code {
+            if !annot.severity.matches(d.severity) || d.code != annot.code {
                 return false;
             }
             if let Some(ref msg) = annot.message
@@ -296,7 +296,7 @@ fn report_unmatched_file_diags(
             errors,
             "  unexpected diagnostic at {loc}: {sev}[{code}]: {msg}",
             sev = crate::severity_str(d.severity),
-            code = d.code.as_str(),
+            code = d.code,
             msg = d.render_message(),
         );
     }
@@ -311,7 +311,7 @@ fn report_unmatched_unit_diags(diags: &[Diagnostic], matched: &[bool], errors: &
             errors,
             "  unexpected unit diagnostic: {sev}[{code}]: {msg}",
             sev = crate::severity_str(d.severity),
-            code = d.code.as_str(),
+            code = d.code,
             msg = d.render_message(),
         );
     }
@@ -392,7 +392,7 @@ fn parse_severity_code_message(s: &str) -> Option<(ExpectedSeverity, String, Opt
         return None;
     };
 
-    // Code may contain nested brackets (e.g. `lyra.semantic[1]`)
+    // Code is a dotted key inside brackets (e.g. `[lyra.semantic.unresolved_name]`)
     let rest = rest.strip_prefix('[')?;
     let bracket_end = find_matching_bracket(rest)?;
     let code = rest[..bracket_end].to_owned();
@@ -436,32 +436,32 @@ mod tests {
 
     #[test]
     fn parse_file_annotation_basic() {
-        let line = "  //         ^ error[lyra.semantic[1]]: unresolved name";
+        let line = "  //         ^ error[lyra.semantic.unresolved_name]: unresolved name";
         let parsed = try_parse_file_annotation(line).unwrap();
         assert_eq!(parsed.caret_col, 13);
         assert!(parsed.span_len.is_none());
         assert_eq!(parsed.severity, ExpectedSeverity::Error);
-        assert_eq!(parsed.code, "lyra.semantic[1]");
+        assert_eq!(parsed.code, "lyra.semantic.unresolved_name");
         assert_eq!(parsed.message.as_deref(), Some("unresolved name"));
     }
 
     #[test]
     fn parse_file_annotation_with_span() {
-        let line = "  // ^~~~ error[lyra.parse[1]]: expected semicolon";
+        let line = "  // ^~~~ error[lyra.parse.error]: expected semicolon";
         let parsed = try_parse_file_annotation(line).unwrap();
         assert_eq!(parsed.caret_col, 5);
         assert_eq!(parsed.span_len, Some(4));
         assert_eq!(parsed.severity, ExpectedSeverity::Error);
-        assert_eq!(parsed.code, "lyra.parse[1]");
+        assert_eq!(parsed.code, "lyra.parse.error");
         assert_eq!(parsed.message.as_deref(), Some("expected semicolon"));
     }
 
     #[test]
     fn parse_file_annotation_no_message() {
-        let line = "  // ^ warning[lyra.semantic[3]]";
+        let line = "  // ^ warning[lyra.semantic.package_not_found]";
         let parsed = try_parse_file_annotation(line).unwrap();
         assert_eq!(parsed.severity, ExpectedSeverity::Warning);
-        assert_eq!(parsed.code, "lyra.semantic[3]");
+        assert_eq!(parsed.code, "lyra.semantic.package_not_found");
         assert!(parsed.message.is_none());
     }
 
@@ -473,19 +473,19 @@ mod tests {
 
     #[test]
     fn parse_unit_annotation() {
-        let line = "// unit error[lyra.semantic[2]]: duplicate module";
+        let line = "// unit error[lyra.semantic.duplicate_definition]: duplicate module";
         let ua = try_parse_unit_annotation(line).unwrap();
         assert_eq!(ua.severity, ExpectedSeverity::Error);
-        assert_eq!(ua.code, "lyra.semantic[2]");
+        assert_eq!(ua.code, "lyra.semantic.duplicate_definition");
         assert_eq!(ua.message.as_deref(), Some("duplicate module"));
     }
 
     #[test]
     fn unit_annotation_no_message() {
-        let line = "// unit warning[lyra.semantic[5]]";
+        let line = "// unit warning[lyra.semantic.ambiguous_import]";
         let ua = try_parse_unit_annotation(line).unwrap();
         assert_eq!(ua.severity, ExpectedSeverity::Warning);
-        assert_eq!(ua.code, "lyra.semantic[5]");
+        assert_eq!(ua.code, "lyra.semantic.ambiguous_import");
         assert!(ua.message.is_none());
     }
 }

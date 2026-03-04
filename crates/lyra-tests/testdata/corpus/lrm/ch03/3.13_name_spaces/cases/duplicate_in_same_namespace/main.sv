@@ -6,11 +6,11 @@
 module dup_value;
   logic bar;
   logic bar;
-  //    ^ error[lyra.semantic[2]]: duplicate definition of `bar`
+  //    ^ error[lyra.semantic.duplicate_definition]: duplicate definition of `bar`
 endmodule
 
 module dup_type;
   typedef logic [7:0] baz;
   typedef logic [3:0] baz;
-  //                  ^ error[lyra.semantic[2]]: duplicate definition of `baz`
+  //                  ^ error[lyra.semantic.duplicate_definition]: duplicate definition of `baz`
 endmodule

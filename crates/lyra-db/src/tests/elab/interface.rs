@@ -32,7 +32,7 @@ fn interface_sig_with_ports() {
     );
     let elab_errs: Vec<_> = diags
         .iter()
-        .filter(|d| d.code.namespace == "lyra.elab" && d.severity == lyra_diag::Severity::Error)
+        .filter(|d| d.code.starts_with("lyra.elab.") && d.severity == lyra_diag::Severity::Error)
         .collect();
     assert!(
         elab_errs.is_empty(),
@@ -48,7 +48,7 @@ fn non_instantiable_rejected() {
     );
     let not_inst: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::NOT_INSTANTIABLE)
+        .filter(|d| d.code == code::NOT_INSTANTIABLE)
         .collect();
     assert_eq!(not_inst.len(), 1);
 }
@@ -90,7 +90,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert!(
         conflicts.is_empty(),
@@ -113,7 +113,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert_eq!(
         conflicts.len(),
@@ -145,7 +145,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert!(
         conflicts.is_empty(),
@@ -168,7 +168,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert_eq!(
         conflicts.len(),
@@ -191,7 +191,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert!(
         conflicts.is_empty(),
@@ -215,7 +215,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert!(
         conflicts.is_empty(),
@@ -238,7 +238,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert!(
         conflicts.is_empty(),
@@ -261,7 +261,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert_eq!(
         conflicts.len(),
@@ -293,7 +293,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert!(
         conflicts.is_empty(),
@@ -316,7 +316,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert_eq!(
         conflicts.len(),
@@ -339,7 +339,7 @@ endmodule";
     let diags = elab_diags(&[src], "top");
     let conflicts: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MODPORT_CONFLICT)
+        .filter(|d| d.code == code::MODPORT_CONFLICT)
         .collect();
     assert!(
         conflicts.is_empty(),

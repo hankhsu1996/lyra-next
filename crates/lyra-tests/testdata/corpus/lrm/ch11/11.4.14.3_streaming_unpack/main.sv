@@ -32,22 +32,22 @@ module streaming_unpack;
 
     // Width mismatch: LHS 8 bits, RHS 64 bits
     {>> {a}} = src64;
-    //       ^ error[lyra.type[28]]: streaming unpack target is 8 bits but source is 64 bits
+    //       ^ error[lyra.type.stream_unpack_width_mismatch]: streaming unpack target is 8 bits but source is 64 bits
 
     // Width mismatch via with: select 2 elements (64 bits) but assign 128-bit source
     {>> {arr with [0:1]}} = src128;
-    //                    ^ error[lyra.type[28]]: streaming unpack target is 64 bits but source is 128 bits
+    //                    ^ error[lyra.type.stream_unpack_width_mismatch]: streaming unpack target is 64 bits but source is 128 bits
 
     // Invalid operand: literal is not an lvalue
     {>> {8'd0}} = src16;
-    //   ^ error[lyra.type[25]]: streaming unpack operand is not a valid assignment target
+    //   ^ error[lyra.type.stream_unpack_operand_invalid]: streaming unpack operand is not a valid assignment target
 
     // Greedy absorber: 1-bit element dynamic array absorbs 16 bits (LRM 11.4.14.4)
     {>> {dyn_arr}} = src16;
 
     // with clause on non-array scalar LHS
     {>> {a with [0]}} = src16;
-    //    ^ error[lyra.type[13]]: `with` clause requires an array operand
+    //    ^ error[lyra.type.stream_with_non_array]: `with` clause requires an array operand
   end
 
   // Positive: continuous assign with streaming LHS

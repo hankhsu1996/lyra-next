@@ -34,5 +34,5 @@ module two_wildcards_ambiguity;
   import P::*;
   import Q::*;
   localparam int X = C;
-  //                ^ error[lyra.semantic[5]]: name `C` is ambiguous: imported from packages `P`, `Q`
+  //                ^ error[lyra.semantic.ambiguous_import]: name `C` is ambiguous: imported from packages `P`, `Q`
 endmodule

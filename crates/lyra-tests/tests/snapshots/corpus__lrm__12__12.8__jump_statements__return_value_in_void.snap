@@ -3,7 +3,7 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (2 diagnostics)
-  error[lyra.semantic[21]] 4:4..4:4: cannot return a value from a void function or task
-  error[lyra.semantic[21]] 9:4..9:4: cannot return a value from a void function or task
+  error[lyra.semantic.return_value_in_void] 4:4..4:4: cannot return a value from a void function or task
+  error[lyra.semantic.return_value_in_void] 9:4..9:4: cannot return a value from a void function or task
 ---
 unit (0 diagnostics)

@@ -3,6 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.type[32]] 7:9..7:9: void expression cannot be used as a value
+  error[lyra.type.void_used_as_value] 7:9..7:9: void expression cannot be used as a value
 ---
 unit (0 diagnostics)
