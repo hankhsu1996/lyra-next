@@ -88,6 +88,9 @@ ast_nodes! {
     ForeachVarSlot(SyntaxKind::ForeachVarSlot) {
         declarator: Declarator,
     }
+    BreakStmt(SyntaxKind::BreakStmt) {}
+    ContinueStmt(SyntaxKind::ContinueStmt) {}
+    ReturnStmt(SyntaxKind::ReturnStmt) { @custom }
     AssignStmt(SyntaxKind::AssignStmt) { @custom }
     TimingControl(SyntaxKind::TimingControl) { @custom }
     EventExpr(SyntaxKind::EventExpr) {}

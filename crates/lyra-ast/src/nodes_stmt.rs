@@ -9,7 +9,7 @@ use crate::node::AstNode;
 use crate::nodes::{
     AssignStmt, BinExpr, BlockStmt, CaseItem, CaseStmt, ContinuousAssign, DoWhileStmt,
     DriveStrength, ForStmt, ForeachStmt, ForeachVarList, ForeverStmt, IfStmt, NameRef, RepeatStmt,
-    TimingControl, WhileStmt,
+    ReturnStmt, TimingControl, WhileStmt,
 };
 use crate::nodes_expr::SyntaxAssignOp;
 use crate::support::{self, AstChildren};
@@ -294,6 +294,13 @@ impl ForeachStmt {
     /// The loop body statement.
     pub fn body(&self) -> Option<crate::node::StmtNode> {
         support::child(&self.syntax)
+    }
+}
+
+impl ReturnStmt {
+    /// The optional return value expression.
+    pub fn value(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 }
 

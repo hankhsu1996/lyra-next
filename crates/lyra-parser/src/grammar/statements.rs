@@ -32,6 +32,9 @@ pub(crate) fn stmt(p: &mut Parser) {
         SyntaxKind::RepeatKw => repeat_stmt(p),
         SyntaxKind::ForeverKw => forever_stmt(p),
         SyntaxKind::DoKw => do_while_stmt(p),
+        SyntaxKind::BreakKw => break_stmt(p),
+        SyntaxKind::ContinueKw => continue_stmt(p),
+        SyntaxKind::ReturnKw => return_stmt(p),
         // Local declaration in procedural context
         _ if declarations::at_unambiguous_data_decl_start(p) => declarations::var_decl(p),
         SyntaxKind::Semicolon => {
@@ -382,6 +385,33 @@ fn event_item(p: &mut Parser) {
     }
     expressions::expr(p);
     m.complete(p, SyntaxKind::EventItem);
+}
+
+// `break ;`
+fn break_stmt(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // break
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::BreakStmt);
+}
+
+// `continue ;`
+fn continue_stmt(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // continue
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::ContinueStmt);
+}
+
+// `return [expr] ;`
+fn return_stmt(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // return
+    if !p.at(SyntaxKind::Semicolon) && !p.at_end() {
+        expressions::expr(p);
+    }
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::ReturnStmt);
 }
 
 // Expression statement: `expr ;` or `lhs = rhs ;` or `lhs <= rhs ;`

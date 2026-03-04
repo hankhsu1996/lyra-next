@@ -51,6 +51,9 @@ pub fn is_statement_kind(kind: lyra_lexer::SyntaxKind) -> bool {
             | SyntaxKind::NetDecl
             | SyntaxKind::TimingControl
             | SyntaxKind::SystemTfCall
+            | SyntaxKind::BreakStmt
+            | SyntaxKind::ContinueStmt
+            | SyntaxKind::ReturnStmt
     )
 }
 
