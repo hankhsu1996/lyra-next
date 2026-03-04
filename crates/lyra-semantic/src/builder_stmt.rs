@@ -54,6 +54,7 @@ pub(crate) fn collect_statement(
                 collect_statement(ctx, body.syntax(), foreach_scope);
             }
         }
+        SyntaxKind::BreakStmt | SyntaxKind::ContinueStmt => {}
         SyntaxKind::IfStmt
         | SyntaxKind::CaseStmt
         | SyntaxKind::CaseItem
@@ -68,7 +69,10 @@ pub(crate) fn collect_statement(
             }
             collect_direct_name_refs(ctx, node, scope);
         }
-        SyntaxKind::AssignStmt | SyntaxKind::EventExpr | SyntaxKind::EventItem => {
+        SyntaxKind::ReturnStmt
+        | SyntaxKind::AssignStmt
+        | SyntaxKind::EventExpr
+        | SyntaxKind::EventItem => {
             collect_name_refs(ctx, node, scope);
         }
         _ => {
