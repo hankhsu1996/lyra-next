@@ -1,6 +1,7 @@
 use lyra_ast::{
     AstNode, Declarator, ExportDecl, ExportItem, ForeachStmt, FunctionDecl, HasSyntax, ImportItem,
-    ModportDecl, ModportPortKind, ModuleInstantiation, TaskDecl, TfPortDecl, TypeSpec,
+    ModportDecl, ModportPortKind, ModportTfPortsGroup, ModuleInstantiation, TaskDecl, TfPortDecl,
+    TypeSpec,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -15,7 +16,10 @@ use crate::def_index::{
 };
 use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
-use crate::modport_def::{ModportDef, ModportDefId, ModportEntry, ModportTarget, PortDirection};
+use crate::modport_def::{
+    ModportDef, ModportDefId, ModportEntry, ModportTarget, ModportTfEntry, ModportTfForm,
+    PortDirection, TfPortKind,
+};
 use crate::record::SymbolOrigin;
 use crate::scopes::{ScopeId, ScopeKind};
 use crate::symbols::{Constness, Lifetime, Namespace, Symbol, SymbolKind};
@@ -279,7 +283,7 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, 
             ordinal,
         };
 
-        let entries = collect_modport_entries(ctx, &item);
+        let collected = collect_modport_entries(ctx, &item);
 
         // Register symbol for navigation/diagnostics
         let Some(modport_decl_site) = ctx.ast_id_map.erased_ast_id(item.syntax()) else {
@@ -309,17 +313,24 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, 
             def: ModportDef {
                 id: placeholder_id,
                 name: SmolStr::new(name_tok.text()),
-                entries: entries.into_boxed_slice(),
+                entries: collected.signal_entries.into_boxed_slice(),
+                tf_entries: collected.tf_entries.into_boxed_slice(),
             },
         });
     }
 }
 
+struct CollectedModportEntries {
+    signal_entries: Vec<ModportEntry>,
+    tf_entries: Vec<ModportTfEntry>,
+}
+
 fn collect_modport_entries(
     ctx: &DefContext<'_>,
     item: &lyra_ast::ModportItem,
-) -> Vec<ModportEntry> {
-    let mut entries = Vec::new();
+) -> CollectedModportEntries {
+    let mut signal_entries = Vec::new();
+    let mut tf_entries = Vec::new();
     let mut current_dir: Option<PortDirection> = None;
     for port_kind in item.port_items() {
         match port_kind {
@@ -332,7 +343,7 @@ fn collect_modport_entries(
                     && let Some(port_id) = ctx.ast_id_map.erased_ast_id(port.syntax())
                 {
                     let name = SmolStr::new(port_name_tok.text());
-                    entries.push(ModportEntry {
+                    signal_entries.push(ModportEntry {
                         port_name: name.clone(),
                         direction: dir,
                         target: ModportTarget::ImplicitMember { member_name: name },
@@ -357,7 +368,7 @@ fn collect_modport_entries(
                     } else {
                         ModportTarget::Empty
                     };
-                    entries.push(ModportEntry {
+                    signal_entries.push(ModportEntry {
                         port_name: SmolStr::new(port_name_tok.text()),
                         direction: dir,
                         target,
@@ -366,9 +377,46 @@ fn collect_modport_entries(
                     });
                 }
             }
+            ModportPortKind::TfGroup(group) => {
+                collect_tf_group_entries(ctx, &group, &mut tf_entries);
+            }
         }
     }
-    entries
+    CollectedModportEntries {
+        signal_entries,
+        tf_entries,
+    }
+}
+
+fn collect_tf_group_entries(
+    ctx: &DefContext<'_>,
+    group: &ModportTfPortsGroup,
+    tf_entries: &mut Vec<ModportTfEntry>,
+) {
+    let tf_kind = match group.import_export_token().map(|t| t.kind()) {
+        Some(SyntaxKind::ExportKw) => TfPortKind::Export,
+        _ => TfPortKind::Import,
+    };
+    for entry in group.entries() {
+        let Some(name_tok) = entry.name() else {
+            continue;
+        };
+        let Some(port_site) = ctx.ast_id_map.erased_ast_id(entry.syntax()) else {
+            continue;
+        };
+        let form = if entry.has_prototype() {
+            ModportTfForm::Prototype
+        } else {
+            ModportTfForm::BareName
+        };
+        tf_entries.push(ModportTfEntry {
+            kind: tf_kind,
+            name: SmolStr::new(name_tok.text()),
+            form,
+            port_site,
+            name_span: NameSpan::new(name_tok.text_range()),
+        });
+    }
 }
 
 fn parse_direction(kind: SyntaxKind, current: Option<PortDirection>) -> Option<PortDirection> {

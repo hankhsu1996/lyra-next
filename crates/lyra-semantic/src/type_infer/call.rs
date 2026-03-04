@@ -9,6 +9,7 @@ use super::infer_expr;
 use crate::coerce::IntegralCtx;
 use crate::member::{MemberInfo, MemberKind, MemberLookupError};
 use crate::member_name::MemberNameToken;
+use crate::symbols::GlobalSymbolId;
 use crate::types::Ty;
 
 pub(super) fn infer_call(call: &CallExpr, ctx: &dyn InferCtx) -> ExprType {
@@ -117,6 +118,10 @@ fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx
         }) => {
             crate::builtin_methods::infer_builtin_method_call(call, bm, &ty, receiver.as_ref(), ctx)
         }
+        Ok(MemberInfo {
+            kind: MemberKind::InterfaceCallable { global_sym },
+            ..
+        }) => infer_interface_callable(call, global_sym, ctx),
         Ok(_) | Err(MemberLookupError::NoMembersOnType) => ExprType::error(
             ExprTypeErrorKind::UnsupportedCalleeForm(CalleeFormKind::MethodCall),
         ),
@@ -128,6 +133,24 @@ fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx
             ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(reason))
         }
     }
+}
+
+/// Infer a call to an interface task/function member (LRM 25.5, 25.7).
+fn infer_interface_callable(
+    call: &CallExpr,
+    global_sym: GlobalSymbolId,
+    ctx: &dyn InferCtx,
+) -> ExprType {
+    let Some(sig) = ctx.callable_sig(global_sym) else {
+        return ExprType::error(ExprTypeErrorKind::UnresolvedCall);
+    };
+    if sig.kind == CallableKind::Task {
+        // Task calls are statement-level only -- return Void
+        check_call_args(call, &sig, ctx);
+        return ExprType::from_ty(&Ty::Void);
+    }
+    check_call_args(call, &sig, ctx);
+    ExprType::from_ty(&sig.return_ty)
 }
 
 /// Validate and type an iterator pseudo-method call (LRM 7.12.4).

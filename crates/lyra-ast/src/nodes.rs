@@ -220,6 +220,26 @@ ast_nodes! {
         port_name: token([Ident, EscapedIdent]),
     }
 
+    // Modport TF port group (LRM 25.7): `import entry {, entry}` or `export entry {, entry}`
+    ModportTfPortsGroup(SyntaxKind::ModportTfPortsGroup) {
+        import_export: token([ImportKw, ExportKw]) as import_export_token,
+        entries: [ModportTfPortEntry],
+    }
+
+    // Modport TF port entry (LRM 25.7): bare ident or task/function prototype
+    ModportTfPortEntry(SyntaxKind::ModportTfPortEntry) { @custom }
+
+    // Task prototype (LRM 25.7): `task name [ ( tf_port_list ) ]`
+    TaskPrototype(SyntaxKind::TaskPrototype) {
+        name: token([Ident, EscapedIdent]),
+    }
+
+    // Function prototype (LRM 25.7): `function data_type_or_void name [ ( tf_port_list ) ]`
+    FunctionPrototype(SyntaxKind::FunctionPrototype) {
+        name: token([Ident, EscapedIdent]),
+        type_spec: TypeSpec,
+    }
+
     ProgramDecl(SyntaxKind::ProgramDecl) {
         name: token([Ident, EscapedIdent]),
         param_port_list: ParamPortList,
@@ -332,10 +352,11 @@ impl SourceFile {
     }
 }
 
-/// Either a bare `ModportPort` or an expression `ModportExprPort`.
+/// Variant kinds within a modport item's port list.
 pub enum ModportPortKind {
     Bare(ModportPort),
     Expr(ModportExprPort),
+    TfGroup(ModportTfPortsGroup),
 }
 
 impl ModportItem {
@@ -348,15 +369,51 @@ impl ModportItem {
     }
 
     pub fn port_items(&self) -> impl Iterator<Item = ModportPortKind> + '_ {
-        self.syntax.children().filter_map(|child| {
-            if child.kind() == SyntaxKind::ModportPort {
-                ModportPort::cast(child).map(ModportPortKind::Bare)
-            } else if child.kind() == SyntaxKind::ModportExprPort {
-                ModportExprPort::cast(child).map(ModportPortKind::Expr)
-            } else {
-                None
-            }
-        })
+        self.syntax
+            .children()
+            .filter_map(|child| match child.kind() {
+                SyntaxKind::ModportPort => ModportPort::cast(child).map(ModportPortKind::Bare),
+                SyntaxKind::ModportExprPort => {
+                    ModportExprPort::cast(child).map(ModportPortKind::Expr)
+                }
+                SyntaxKind::ModportTfPortsGroup => {
+                    ModportTfPortsGroup::cast(child).map(ModportPortKind::TfGroup)
+                }
+                _ => None,
+            })
+    }
+}
+
+impl ModportTfPortEntry {
+    /// The bare name token (for entries without a prototype, e.g. `import Read`).
+    pub fn bare_name_token(&self) -> Option<SyntaxToken> {
+        support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
+    }
+
+    /// The `TaskPrototype` child, if this entry is `task name(...)`.
+    pub fn task_prototype(&self) -> Option<TaskPrototype> {
+        support::child(&self.syntax)
+    }
+
+    /// The `FunctionPrototype` child, if this entry is `function type name(...)`.
+    pub fn function_prototype(&self) -> Option<FunctionPrototype> {
+        support::child(&self.syntax)
+    }
+
+    /// The TF name token, resolved structurally from either bare form or prototype.
+    pub fn name(&self) -> Option<SyntaxToken> {
+        if let Some(proto) = self.task_prototype() {
+            return proto.name();
+        }
+        if let Some(proto) = self.function_prototype() {
+            return proto.name();
+        }
+        self.bare_name_token()
+    }
+
+    /// Whether this entry has a task/function prototype form.
+    pub fn has_prototype(&self) -> bool {
+        self.task_prototype().is_some() || self.function_prototype().is_some()
     }
 }
 

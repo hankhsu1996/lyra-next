@@ -4,7 +4,7 @@ use crate::enum_def::EnumId;
 use lyra_lexer::SyntaxKind;
 
 use crate::member_name::MemberNameToken;
-use crate::symbols::SymbolId;
+use crate::symbols::{GlobalSymbolId, SymbolId};
 use crate::types::{AssocIndex, Ty, UnpackedDim};
 
 /// Information about a resolved member access.
@@ -23,6 +23,10 @@ pub enum MemberKind {
     },
     InterfaceMember {
         member: SymbolId,
+    },
+    /// A task/function declared in an interface (callable member).
+    InterfaceCallable {
+        global_sym: GlobalSymbolId,
     },
     Modport,
     ModportPort {

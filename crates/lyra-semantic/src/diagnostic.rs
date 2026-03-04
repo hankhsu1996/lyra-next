@@ -83,6 +83,9 @@ pub enum SemanticDiagKind {
         packing: SmolStr,
         category: SmolStr,
     },
+    NotASubroutine {
+        name: SmolStr,
+    },
     InternalError {
         detail: SmolStr,
     },
@@ -140,6 +143,9 @@ impl SemanticDiag {
             }
             SemanticDiagKind::NonIntegralPackedMember { name, category, .. } => {
                 format!("non-integral {category} member `{name}` in packed record")
+            }
+            SemanticDiagKind::NotASubroutine { name } => {
+                format!("`{name}` is not a task or function")
             }
             SemanticDiagKind::InternalError { detail } => {
                 format!("internal error: {detail}")

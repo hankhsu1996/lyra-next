@@ -650,10 +650,24 @@ fn interface_member_lookup(
         lyra_semantic::symbols::Namespace::Value,
         member_name,
     ) {
+        let sym_kind = def.symbols.get(sym).kind;
         let global_member = GlobalSymbolId {
             file: file_id,
             local: sym,
         };
+        // Task/function members are callable, not typed as values
+        if matches!(
+            sym_kind,
+            lyra_semantic::symbols::SymbolKind::Function | lyra_semantic::symbols::SymbolKind::Task
+        ) {
+            return Ok(MemberInfo {
+                ty: Ty::Void,
+                kind: MemberKind::InterfaceCallable {
+                    global_sym: global_member,
+                },
+                receiver: None,
+            });
+        }
         let ty = match resolve_sym_type(db, unit, global_member) {
             lyra_semantic::types::SymbolType::Value(ty) => ty,
             lyra_semantic::types::SymbolType::Net(net) => net.data.clone(),
@@ -742,6 +756,20 @@ fn modport_member_lookup(
         return Ok(MemberInfo {
             ty,
             kind,
+            receiver: None,
+        });
+    }
+    // LRM 25.7: TF members allowed via modport import/export
+    if let Some(tf_entry) = sem.view.lookup_tf(member_name) {
+        let global_member = GlobalSymbolId {
+            file: ctx.file_id,
+            local: tf_entry.target,
+        };
+        return Ok(MemberInfo {
+            ty: Ty::Void,
+            kind: MemberKind::InterfaceCallable {
+                global_sym: global_member,
+            },
             receiver: None,
         });
     }

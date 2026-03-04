@@ -171,6 +171,13 @@ pub(crate) fn lower_semantic_diag(
         | SemanticDiagKind::NonIntegralPackedMember { .. } => {
             lower_record_enum_diag(&diag.kind, primary_span)
         }
+        SemanticDiagKind::NotASubroutine { name } => lower_name_diag(
+            DiagnosticCode::NOT_A_SUBROUTINE,
+            MessageId::NotASubroutine,
+            MessageId::NotASubroutine,
+            name,
+            primary_span,
+        ),
         SemanticDiagKind::InternalError { detail } => internal_error_diag(detail, primary_span),
     }
 }
@@ -250,6 +257,7 @@ fn lower_record_enum_diag(kind: &SemanticDiagKind, primary_span: Span) -> Diagno
         | SemanticDiagKind::UnsupportedQualifiedPath { .. }
         | SemanticDiagKind::UndeclaredType { .. }
         | SemanticDiagKind::NotAType { .. }
+        | SemanticDiagKind::NotASubroutine { .. }
         | SemanticDiagKind::InternalError { .. } => {
             internal_error_diag("unexpected variant in record/enum lowering", primary_span)
         }

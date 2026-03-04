@@ -7,7 +7,9 @@ use lyra_semantic::modport_def::ModportDefId;
 use lyra_semantic::modport_def::ModportTarget;
 use lyra_semantic::record::{FieldSem, Packing, RecordId, RecordKind, RecordSem, TypeRef};
 use lyra_semantic::symbols::Namespace;
-use lyra_semantic::types::{ConstInt, ModportView, ModportViewEntry, ModportViewTarget, Ty};
+use lyra_semantic::types::{
+    ConstInt, ModportTfViewEntry, ModportView, ModportViewEntry, ModportViewTarget, Ty,
+};
 use lyra_source::NameSpan;
 use smol_str::SmolStr;
 
@@ -596,14 +598,13 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
 
     let mut entries = Vec::new();
     let mut diags = Vec::new();
-    let mut seen_ports: std::collections::HashMap<SmolStr, (Site, NameSpan)> =
+    let mut seen_signal_ports: std::collections::HashMap<SmolStr, (Site, NameSpan)> =
         std::collections::HashMap::new();
 
     for entry in &*modport_def.entries {
         let entry_primary = DiagSpan::Site(entry.port_id);
         let entry_label = DiagSpan::Name(entry.name_span);
-        // Duplicate port name detection (source-order, before sorting)
-        if let Some(&(prev_site, prev_name_span)) = seen_ports.get(&entry.port_name) {
+        if let Some(&(prev_site, prev_name_span)) = seen_signal_ports.get(&entry.port_name) {
             diags.push(SemanticDiag {
                 kind: SemanticDiagKind::DuplicateDefinition {
                     name: entry.port_name.clone(),
@@ -615,7 +616,7 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
             });
             continue;
         }
-        seen_ports.insert(entry.port_name.clone(), (entry.port_id, entry.name_span));
+        seen_signal_ports.insert(entry.port_name.clone(), (entry.port_id, entry.name_span));
 
         let target = match &entry.target {
             ModportTarget::ImplicitMember { member_name } => {
@@ -646,15 +647,83 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
         });
     }
 
+    let tf_view_entries =
+        resolve_modport_tf_entries(&modport_def.tf_entries, def, iface_scope, &mut diags);
+
     ModportSem {
-        view: ModportView::new(entries),
+        view: ModportView::new(entries, tf_view_entries),
         diags: diags.into_boxed_slice(),
     }
 }
 
+fn resolve_modport_tf_entries(
+    tf_entries: &[lyra_semantic::modport_def::ModportTfEntry],
+    def: &lyra_semantic::def_index::DefIndex,
+    iface_scope: lyra_semantic::scopes::ScopeId,
+    diags: &mut Vec<SemanticDiag>,
+) -> Vec<ModportTfViewEntry> {
+    let mut result = Vec::new();
+    let mut seen_tf_ports: std::collections::HashMap<SmolStr, (Site, NameSpan)> =
+        std::collections::HashMap::new();
+    for tf in tf_entries {
+        let tf_primary = DiagSpan::Site(tf.port_site);
+        let tf_label = DiagSpan::Name(tf.name_span);
+        if let Some(&(prev_site, prev_name_span)) = seen_tf_ports.get(&tf.name) {
+            diags.push(SemanticDiag {
+                kind: SemanticDiagKind::DuplicateDefinition {
+                    name: tf.name.clone(),
+                    original_primary: DiagSpan::Site(prev_site),
+                    original_label: Some(DiagSpan::Name(prev_name_span)),
+                },
+                primary: tf_primary,
+                label: Some(tf_label),
+            });
+            continue;
+        }
+        seen_tf_ports.insert(tf.name.clone(), (tf.port_site, tf.name_span));
+
+        // Resolve in value namespace (interface callables live in value namespace)
+        let Some(sym_id) =
+            def.scopes
+                .resolve(&def.symbols, iface_scope, Namespace::Value, &tf.name)
+        else {
+            diags.push(SemanticDiag {
+                kind: SemanticDiagKind::UnresolvedName {
+                    name: tf.name.clone(),
+                },
+                primary: tf_primary,
+                label: Some(tf_label),
+            });
+            continue;
+        };
+
+        let sym = def.symbols.get(sym_id);
+        if !matches!(
+            sym.kind,
+            lyra_semantic::symbols::SymbolKind::Function | lyra_semantic::symbols::SymbolKind::Task
+        ) {
+            diags.push(SemanticDiag {
+                kind: SemanticDiagKind::NotASubroutine {
+                    name: tf.name.clone(),
+                },
+                primary: tf_primary,
+                label: Some(tf_label),
+            });
+            continue;
+        }
+
+        result.push(ModportTfViewEntry {
+            name: tf.name.clone(),
+            port_site: tf.port_site,
+            target: sym_id,
+        });
+    }
+    result
+}
+
 fn empty_modport_sem() -> ModportSem {
     ModportSem {
-        view: ModportView::new(Vec::new()),
+        view: ModportView::new(Vec::new(), Vec::new()),
         diags: Box::new([]),
     }
 }

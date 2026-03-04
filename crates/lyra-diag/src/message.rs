@@ -101,6 +101,7 @@ pub enum MessageId {
     NonIntegralPackedMember,
     RecordAssignWrongRecord,
     RecordTypeHere,
+    NotASubroutine,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -321,6 +322,9 @@ fn render_other_message(msg: &Message) -> String {
             .and_then(Arg::as_name)
             .map(String::from)
             .unwrap_or_default(),
+        MessageId::NotASubroutine => {
+            format!("`{}` is not a task or function", name())
+        }
         MessageId::InternalError => msg
             .args
             .first()
