@@ -22,6 +22,7 @@ pub struct ModportDef {
     pub id: ModportDefId,
     pub name: SmolStr,
     pub entries: Box<[ModportEntry]>,
+    pub tf_entries: Box<[ModportTfEntry]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,4 +51,28 @@ pub enum PortDirection {
     Output,
     Inout,
     Ref,
+}
+
+/// Whether a modport TF port is `import` or `export` (LRM 25.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TfPortKind {
+    Import,
+    Export,
+}
+
+/// Whether the TF port uses a bare name or a prototype form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ModportTfForm {
+    BareName,
+    Prototype,
+}
+
+/// A task/function entry in a modport declaration (LRM 25.7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModportTfEntry {
+    pub kind: TfPortKind,
+    pub name: SmolStr,
+    pub form: ModportTfForm,
+    pub port_site: Site,
+    pub name_span: NameSpan,
 }

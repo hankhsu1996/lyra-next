@@ -180,9 +180,13 @@ Typing (arity validation, return type) and const-eval for fixed packed/unpacked 
 
 Specify block terminal rules for interface ports. No specify block support. Test: `lrm/ch25/25.6_interfaces_and_specify_blocks`.
 
-### 25.7: Tasks and functions in interfaces
+### 25.7: Export binding semantics
 
-Import/export of subroutines through modports. Neither parsing nor semantic analysis handles `modport_tf_ports_declaration`. Test: `lrm/ch25/25.7_interface_methods`.
+`export` with `task iface.Name` syntax binds a module-defined task into the interface. Parsing of export TF entries is implemented, but the binding semantics that wire a module's task body into the interface scope are not. Blocked by: module-to-interface task binding model. Test: `lrm/ch25/25.7.3_exporting_tasks`.
+
+### 25.7: Prototype signature validation
+
+Prototype-form `import`/`export` in modports (e.g., `import task Read(input logic [7:0] addr)`) parse and resolve the TF name, but the prototype signature is not validated against the actual declared task/function. Blocked by: callable signature comparison infrastructure. Test: deferred until signature matching lands.
 
 ### 25.7.4: Extern forkjoin tasks
 

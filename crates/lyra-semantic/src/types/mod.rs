@@ -375,10 +375,22 @@ pub struct InterfaceType {
 
 /// Derived fact: which ports a modport exposes, their directions, and targets.
 ///
-/// Entries are sorted by `port_name` for deterministic binary search.
+/// Signal entries and TF entries are sorted by name for deterministic binary search.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModportView {
     entries: Box<[ModportViewEntry]>,
+    tf_entries: Box<[ModportTfViewEntry]>,
+}
+
+/// A resolved modport TF port entry (LRM 25.7).
+///
+/// Only stores the allowlist (name + resolved target). `TfPortKind` (import/export)
+/// is kept in `ModportDef` as a source-level fact; the view just gates access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModportTfViewEntry {
+    pub name: SmolStr,
+    pub port_site: Site,
+    pub target: SymbolId,
 }
 
 /// A resolved modport port entry.
@@ -402,10 +414,15 @@ pub enum ModportViewTarget {
 }
 
 impl ModportView {
-    pub fn new(mut entries: Vec<ModportViewEntry>) -> Self {
+    pub fn new(
+        mut entries: Vec<ModportViewEntry>,
+        mut tf_entries: Vec<ModportTfViewEntry>,
+    ) -> Self {
         entries.sort_by(|a, b| a.port_name.cmp(&b.port_name));
+        tf_entries.sort_by(|a, b| a.name.cmp(&b.name));
         Self {
             entries: entries.into_boxed_slice(),
+            tf_entries: tf_entries.into_boxed_slice(),
         }
     }
 
@@ -417,8 +434,22 @@ impl ModportView {
         Some(&self.entries[idx])
     }
 
+    /// Look up a TF member by name.
+    pub fn lookup_tf(&self, name: &str) -> Option<&ModportTfViewEntry> {
+        let idx = self
+            .tf_entries
+            .binary_search_by(|e| e.name.as_str().cmp(name))
+            .ok()?;
+        Some(&self.tf_entries[idx])
+    }
+
     pub fn has_port(&self, port_name: &str) -> bool {
         self.lookup(port_name).is_some()
+    }
+
+    /// Whether the name is listed in TF entries.
+    pub fn has_tf(&self, name: &str) -> bool {
+        self.lookup_tf(name).is_some()
     }
 
     pub fn direction_of_port(&self, port_name: &str) -> Option<PortDirection> {

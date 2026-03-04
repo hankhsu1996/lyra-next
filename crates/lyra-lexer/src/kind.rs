@@ -505,6 +505,13 @@ pub enum SyntaxKind {
     // Array manipulation `with (expr)` clause (LRM 7.12)
     ArrayManipWithClause,
 
+    // Modport TF ports (LRM 25.7)
+    ModportTfPort,
+    ModportTfPortsGroup,
+    ModportTfPortEntry,
+    TaskPrototype,
+    FunctionPrototype,
+
     #[doc(hidden)]
     __Last,
 }

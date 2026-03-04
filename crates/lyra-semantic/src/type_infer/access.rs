@@ -85,7 +85,9 @@ pub(super) fn infer_field_access(field_expr: &FieldExpr, ctx: &dyn InferCtx) -> 
     };
     match ctx.member_lookup(&lhs_type.ty, &member) {
         Ok(info) => match info.kind {
-            MemberKind::BuiltinMethod(_) => ExprType::error(ExprTypeErrorKind::MethodRequiresCall),
+            MemberKind::BuiltinMethod(_) | MemberKind::InterfaceCallable { .. } => {
+                ExprType::error(ExprTypeErrorKind::MethodRequiresCall)
+            }
             _ => ExprType::from_ty(&info.ty),
         },
         Err(MemberLookupError::NoMembersOnType) => {

@@ -235,6 +235,10 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 16,
     };
+    pub const NOT_A_SUBROUTINE: Self = Self {
+        namespace: "lyra.semantic",
+        number: 17,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,

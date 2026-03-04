@@ -212,6 +212,18 @@ fn modport_ports(p: &mut Parser) {
     let mut has_dir = false;
 
     loop {
+        // Import/export TF port group (LRM 25.7)
+        if p.at(SyntaxKind::ImportKw) || p.at(SyntaxKind::ExportKw) {
+            modport_tf_ports_group(p);
+            if !p.eat(SyntaxKind::Comma) {
+                break;
+            }
+            if p.at(SyntaxKind::RParen) {
+                break;
+            }
+            continue;
+        }
+
         // Accept a new direction keyword (updates the sticky direction)
         if ports::is_direction(p.current()) {
             has_dir = true;
@@ -246,4 +258,83 @@ fn modport_ports(p: &mut Parser) {
             break;
         }
     }
+}
+
+// Parse a group of import/export TF ports (LRM 25.7):
+// `import|export tf_entry {, tf_entry}`
+// The group node owns the import/export keyword; each entry is a child.
+fn modport_tf_ports_group(p: &mut Parser) {
+    let group = p.start();
+    p.bump(); // import or export
+
+    modport_tf_port_entry(p);
+
+    loop {
+        if !p.at(SyntaxKind::Comma) {
+            break;
+        }
+        let next = p.nth(1);
+        // A new import/export or direction keyword starts a new group
+        if next == SyntaxKind::ImportKw
+            || next == SyntaxKind::ExportKw
+            || ports::is_direction(next)
+            || next == SyntaxKind::RParen
+            || next == SyntaxKind::Semicolon
+        {
+            break;
+        }
+        p.bump(); // comma
+        modport_tf_port_entry(p);
+    }
+
+    group.complete(p, SyntaxKind::ModportTfPortsGroup);
+}
+
+// Parse a single modport TF entry: bare ident, task prototype, or function prototype.
+fn modport_tf_port_entry(p: &mut Parser) {
+    let entry = p.start();
+    if p.at(SyntaxKind::TaskKw) {
+        task_prototype(p);
+    } else if p.at(SyntaxKind::FunctionKw) {
+        function_prototype(p);
+    } else {
+        p.expect(SyntaxKind::Ident);
+    }
+    entry.complete(p, SyntaxKind::ModportTfPortEntry);
+}
+
+// Parse task prototype: `task name [ ( tf_port_list ) ]`
+fn task_prototype(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // task
+    p.expect(SyntaxKind::Ident);
+    if p.at(SyntaxKind::LParen) {
+        tf_port_list(p);
+    }
+    m.complete(p, SyntaxKind::TaskPrototype);
+}
+
+// Parse function prototype: `function data_type_or_void name [ ( tf_port_list ) ]`
+// Uses the same return-type disambiguation as `function_decl`.
+fn function_prototype(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // function
+    // Return type (optional -- implicit logic if omitted, LRM 13.4.1).
+    // Lookahead: if current is Ident and next starts the port list or ends
+    // the entry, the Ident is the function name, not a type.
+    if p.at(SyntaxKind::Ident)
+        && (p.nth(1) == SyntaxKind::LParen
+            || p.nth(1) == SyntaxKind::Semicolon
+            || p.nth(1) == SyntaxKind::Comma
+            || p.nth(1) == SyntaxKind::RParen)
+    {
+        p.bump(); // function name (no explicit return type)
+    } else {
+        declarations::type_spec(p);
+        p.expect(SyntaxKind::Ident); // function name
+    }
+    if p.at(SyntaxKind::LParen) {
+        tf_port_list(p);
+    }
+    m.complete(p, SyntaxKind::FunctionPrototype);
 }
