@@ -263,6 +263,18 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 22,
     };
+    pub const ASSIGN_TO_FOREACH_VAR: Self = Self {
+        namespace: "lyra.semantic",
+        number: 23,
+    };
+    pub const FOREACH_VAR_SAME_AS_ARRAY: Self = Self {
+        namespace: "lyra.semantic",
+        number: 24,
+    };
+    pub const FOREACH_TOO_MANY_VARS: Self = Self {
+        namespace: "lyra.semantic",
+        number: 25,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,
