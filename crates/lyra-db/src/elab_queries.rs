@@ -894,7 +894,7 @@ fn match_case_body(
     let mut matched: Option<(lyra_ast::CaseItem, lyra_ast::GenerateBody)> = None;
     let mut default_body: Option<lyra_ast::GenerateBody> = None;
 
-    for item in case_stmt.items() {
+    for item in case_stmt.normal_items() {
         if item.is_default() {
             default_body = item.generate_body();
             continue;

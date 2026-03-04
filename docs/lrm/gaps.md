@@ -136,9 +136,9 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 ## Chapter 12 -- Procedural Programming Statements
 
-### 12.5.4: Set membership case statement (`case inside`)
+### 12.5.4: Set membership case statement (`case inside`) -- inside semantics
 
-`case (expr) inside` syntax with value ranges as case items. The parser crashes (rowan assertion failure) on `case ... inside` syntax. Blocked by: parser support for `inside` keyword in case statement context. Test: `lrm/ch12/12.5.4_set_membership_case`.
+`case (expr) inside` parses (CST/AST nodes, typed accessors, semantic traversal). Remaining: `inside` operator value-range matching semantics (11.4.13), wildcard bit handling, type checking of range expressions. Blocked by: `inside` operator semantic evaluation. Test: `lrm/ch12/12.5.4_set_membership_case`.
 
 ### 12.6.1: Pattern matching in case statements
 

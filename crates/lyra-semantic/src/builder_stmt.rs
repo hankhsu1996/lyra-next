@@ -57,6 +57,7 @@ pub(crate) fn collect_statement(
         SyntaxKind::IfStmt
         | SyntaxKind::CaseStmt
         | SyntaxKind::CaseItem
+        | SyntaxKind::CaseInsideItem
         | SyntaxKind::ForStmt
         | SyntaxKind::WhileStmt
         | SyntaxKind::RepeatStmt
