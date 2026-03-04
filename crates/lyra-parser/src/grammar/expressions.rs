@@ -197,7 +197,7 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
                 }
             }
             p.expect(SyntaxKind::RBrace);
-            Some(m.complete(p, SyntaxKind::ConcatExpr))
+            Some(m.complete(p, SyntaxKind::AssignmentPatternExpr))
         }
         SyntaxKind::NewKw => {
             let m = p.start();

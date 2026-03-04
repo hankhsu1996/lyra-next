@@ -127,6 +127,10 @@ pub enum ExprView {
     BitVec(BitVecType),
     /// Non-bit-vector type (real, string, struct, etc.).
     Plain,
+    /// Assignment pattern (`'{...}`): aggregate literal that is not yet
+    /// semantically resolved. The underlying `Ty` is `Error` (unsupported).
+    /// Downstream rules gate on this view to skip inapplicable checks.
+    AssignmentPattern,
     /// Type could not be determined.
     Error(ExprTypeErrorKind),
 }
@@ -249,7 +253,7 @@ impl ExprType {
     pub fn pretty(&self) -> SmolStr {
         match &self.view {
             ExprView::BitVec(bv) => bv.pretty(),
-            ExprView::Plain => self.ty.pretty(),
+            ExprView::Plain | ExprView::AssignmentPattern => self.ty.pretty(),
             ExprView::Error(_) => SmolStr::new_static("<error>"),
         }
     }
@@ -343,6 +347,6 @@ pub(crate) fn try_integral_view(et: &ExprType, ctx: &dyn InferCtx) -> Option<Bit
                 None
             }
         }
-        ExprView::Error(_) => None,
+        ExprView::AssignmentPattern | ExprView::Error(_) => None,
     }
 }

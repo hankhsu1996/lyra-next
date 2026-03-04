@@ -81,7 +81,7 @@ pub(super) fn infer_prefix(
         let operand = infer_expr(&operand_expr, ctx, expected);
         match &operand.view {
             ExprView::BitVec(_) | ExprView::Error(_) => operand,
-            ExprView::Plain => {
+            ExprView::Plain | ExprView::AssignmentPattern => {
                 if let Some(bv) = try_integral_view(&operand, ctx) {
                     ExprType::bitvec(bv)
                 } else {

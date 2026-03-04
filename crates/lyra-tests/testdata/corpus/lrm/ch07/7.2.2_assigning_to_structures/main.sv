@@ -31,4 +31,22 @@ module assigning_to_structures;
   // OK: packed struct from integral (no record-to-record mismatch)
   assign x = 16'hABCD;
 
+  // Packed struct to/from integral (reuse s1_t which is 16-bit packed)
+  logic [15:0] v16;
+  assign v16 = x;       // OK: packed struct -> integral (same width)
+  assign x = v16;       // OK: integral -> packed struct (same width)
+
+  // Truncation: 16-bit packed struct -> 8-bit integral
+  logic [7:0] v8;
+  assign v8 = x;
+  //    ^ warning[lyra.type[1]]
+
+  // Unpacked struct to/from integral (error)
+  typedef struct { logic [7:0] a; logic [7:0] b; } unpacked_t;
+  unpacked_t u;
+  //           ^ error[lyra.type[41]]
+  assign v16 = u;
+  //             ^ error[lyra.type[41]]
+  assign u = v16;
+
 endmodule

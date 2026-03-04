@@ -348,6 +348,13 @@ impl ConcatExpr {
     }
 }
 
+impl crate::nodes::AssignmentPatternExpr {
+    /// Expression children inside `AssignmentPatternItem` wrappers.
+    pub fn operands(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
+        support::expr_children(&self.syntax)
+    }
+}
+
 impl ReplicExpr {
     pub fn count(&self) -> Option<crate::expr::Expr> {
         support::expr_child(&self.syntax, 0)

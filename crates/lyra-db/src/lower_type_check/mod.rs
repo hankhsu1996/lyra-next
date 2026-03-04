@@ -108,6 +108,9 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::StreamSliceSizeNotConst { .. } => {
             stream::lower_stream_slice_size_not_const(item, source_map, diags);
         }
+        TypeCheckItem::UnpackedRecordIntegralAssign { .. } => {
+            record::lower_unpacked_record_integral_assign(db, unit, item, source_map, diags);
+        }
     }
 }
 

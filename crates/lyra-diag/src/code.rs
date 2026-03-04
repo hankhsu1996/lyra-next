@@ -211,6 +211,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 40,
     };
+    pub const UNPACKED_RECORD_INTEGRAL_ASSIGN: Self = Self {
+        namespace: "lyra.type",
+        number: 41,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,

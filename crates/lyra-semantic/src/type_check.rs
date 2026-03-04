@@ -8,7 +8,7 @@ use lyra_source::{NameSpan, TextRange};
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
 use crate::modport_def::PortDirection;
-use crate::record::RecordId;
+use crate::record::{Packing, RecordId};
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView};
 use crate::types::{SymbolType, Ty, UnpackedDim};
 
@@ -221,6 +221,14 @@ pub enum TypeCheckItem {
     StreamSliceSizeNotConst {
         slice_size_site: Site,
     },
+    UnpackedRecordIntegralAssign {
+        assign_site: Site,
+        lhs_site: Site,
+        rhs_site: Site,
+        record_id: RecordId,
+        other_ty: Ty,
+        record_is_lhs: bool,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -269,6 +277,15 @@ pub trait TypeCheckCtx {
     fn const_eval_int_by_site_full(&self, site: Site) -> crate::types::ConstInt;
     /// Check whether an assignment target resolves to a readonly symbol.
     fn readonly_target_kind(&self, expr_site: Site) -> Option<(ReadonlyKind, smol_str::SmolStr)>;
+    /// Packing of a record (struct/union) type by its `RecordId`.
+    ///
+    /// Returns `None` for missing defs (recovery).
+    fn record_packing(&self, id: RecordId) -> Option<Packing>;
+    /// Fixed bit width of a packed/softpacked record.
+    ///
+    /// Returns `Some(width)` only for packed/softpacked records where width
+    /// is statically known; otherwise `None`.
+    fn record_fixed_width_bits(&self, id: RecordId) -> Option<u32>;
 }
 
 pub(crate) const MISSING_AST_ID: &str = "missing_ast_id in type checker";
@@ -417,7 +434,9 @@ pub fn check_var_decl(
         }
 
         if !matches!(rhs_type.ty, Ty::Error) {
-            check_assignment_compat(&lhs_type, &rhs_type, decl_site, lhs_site, rhs_site, items);
+            check_assignment_compat(
+                &lhs_type, &rhs_type, decl_site, lhs_site, rhs_site, ctx, items,
+            );
         }
     }
 
@@ -469,7 +488,9 @@ fn check_assignment_pair(
             }
 
             if !matches!(rhs_type.ty, Ty::Error) {
-                check_assignment_compat(&lhs_type, &rhs_type, stmt_site, lhs_site, rhs_site, items);
+                check_assignment_compat(
+                    &lhs_type, &rhs_type, stmt_site, lhs_site, rhs_site, ctx, items,
+                );
             }
         }
         crate::lhs::LhsClass::Stream(stream_expr) => {
@@ -509,6 +530,7 @@ fn check_assignment_compat(
     assign_site: Site,
     lhs_site: Site,
     rhs_site: Site,
+    ctx: &dyn TypeCheckCtx,
     items: &mut Vec<TypeCheckItem>,
 ) {
     if matches!(lhs.ty, Ty::Error)
@@ -573,6 +595,15 @@ fn check_assignment_compat(
         _ => {}
     }
 
+    // Record <-> integral assignment compatibility (LRM 7.2.2).
+    // Assignment patterns (`'{...}`) are exempt: they are aggregate
+    // literals, not genuine integral expressions.
+    if !matches!(rhs.view, ExprView::AssignmentPattern)
+        && !matches!(lhs.view, ExprView::AssignmentPattern)
+    {
+        check_record_integral_compat(lhs, rhs, assign_site, lhs_site, rhs_site, ctx, items);
+    }
+
     // Array assignment compatibility check (both sides must be arrays)
     if matches!(lhs.ty, Ty::Array { .. })
         && matches!(rhs.ty, Ty::Array { .. })
@@ -588,6 +619,69 @@ fn check_assignment_compat(
             lhs_ty: lhs.ty.clone(),
             rhs_ty: rhs.ty.clone(),
         });
+    }
+}
+
+/// Record <-> integral assignment compatibility (LRM 7.2.2).
+///
+/// Unpacked records cannot be assigned to/from integral types (error).
+/// Packed/softpacked records are bit-vector-compatible with integrals;
+/// truncation warnings apply when widths differ.
+fn check_record_integral_compat(
+    lhs: &ExprType,
+    rhs: &ExprType,
+    assign_site: Site,
+    lhs_site: Site,
+    rhs_site: Site,
+    ctx: &dyn TypeCheckCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let (record_id, other_ty, record_is_lhs) = match (&lhs.ty, &rhs.ty) {
+        (Ty::Record(rid), Ty::Integral(_)) => (*rid, &rhs.ty, true),
+        (Ty::Integral(_), Ty::Record(rid)) => (*rid, &lhs.ty, false),
+        _ => return,
+    };
+
+    let Some(packing) = ctx.record_packing(record_id) else {
+        return;
+    };
+
+    match packing {
+        Packing::Unpacked => {
+            items.push(TypeCheckItem::UnpackedRecordIntegralAssign {
+                assign_site,
+                lhs_site,
+                rhs_site,
+                record_id,
+                other_ty: other_ty.clone(),
+                record_is_lhs,
+            });
+        }
+        Packing::Packed | Packing::SoftPacked => {
+            let record_width = ctx.record_fixed_width_bits(record_id);
+            let integral_width = if record_is_lhs {
+                bitvec_known_width(rhs)
+            } else {
+                bitvec_known_width(lhs)
+            };
+            let (lhs_w, rhs_w) = if record_is_lhs {
+                (record_width, integral_width)
+            } else {
+                (integral_width, record_width)
+            };
+            if let (Some(lw), Some(rw)) = (lhs_w, rhs_w)
+                && !is_context_dependent(rhs)
+                && rw > lw
+            {
+                items.push(TypeCheckItem::AssignTruncation {
+                    assign_site,
+                    lhs_site,
+                    rhs_site,
+                    lhs_width: lw,
+                    rhs_width: rw,
+                });
+            }
+        }
     }
 }
 

@@ -4,9 +4,9 @@ use lyra_source::NameSpan;
 
 use crate::node::{AstNode, HasSyntax, is_expression_kind};
 use crate::nodes::{
-    BinExpr, CallExpr, CastExpr, ConcatExpr, CondExpr, Expression, FieldExpr, IndexExpr, Literal,
-    NameRef, NewExpr, ParenExpr, PrefixExpr, QualifiedName, RangeExpr, ReplicExpr, StreamExpr,
-    SystemTfCall, TypeExpr, TypeSpec,
+    AssignmentPatternExpr, BinExpr, CallExpr, CastExpr, ConcatExpr, CondExpr, Expression,
+    FieldExpr, IndexExpr, Literal, NameRef, NewExpr, ParenExpr, PrefixExpr, QualifiedName,
+    RangeExpr, ReplicExpr, StreamExpr, SystemTfCall, TypeExpr, TypeSpec,
 };
 
 /// Typed handle for any expression-kind syntax node.
@@ -119,6 +119,9 @@ impl Expr {
             SyntaxKind::PrefixExpr => PrefixExpr::cast(node).map(ExprKind::PrefixExpr),
             SyntaxKind::CondExpr => CondExpr::cast(node).map(ExprKind::CondExpr),
             SyntaxKind::ConcatExpr => ConcatExpr::cast(node).map(ExprKind::ConcatExpr),
+            SyntaxKind::AssignmentPatternExpr => {
+                AssignmentPatternExpr::cast(node).map(ExprKind::AssignmentPatternExpr)
+            }
             SyntaxKind::ReplicExpr => ReplicExpr::cast(node).map(ExprKind::ReplicExpr),
             SyntaxKind::IndexExpr => IndexExpr::cast(node).map(ExprKind::IndexExpr),
             SyntaxKind::RangeExpr => RangeExpr::cast(node).map(ExprKind::RangeExpr),
@@ -147,6 +150,7 @@ pub enum ExprKind {
     PrefixExpr(PrefixExpr),
     CondExpr(CondExpr),
     ConcatExpr(ConcatExpr),
+    AssignmentPatternExpr(AssignmentPatternExpr),
     ReplicExpr(ReplicExpr),
     IndexExpr(IndexExpr),
     RangeExpr(RangeExpr),
@@ -175,6 +179,7 @@ impl ExprKind {
                 | ExprKind::PrefixExpr(_)
                 | ExprKind::CondExpr(_)
                 | ExprKind::ConcatExpr(_)
+                | ExprKind::AssignmentPatternExpr(_)
                 | ExprKind::ReplicExpr(_)
                 | ExprKind::IndexExpr(_)
                 | ExprKind::CallExpr(_)
@@ -191,6 +196,7 @@ impl ExprKind {
             Self::PrefixExpr(n) => n.syntax(),
             Self::CondExpr(n) => n.syntax(),
             Self::ConcatExpr(n) => n.syntax(),
+            Self::AssignmentPatternExpr(n) => n.syntax(),
             Self::ReplicExpr(n) => n.syntax(),
             Self::IndexExpr(n) => n.syntax(),
             Self::RangeExpr(n) => n.syntax(),

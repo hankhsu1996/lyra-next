@@ -33,13 +33,7 @@ pub(super) fn lower_assign_truncation(
     let rhs_span = source_map
         .map_span(rhs_site.text_range())
         .unwrap_or(assign_span);
-    diags.push(truncation_diag(
-        *lhs_width,
-        *rhs_width,
-        assign_span,
-        lhs_span,
-        rhs_span,
-    ));
+    diags.push(truncation_diag(*lhs_width, *rhs_width, lhs_span, rhs_span));
 }
 
 pub(super) fn lower_array_incompat(
@@ -135,7 +129,6 @@ pub(super) fn lower_array_query_item(
 fn truncation_diag(
     lhs_width: u32,
     rhs_width: u32,
-    assign_span: lyra_source::Span,
     lhs_span: lyra_source::Span,
     rhs_span: lyra_source::Span,
 ) -> lyra_diag::Diagnostic {
@@ -152,16 +145,8 @@ fn truncation_diag(
     )
     .with_label(lyra_diag::Label {
         kind: lyra_diag::LabelKind::Primary,
-        span: assign_span,
-        message: lyra_diag::Message::new(lyra_diag::MessageId::WidthMismatch, width_args()),
-    })
-    .with_label(lyra_diag::Label {
-        kind: lyra_diag::LabelKind::Secondary,
         span: lhs_span,
-        message: lyra_diag::Message::new(
-            lyra_diag::MessageId::BitsWide,
-            vec![lyra_diag::Arg::Width(lhs_width)],
-        ),
+        message: lyra_diag::Message::new(lyra_diag::MessageId::WidthMismatch, width_args()),
     })
     .with_label(lyra_diag::Label {
         kind: lyra_diag::LabelKind::Secondary,
