@@ -78,6 +78,7 @@ pub enum MessageId {
     IllegalDriveStrengthBothHighz,
     QueueBoundNotConst,
     QueueBoundNotPositive,
+    StreamSliceSizeNotConst,
     // Elaboration messages
     UnresolvedModuleInst,
     NotInstantiable,
@@ -262,7 +263,6 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::ModportExprNotAssignable
         | MessageId::MemberNotInModport
         | MessageId::EnumCastOutOfRange
-        | MessageId::StreamWithNonArray
         | MessageId::EnumDuplicateValue
         | MessageId::EnumValueOverflow
         | MessageId::EnumSizedLiteralWidthMismatch
@@ -281,10 +281,6 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::NewExprSizeNegative
         | MessageId::NewExprInitIncompat
         | MessageId::ArrayIncompatible
-        | MessageId::StreamUnpackOperandInvalid
-        | MessageId::StreamUnpackOperandUnsupported
-        | MessageId::StreamUnpackGreedyRemainder
-        | MessageId::StreamUnpackWidthMismatch
         | MessageId::AssignToConst
         | MessageId::ConstMissingInit
         | MessageId::VoidObjectType
@@ -297,6 +293,12 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::NonIntegralPackedMember
         | MessageId::RecordAssignWrongRecord
         | MessageId::RecordTypeHere => render_type_message(msg),
+        MessageId::StreamUnpackOperandInvalid
+        | MessageId::StreamUnpackOperandUnsupported
+        | MessageId::StreamUnpackGreedyRemainder
+        | MessageId::StreamUnpackWidthMismatch
+        | MessageId::StreamSliceSizeNotConst
+        | MessageId::StreamWithNonArray => render_stream_unpack_message(msg),
         _ => render_other_message(msg),
     }
 }
@@ -401,7 +403,6 @@ fn render_type_message(msg: &Message) -> String {
             let enum_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
             format!("cast value {value} is not a member of enum `{enum_name}`")
         }
-        MessageId::StreamWithNonArray => "`with` clause requires an array operand".into(),
         MessageId::EnumDuplicateValue
         | MessageId::EnumValueOverflow
         | MessageId::EnumSizedLiteralWidthMismatch
@@ -420,13 +421,7 @@ fn render_type_message(msg: &Message) -> String {
         | MessageId::NewExprSizeNegative
         | MessageId::NewExprInitIncompat
         | MessageId::ArrayIncompatible => render_array_message(msg),
-        MessageId::StreamUnpackOperandInvalid
-        | MessageId::StreamUnpackOperandUnsupported
-        | MessageId::StreamUnpackGreedyRemainder
-        | MessageId::StreamUnpackWidthMismatch => render_stream_unpack_message(msg),
-        MessageId::AssignToConst => {
-            format!("cannot assign to const variable `{}`", name())
-        }
+        MessageId::AssignToConst => format!("cannot assign to const variable `{}`", name()),
         MessageId::ConstMissingInit => "const variable must have an initializer".into(),
         MessageId::VoidObjectType => "void cannot be used as an object type".into(),
         MessageId::VoidUsedAsValue => "void expression cannot be used as a value".into(),
@@ -444,8 +439,7 @@ fn render_type_message(msg: &Message) -> String {
         }
         MessageId::QueueBoundNotConst => "queue bound must be a constant positive integer".into(),
         MessageId::QueueBoundNotPositive => {
-            let value = name();
-            format!("queue bound must be a positive integer, got {value}")
+            format!("queue bound must be a positive integer, got {}", name())
         }
         _ => String::new(),
     }
@@ -472,6 +466,10 @@ fn render_stream_unpack_message(msg: &Message) -> String {
             let rhs_w = msg.args.get(1).and_then(Arg::as_width).unwrap_or(0);
             format!("streaming unpack target is {lhs_w} bits but source is {rhs_w} bits")
         }
+        MessageId::StreamSliceSizeNotConst => {
+            "streaming slice_size must be a constant expression".into()
+        }
+        MessageId::StreamWithNonArray => "`with` clause requires an array operand".into(),
         _ => String::new(),
     }
 }

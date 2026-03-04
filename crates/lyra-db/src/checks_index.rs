@@ -40,6 +40,7 @@ pub enum CheckKind {
     FieldExpr,
     CastExpr,
     StreamOperandItem,
+    StreamExpr,
     CallExpr,
     NetDecl,
     TypedefDecl,
@@ -334,6 +335,7 @@ impl IndexBuilder<'_> {
                     self.push(ek.syntax(), CheckKind::SystemTfCall, access);
                 }
                 ExprKind::StreamExpr(stream) => {
+                    self.push(stream.syntax(), CheckKind::StreamExpr, access);
                     if let Some(operands) = stream.stream_operands() {
                         for item in operands.items() {
                             self.push(item.syntax(), CheckKind::StreamOperandItem, access);

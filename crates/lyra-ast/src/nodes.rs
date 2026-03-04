@@ -110,7 +110,7 @@ ast_nodes! {
     ConcatExpr(SyntaxKind::ConcatExpr) { @custom }
     ReplicExpr(SyntaxKind::ReplicExpr) { @custom }
     StreamExpr(SyntaxKind::StreamExpr) { @custom }
-    StreamSliceSize(SyntaxKind::StreamSliceSize) {}
+    StreamSliceSize(SyntaxKind::StreamSliceSize) { @custom }
     StreamOperands(SyntaxKind::StreamOperands) { @custom }
     CastExpr(SyntaxKind::CastExpr) { @custom }
     NewExpr(SyntaxKind::NewExpr) { @custom }

@@ -207,6 +207,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 39,
     };
+    pub const STREAM_SLICE_SIZE_NOT_CONST: Self = Self {
+        namespace: "lyra.type",
+        number: 40,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,
