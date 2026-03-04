@@ -97,6 +97,7 @@ pub enum MessageId {
     ModportConflict,
     WildcardLocalConflict,
     TypeParamNoDefault,
+    NonIntegralPackedMember,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -281,7 +282,8 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::ArrayQueryVarSizedDimByNumber
         | MessageId::IllegalDriveStrengthBothHighz
         | MessageId::QueueBoundNotConst
-        | MessageId::QueueBoundNotPositive => render_type_message(msg),
+        | MessageId::QueueBoundNotPositive
+        | MessageId::NonIntegralPackedMember => render_type_message(msg),
         _ => render_other_message(msg),
     }
 }
@@ -341,6 +343,7 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::NotADataType => "not a data type".into(),
         MessageId::VoidMemberNonTagged
         | MessageId::IllegalUnionMemberType
+        | MessageId::NonIntegralPackedMember
         | MessageId::IllegalEnumBaseType
         | MessageId::EnumBaseDimsNotConstant
         | MessageId::EnumRangeBoundNotEvaluable
@@ -502,6 +505,15 @@ fn render_record_message(msg: &Message) -> String {
             format!(
                 "{category} member `{}` is not allowed in untagged unions",
                 name()
+            )
+        }
+        MessageId::NonIntegralPackedMember => {
+            let record_kind = msg.args.first().and_then(Arg::as_category).unwrap_or("?");
+            let member_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            let packing = msg.args.get(2).and_then(Arg::as_category).unwrap_or("?");
+            let category = msg.args.get(3).and_then(Arg::as_category).unwrap_or("?");
+            format!(
+                "{record_kind} member `{member_name}` is not an integral type ({category}) in {packing} {record_kind}"
             )
         }
         MessageId::IllegalEnumBaseType => {

@@ -223,6 +223,10 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 15,
     };
+    pub const NON_INTEGRAL_PACKED_MEMBER: Self = Self {
+        namespace: "lyra.semantic",
+        number: 16,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,

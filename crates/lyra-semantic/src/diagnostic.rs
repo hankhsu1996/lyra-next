@@ -77,6 +77,12 @@ pub enum SemanticDiagKind {
     EnumRangeTooLarge {
         count: u64,
     },
+    NonIntegralPackedMember {
+        name: SmolStr,
+        record_kind: SmolStr,
+        packing: SmolStr,
+        category: SmolStr,
+    },
     InternalError {
         detail: SmolStr,
     },
@@ -131,6 +137,9 @@ impl SemanticDiag {
             }
             SemanticDiagKind::EnumRangeTooLarge { count } => {
                 format!("enum member range count is too large ({count})")
+            }
+            SemanticDiagKind::NonIntegralPackedMember { name, category, .. } => {
+                format!("non-integral {category} member `{name}` in packed record")
             }
             SemanticDiagKind::InternalError { detail } => {
                 format!("internal error: {detail}")

@@ -161,6 +161,27 @@ pub(crate) fn lower_semantic_diag(
             name,
             primary_span,
         ),
+        SemanticDiagKind::VoidMemberNonTagged { .. }
+        | SemanticDiagKind::IllegalUnionMemberType { .. }
+        | SemanticDiagKind::IllegalEnumBaseType { .. }
+        | SemanticDiagKind::EnumBaseDimsNotConstant
+        | SemanticDiagKind::EnumRangeBoundNotEvaluable
+        | SemanticDiagKind::EnumRangeCountNegative { .. }
+        | SemanticDiagKind::EnumRangeTooLarge { .. }
+        | SemanticDiagKind::NonIntegralPackedMember { .. } => {
+            lower_record_enum_diag(&diag.kind, primary_span)
+        }
+        SemanticDiagKind::InternalError { detail } => internal_error_diag(detail, primary_span),
+    }
+}
+
+/// Lower record/enum validation diagnostics.
+///
+/// Total over its input: all `SemanticDiagKind` variants are explicitly matched.
+/// Non-handled variants (dispatched directly in `lower_semantic_diag`) produce
+/// an internal error so new variants cause compile errors, not silent fallbacks.
+fn lower_record_enum_diag(kind: &SemanticDiagKind, primary_span: Span) -> Diagnostic {
+    match kind {
         SemanticDiagKind::VoidMemberNonTagged { name } => lower_name_diag(
             DiagnosticCode::VOID_MEMBER_NON_TAGGED,
             MessageId::VoidMemberNonTagged,
@@ -205,7 +226,33 @@ pub(crate) fn lower_semantic_diag(
             vec![Arg::Name(SmolStr::new(format!("{count}")))],
             primary_span,
         ),
-        SemanticDiagKind::InternalError { detail } => internal_error_diag(detail, primary_span),
+        SemanticDiagKind::NonIntegralPackedMember {
+            name,
+            record_kind,
+            packing,
+            category,
+        } => lower_args_diag(
+            DiagnosticCode::NON_INTEGRAL_PACKED_MEMBER,
+            MessageId::NonIntegralPackedMember,
+            vec![
+                Arg::Category(record_kind.clone()),
+                Arg::Name(name.clone()),
+                Arg::Category(packing.clone()),
+                Arg::Category(category.clone()),
+            ],
+            primary_span,
+        ),
+        SemanticDiagKind::UnresolvedName { .. }
+        | SemanticDiagKind::DuplicateDefinition { .. }
+        | SemanticDiagKind::PackageNotFound { .. }
+        | SemanticDiagKind::MemberNotFound { .. }
+        | SemanticDiagKind::AmbiguousWildcardImport { .. }
+        | SemanticDiagKind::UnsupportedQualifiedPath { .. }
+        | SemanticDiagKind::UndeclaredType { .. }
+        | SemanticDiagKind::NotAType { .. }
+        | SemanticDiagKind::InternalError { .. } => {
+            internal_error_diag("unexpected variant in record/enum lowering", primary_span)
+        }
     }
 }
 
