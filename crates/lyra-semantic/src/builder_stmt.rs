@@ -54,7 +54,6 @@ pub(crate) fn collect_statement(
                 collect_statement(ctx, body.syntax(), foreach_scope);
             }
         }
-        SyntaxKind::BreakStmt | SyntaxKind::ContinueStmt => {}
         SyntaxKind::IfStmt
         | SyntaxKind::CaseStmt
         | SyntaxKind::CaseItem

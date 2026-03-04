@@ -229,6 +229,33 @@ fn do_while_stmt(p: &mut Parser) {
     m.complete(p, SyntaxKind::DoWhileStmt);
 }
 
+// `break ;` (LRM 12.8)
+fn break_stmt(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // break
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::BreakStmt);
+}
+
+// `continue ;` (LRM 12.8)
+fn continue_stmt(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // continue
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::ContinueStmt);
+}
+
+// `return [expr] ;` -- expr omitted if next token is `;` (LRM 12.8)
+fn return_stmt(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // return
+    if !p.at(SyntaxKind::Semicolon) {
+        expressions::expr(p);
+    }
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::ReturnStmt);
+}
+
 // `foreach (array_ref[vars]) stmt` (LRM 12.7.3)
 fn foreach_stmt(p: &mut Parser) {
     let m = p.start();
@@ -385,33 +412,6 @@ fn event_item(p: &mut Parser) {
     }
     expressions::expr(p);
     m.complete(p, SyntaxKind::EventItem);
-}
-
-// `break ;`
-fn break_stmt(p: &mut Parser) {
-    let m = p.start();
-    p.bump(); // break
-    p.expect(SyntaxKind::Semicolon);
-    m.complete(p, SyntaxKind::BreakStmt);
-}
-
-// `continue ;`
-fn continue_stmt(p: &mut Parser) {
-    let m = p.start();
-    p.bump(); // continue
-    p.expect(SyntaxKind::Semicolon);
-    m.complete(p, SyntaxKind::ContinueStmt);
-}
-
-// `return [expr] ;`
-fn return_stmt(p: &mut Parser) {
-    let m = p.start();
-    p.bump(); // return
-    if !p.at(SyntaxKind::Semicolon) && !p.at_end() {
-        expressions::expr(p);
-    }
-    p.expect(SyntaxKind::Semicolon);
-    m.complete(p, SyntaxKind::ReturnStmt);
 }
 
 // Expression statement: `expr ;` or `lhs = rhs ;` or `lhs <= rhs ;`
