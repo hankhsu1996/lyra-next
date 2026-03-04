@@ -92,9 +92,9 @@ Type parameter declarations and default resolution are implemented (6.20.3). Rem
 
 Packed structs can be assigned from matching-width integral values. Struct-to-struct assignment (copying all fields) and aggregate assignment patterns (struct literals) are not type-checked. No assignment compatibility checking exists for `Record` types in `type_check.rs`. Blocked by: struct assignment compatibility rules, aggregate literal/pattern expression support. Test: `lrm/ch07/7.2.2_assigning_to_structures`.
 
-### 7.3.1: Soft packed union layout semantics
+### 7.3.1: Packed union layout and expression semantics
 
-Width computation (`bit_width_total`) handles packed records internally (struct=sum, union=max). `$bits` const-eval now exposes these widths at the SV level. Right-justified member placement and layout mapping are not modeled. Test: `lrm/ch07/7.3.1_packed_unions/cases/soft_packed_union_layout`.
+Non-integral member validation is implemented for packed structs and unions (LRM 7.2.1 / 7.3.1). Width computation (`bit_width_total`) handles packed records internally (struct=sum, union=max). `$bits` const-eval exposes these widths at the SV level. Remaining: right-justified member placement and layout mapping, packed union value/expression semantics (packed union as vector, selection semantics). Test: `lrm/ch07/7.3.1_packed_unions/cases/soft_packed_union_layout`.
 
 ### 7.3.2: Tagged unions
 

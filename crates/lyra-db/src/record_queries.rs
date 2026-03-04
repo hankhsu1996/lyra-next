@@ -283,6 +283,55 @@ fn forbidden_union_member_category(ty: &Ty) -> Option<&'static str> {
     }
 }
 
+/// Returns the non-integral category label if this type cannot appear in a packed record.
+///
+/// LRM 7.2.1 / 7.3.1: packed structs and packed unions shall contain only
+/// integral data types. Enums, integral types, and other packed records are
+/// integral. Error and void are skipped (handled separately).
+fn non_integral_packed_member_category(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    ty: &Ty,
+) -> Option<&'static str> {
+    match ty {
+        Ty::Record(id) => {
+            let file_id = id.file();
+            let source_file = source_file_by_id(db, unit, file_id)?;
+            let def = def_index_file(db, source_file);
+            let record_def = def.record_def_by_id(*id)?;
+            match record_def.packing {
+                Packing::Packed | Packing::SoftPacked => None,
+                Packing::Unpacked => match record_def.kind {
+                    RecordKind::Struct => Some("unpacked struct"),
+                    RecordKind::Union | RecordKind::TaggedUnion => Some("unpacked union"),
+                },
+            }
+        }
+        Ty::Real(_) => Some("real"),
+        Ty::String => Some("string"),
+        Ty::Chandle => Some("chandle"),
+        Ty::Event => Some("event"),
+        Ty::Interface(_) => Some("interface"),
+        Ty::Array { .. } => Some("unpacked array"),
+        Ty::Integral(_) | Ty::Enum(_) | Ty::Error | Ty::Void => None,
+    }
+}
+
+fn record_kind_str(kind: RecordKind) -> &'static str {
+    match kind {
+        RecordKind::Struct => "struct",
+        RecordKind::Union | RecordKind::TaggedUnion => "union",
+    }
+}
+
+fn packing_str(packing: Packing) -> &'static str {
+    match packing {
+        Packing::Packed => "packed",
+        Packing::SoftPacked => "soft packed",
+        Packing::Unpacked => "unpacked",
+    }
+}
+
 fn empty_record_sem() -> RecordSem {
     RecordSem {
         fields: Box::new([]),
@@ -339,6 +388,38 @@ pub fn record_diagnostics<'db>(
                             category: SmolStr::new(category),
                         },
                         primary: DiagSpan::Site(def_field.best_type_site()),
+                        label: None,
+                    });
+                }
+            }
+        }
+
+        // Non-integral member in packed record (LRM 7.2.1 / 7.3.1)
+        if matches!(record_def.packing, Packing::Packed | Packing::SoftPacked) {
+            let rk = record_kind_str(record_def.kind);
+            let pk = packing_str(record_def.packing);
+            for (i, def_field) in record_def.fields.iter().enumerate() {
+                let Some(sem_field) = sem.fields.get(i) else {
+                    continue;
+                };
+                if sem_field.ty == Ty::Void {
+                    continue;
+                }
+                if record_def.kind == RecordKind::Union
+                    && forbidden_union_member_category(&sem_field.ty).is_some()
+                {
+                    continue;
+                }
+                if let Some(category) = non_integral_packed_member_category(db, unit, &sem_field.ty)
+                {
+                    sem_diags.push(SemanticDiag {
+                        kind: SemanticDiagKind::NonIntegralPackedMember {
+                            name: sem_field.name.clone(),
+                            record_kind: SmolStr::new(rk),
+                            packing: SmolStr::new(pk),
+                            category: SmolStr::new(category),
+                        },
+                        primary: DiagSpan::Name(def_field.name_span),
                         label: None,
                     });
                 }

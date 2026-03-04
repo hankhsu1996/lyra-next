@@ -4,9 +4,11 @@
 // and function declarations among modules, interfaces, programs, and checkers.
 
 // Basic package with typedef and functions (LRM 26.2 example)
+// Note: the LRM example uses shortreal in a packed struct, which violates
+// LRM 7.2.1 (packed structs require integral members). We use logic instead.
 package ComplexPkg;
   typedef struct packed {
-    shortreal i, r;
+    logic [31:0] i, r;
   } Complex;
 
   function automatic Complex add(Complex a, b);
