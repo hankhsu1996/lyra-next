@@ -82,8 +82,12 @@ ast_nodes! {
     RepeatStmt(SyntaxKind::RepeatStmt) { @custom }
     ForeverStmt(SyntaxKind::ForeverStmt) { @custom }
     DoWhileStmt(SyntaxKind::DoWhileStmt) { @custom }
-    BreakStmt(SyntaxKind::BreakStmt) {}
-    ContinueStmt(SyntaxKind::ContinueStmt) {}
+    BreakStmt(SyntaxKind::BreakStmt) {
+        kw: token(BreakKw) as break_kw,
+    }
+    ContinueStmt(SyntaxKind::ContinueStmt) {
+        kw: token(ContinueKw) as continue_kw,
+    }
     ReturnStmt(SyntaxKind::ReturnStmt) { @custom }
     ForeachStmt(SyntaxKind::ForeachStmt) { @custom }
     ForeachVarList(SyntaxKind::ForeachVarList) {

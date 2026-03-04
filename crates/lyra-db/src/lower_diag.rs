@@ -555,6 +555,55 @@ fn freeform_text(message: &str, extra: Option<&str>) -> SmolStr {
     }
 }
 
+/// Lower jump-statement legality items (LRM 12.8) into diagnostics.
+///
+/// Each `JumpCheckItem` carries a keyword `TokenSpan` extracted during
+/// the builder phase. Lowering maps it through the `SourceMap`.
+pub(crate) fn lower_jump_check_items(
+    file_id: FileId,
+    source_map: &lyra_preprocess::SourceMap,
+    items: &[crate::jump_check::JumpCheckItem],
+    diags: &mut Vec<Diagnostic>,
+) {
+    use crate::jump_check::JumpCheckItem;
+    for item in items {
+        let kw = item.kw();
+        if !kw.is_valid() {
+            continue;
+        }
+        let (span, _) = map_span_or_fallback(file_id, source_map, kw.text_range());
+        let (code, msg_id) = match item {
+            JumpCheckItem::BreakOutsideLoop { .. } => (
+                DiagnosticCode::BREAK_OUTSIDE_LOOP,
+                MessageId::BreakOutsideLoop,
+            ),
+            JumpCheckItem::ContinueOutsideLoop { .. } => (
+                DiagnosticCode::CONTINUE_OUTSIDE_LOOP,
+                MessageId::ContinueOutsideLoop,
+            ),
+            JumpCheckItem::ReturnOutsideCallable { .. } => (
+                DiagnosticCode::RETURN_OUTSIDE_CALLABLE,
+                MessageId::ReturnOutsideCallable,
+            ),
+            JumpCheckItem::ReturnValueInVoid { .. } => (
+                DiagnosticCode::RETURN_VALUE_IN_VOID,
+                MessageId::ReturnValueInVoid,
+            ),
+            JumpCheckItem::ReturnMissingValue { .. } => (
+                DiagnosticCode::RETURN_MISSING_VALUE,
+                MessageId::ReturnMissingValue,
+            ),
+        };
+        diags.push(
+            Diagnostic::new(Severity::Error, code, Message::simple(msg_id)).with_label(Label {
+                kind: LabelKind::Primary,
+                span,
+                message: Message::simple(msg_id),
+            }),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

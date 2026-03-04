@@ -152,14 +152,6 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 Ternary `?:` with `matches` pattern-matching operator. Requires same infrastructure as 12.6.2. Blocked by: tagged union construction, `matches` operator parsing. Test: `lrm/ch12/12.6.3_pattern_matching_conditional`.
 
-### 12.8.a: Jump legality -- break/continue outside loop
-
-`break` and `continue` are parsed but no legality validation exists. Using them outside a loop (or fork-join block for `break`) is not diagnosed. Blocked by: context-aware statement legality checking. Test: `lrm/ch12/12.8_jump_statements` (legality cases).
-
-### 12.8.b: Return legality and type checking
-
-`return` is parsed but no legality or type validation exists. Using `return` outside a callable, returning a value from a void function/task, or omitting a value from a non-void function is not diagnosed. Blocked by: callable-context return type checking. Test: `lrm/ch12/12.8_jump_statements` (return legality cases).
-
 ## Chapter 20 -- System Functions
 
 ### 20.6.2: $bits constant evaluation -- unsupported type categories

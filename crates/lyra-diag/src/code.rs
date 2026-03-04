@@ -239,6 +239,26 @@ impl DiagnosticCode {
         namespace: "lyra.semantic",
         number: 17,
     };
+    pub const BREAK_OUTSIDE_LOOP: Self = Self {
+        namespace: "lyra.semantic",
+        number: 18,
+    };
+    pub const CONTINUE_OUTSIDE_LOOP: Self = Self {
+        namespace: "lyra.semantic",
+        number: 19,
+    };
+    pub const RETURN_OUTSIDE_CALLABLE: Self = Self {
+        namespace: "lyra.semantic",
+        number: 20,
+    };
+    pub const RETURN_VALUE_IN_VOID: Self = Self {
+        namespace: "lyra.semantic",
+        number: 21,
+    };
+    pub const RETURN_MISSING_VALUE: Self = Self {
+        namespace: "lyra.semantic",
+        number: 22,
+    };
     pub const UNRESOLVED_MODULE_INST: Self = Self {
         namespace: "lyra.elab",
         number: 1,

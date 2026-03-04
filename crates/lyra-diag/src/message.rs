@@ -102,6 +102,12 @@ pub enum MessageId {
     RecordAssignWrongRecord,
     RecordTypeHere,
     NotASubroutine,
+    // Jump statement messages
+    BreakOutsideLoop,
+    ContinueOutsideLoop,
+    ReturnOutsideCallable,
+    ReturnValueInVoid,
+    ReturnMissingValue,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -316,6 +322,13 @@ fn render_other_message(msg: &Message) -> String {
         MessageId::ValueNotType => "this is a value, not a type".into(),
         MessageId::RedefinedHere => "redefined here".into(),
         MessageId::FirstDefinedHere => "first defined here".into(),
+        MessageId::BreakOutsideLoop => "`break` statement outside of a loop".into(),
+        MessageId::ContinueOutsideLoop => "`continue` statement outside of a loop".into(),
+        MessageId::ReturnOutsideCallable => {
+            "`return` statement outside of a function or task".into()
+        }
+        MessageId::ReturnValueInVoid => "cannot return a value from a void function or task".into(),
+        MessageId::ReturnMissingValue => "non-void function must return a value".into(),
         MessageId::ParseError | MessageId::PreprocessError => msg
             .args
             .first()
