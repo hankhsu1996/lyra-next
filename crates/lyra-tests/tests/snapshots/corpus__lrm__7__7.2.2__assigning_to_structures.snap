@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.type[39]] 23:12..23:12: cannot assign struct `s2_t` to struct `s1_t`
+  error[lyra.type[39]] 27:12..27:12: cannot assign union `u1_t` to struct `s1_t`
+---
+unit (0 diagnostics)

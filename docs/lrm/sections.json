@@ -146,7 +146,7 @@
   {"section": "7.2", "chapter": 7, "title": "Structures", "parent": "7", "children": ["7.2.0","7.2.1","7.2.2"], "ownable": false},
   {"section": "7.2.0", "chapter": 7, "title": "Structure declaration and member access", "parent": "7.2", "children": [], "ownable": true},
   {"section": "7.2.1", "chapter": 7, "title": "Packed structures", "parent": "7.2", "children": [], "ownable": true},
-  {"section": "7.2.2", "chapter": 7, "title": "Assigning to structures", "parent": "7.2", "children": [], "ownable": false},
+  {"section": "7.2.2", "chapter": 7, "title": "Assigning to structures", "parent": "7.2", "children": [], "ownable": true},
   {"section": "7.3", "chapter": 7, "title": "Unions", "parent": "7", "children": ["7.3.0","7.3.1","7.3.2"], "ownable": false},
   {"section": "7.3.0", "chapter": 7, "title": "Union declaration", "parent": "7.3", "children": [], "ownable": true},
   {"section": "7.3.1", "chapter": 7, "title": "Packed unions", "parent": "7.3", "children": [], "ownable": true},

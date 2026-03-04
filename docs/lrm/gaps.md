@@ -90,7 +90,7 @@ Type parameter declarations and default resolution are implemented (6.20.3). Rem
 
 ### 7.2.2: Assigning to structures
 
-Packed structs can be assigned from matching-width integral values. Struct-to-struct assignment (copying all fields) and aggregate assignment patterns (struct literals) are not type-checked. No assignment compatibility checking exists for `Record` types in `type_check.rs`. Blocked by: struct assignment compatibility rules, aggregate literal/pattern expression support. Test: `lrm/ch07/7.2.2_assigning_to_structures`.
+Record-to-record identity mismatch is now diagnosed (different struct/union types rejected). Remaining gaps: packed record to/from integral assignment rules (needs packing + integral classification in the checker), pattern/aggregate assignment and fieldwise forms, coercion/cast diagnostics in record context. Blocked by: packed integral conversion rules, aggregate literal/pattern expression support. Test: `lrm/ch07/7.2.2_assigning_to_structures`.
 
 ### 7.3.1: Packed union layout and expression semantics
 
