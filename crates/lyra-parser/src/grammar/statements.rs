@@ -92,6 +92,7 @@ fn if_stmt(p: &mut Parser) {
 }
 
 // `[unique|priority] case[xz] (expr) { case_item } endcase`
+// `[unique|priority] case (expr) inside { case_inside_item } endcase` (LRM 12.5.4)
 fn case_stmt(p: &mut Parser) {
     let m = p.start();
     // Optional unique/unique0/priority modifier
@@ -105,9 +106,14 @@ fn case_stmt(p: &mut Parser) {
     p.expect(SyntaxKind::LParen);
     expressions::expr(p);
     p.expect(SyntaxKind::RParen);
+    let is_inside = p.eat(SyntaxKind::InsideKw);
     while !p.at(SyntaxKind::EndcaseKw) && !p.at_end() && !at_block_end(p) {
         let cp = p.checkpoint();
-        case_item(p);
+        if is_inside {
+            case_inside_item(p);
+        } else {
+            case_item(p);
+        }
         if !p.has_progressed(cp) {
             p.error_bump("expected case item");
         }
@@ -134,6 +140,45 @@ fn case_item(p: &mut Parser) {
         stmt(p);
     }
     m.complete(p, SyntaxKind::CaseItem);
+}
+
+// `case_inside_item ::= range_list : stmt | default [:] stmt` (LRM 12.5.4)
+fn case_inside_item(p: &mut Parser) {
+    let m = p.start();
+    if p.eat(SyntaxKind::DefaultKw) {
+        p.eat(SyntaxKind::Colon);
+        stmt(p);
+    } else {
+        range_list(p);
+        p.expect(SyntaxKind::Colon);
+        stmt(p);
+    }
+    m.complete(p, SyntaxKind::CaseInsideItem);
+}
+
+// `range_list ::= value_range { , value_range }`
+fn range_list(p: &mut Parser) {
+    let m = p.start();
+    value_range(p);
+    while p.eat(SyntaxKind::Comma) {
+        value_range(p);
+    }
+    m.complete(p, SyntaxKind::RangeList);
+}
+
+// `value_range ::= expression | [ expression : expression ]`
+fn value_range(p: &mut Parser) {
+    let m = p.start();
+    if p.at(SyntaxKind::LBracket) {
+        p.bump(); // [
+        expressions::expr(p);
+        p.expect(SyntaxKind::Colon);
+        expressions::expr(p);
+        p.expect(SyntaxKind::RBracket);
+    } else {
+        expressions::expr(p);
+    }
+    m.complete(p, SyntaxKind::ValueRange);
 }
 
 // `for (init; cond; step) stmt`

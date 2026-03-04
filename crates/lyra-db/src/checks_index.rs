@@ -166,7 +166,7 @@ impl IndexBuilder<'_> {
                 if let Some(sel) = case.selector() {
                     self.collect_from_expr(&sel, AccessMode::Read);
                 }
-                for ci in case.items() {
+                for ci in case.normal_items() {
                     for expr in expr_children(ci.syntax()) {
                         self.collect_from_expr(&expr, AccessMode::Read);
                     }
@@ -250,7 +250,7 @@ impl IndexBuilder<'_> {
             if let Some(sel) = case.selector() {
                 self.collect_from_expr(&sel, access);
             }
-            for item in case.items() {
+            for item in case.normal_items() {
                 for expr in expr_children(item.syntax()) {
                     self.collect_from_expr(&expr, access);
                 }

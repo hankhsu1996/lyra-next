@@ -512,6 +512,11 @@ pub enum SyntaxKind {
     TaskPrototype,
     FunctionPrototype,
 
+    // Set membership case statement (LRM 12.5.4)
+    CaseInsideItem,
+    RangeList,
+    ValueRange,
+
     #[doc(hidden)]
     __Last,
 }

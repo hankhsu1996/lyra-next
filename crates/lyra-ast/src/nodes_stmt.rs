@@ -7,9 +7,9 @@ use lyra_parser::SyntaxToken;
 
 use crate::node::AstNode;
 use crate::nodes::{
-    AssignStmt, BinExpr, BlockStmt, CaseItem, CaseStmt, ContinuousAssign, DoWhileStmt,
-    DriveStrength, ForStmt, ForeachStmt, ForeachVarList, ForeverStmt, IfStmt, NameRef, RepeatStmt,
-    ReturnStmt, TimingControl, WhileStmt,
+    AssignStmt, BinExpr, BlockStmt, CaseInsideItem, CaseItem, CaseStmt, ContinuousAssign,
+    DoWhileStmt, DriveStrength, ForStmt, ForeachStmt, ForeachVarList, ForeverStmt, IfStmt, NameRef,
+    RangeList, RepeatStmt, ReturnStmt, TimingControl, ValueRange, WhileStmt,
 };
 use crate::nodes_expr::SyntaxAssignOp;
 use crate::support::{self, AstChildren};
@@ -91,12 +91,116 @@ impl CaseStmt {
         }
         None
     }
+
+    /// Whether this is a `case ... inside` statement (LRM 12.5.4).
+    pub fn is_inside(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::InsideKw).is_some()
+    }
+
+    /// Iterate normal `CaseItem` children only (excludes `CaseInsideItem`).
+    pub fn normal_items(&self) -> AstChildren<CaseItem> {
+        support::children(&self.syntax)
+    }
+
+    /// Iterate all case items (normal or inside) as a unified type.
+    pub fn items(&self) -> impl Iterator<Item = CaseItemLike> + '_ {
+        self.syntax
+            .children()
+            .filter_map(|child| match child.kind() {
+                SyntaxKind::CaseItem => CaseItem::cast(child).map(CaseItemLike::Normal),
+                SyntaxKind::CaseInsideItem => CaseInsideItem::cast(child).map(CaseItemLike::Inside),
+                _ => None,
+            })
+    }
+}
+
+/// A case item from either a normal `case` or a `case inside` statement.
+#[derive(Debug, Clone)]
+pub enum CaseItemLike {
+    Normal(CaseItem),
+    Inside(CaseInsideItem),
+}
+
+impl CaseInsideItem {
+    /// Whether this is a `default` item.
+    pub fn is_default(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::DefaultKw).is_some()
+    }
+
+    /// The range list (None for default items).
+    pub fn range_list(&self) -> Option<RangeList> {
+        support::child(&self.syntax)
+    }
+
+    /// The body statement after the colon.
+    pub fn body(&self) -> Option<crate::node::StmtNode> {
+        let mut past_colon = false;
+        for el in self.syntax.children_with_tokens() {
+            match el {
+                rowan::NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::Colon => {
+                    past_colon = true;
+                }
+                rowan::NodeOrToken::Node(node) if past_colon => {
+                    return crate::node::StmtNode::cast(node);
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+}
+
+impl RangeList {
+    /// Iterate over individual value ranges.
+    pub fn value_ranges(&self) -> AstChildren<ValueRange> {
+        support::children(&self.syntax)
+    }
+}
+
+/// Classification of a single value range element.
+#[derive(Debug, Clone)]
+pub enum ValueRangeKind {
+    /// A single expression (e.g. `1`).
+    SingleExpr(crate::expr::Expr),
+    /// A bracketed range `[lo : hi]`.
+    BracketRange {
+        lo: crate::expr::Expr,
+        hi: crate::expr::Expr,
+    },
+}
+
+impl ValueRange {
+    /// Classify this value range as a single expression or a bracketed range.
+    pub fn kind(&self) -> Option<ValueRangeKind> {
+        let has_bracket = support::token(&self.syntax, SyntaxKind::LBracket).is_some();
+        if has_bracket {
+            let mut exprs = support::expr_children(&self.syntax);
+            let lo = exprs.next()?;
+            let hi = exprs.next()?;
+            Some(ValueRangeKind::BracketRange { lo, hi })
+        } else {
+            let expr = support::expr_children(&self.syntax).next()?;
+            Some(ValueRangeKind::SingleExpr(expr))
+        }
+    }
 }
 
 impl CaseItem {
-    /// The body statement of this case item.
+    /// The body statement after the colon.
     pub fn body(&self) -> Option<crate::node::StmtNode> {
-        support::child(&self.syntax)
+        let mut past_colon = false;
+        for el in self.syntax.children_with_tokens() {
+            match el {
+                rowan::NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::Colon => {
+                    past_colon = true;
+                }
+                rowan::NodeOrToken::Node(node) if past_colon => {
+                    return crate::node::StmtNode::cast(node);
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     /// Whether this is a `default` case item.

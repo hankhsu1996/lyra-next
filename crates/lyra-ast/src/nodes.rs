@@ -71,11 +71,12 @@ ast_nodes! {
     BlockStmt(SyntaxKind::BlockStmt) { @custom }
     IfStmt(SyntaxKind::IfStmt) { @custom }
 
-    CaseStmt(SyntaxKind::CaseStmt) {
-        items: [CaseItem],
-    }
+    CaseStmt(SyntaxKind::CaseStmt) { @custom }
 
     CaseItem(SyntaxKind::CaseItem) { @custom }
+    CaseInsideItem(SyntaxKind::CaseInsideItem) { @custom }
+    RangeList(SyntaxKind::RangeList) { @custom }
+    ValueRange(SyntaxKind::ValueRange) { @custom }
     ForStmt(SyntaxKind::ForStmt) { @custom }
     WhileStmt(SyntaxKind::WhileStmt) { @custom }
     RepeatStmt(SyntaxKind::RepeatStmt) { @custom }

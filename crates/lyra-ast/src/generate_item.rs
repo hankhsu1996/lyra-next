@@ -3,8 +3,8 @@ use lyra_parser::SyntaxNode;
 
 use crate::node::{AstNode, HasSyntax};
 use crate::nodes::{
-    BlockStmt, CaseItem, CaseStmt, ForStmt, GenerateRegion, IfStmt, InterfaceBody, ModuleBody,
-    ModuleInstantiation,
+    BlockStmt, CaseInsideItem, CaseItem, CaseStmt, ForStmt, GenerateRegion, IfStmt, InterfaceBody,
+    ModuleBody, ModuleInstantiation,
 };
 
 /// Typed sum for generate-level items inside module/interface bodies
@@ -213,6 +213,13 @@ impl ForStmt {
 }
 
 impl CaseItem {
+    /// The generate body (first node after `Colon`).
+    pub fn generate_body(&self) -> Option<GenerateBody> {
+        first_node_after(self.syntax(), SyntaxKind::Colon).and_then(|n| GenerateBody::cast(&n))
+    }
+}
+
+impl CaseInsideItem {
     /// The generate body (first node after `Colon`).
     pub fn generate_body(&self) -> Option<GenerateBody> {
         first_node_after(self.syntax(), SyntaxKind::Colon).and_then(|n| GenerateBody::cast(&n))
