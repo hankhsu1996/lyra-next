@@ -136,6 +136,30 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 ## Chapter 12 -- Procedural Programming Statements
 
+### 12.5.4: Set membership case statement (`case inside`)
+
+`case (expr) inside` syntax with value ranges as case items. The parser crashes (rowan assertion failure) on `case ... inside` syntax. Blocked by: parser support for `inside` keyword in case statement context. Test: `lrm/ch12/12.5.4_set_membership_case`.
+
+### 12.6.1: Pattern matching in case statements
+
+`case` with `tagged union` patterns and wildcard patterns. Requires tagged union support (7.3.2) which is not implemented. Blocked by: tagged union construction, pattern expression parsing. Test: `lrm/ch12/12.6.1_pattern_matching_case`.
+
+### 12.6.2: Pattern matching in if statements
+
+`if` with `matches` pattern-matching operator. Requires tagged union support and `matches` keyword parsing. Blocked by: tagged union construction, `matches` operator parsing. Test: `lrm/ch12/12.6.2_pattern_matching_if`.
+
+### 12.6.3: Pattern matching in conditional expressions
+
+Ternary `?:` with `matches` pattern-matching operator. Requires same infrastructure as 12.6.2. Blocked by: tagged union construction, `matches` operator parsing. Test: `lrm/ch12/12.6.3_pattern_matching_conditional`.
+
+### 12.7.5: Do...while loop
+
+`do ... while (cond);` loop syntax. Parser does not recognize `do` as a statement keyword. Blocked by: parser support for do-while statement. Test: `lrm/ch12/12.7.5_do_while_loop`.
+
+### 12.8: Jump statements
+
+`break`, `continue`, and `return` statements. Parser does not recognize these as statement keywords. Blocked by: parser support for jump statements. Test: `lrm/ch12/12.8_jump_statements`.
+
 ## Chapter 20 -- System Functions
 
 ### 20.6.2: $bits constant evaluation -- unsupported type categories
