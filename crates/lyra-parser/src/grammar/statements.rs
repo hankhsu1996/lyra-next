@@ -31,6 +31,7 @@ pub(crate) fn stmt(p: &mut Parser) {
         SyntaxKind::WhileKw => while_stmt(p),
         SyntaxKind::RepeatKw => repeat_stmt(p),
         SyntaxKind::ForeverKw => forever_stmt(p),
+        SyntaxKind::DoKw => do_while_stmt(p),
         // Local declaration in procedural context
         _ if declarations::at_unambiguous_data_decl_start(p) => declarations::var_decl(p),
         SyntaxKind::Semicolon => {
@@ -210,6 +211,19 @@ fn forever_stmt(p: &mut Parser) {
     p.bump(); // forever
     stmt(p);
     m.complete(p, SyntaxKind::ForeverStmt);
+}
+
+// `do stmt while (expr) ;`
+fn do_while_stmt(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // do
+    stmt(p);
+    p.expect(SyntaxKind::WhileKw);
+    p.expect(SyntaxKind::LParen);
+    expressions::expr(p);
+    p.expect(SyntaxKind::RParen);
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::DoWhileStmt);
 }
 
 // `foreach (array_ref[vars]) stmt` (LRM 12.7.3)

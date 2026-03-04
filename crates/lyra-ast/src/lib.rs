@@ -21,8 +21,8 @@ pub use node::{AstNode, HasSyntax, StmtNode, is_expression_kind, is_statement_ki
 pub use nodes::{
     AlwaysBlock, ArgList, ArrayManipWithClause, AssignStmt, BinExpr, BlockStmt, CallExpr, CaseItem,
     CaseStmt, CastExpr, ChargeStrength, ConcatExpr, CondExpr, ConfigDecl, ContinuousAssign,
-    Declarator, DottedName, DriveStrength, EnumMember, EnumType, ErrorNode, EventExpr, EventItem,
-    ExportDecl, ExportItem, Expression, FieldExpr, ForStmt, ForeachStmt, ForeachVarList,
+    Declarator, DoWhileStmt, DottedName, DriveStrength, EnumMember, EnumType, ErrorNode, EventExpr,
+    EventItem, ExportDecl, ExportItem, Expression, FieldExpr, ForStmt, ForeachStmt, ForeachVarList,
     ForeachVarSlot, ForeverStmt, FunctionDecl, GenerateRegion, HierarchicalInstance, IfStmt,
     ImportDecl, ImportItem, IndexExpr, InitialBlock, InstancePort, InstancePortList, InterfaceBody,
     InterfaceDecl, Literal, ModportDecl, ModportExprPort, ModportItem, ModportPort,

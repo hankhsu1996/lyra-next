@@ -80,6 +80,7 @@ ast_nodes! {
     WhileStmt(SyntaxKind::WhileStmt) { @custom }
     RepeatStmt(SyntaxKind::RepeatStmt) { @custom }
     ForeverStmt(SyntaxKind::ForeverStmt) { @custom }
+    DoWhileStmt(SyntaxKind::DoWhileStmt) { @custom }
     ForeachStmt(SyntaxKind::ForeachStmt) { @custom }
     ForeachVarList(SyntaxKind::ForeachVarList) {
         slots: [ForeachVarSlot],
