@@ -76,6 +76,74 @@ pub(super) fn lower_record_assign_item(
     );
 }
 
+pub(super) fn lower_unpacked_record_integral_assign(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let TypeCheckItem::UnpackedRecordIntegralAssign {
+        assign_site,
+        lhs_site,
+        rhs_site,
+        record_id,
+        other_ty,
+        record_is_lhs,
+    } = item
+    else {
+        return;
+    };
+    let Some(assign_span) = source_map.map_span(assign_site.text_range()) else {
+        return;
+    };
+
+    let record_site = if *record_is_lhs { lhs_site } else { rhs_site };
+    let record_span = source_map
+        .map_span(record_site.text_range())
+        .unwrap_or(assign_span);
+
+    let (kind, name) = record_display_name(db, unit, record_id);
+    let kind_str = record_kind_str(kind);
+    let other_name = other_ty.pretty();
+
+    let args = vec![
+        lyra_diag::Arg::Name(smol_str::SmolStr::new(kind_str)),
+        lyra_diag::Arg::Name(name.clone()),
+        lyra_diag::Arg::Name(other_name),
+    ];
+
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::DiagnosticCode::UNPACKED_RECORD_INTEGRAL_ASSIGN,
+            lyra_diag::Message::new(
+                lyra_diag::MessageId::UnpackedRecordIntegralAssign,
+                args.clone(),
+            ),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span: assign_span,
+            message: lyra_diag::Message::new(
+                lyra_diag::MessageId::UnpackedRecordIntegralAssign,
+                args,
+            ),
+        })
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Secondary,
+            span: record_span,
+            message: lyra_diag::Message::new(
+                lyra_diag::MessageId::RecordTypeHere,
+                vec![
+                    lyra_diag::Arg::Name(smol_str::SmolStr::new(kind_str)),
+                    lyra_diag::Arg::Name(name),
+                ],
+            ),
+        }),
+    );
+}
+
 fn record_display_name(
     db: &dyn salsa::Database,
     unit: CompilationUnit,

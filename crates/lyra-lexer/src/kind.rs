@@ -517,6 +517,9 @@ pub enum SyntaxKind {
     RangeList,
     ValueRange,
 
+    // Assignment pattern expression (LRM 10.9.1)
+    AssignmentPatternExpr,
+
     #[doc(hidden)]
     __Last,
 }

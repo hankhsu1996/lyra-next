@@ -35,6 +35,10 @@ pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx
         ExprKind::BinExpr(b) => scalar::infer_binary(&b, ctx, expected),
         ExprKind::CondExpr(c) => scalar::infer_cond(&c, ctx, expected),
         ExprKind::ConcatExpr(c) => aggregate::infer_concat(&c, ctx),
+        ExprKind::AssignmentPatternExpr(_) => ExprType {
+            ty: Ty::Error,
+            view: ExprView::AssignmentPattern,
+        },
         ExprKind::ReplicExpr(r) => aggregate::infer_replic(&r, ctx),
         ExprKind::IndexExpr(i) => access::infer_index(&i, ctx),
         ExprKind::RangeExpr(r) => range::infer_range(&r, ctx),

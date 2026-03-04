@@ -102,6 +102,7 @@ pub enum MessageId {
     NonIntegralPackedMember,
     RecordAssignWrongRecord,
     RecordTypeHere,
+    UnpackedRecordIntegralAssign,
     NotASubroutine,
     // Jump statement messages
     BreakOutsideLoop,
@@ -296,7 +297,8 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::QueueBoundNotPositive
         | MessageId::NonIntegralPackedMember
         | MessageId::RecordAssignWrongRecord
-        | MessageId::RecordTypeHere => render_type_message(msg),
+        | MessageId::RecordTypeHere
+        | MessageId::UnpackedRecordIntegralAssign => render_type_message(msg),
         MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
         | MessageId::StreamUnpackGreedyRemainder
@@ -397,9 +399,9 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::EnumAssignFromNonEnum
         | MessageId::EnumAssignWrongEnum
         | MessageId::EnumTypeHere => render_enum_assign_message(msg),
-        MessageId::RecordAssignWrongRecord | MessageId::RecordTypeHere => {
-            render_record_assign_message(msg)
-        }
+        MessageId::RecordAssignWrongRecord
+        | MessageId::RecordTypeHere
+        | MessageId::UnpackedRecordIntegralAssign => render_record_assign_message(msg),
         MessageId::ConversionArgCategory | MessageId::ConversionWidthMismatch => {
             render_conversion_message(msg)
         }
@@ -530,6 +532,15 @@ fn render_record_assign_message(msg: &Message) -> String {
             let kind = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
             let record_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
             format!("{kind} type `{record_name}`")
+        }
+        // Args: [record_kind, record_name, other_ty_name]
+        MessageId::UnpackedRecordIntegralAssign => {
+            let kind = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            let record_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            let other_ty = msg.args.get(2).and_then(Arg::as_name).unwrap_or("?");
+            format!(
+                "unpacked {kind} `{record_name}` cannot be assigned to/from integral type `{other_ty}`"
+            )
         }
         _ => String::new(),
     }

@@ -2,8 +2,11 @@
 source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
-// file: main.sv (2 diagnostics)
+// file: main.sv (5 diagnostics)
   error[lyra.type[39]] 23:12..23:12: cannot assign struct `s2_t` to struct `s1_t`
   error[lyra.type[39]] 27:12..27:12: cannot assign union `u1_t` to struct `s1_t`
+  warning[lyra.type[1]] 40:8..40:8: implicit truncation: 16-bit value assigned to 8-bit target
+  error[lyra.type[41]] 45:15..45:15: unpacked struct `unpacked_t` cannot be assigned to/from integral type `logic [15:0]`
+  error[lyra.type[41]] 47:17..47:17: unpacked struct `unpacked_t` cannot be assigned to/from integral type `logic [15:0]`
 ---
 unit (0 diagnostics)

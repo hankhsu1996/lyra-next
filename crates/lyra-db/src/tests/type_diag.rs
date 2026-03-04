@@ -143,11 +143,10 @@ fn truncation_has_labels() {
     let src = "module m; logic [3:0] a; logic [7:0] b; assign a = b; endmodule";
     let diags = type_diag_warnings(src);
     assert_eq!(diags.len(), 1);
-    // Should have primary + 2 secondary labels
-    assert_eq!(diags[0].labels.len(), 3);
+    // Primary label on LHS + secondary label on RHS
+    assert_eq!(diags[0].labels.len(), 2);
     assert_eq!(diags[0].labels[0].kind, lyra_diag::LabelKind::Primary);
     assert_eq!(diags[0].labels[1].kind, lyra_diag::LabelKind::Secondary);
-    assert_eq!(diags[0].labels[2].kind, lyra_diag::LabelKind::Secondary);
 }
 
 #[test]

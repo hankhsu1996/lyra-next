@@ -528,6 +528,29 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         self.fixed_stream_width_bits_of_type(&et)
     }
 
+    fn record_packing(
+        &self,
+        id: lyra_semantic::record::RecordId,
+    ) -> Option<lyra_semantic::record::Packing> {
+        let file_id = id.file();
+        let sf = source_file_by_id(self.db, self.unit, file_id)?;
+        let def = def_index_file(self.db, sf);
+        let record_def = def.record_def_by_id(id)?;
+        Some(record_def.packing)
+    }
+
+    fn record_fixed_width_bits(&self, id: lyra_semantic::record::RecordId) -> Option<u32> {
+        let packing = self.record_packing(id)?;
+        if !matches!(
+            packing,
+            lyra_semantic::record::Packing::Packed | lyra_semantic::record::Packing::SoftPacked
+        ) {
+            return None;
+        }
+        let ty_ref = crate::type_queries::TyRef::new(self.db, lyra_semantic::types::Ty::Record(id));
+        crate::type_queries::bit_width_total(self.db, self.unit, ty_ref)
+    }
+
     fn readonly_target_kind(
         &self,
         expr_site: lyra_ast::ErasedAstId,
