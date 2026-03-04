@@ -9,9 +9,9 @@ endpackage
 
 module top;
   int a = x;
-  //     ^ error[lyra.semantic[1]]: unresolved name `x`
+  //     ^ error[lyra.semantic.unresolved_name]: unresolved name `x`
   import q::x;
-  //    ^ error[lyra.semantic[7]]: import of `x` from package `q` conflicts with wildcard import from package `p`
+  //    ^ error[lyra.semantic.import_conflict]: import of `x` from package `q` conflicts with wildcard import from package `p`
   import p::*;
   int b = x;
 endmodule

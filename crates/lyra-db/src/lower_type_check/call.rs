@@ -37,7 +37,7 @@ pub(super) fn lower_method_call_error(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::METHOD_CALL_ERROR,
+            lyra_diag::code::METHOD_CALL_ERROR,
             lyra_diag::Message::new(msg_id, msg_args.clone()),
         )
         .with_label(lyra_diag::Label {
@@ -69,7 +69,7 @@ pub(super) fn lower_bits_non_data_type(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::BITS_NON_DATA_TYPE,
+            lyra_diag::code::BITS_NON_DATA_TYPE,
             lyra_diag::Message::simple(lyra_diag::MessageId::BitsNonDataType),
         )
         .with_label(lyra_diag::Label {
@@ -135,22 +135,22 @@ pub(super) fn lower_new_expr_item(
     let (site, code, msg_id) = match item {
         TypeCheckItem::NewExprNotDynArray { new_site, .. } => (
             *new_site,
-            lyra_diag::DiagnosticCode::NEW_EXPR_NOT_DYN_ARRAY,
+            lyra_diag::code::NEW_EXPR_NOT_DYN_ARRAY,
             lyra_diag::MessageId::NewExprNotDynArray,
         ),
         TypeCheckItem::NewExprTooManyInitArgs { new_site } => (
             *new_site,
-            lyra_diag::DiagnosticCode::NEW_EXPR_TOO_MANY_INIT_ARGS,
+            lyra_diag::code::NEW_EXPR_TOO_MANY_INIT_ARGS,
             lyra_diag::MessageId::NewExprTooManyInitArgs,
         ),
         TypeCheckItem::NewExprSizeNotLongint { new_site, .. } => (
             *new_site,
-            lyra_diag::DiagnosticCode::NEW_EXPR_SIZE_NOT_LONGINT,
+            lyra_diag::code::NEW_EXPR_SIZE_NOT_LONGINT,
             lyra_diag::MessageId::NewExprSizeNotLongint,
         ),
         TypeCheckItem::NewExprSizeNegative { new_site, .. } => (
             *new_site,
-            lyra_diag::DiagnosticCode::NEW_EXPR_SIZE_NEGATIVE,
+            lyra_diag::code::NEW_EXPR_SIZE_NEGATIVE,
             lyra_diag::MessageId::NewExprSizeNegative,
         ),
         _ => return,
@@ -200,7 +200,7 @@ pub(super) fn lower_new_expr_init_incompat(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::NEW_EXPR_INIT_INCOMPAT,
+            lyra_diag::code::NEW_EXPR_INIT_INCOMPAT,
             lyra_diag::Message::new(lyra_diag::MessageId::NewExprInitIncompat, msg_args.clone()),
         )
         .with_label(lyra_diag::Label {
@@ -218,7 +218,7 @@ fn conversion_diag(
 ) -> lyra_diag::Diagnostic {
     lyra_diag::Diagnostic::new(
         lyra_diag::Severity::Error,
-        lyra_diag::DiagnosticCode::CONVERSION_ARG_TYPE,
+        lyra_diag::code::CONVERSION_ARG_TYPE,
         lyra_diag::Message::new(msg_id, msg_args.clone()),
     )
     .with_label(lyra_diag::Label {

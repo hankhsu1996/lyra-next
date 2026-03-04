@@ -1,9 +1,8 @@
 ---
 source: crates/lyra-tests/tests/corpus.rs
-assertion_line: 477
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.parse[1]] 20:15..20:15: strength specification is not allowed on interconnect nets
+  error[lyra.parse.error] 20:15..20:15: strength specification is not allowed on interconnect nets
 ---
 unit (0 diagnostics)

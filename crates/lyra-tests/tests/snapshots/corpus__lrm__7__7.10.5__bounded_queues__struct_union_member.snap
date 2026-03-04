@@ -3,10 +3,10 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (5 diagnostics)
-  error[lyra.type[37]] 9:13..9:13: queue bound must be a positive integer, got 0
-  error[lyra.type[37]] 15:13..15:13: queue bound must be a positive integer, got -1
-  error[lyra.type[37]] 22:15..22:15: queue bound must be a positive integer, got 0
-  error[lyra.semantic[14]] 29:7..29:7: queue member `q` is not allowed in untagged unions
-  error[lyra.type[37]] 29:13..29:13: queue bound must be a positive integer, got 0
+  error[lyra.type.queue_bound_not_positive] 9:13..9:13: queue bound must be a positive integer, got 0
+  error[lyra.type.queue_bound_not_positive] 15:13..15:13: queue bound must be a positive integer, got -1
+  error[lyra.type.queue_bound_not_positive] 22:15..22:15: queue bound must be a positive integer, got 0
+  error[lyra.semantic.illegal_union_member_type] 29:7..29:7: queue member `q` is not allowed in untagged unions
+  error[lyra.type.queue_bound_not_positive] 29:13..29:13: queue bound must be a positive integer, got 0
 ---
 unit (0 diagnostics)

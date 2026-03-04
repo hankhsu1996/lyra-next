@@ -11,7 +11,7 @@ fn param_default_no_override() {
     );
     let elab_errs: Vec<_> = diags
         .iter()
-        .filter(|d| d.code.namespace == "lyra.elab" && d.severity == lyra_diag::Severity::Error)
+        .filter(|d| d.code.starts_with("lyra.elab.") && d.severity == lyra_diag::Severity::Error)
         .collect();
     assert!(
         elab_errs.is_empty(),
@@ -60,7 +60,7 @@ fn param_unknown_name() {
     );
     let unknown: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::UNKNOWN_PARAM)
+        .filter(|d| d.code == code::UNKNOWN_PARAM)
         .collect();
     assert_eq!(unknown.len(), 1, "expected 1 unknown param diag");
 }
@@ -76,7 +76,7 @@ fn param_too_many_positional() {
     );
     let too_many: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::TOO_MANY_POSITIONAL_PARAMS)
+        .filter(|d| d.code == code::TOO_MANY_POSITIONAL_PARAMS)
         .collect();
     assert_eq!(too_many.len(), 1, "expected 1 too-many params diag");
 }
@@ -92,7 +92,7 @@ fn param_duplicate_named() {
     );
     let dups: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::DUPLICATE_PARAM_OVERRIDE)
+        .filter(|d| d.code == code::DUPLICATE_PARAM_OVERRIDE)
         .collect();
     assert_eq!(dups.len(), 1, "expected 1 duplicate param override diag");
 }
@@ -108,7 +108,7 @@ fn param_non_const_override() {
     );
     let not_const: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::PARAM_NOT_CONST)
+        .filter(|d| d.code == code::PARAM_NOT_CONST)
         .collect();
     assert_eq!(not_const.len(), 1, "expected 1 param-not-const diag");
 }

@@ -24,18 +24,18 @@ endmodule
 // Illegal: write to input member
 module write_to_input(my_bus.master bus);
   always_comb bus.gnt = 1'b1;
-  //              ^ error[lyra.type[10]]: modport member declared 'input' cannot be used in write context
+  //              ^ error[lyra.type.modport_direction]: modport member declared 'input' cannot be used in write context
 endmodule
 
 // Illegal: read from output member
 module read_from_output(my_bus.slave bus);
   logic local_gnt;
   always_comb local_gnt = bus.gnt;
-  //                          ^ error[lyra.type[10]]: modport member declared 'output' cannot be used in read context
+  //                          ^ error[lyra.type.modport_direction]: modport member declared 'output' cannot be used in read context
 endmodule
 
 // Compound assignment on input member
 module compound_on_input(my_bus.slave bus);
   always_comb bus.data += 8'h01;
-  //              ^ error[lyra.type[10]]: modport member declared 'input' cannot be used in write context
+  //              ^ error[lyra.type.modport_direction]: modport member declared 'input' cannot be used in write context
 endmodule

@@ -6,6 +6,6 @@ module void_return_expr_rejected;
   endfunction
 
   int x = f();
-  //     ^ error[lyra.type[32]]: void expression cannot be used as a value
+  //     ^ error[lyra.type.void_used_as_value]: void expression cannot be used as a value
 
 endmodule

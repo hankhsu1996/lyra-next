@@ -443,7 +443,7 @@ fn void_member_in_struct_diagnosed() {
     let diags = file_diagnostics(&db, file, unit);
     let void_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == lyra_diag::DiagnosticCode::VOID_MEMBER_NON_TAGGED)
+        .filter(|d| d.code == lyra_diag::code::VOID_MEMBER_NON_TAGGED)
         .collect();
     assert_eq!(
         void_diags.len(),
@@ -469,7 +469,7 @@ fn void_member_in_untagged_union_diagnosed() {
     let diags = file_diagnostics(&db, file, unit);
     let void_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == lyra_diag::DiagnosticCode::VOID_MEMBER_NON_TAGGED)
+        .filter(|d| d.code == lyra_diag::code::VOID_MEMBER_NON_TAGGED)
         .collect();
     assert_eq!(
         void_diags.len(),
@@ -490,7 +490,7 @@ fn tagged_union_allows_void_member() {
     let diags = file_diagnostics(&db, file, unit);
     let void_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == lyra_diag::DiagnosticCode::VOID_MEMBER_NON_TAGGED)
+        .filter(|d| d.code == lyra_diag::code::VOID_MEMBER_NON_TAGGED)
         .collect();
     assert!(
         void_diags.is_empty(),
@@ -510,7 +510,7 @@ fn chandle_in_untagged_union_diagnosed() {
     let diags = file_diagnostics(&db, file, unit);
     let illegal_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == lyra_diag::DiagnosticCode::ILLEGAL_UNION_MEMBER_TYPE)
+        .filter(|d| d.code == lyra_diag::code::ILLEGAL_UNION_MEMBER_TYPE)
         .collect();
     assert_eq!(
         illegal_diags.len(),
@@ -536,7 +536,7 @@ fn event_in_untagged_union_diagnosed() {
     let diags = file_diagnostics(&db, file, unit);
     let illegal_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == lyra_diag::DiagnosticCode::ILLEGAL_UNION_MEMBER_TYPE)
+        .filter(|d| d.code == lyra_diag::code::ILLEGAL_UNION_MEMBER_TYPE)
         .collect();
     assert_eq!(
         illegal_diags.len(),
@@ -562,7 +562,7 @@ fn tagged_union_allows_chandle_and_event() {
     let diags = file_diagnostics(&db, file, unit);
     let illegal_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == lyra_diag::DiagnosticCode::ILLEGAL_UNION_MEMBER_TYPE)
+        .filter(|d| d.code == lyra_diag::code::ILLEGAL_UNION_MEMBER_TYPE)
         .collect();
     assert!(
         illegal_diags.is_empty(),

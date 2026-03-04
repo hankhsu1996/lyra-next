@@ -21,17 +21,17 @@ module real_conversion;
 
   // Wrong width for $bitstoreal (expects 64-bit, got 16-bit)
   assign r = $bitstoreal(bits16);
-  //                     ^ error[lyra.type[8]]: $bitstoreal requires 64-bit argument, got 16-bit
+  //                     ^ error[lyra.type.conversion_arg_type]: $bitstoreal requires 64-bit argument, got 16-bit
 
   // Wrong width for $bitstoshortreal (expects 32-bit, got 64-bit)
   assign sr = $bitstoshortreal(bits64);
-  //                           ^ error[lyra.type[8]]: $bitstoshortreal requires 32-bit argument, got 64-bit
+  //                           ^ error[lyra.type.conversion_arg_type]: $bitstoshortreal requires 32-bit argument, got 64-bit
 
   // Category mismatch: $bitstoreal with real arg
   assign r = $bitstoreal(r);
-  //                     ^ error[lyra.type[8]]: $bitstoreal requires integral argument
+  //                     ^ error[lyra.type.conversion_arg_type]: $bitstoreal requires integral argument
 
   // Category mismatch: $realtobits with integral arg
   assign bits64 = $realtobits(bits64);
-  //                          ^ error[lyra.type[8]]: $realtobits requires real argument
+  //                          ^ error[lyra.type.conversion_arg_type]: $realtobits requires real argument
 endmodule

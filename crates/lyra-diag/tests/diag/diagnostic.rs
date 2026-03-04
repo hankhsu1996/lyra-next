@@ -1,4 +1,4 @@
-use lyra_diag::{Arg, Diagnostic, DiagnosticCode, Label, LabelKind, Message, MessageId, Severity};
+use lyra_diag::{Arg, Diagnostic, Label, LabelKind, Message, MessageId, Severity, code};
 use lyra_source::{FileId, Span, TextRange, TextSize};
 
 fn dummy_span() -> Span {
@@ -12,7 +12,7 @@ fn dummy_span() -> Span {
 fn primary_span_returns_first_primary() {
     let d = Diagnostic::new(
         Severity::Error,
-        DiagnosticCode::UNRESOLVED_NAME,
+        code::UNRESOLVED_NAME,
         Message::new(MessageId::UnresolvedName, vec![Arg::Name("x".into())]),
     )
     .with_label(Label {
@@ -35,7 +35,7 @@ fn primary_span_skips_secondary() {
 
     let d = Diagnostic::new(
         Severity::Error,
-        DiagnosticCode::DUPLICATE_DEFINITION,
+        code::DUPLICATE_DEFINITION,
         Message::new(MessageId::DuplicateDefinition, vec![Arg::Name("x".into())]),
     )
     .with_label(Label {
@@ -57,7 +57,7 @@ fn primary_span_skips_secondary() {
 fn empty_labels_returns_none() {
     let d = Diagnostic::new(
         Severity::Warning,
-        DiagnosticCode::PARSE_ERROR,
+        code::PARSE_ERROR,
         Message::simple(MessageId::ParseError),
     );
     assert!(d.primary_span().is_none());
@@ -67,7 +67,7 @@ fn empty_labels_returns_none() {
 fn render_message_delegates() {
     let d = Diagnostic::new(
         Severity::Error,
-        DiagnosticCode::UNRESOLVED_NAME,
+        code::UNRESOLVED_NAME,
         Message::new(MessageId::UnresolvedName, vec![Arg::Name("clk".into())]),
     );
     assert_eq!(d.render_message(), "unresolved name `clk`");

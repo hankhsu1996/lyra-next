@@ -524,7 +524,7 @@ fn check_packed_union_widths(
         diags.push(
             lyra_diag::Diagnostic::new(
                 lyra_diag::Severity::Error,
-                lyra_diag::DiagnosticCode::PACKED_UNION_WIDTH,
+                lyra_diag::code::PACKED_UNION_WIDTH,
                 lyra_diag::Message::new(
                     lyra_diag::MessageId::PackedUnionWidthMismatch,
                     vec![

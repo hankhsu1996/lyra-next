@@ -21,6 +21,6 @@ module slice_size_const;
 
     // Failing: variable expression as slice size
     result = {<< (x + 0) {data}};
-    //          ^ error[lyra.type[40]]: streaming slice_size must be a constant expression
+    //          ^ error[lyra.type.stream_slice_size_not_const]: streaming slice_size must be a constant expression
   end
 endmodule

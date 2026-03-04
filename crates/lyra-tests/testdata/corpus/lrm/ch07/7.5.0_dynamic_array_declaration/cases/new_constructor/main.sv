@@ -19,13 +19,13 @@ module new_constructor;
   int fixed_arr [5];
   initial begin
     fixed_arr = new[5];
-  //           ^ error[lyra.type[19]]
+  //           ^ error[lyra.type.new_expr_not_dyn_array]
   end
 
   // Error: negative size
   initial begin
     dyn_arr = new[-1];
-  //         ^ error[lyra.type[22]]
+  //         ^ error[lyra.type.new_expr_size_negative]
   end
 
 endmodule

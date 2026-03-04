@@ -11,7 +11,7 @@ fn named_ports_correct() {
     );
     let elab_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code.namespace == "lyra.elab")
+        .filter(|d| d.code.starts_with("lyra.elab."))
         .collect();
     assert!(
         elab_diags.is_empty(),
@@ -30,7 +30,7 @@ fn named_port_unknown() {
     );
     let unknown: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::UNKNOWN_PORT)
+        .filter(|d| d.code == code::UNKNOWN_PORT)
         .collect();
     assert_eq!(unknown.len(), 1, "expected 1 unknown port diag");
 }
@@ -46,7 +46,7 @@ fn named_port_duplicate() {
     );
     let dups: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::DUPLICATE_PORT_CONN)
+        .filter(|d| d.code == code::DUPLICATE_PORT_CONN)
         .collect();
     assert_eq!(dups.len(), 1, "expected 1 duplicate port diag");
 }
@@ -62,7 +62,7 @@ fn positional_ports_correct() {
     );
     let elab_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code.namespace == "lyra.elab")
+        .filter(|d| d.code.starts_with("lyra.elab."))
         .collect();
     assert!(
         elab_diags.is_empty(),
@@ -81,7 +81,7 @@ fn positional_too_many() {
     );
     let too_many: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::TOO_MANY_POSITIONAL_PORTS)
+        .filter(|d| d.code == code::TOO_MANY_POSITIONAL_PORTS)
         .collect();
     assert_eq!(too_many.len(), 1, "expected 1 too-many diag");
 }
@@ -97,7 +97,7 @@ fn missing_port_named() {
     );
     let missing: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MISSING_PORT_CONN)
+        .filter(|d| d.code == code::MISSING_PORT_CONN)
         .collect();
     assert_eq!(missing.len(), 1, "expected 1 missing port warning");
     assert_eq!(missing[0].severity, lyra_diag::Severity::Warning);
@@ -114,7 +114,7 @@ fn missing_port_positional() {
     );
     let missing: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::MISSING_PORT_CONN)
+        .filter(|d| d.code == code::MISSING_PORT_CONN)
         .collect();
     assert_eq!(missing.len(), 2, "expected 2 missing port warnings (b, c)");
 }

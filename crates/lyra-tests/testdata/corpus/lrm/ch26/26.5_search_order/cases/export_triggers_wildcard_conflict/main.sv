@@ -13,5 +13,5 @@ package R;
   import P::*;
   import Q::*;
   export P::x;
-  //    ^ error[lyra.semantic[7]]: import of `x` from package `P` conflicts with wildcard import from package `Q`
+  //    ^ error[lyra.semantic.import_conflict]: import of `x` from package `P` conflicts with wildcard import from package `Q`
 endpackage

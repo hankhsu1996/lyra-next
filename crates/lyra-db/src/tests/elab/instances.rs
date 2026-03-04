@@ -5,7 +5,7 @@ fn unresolved_module() {
     let diags = elab_diags(&["module top; nonexistent u1(); endmodule"], "top");
     let unresolved: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::UNRESOLVED_MODULE_INST)
+        .filter(|d| d.code == code::UNRESOLVED_MODULE_INST)
         .collect();
     assert_eq!(unresolved.len(), 1);
 }
@@ -18,7 +18,7 @@ fn not_a_module_instantiation() {
     );
     let not_mod: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == DiagnosticCode::NOT_INSTANTIABLE)
+        .filter(|d| d.code == code::NOT_INSTANTIABLE)
         .collect();
     assert_eq!(not_mod.len(), 1);
 }
@@ -143,7 +143,7 @@ fn multi_file_instantiation() {
     );
     let elab_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code.namespace == "lyra.elab")
+        .filter(|d| d.code.starts_with("lyra.elab."))
         .collect();
     assert!(
         elab_diags.is_empty(),

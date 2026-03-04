@@ -48,7 +48,7 @@ pub(super) fn lower_record_assign_item(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::RECORD_ASSIGN_INCOMPAT,
+            lyra_diag::code::RECORD_ASSIGN_INCOMPAT,
             lyra_diag::Message::new(
                 lyra_diag::MessageId::RecordAssignWrongRecord,
                 primary_args.clone(),
@@ -116,7 +116,7 @@ pub(super) fn lower_unpacked_record_integral_assign(
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::DiagnosticCode::UNPACKED_RECORD_INTEGRAL_ASSIGN,
+            lyra_diag::code::UNPACKED_RECORD_INTEGRAL_ASSIGN,
             lyra_diag::Message::new(
                 lyra_diag::MessageId::UnpackedRecordIntegralAssign,
                 args.clone(),

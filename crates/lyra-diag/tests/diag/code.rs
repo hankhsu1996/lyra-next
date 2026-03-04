@@ -1,23 +1,12 @@
-use lyra_diag::DiagnosticCode;
+use lyra_diag::code;
 
 #[test]
-fn code_as_str() {
-    assert_eq!(DiagnosticCode::PARSE_ERROR.as_str(), "lyra.parse[1]");
-    assert_eq!(DiagnosticCode::UNRESOLVED_NAME.as_str(), "lyra.semantic[1]");
+fn key_is_string() {
+    assert_eq!(code::PARSE_ERROR, "lyra.parse.error");
+    assert_eq!(code::UNRESOLVED_NAME, "lyra.semantic.unresolved_name");
     assert_eq!(
-        DiagnosticCode::DUPLICATE_DEFINITION.as_str(),
-        "lyra.semantic[2]"
+        code::DUPLICATE_DEFINITION,
+        "lyra.semantic.duplicate_definition"
     );
-    assert_eq!(
-        DiagnosticCode::PREPROCESS_ERROR.as_str(),
-        "lyra.preprocess[1]"
-    );
-}
-
-#[test]
-fn code_display() {
-    assert_eq!(
-        format!("{}", DiagnosticCode::UNRESOLVED_NAME),
-        "lyra.semantic[1]"
-    );
+    assert_eq!(code::PREPROCESS_ERROR, "lyra.preprocess.error");
 }

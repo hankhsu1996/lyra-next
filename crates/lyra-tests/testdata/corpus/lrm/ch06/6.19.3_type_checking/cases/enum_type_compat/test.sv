@@ -18,11 +18,11 @@ module enum_type_compat;
 
   // Int to enum without cast: error
   assign c = i;
-  //        ^ error[lyra.type[7]]
+  //        ^ error[lyra.type.enum_assign_incompat]
 
   // Cross-enum assignment: error
   assign c = d;
-  //        ^ error[lyra.type[7]]
+  //        ^ error[lyra.type.enum_assign_incompat]
 
   // Builtin type cast
   initial begin
@@ -34,7 +34,7 @@ module enum_type_compat;
   E e;
   initial begin
     e = E'(2);
-    // ^ warning[lyra.type[12]]
+    // ^ warning[lyra.type.enum_cast_out_of_range]
   end
 
 endmodule

@@ -4,10 +4,10 @@ module enum_range_errors;
 
   // Negative count
   typedef enum { N[-1] } neg_t;
-  //             ^ error[lyra.semantic[9]]
+  //             ^ error[lyra.semantic.enum_range_invalid]
 
   // Collision: range-generated name collides with plain member
   typedef enum { P[3], P1 } collision_t;
-  //             ^ error[lyra.semantic[2]]
+  //             ^ error[lyra.semantic.duplicate_definition]
 
 endmodule

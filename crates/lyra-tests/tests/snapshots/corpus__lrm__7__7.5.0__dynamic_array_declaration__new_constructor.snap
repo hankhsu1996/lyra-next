@@ -3,7 +3,7 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (2 diagnostics)
-  error[lyra.type[19]] 20:15..20:15: new[] can only initialize a dynamic array
-  error[lyra.type[22]] 26:13..26:13: new[] size must be non-negative
+  error[lyra.type.new_expr_not_dyn_array] 20:15..20:15: new[] can only initialize a dynamic array
+  error[lyra.type.new_expr_size_negative] 26:13..26:13: new[] size must be non-negative
 ---
 unit (0 diagnostics)

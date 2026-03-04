@@ -6,9 +6,9 @@ module string_method_errors;
 
   initial begin
     s.foo();
-    //^ error[lyra.type[16]]: unknown method `foo` on this type
+    //^ error[lyra.type.method_call_error]: unknown method `foo` on this type
     s.len(1);
-    //^ error[lyra.type[16]]: wrong number of arguments to method `len`
+    //^ error[lyra.type.method_call_error]: wrong number of arguments to method `len`
   end
 
 endmodule

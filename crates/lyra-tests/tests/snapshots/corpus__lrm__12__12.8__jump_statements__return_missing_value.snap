@@ -3,6 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.semantic[22]] 4:4..4:4: non-void function must return a value
+  error[lyra.semantic.return_missing_value] 4:4..4:4: non-void function must return a value
 ---
 unit (0 diagnostics)

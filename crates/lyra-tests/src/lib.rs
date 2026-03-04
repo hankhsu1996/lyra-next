@@ -132,12 +132,12 @@ impl TestWorkspace {
                     let start = line_index.line_col(span.range.start());
                     let end = line_index.line_col(span.range.end());
                     let msg = d.render_message();
-                    let code = d.code.as_str();
+                    let code = d.code;
                     let sev = severity_str(d.severity);
                     Some((
                         start.line,
                         start.col,
-                        code.clone(),
+                        code,
                         sev,
                         msg.clone(),
                         format!(
@@ -150,7 +150,7 @@ impl TestWorkspace {
             entries.sort_by(|a, b| {
                 a.0.cmp(&b.0)
                     .then_with(|| a.1.cmp(&b.1))
-                    .then_with(|| a.2.cmp(&b.2))
+                    .then_with(|| a.2.cmp(b.2))
                     .then_with(|| a.3.cmp(b.3))
                     .then_with(|| a.4.cmp(&b.4))
             });
@@ -172,7 +172,7 @@ impl TestWorkspace {
         let mut unit_entries: Vec<_> = unit_diags
             .iter()
             .map(|d| {
-                let code = d.code.as_str();
+                let code = d.code;
                 let sev = severity_str(d.severity);
                 let msg = d.render_message();
                 // Unit diagnostics may have a span (for the duplicate location)
@@ -193,7 +193,7 @@ impl TestWorkspace {
                 });
                 let loc = loc.unwrap_or_default();
                 (
-                    code.clone(),
+                    code,
                     sev,
                     msg.clone(),
                     format!("  {sev}[{code}]{loc}: {msg}"),
@@ -201,7 +201,7 @@ impl TestWorkspace {
             })
             .collect();
         unit_entries.sort_by(|a, b| {
-            a.0.cmp(&b.0)
+            a.0.cmp(b.0)
                 .then_with(|| a.1.cmp(b.1))
                 .then_with(|| a.2.cmp(&b.2))
         });

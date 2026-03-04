@@ -7,5 +7,5 @@ module top;
   import p::*;
   initial x = 1;  // realizes p::x in scope top
   int x;
-  //  ^ error[lyra.semantic[7]]: local declaration of `x` conflicts with wildcard import from package `p`
+  //  ^ error[lyra.semantic.import_conflict]: local declaration of `x` conflicts with wildcard import from package `p`
 endmodule

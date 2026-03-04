@@ -3,7 +3,7 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (2 diagnostics)
-  error[lyra.type[38]] 24:8..24:8: member `Write` is not accessible through this modport
-  error[lyra.type[38]] 26:8..26:8: member `Reset` is not accessible through this modport
+  error[lyra.type.member_not_in_modport] 24:8..24:8: member `Write` is not accessible through this modport
+  error[lyra.type.member_not_in_modport] 26:8..26:8: member `Reset` is not accessible through this modport
 ---
 unit (0 diagnostics)

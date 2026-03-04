@@ -3,6 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.type[31]] 4:7..4:7: void cannot be used as an object type
+  error[lyra.type.void_object_type] 4:7..4:7: void cannot be used as an object type
 ---
 unit (0 diagnostics)

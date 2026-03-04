@@ -8,7 +8,7 @@ module var_same_name_as_array;
 
   initial begin
     foreach (arr[arr]) begin
-//               ^ error[lyra.semantic[24]]: foreach loop variable has same name as iterated array `arr`
+//               ^ error[lyra.semantic.foreach_var_same_as_array]: foreach loop variable has same name as iterated array `arr`
     end
   end
 

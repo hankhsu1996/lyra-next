@@ -46,7 +46,7 @@ fn duplicate_diag_has_secondary_label() {
     let diags = file_diagnostics(&db, file, unit);
     let dup = diags
         .iter()
-        .find(|d| d.code == lyra_diag::DiagnosticCode::DUPLICATE_DEFINITION)
+        .find(|d| d.code == lyra_diag::code::DUPLICATE_DEFINITION)
         .expect("should have duplicate diagnostic");
     assert_eq!(dup.labels.len(), 2, "primary + secondary labels");
     assert_eq!(dup.labels[0].kind, lyra_diag::LabelKind::Primary);
@@ -62,7 +62,7 @@ fn unresolved_diag_has_code() {
     let unresolved = diags
         .iter()
         .find(|d| {
-            d.code == lyra_diag::DiagnosticCode::UNRESOLVED_NAME
+            d.code == lyra_diag::code::UNRESOLVED_NAME
                 && d.render_message().contains("unknown_name")
         })
         .expect("should have unresolved name diagnostic for unknown_name");
@@ -76,9 +76,7 @@ fn parse_error_has_code() {
     let unit = single_file_unit(&db, file);
     let diags = file_diagnostics(&db, file, unit);
     assert!(
-        diags
-            .iter()
-            .any(|d| d.code == lyra_diag::DiagnosticCode::PARSE_ERROR),
+        diags.iter().any(|d| d.code == lyra_diag::code::PARSE_ERROR),
         "should have parse error diagnostic with PARSE_ERROR code"
     );
 }
@@ -91,7 +89,7 @@ fn undeclared_type_diag() {
     let diags = file_diagnostics(&db, file, unit);
     let diag = diags
         .iter()
-        .find(|d| d.code == lyra_diag::DiagnosticCode::UNDECLARED_TYPE)
+        .find(|d| d.code == lyra_diag::code::UNDECLARED_TYPE)
         .expect("should have undeclared type diagnostic");
     assert_eq!(diag.severity, lyra_diag::Severity::Error);
     assert!(
@@ -118,7 +116,7 @@ fn undeclared_type_not_value() {
         .expect("should have diagnostic for unknown_name");
     assert_eq!(
         unresolved.code,
-        lyra_diag::DiagnosticCode::UNRESOLVED_NAME,
+        lyra_diag::code::UNRESOLVED_NAME,
         "value-position name should use UNRESOLVED_NAME, not UNDECLARED_TYPE"
     );
 }
@@ -131,7 +129,7 @@ fn not_a_type_diag() {
     let diags = file_diagnostics(&db, file, unit);
     let diag = diags
         .iter()
-        .find(|d| d.code == lyra_diag::DiagnosticCode::NOT_A_TYPE)
+        .find(|d| d.code == lyra_diag::code::NOT_A_TYPE)
         .expect("should have not-a-type diagnostic");
     assert_eq!(diag.severity, lyra_diag::Severity::Error);
     assert!(
@@ -154,8 +152,7 @@ fn typedef_resolves_ok() {
     let type_diags: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.code == lyra_diag::DiagnosticCode::UNDECLARED_TYPE
-                || d.code == lyra_diag::DiagnosticCode::NOT_A_TYPE
+            d.code == lyra_diag::code::UNDECLARED_TYPE || d.code == lyra_diag::code::NOT_A_TYPE
         })
         .collect();
     assert!(
@@ -176,7 +173,7 @@ fn qualified_pkg_not_found() {
         .expect("should have diagnostic mentioning no_pkg");
     assert_eq!(
         diag.code,
-        lyra_diag::DiagnosticCode::PACKAGE_NOT_FOUND,
+        lyra_diag::code::PACKAGE_NOT_FOUND,
         "should be PACKAGE_NOT_FOUND, not UNDECLARED_TYPE"
     );
 }
@@ -198,7 +195,7 @@ fn qualified_member_not_found() {
         .expect("should have diagnostic mentioning unknown_t");
     assert_eq!(
         diag.code,
-        lyra_diag::DiagnosticCode::MEMBER_NOT_FOUND,
+        lyra_diag::code::MEMBER_NOT_FOUND,
         "should be MEMBER_NOT_FOUND, not UNDECLARED_TYPE"
     );
 }

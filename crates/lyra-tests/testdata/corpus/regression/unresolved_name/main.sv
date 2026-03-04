@@ -1,5 +1,5 @@
 module top;
   assign y = x;
-  //    ^ error[lyra.semantic[1]]: unresolved name `y`
-  //        ^ error[lyra.semantic[1]]: unresolved name `x`
+  //    ^ error[lyra.semantic.unresolved_name]: unresolved name `y`
+  //        ^ error[lyra.semantic.unresolved_name]: unresolved name `x`
 endmodule

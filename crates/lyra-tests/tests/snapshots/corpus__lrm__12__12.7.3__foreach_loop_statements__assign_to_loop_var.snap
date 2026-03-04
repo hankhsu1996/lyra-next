@@ -3,6 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.semantic[23]] 10:6..10:6: cannot assign to foreach loop variable `i`
+  error[lyra.semantic.assign_to_foreach_var] 10:6..10:6: cannot assign to foreach loop variable `i`
 ---
 unit (0 diagnostics)

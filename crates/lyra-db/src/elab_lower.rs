@@ -245,7 +245,7 @@ fn lower_elab_diag(
     diag: &ElabDiag,
 ) -> lyra_diag::Diagnostic {
     use lyra_diag::{
-        Arg, Diagnostic, DiagnosticCode as C, Label, LabelKind, Message, MessageId as M, Severity,
+        Arg, Diagnostic, Label, LabelKind, Message, MessageId as M, Severity, code as C,
     };
 
     let span = map_elab_span(db, unit, *diag.span());
@@ -297,12 +297,8 @@ fn lower_elab_diag(
 
 fn elab_diag_code_msg(
     diag: &ElabDiag,
-) -> (
-    lyra_diag::Severity,
-    lyra_diag::DiagnosticCode,
-    lyra_diag::Message,
-) {
-    use lyra_diag::{Arg, DiagnosticCode as C, Message, MessageId as M, Severity};
+) -> (lyra_diag::Severity, lyra_diag::DiagKey, lyra_diag::Message) {
+    use lyra_diag::{Arg, Message, MessageId as M, Severity, code as C};
     let e = Severity::Error;
     let n = |d: &ElabDiag| match d {
         ElabDiag::UnresolvedModuleInst { name, .. }

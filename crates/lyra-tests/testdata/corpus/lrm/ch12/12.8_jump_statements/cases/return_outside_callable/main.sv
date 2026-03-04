@@ -3,6 +3,6 @@
 module return_outside_callable;
   initial begin
     return;
-//  ^ error[lyra.semantic[20]]: `return` statement outside of a function or task
+//  ^ error[lyra.semantic.return_outside_callable]: `return` statement outside of a function or task
   end
 endmodule

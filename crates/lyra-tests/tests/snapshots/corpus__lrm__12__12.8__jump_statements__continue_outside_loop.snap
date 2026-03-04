@@ -3,6 +3,6 @@ source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
 // file: main.sv (1 diagnostic)
-  error[lyra.semantic[19]] 4:4..4:4: `continue` statement outside of a loop
+  error[lyra.semantic.continue_outside_loop] 4:4..4:4: `continue` statement outside of a loop
 ---
 unit (0 diagnostics)
