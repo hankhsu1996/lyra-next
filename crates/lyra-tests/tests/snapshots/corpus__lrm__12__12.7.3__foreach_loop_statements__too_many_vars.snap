@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.semantic[25]] 9:20..9:20: foreach has 2 loop variables but iterated expression has only 1 dimensions
+---
+unit (0 diagnostics)

@@ -109,6 +109,10 @@ pub enum MessageId {
     ReturnOutsideCallable,
     ReturnValueInVoid,
     ReturnMissingValue,
+    // Foreach loop legality messages
+    AssignToForeachVar,
+    ForeachVarSameAsArray,
+    ForeachTooManyVars,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -331,6 +335,22 @@ fn render_other_message(msg: &Message) -> String {
         }
         MessageId::ReturnValueInVoid => "cannot return a value from a void function or task".into(),
         MessageId::ReturnMissingValue => "non-void function must return a value".into(),
+        MessageId::AssignToForeachVar => {
+            format!("cannot assign to foreach loop variable `{}`", name())
+        }
+        MessageId::ForeachVarSameAsArray => {
+            format!(
+                "foreach loop variable has same name as iterated array `{}`",
+                name()
+            )
+        }
+        MessageId::ForeachTooManyVars => {
+            let dim_count = msg.args.first().and_then(Arg::as_count).unwrap_or(0);
+            let var_count = msg.args.get(1).and_then(Arg::as_count).unwrap_or(0);
+            format!(
+                "foreach has {var_count} loop variables but iterated expression has only {dim_count} dimensions"
+            )
+        }
         MessageId::ParseError | MessageId::PreprocessError => msg
             .args
             .first()

@@ -57,6 +57,17 @@ pub fn file_diagnostics(
         );
     }
 
+    // Foreach loop legality diagnostics (LRM 12.7.3)
+    {
+        let foreach_index = crate::foreach_check::foreach_check_index(db, file, unit);
+        crate::lower_diag::lower_foreach_check_items(
+            file.file_id(db),
+            &pp.source_map,
+            &foreach_index.items,
+            &mut diags,
+        );
+    }
+
     // Enum base type diagnostics
     let file_id = file.file_id(db);
     for enum_def in &*def.enum_defs {

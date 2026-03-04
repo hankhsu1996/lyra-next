@@ -389,7 +389,8 @@ fn type_of_foreach_var(
     fv_def: &lyra_semantic::def_index::ForeachVarDef,
 ) -> lyra_semantic::types::SymbolType {
     use lyra_ast::{AstNode, ForeachStmt, HasSyntax};
-    use lyra_semantic::types::{AssocIndex, SymbolType, SymbolTypeError};
+    use lyra_semantic::types::foreach_dim::{ForeachDimIndexType, ForeachDims};
+    use lyra_semantic::types::{SymbolType, SymbolTypeError};
 
     use crate::expr_queries::{ExprRef, type_of_expr};
 
@@ -416,22 +417,15 @@ fn type_of_foreach_var(
     // header selects. Slot 0 maps to the outermost remaining dim.
     let expr_ref = ExprRef::new(db, unit, expr_site);
     let expr_type = type_of_expr(db, expr_ref);
-    let ty = expr_type.ty;
 
-    // Decompose unpacked dimensions and map slot directly to index type.
-    let (_base, dims) = lyra_semantic::types::collect_array_dims(&ty);
+    let dims = ForeachDims::from_iterated_type(&expr_type.ty);
     let slot = fv_def.slot as usize;
 
-    if slot >= dims.len() {
-        return SymbolType::Value(Ty::Error);
+    match dims.slot_index_type(slot) {
+        Some(ForeachDimIndexType::Int) => SymbolType::Value(Ty::int()),
+        Some(ForeachDimIndexType::Typed(key_ty)) => SymbolType::Value(key_ty.as_ref().clone()),
+        None => SymbolType::Value(Ty::Error),
     }
-
-    let index_type = match dims[slot] {
-        UnpackedDim::Assoc(AssocIndex::Typed(inner_ty)) => inner_ty.as_ref().clone(),
-        _ => Ty::int(),
-    };
-
-    SymbolType::Value(index_type)
 }
 
 /// Resolve a definition-namespace target to its base `Ty` (no dims).

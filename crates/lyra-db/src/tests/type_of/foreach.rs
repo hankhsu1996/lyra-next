@@ -349,3 +349,54 @@ fn foreach_var_slot_out_of_range() {
     // j maps to slot 1 -> no dim -> Error
     assert_eq!(get_type(&db, file, unit, "j"), SymbolType::Value(Ty::Error));
 }
+
+// Foreach over packed vector: loop var type is int
+#[test]
+fn foreach_var_packed_vector() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\
+         logic [7:0] v;\
+         initial foreach (v[i]) begin end\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(get_type(&db, file, unit, "i"), SymbolType::Value(Ty::int()));
+}
+
+// Foreach over string: loop var type is int
+#[test]
+fn foreach_var_string() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\
+         string s;\
+         initial foreach (s[i]) begin end\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(get_type(&db, file, unit, "i"), SymbolType::Value(Ty::int()));
+}
+
+// Foreach over mixed unpacked + packed: both vars get int
+#[test]
+fn foreach_var_mixed_unpacked_packed() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\
+         logic [7:0] arr [3];\
+         initial foreach (arr[i,j]) begin end\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    // i -> unpacked dim [3] -> int
+    assert_eq!(get_type(&db, file, unit, "i"), SymbolType::Value(Ty::int()));
+    // j -> packed dim [7:0] -> int
+    assert_eq!(get_type(&db, file, unit, "j"), SymbolType::Value(Ty::int()));
+}

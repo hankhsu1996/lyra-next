@@ -879,5 +879,7 @@ fn fmt_unpacked_dim(s: &mut String, dim: &UnpackedDim) {
     }
 }
 
+pub mod foreach_dim;
+
 #[cfg(test)]
 mod tests;

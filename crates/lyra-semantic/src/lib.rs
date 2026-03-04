@@ -10,6 +10,7 @@ pub mod def_entry;
 pub mod def_index;
 pub mod diagnostic;
 pub mod enum_def;
+pub mod foreach_check;
 pub mod global_index;
 pub mod instance_decl;
 pub mod interface_id;

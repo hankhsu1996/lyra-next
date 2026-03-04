@@ -604,6 +604,80 @@ pub(crate) fn lower_jump_check_items(
     }
 }
 
+/// Lower foreach-legality items (LRM 12.7.3) into diagnostics.
+pub(crate) fn lower_foreach_check_items(
+    file_id: FileId,
+    source_map: &lyra_preprocess::SourceMap,
+    items: &[lyra_semantic::foreach_check::ForeachCheckItem],
+    diags: &mut Vec<Diagnostic>,
+) {
+    use lyra_semantic::foreach_check::ForeachCheckItem;
+    for item in items {
+        let (span_range, code, msg) = match item {
+            ForeachCheckItem::AssignToForeachVar {
+                lhs_name_span,
+                var_name,
+            } => {
+                if !lhs_name_span.is_valid() {
+                    continue;
+                }
+                (
+                    lhs_name_span.text_range(),
+                    DiagnosticCode::ASSIGN_TO_FOREACH_VAR,
+                    Message::new(
+                        MessageId::AssignToForeachVar,
+                        vec![Arg::Name(var_name.clone())],
+                    ),
+                )
+            }
+            ForeachCheckItem::VarSameNameAsArray {
+                var_name_span,
+                array_name,
+            } => {
+                if !var_name_span.is_valid() {
+                    continue;
+                }
+                (
+                    var_name_span.text_range(),
+                    DiagnosticCode::FOREACH_VAR_SAME_AS_ARRAY,
+                    Message::new(
+                        MessageId::ForeachVarSameAsArray,
+                        vec![Arg::Name(array_name.clone())],
+                    ),
+                )
+            }
+            ForeachCheckItem::TooManyVars {
+                excess_var_span,
+                dim_count,
+                var_count,
+            } => {
+                if !excess_var_span.is_valid() {
+                    continue;
+                }
+                (
+                    excess_var_span.text_range(),
+                    DiagnosticCode::FOREACH_TOO_MANY_VARS,
+                    Message::new(
+                        MessageId::ForeachTooManyVars,
+                        vec![
+                            Arg::Count(*dim_count as usize),
+                            Arg::Count(*var_count as usize),
+                        ],
+                    ),
+                )
+            }
+        };
+        let (span, _) = map_span_or_fallback(file_id, source_map, span_range);
+        diags.push(
+            Diagnostic::new(Severity::Error, code, msg.clone()).with_label(Label {
+                kind: LabelKind::Primary,
+                span,
+                message: msg,
+            }),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
