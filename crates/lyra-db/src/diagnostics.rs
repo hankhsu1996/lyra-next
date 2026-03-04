@@ -176,7 +176,7 @@ pub fn type_diagnostics(
     let map = ast_id_map(db, file);
     let pp = preprocess_file(db, file);
     let index = checks_index(db, file);
-    let facts = field_access_facts(db, file, unit);
+    let field_access = field_access_facts(db, file, unit);
 
     let ctx = DbTypeCheckCtx {
         db,
@@ -191,7 +191,7 @@ pub fn type_diagnostics(
         let Some(node) = map.get_node(&root, entry.site) else {
             continue;
         };
-        dispatch_check_entry(entry, node, map, facts, &ctx, &mut items);
+        dispatch_check_entry(entry, node, map, field_access, &ctx, &mut items);
     }
 
     check_drive_strength_in_file(&root, map, &mut items);
@@ -215,7 +215,7 @@ fn dispatch_check_entry(
     entry: &crate::checks_index::CheckEntry,
     node: lyra_parser::SyntaxNode,
     map: &lyra_ast::AstIdMap,
-    facts: &lyra_semantic::modport_facts::FieldAccessFacts,
+    field_access: &lyra_semantic::modport_facts::FieldAccessFacts,
     ctx: &DbTypeCheckCtx<'_>,
     items: &mut Vec<lyra_semantic::type_check::TypeCheckItem>,
 ) {
@@ -251,10 +251,11 @@ fn dispatch_check_entry(
                 lyra_semantic::type_check::check_field_direction(
                     &field,
                     ctx,
-                    facts,
+                    field_access,
                     entry.access,
                     items,
                 );
+                lyra_semantic::type_check::check_field_modport_restriction(&field, ctx, items);
             }
         }
         CheckKind::CastExpr => {

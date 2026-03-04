@@ -35,7 +35,8 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::ModportDirectionViolation { .. }
         | TypeCheckItem::ModportRefUnsupported { .. }
         | TypeCheckItem::ModportEmptyPortAccess { .. }
-        | TypeCheckItem::ModportExprNotAssignable { .. } => {
+        | TypeCheckItem::ModportExprNotAssignable { .. }
+        | TypeCheckItem::MemberNotInModport { .. } => {
             misc::lower_modport_item(item, source_map, diags);
         }
         TypeCheckItem::EnumCastOutOfRange { .. } => {

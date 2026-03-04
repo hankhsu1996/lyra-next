@@ -78,6 +78,30 @@ pub(super) fn lower_modport_item(
                 lyra_diag::MessageId::ModportExprNotAssignable,
             );
         }
+        TypeCheckItem::MemberNotInModport {
+            member_name_span,
+            member_name,
+        } => {
+            let Some(span) = source_map.map_span(member_name_span.text_range()) else {
+                return;
+            };
+            let args = vec![lyra_diag::Arg::Name(member_name.clone())];
+            diags.push(
+                lyra_diag::Diagnostic::new(
+                    lyra_diag::Severity::Error,
+                    lyra_diag::DiagnosticCode::MEMBER_NOT_IN_MODPORT,
+                    lyra_diag::Message::new(lyra_diag::MessageId::MemberNotInModport, args.clone()),
+                )
+                .with_label(lyra_diag::Label {
+                    kind: lyra_diag::LabelKind::Primary,
+                    span,
+                    message: lyra_diag::Message::new(
+                        lyra_diag::MessageId::MemberNotInModport,
+                        args,
+                    ),
+                }),
+            );
+        }
         _ => {}
     }
 }

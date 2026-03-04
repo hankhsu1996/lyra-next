@@ -70,7 +70,7 @@ fn register_type_expr_use_site(
 ) {
     match utr {
         crate::type_extract::UserTypeRef::Simple(nr)
-        | crate::type_extract::UserTypeRef::InterfaceModport { iface: nr, .. } => {
+        | crate::type_extract::UserTypeRef::DottedType { base: nr, .. } => {
             if let Some(ident) = nr.ident()
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
             {
@@ -109,14 +109,26 @@ fn register_type_use_site(
     scope: ScopeId,
 ) {
     match utr {
-        crate::type_extract::UserTypeRef::Simple(nr)
-        | crate::type_extract::UserTypeRef::InterfaceModport { iface: nr, .. } => {
+        crate::type_extract::UserTypeRef::Simple(nr) => {
             if let Some(ident) = nr.ident()
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
             {
                 ctx.use_sites.push(UseSite {
                     path: NamePath::Simple(SmolStr::new(ident.text())),
                     expected_ns: ExpectedNs::TypeThenValue,
+                    scope,
+                    name_ref_site: ast_id.erase(),
+                    order_key: 0,
+                });
+            }
+        }
+        crate::type_extract::UserTypeRef::DottedType { base: nr, .. } => {
+            if let Some(ident) = nr.ident()
+                && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
+            {
+                ctx.use_sites.push(UseSite {
+                    path: NamePath::Simple(SmolStr::new(ident.text())),
+                    expected_ns: ExpectedNs::TypeOrValue,
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,

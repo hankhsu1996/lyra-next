@@ -226,16 +226,16 @@ fn user_type_ref_dotted_name() {
         TypeNameRef::Dotted(d) => d,
         other => panic!("expected Dotted, got {other:?}"),
     };
-    let iface = dn.interface_ref().expect("interface_ref");
-    assert_eq!(iface.ident().expect("ident").text(), "my_bus");
-    assert_eq!(dn.modport_ident().expect("modport").text(), "master");
+    let base = dn.base_ref().expect("base_ref");
+    assert_eq!(base.ident().expect("ident").text(), "my_bus");
+    assert_eq!(dn.member_ident().expect("member").text(), "master");
 
     let utr = user_type_ref(&ts).expect("should extract UserTypeRef");
     match utr {
-        UserTypeRef::InterfaceModport { modport_name, .. } => {
-            assert_eq!(modport_name.as_str(), "master");
+        UserTypeRef::DottedType { member, .. } => {
+            assert_eq!(member.as_str(), "master");
         }
-        other => panic!("expected InterfaceModport, got {other:?}"),
+        other => panic!("expected DottedType, got {other:?}"),
     }
 }
 

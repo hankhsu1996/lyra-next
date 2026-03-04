@@ -71,13 +71,13 @@ fn resolve_def_interface_ty(
         return Ty::Error;
     };
     let modport = match utr {
-        UserTypeRef::InterfaceModport { modport_name, .. } => {
+        UserTypeRef::DottedType { member, .. } => {
             let target_file_id = def_id.ast_id().file();
             let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
                 return Ty::Error;
             };
             let target_def = def_index_file(db, target_file);
-            match target_def.modport_by_name(iface_def, modport_name.as_str()) {
+            match target_def.modport_by_name(iface_def, member.as_str()) {
                 Some(mp_def) => Some(mp_def.id),
                 None => return Ty::Error,
             }

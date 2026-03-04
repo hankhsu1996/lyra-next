@@ -719,8 +719,12 @@ pub enum SymbolTypeError {
     PortTypeMissing,
     /// Modport name does not exist on the resolved interface.
     UnknownModport,
-    /// Dotted name used on a non-interface type (e.g. `typedef int foo; foo.bar v;`).
-    ModportOnNonInterface,
+    /// Dotted type base resolved but is not a container you can dot into in type position.
+    DottedTypeBaseNotInterfaceContainer,
+    /// Member not found in interface type namespace (dotted type value-base path).
+    UnknownInterfaceTypeMember,
+    /// Member found in interface type namespace but is not a type alias.
+    InterfaceTypeMemberNotAType,
 }
 
 /// IEEE 1800-2023 net type keywords (LRM 6.7).

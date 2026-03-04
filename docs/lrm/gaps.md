@@ -168,10 +168,6 @@ Import/export of subroutines through modports. Neither parsing nor semantic anal
 
 `virtual interface` type declaration, assignment, and access. Not supported at any layer. Test: `lrm/ch25/25.9_virtual_interfaces`.
 
-### 25.10: Type access through modport-qualified ports
-
-Value-namespace parameter and localparam access through modport-qualified ports is implemented. Remaining: dotted names in type position through modport-qualified ports (e.g. `typedef i.choice yes_no`) require a dedicated type-path resolver that understands `port.(interface).(modport)` vs `port.type_member`. Test: `lrm/ch25/25.10_interface_objects/cases/`.
-
 ## Chapter 26 -- Packages
 
 ### 26.7: std package contents (Annex G)

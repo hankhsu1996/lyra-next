@@ -91,12 +91,12 @@ fn dotted_name_parts() {
     let dn_node = find_kind(&root, SyntaxKind::DottedName).expect("DottedName");
     let dn = lyra_ast::DottedName::cast(dn_node).expect("cast");
 
-    let iface = dn.interface_ref().expect("interface_ref");
-    let iface_ident = iface.ident().expect("ident");
-    assert_eq!(iface_ident.text(), "my_bus");
+    let base = dn.base_ref().expect("base_ref");
+    let base_ident = base.ident().expect("ident");
+    assert_eq!(base_ident.text(), "my_bus");
 
-    let mp = dn.modport_ident().expect("modport_ident");
-    assert_eq!(mp.text(), "master");
+    let member = dn.member_ident().expect("member_ident");
+    assert_eq!(member.text(), "master");
 }
 
 // PackedDimension tests

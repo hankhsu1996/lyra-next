@@ -1,8 +1,9 @@
+use lyra_semantic::def_entry::DefScope;
 use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::interface_id::InterfaceDefId;
 use lyra_semantic::resolve_index::CoreResolveResult;
-use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId};
+use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId, Namespace};
 use lyra_semantic::types::{InterfaceIdentity, InterfaceType, Ty};
 use lyra_source::FileId;
 use smol_str::SmolStr;
@@ -176,6 +177,35 @@ pub(crate) fn def_target_ty(
         }),
         _ => Ty::Error,
     }
+}
+
+/// Resolve a member name in a specific namespace within a concrete interface scope.
+///
+/// Takes `InterfaceDefId` (the semantic identity) so callers don't need to know
+/// about `GlobalDefId` shape. Pure composition of existing queries:
+/// `source_file_by_id` and `def_index_file`.
+pub(crate) fn resolve_interface_scope_symbol(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    iface: InterfaceDefId,
+    ns: Namespace,
+    member_name: &str,
+) -> Option<GlobalSymbolId> {
+    let def_id = iface.global_def();
+    let file_id = def_id.ast_id().file();
+    let src = source_file_by_id(db, unit, file_id)?;
+    let def = def_index_file(db, src);
+    let entry = def.def_entry(def_id)?;
+    let DefScope::Owned(iface_scope) = entry.scope else {
+        return None;
+    };
+    let sym_id = def
+        .scopes
+        .resolve(&def.symbols, iface_scope, ns, member_name)?;
+    Some(GlobalSymbolId {
+        file: file_id,
+        local: sym_id,
+    })
 }
 
 /// Classify a `CoreResolveResult` for a record field, returning a `Ty` and

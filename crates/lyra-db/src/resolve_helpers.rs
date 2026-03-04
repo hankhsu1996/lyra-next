@@ -9,7 +9,7 @@ use crate::{CompilationUnit, SourceFile};
 /// Get the syntax node from a `UserTypeRef` for AST ID lookup.
 pub(crate) fn utr_syntax(utr: &UserTypeRef) -> &lyra_parser::SyntaxNode {
     match utr {
-        UserTypeRef::Simple(nr) | UserTypeRef::InterfaceModport { iface: nr, .. } => nr.syntax(),
+        UserTypeRef::Simple(nr) | UserTypeRef::DottedType { base: nr, .. } => nr.syntax(),
         UserTypeRef::Qualified(qn) => qn.syntax(),
     }
 }

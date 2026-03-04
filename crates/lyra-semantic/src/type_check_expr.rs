@@ -178,6 +178,38 @@ fn direction_permits(dir: PortDirection, access: AccessKind) -> bool {
     )
 }
 
+/// Check a `FieldExpr` for member-not-in-modport restriction.
+///
+/// Uses the expression inference path as the semantic source of truth:
+/// queries the inferred type of the field expression by its site, and
+/// if it reports `MemberNotInModport`, emits the diagnostic.
+pub fn check_field_modport_restriction(
+    field: &lyra_ast::FieldExpr,
+    ctx: &dyn TypeCheckCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    use crate::type_infer::ExprTypeErrorKind;
+
+    let map = ctx.ast_id_map();
+    let Some(field_site) = site::opt_site_of(map, field) else {
+        return;
+    };
+    let result = ctx.expr_type_by_id(field_site);
+    if !matches!(
+        result.view,
+        ExprView::Error(ExprTypeErrorKind::MemberNotInModport)
+    ) {
+        return;
+    }
+    let Some(field_tok) = field.field_name() else {
+        return;
+    };
+    items.push(TypeCheckItem::MemberNotInModport {
+        member_name_span: NameSpan::new(field_tok.text_range()),
+        member_name: smol_str::SmolStr::new(field_tok.text()),
+    });
+}
+
 /// Check a `StreamOperandItem` for non-array `with` clause.
 ///
 /// When `access` is `Write` or `ReadWrite`, the non-array `with` check is

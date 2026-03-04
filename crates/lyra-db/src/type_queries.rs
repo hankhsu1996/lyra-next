@@ -452,13 +452,13 @@ fn resolve_def_base_ty(
         return Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved));
     };
     let modport = match user_type {
-        UserTypeRef::InterfaceModport { modport_name, .. } => {
+        UserTypeRef::DottedType { member, .. } => {
             let target_file_id = def_id.ast_id().file();
             let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
                 return Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved));
             };
             let target_def = def_index_file(db, target_file);
-            match target_def.modport_by_name(iface_def, modport_name.as_str()) {
+            match target_def.modport_by_name(iface_def, member.as_str()) {
                 Some(mp_def) => Some(mp_def.id),
                 None => return Err(SymbolType::Error(SymbolTypeError::UnknownModport)),
             }
@@ -490,8 +490,10 @@ fn resolve_symbol_base_ty(
     let target_info = target_def.symbols.get(target_id.local);
 
     if is_alias_kind(target_info.kind) {
-        if matches!(user_type, UserTypeRef::InterfaceModport { .. }) {
-            return Err(SymbolType::Error(SymbolTypeError::ModportOnNonInterface));
+        if matches!(user_type, UserTypeRef::DottedType { .. }) {
+            return Err(SymbolType::Error(
+                SymbolTypeError::DottedTypeBaseNotInterfaceContainer,
+            ));
         }
         let typedef_ref = SymbolRef::new(db, unit, target_id);
         let typedef_type = type_of_symbol_raw(db, typedef_ref);
@@ -503,8 +505,40 @@ fn resolve_symbol_base_ty(
                 SymbolTypeError::AliasUnderlyingUnsupported,
             )),
         }
-    } else if matches!(user_type, UserTypeRef::InterfaceModport { .. }) {
-        Err(SymbolType::Error(SymbolTypeError::ModportOnNonInterface))
+    } else if let UserTypeRef::DottedType { member, .. } = user_type {
+        // Value-base path: base resolved to a non-alias value symbol.
+        // Get its type and check if it is an interface.
+        let sym_ref = SymbolRef::new(db, unit, target_id);
+        let port_type = type_of_symbol_raw(db, sym_ref);
+        match &port_type {
+            SymbolType::Value(Ty::Interface(iface_ty)) => {
+                let InterfaceIdentity::Concrete(concrete_iface) = iface_ty.iface else {
+                    return Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved));
+                };
+                let Some(member_sym) = crate::ty_resolve::resolve_interface_scope_symbol(
+                    db,
+                    unit,
+                    concrete_iface,
+                    lyra_semantic::symbols::Namespace::Type,
+                    member.as_str(),
+                ) else {
+                    return Err(SymbolType::Error(
+                        SymbolTypeError::UnknownInterfaceTypeMember,
+                    ));
+                };
+                let member_ref = SymbolRef::new(db, unit, member_sym);
+                let member_type = type_of_symbol_raw(db, member_ref);
+                match &member_type {
+                    SymbolType::TypeAlias(ty) => Ok(ty.clone()),
+                    _ => Err(SymbolType::Error(
+                        SymbolTypeError::InterfaceTypeMemberNotAType,
+                    )),
+                }
+            }
+            _ => Err(SymbolType::Error(
+                SymbolTypeError::DottedTypeBaseNotInterfaceContainer,
+            )),
+        }
     } else {
         Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved))
     }

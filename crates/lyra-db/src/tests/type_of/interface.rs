@@ -166,8 +166,8 @@ fn modport_on_non_interface_error() {
     let ty = get_type(&db, file, unit, "v");
     assert_eq!(
         ty,
-        SymbolType::Error(SymbolTypeError::ModportOnNonInterface),
-        "dotted name on non-interface should give ModportOnNonInterface"
+        SymbolType::Error(SymbolTypeError::DottedTypeBaseNotInterfaceContainer),
+        "dotted name on non-interface should give DottedTypeBaseNotInterfaceContainer"
     );
 }
 

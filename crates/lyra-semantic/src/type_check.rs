@@ -14,7 +14,8 @@ use crate::types::{SymbolType, Ty, UnpackedDim};
 use crate::type_check_dim::check_type_spec_member_dims;
 pub use crate::type_check_dim::{check_net_decl, check_port_decl, check_typedef_decl};
 pub use crate::type_check_expr::{
-    check_cast_expr, check_field_direction, check_method_call, check_stream_operand,
+    check_cast_expr, check_field_direction, check_field_modport_restriction, check_method_call,
+    check_stream_operand,
 };
 pub use crate::type_check_system_call::check_system_call;
 
@@ -101,6 +102,10 @@ pub enum TypeCheckItem {
     },
     ModportExprNotAssignable {
         member_name_span: NameSpan,
+    },
+    MemberNotInModport {
+        member_name_span: NameSpan,
+        member_name: smol_str::SmolStr,
     },
     MethodCallError {
         call_name_span: NameSpan,

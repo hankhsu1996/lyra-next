@@ -44,6 +44,7 @@ pub enum MessageId {
     ModportRefUnsupported,
     ModportEmptyPortAccess,
     ModportExprNotAssignable,
+    MemberNotInModport,
     EnumCastOutOfRange,
     StreamWithNonArray,
     EnumDuplicateValue,
@@ -250,6 +251,7 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::ModportRefUnsupported
         | MessageId::ModportEmptyPortAccess
         | MessageId::ModportExprNotAssignable
+        | MessageId::MemberNotInModport
         | MessageId::EnumCastOutOfRange
         | MessageId::StreamWithNonArray
         | MessageId::EnumDuplicateValue
@@ -368,7 +370,8 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::ModportDirectionViolation
         | MessageId::ModportRefUnsupported
         | MessageId::ModportEmptyPortAccess
-        | MessageId::ModportExprNotAssignable => render_modport_message(msg),
+        | MessageId::ModportExprNotAssignable
+        | MessageId::MemberNotInModport => render_modport_message(msg),
         MessageId::EnumCastOutOfRange => {
             let value = name();
             let enum_name = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
@@ -590,6 +593,9 @@ fn render_modport_message(msg: &Message) -> String {
         }
         MessageId::ModportEmptyPortAccess => "modport port has no connection (empty parens)".into(),
         MessageId::ModportExprNotAssignable => "modport expression target is not assignable".into(),
+        MessageId::MemberNotInModport => {
+            format!("member `{}` is not accessible through this modport", name())
+        }
         _ => String::new(),
     }
 }
