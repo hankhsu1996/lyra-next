@@ -45,15 +45,15 @@ pub fn is_statement_kind(kind: lyra_lexer::SyntaxKind) -> bool {
             | SyntaxKind::ForeverStmt
             | SyntaxKind::DoWhileStmt
             | SyntaxKind::ForeachStmt
+            | SyntaxKind::BreakStmt
+            | SyntaxKind::ContinueStmt
+            | SyntaxKind::ReturnStmt
             | SyntaxKind::AssignStmt
             | SyntaxKind::ContinuousAssign
             | SyntaxKind::VarDecl
             | SyntaxKind::NetDecl
             | SyntaxKind::TimingControl
             | SyntaxKind::SystemTfCall
-            | SyntaxKind::BreakStmt
-            | SyntaxKind::ContinueStmt
-            | SyntaxKind::ReturnStmt
     )
 }
 

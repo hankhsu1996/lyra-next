@@ -280,6 +280,13 @@ impl DoWhileStmt {
     }
 }
 
+impl ReturnStmt {
+    /// The return value expression, if present.
+    pub fn value(&self) -> Option<crate::expr::Expr> {
+        support::expr_children(&self.syntax).next()
+    }
+}
+
 impl ForeachStmt {
     /// The array expression before the loop-variable list.
     pub fn array_expr(&self) -> Option<crate::expr::Expr> {
@@ -294,13 +301,6 @@ impl ForeachStmt {
     /// The loop body statement.
     pub fn body(&self) -> Option<crate::node::StmtNode> {
         support::child(&self.syntax)
-    }
-}
-
-impl ReturnStmt {
-    /// The optional return value expression.
-    pub fn value(&self) -> Option<crate::expr::Expr> {
-        support::expr_child(&self.syntax, 0)
     }
 }
 

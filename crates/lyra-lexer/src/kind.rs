@@ -409,6 +409,9 @@ pub enum SyntaxKind {
     RepeatStmt,
     ForeverStmt,
     DoWhileStmt,
+    BreakStmt,
+    ContinueStmt,
+    ReturnStmt,
     AssignStmt,
     TimingControl,
     EventExpr,
@@ -488,11 +491,6 @@ pub enum SyntaxKind {
     ForeachStmt,
     ForeachVarList,
     ForeachVarSlot,
-
-    // Jump statements (LRM 12.8)
-    BreakStmt,
-    ContinueStmt,
-    ReturnStmt,
 
     // Strength specifications (LRM 6.3.2)
     DriveStrength,
