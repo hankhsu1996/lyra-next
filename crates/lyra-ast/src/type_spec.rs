@@ -380,8 +380,8 @@ impl UnpackedDimension {
 // DottedName accessor
 
 impl DottedName {
-    /// The modport identifier token after the dot.
-    pub fn modport_ident(&self) -> Option<SyntaxToken> {
+    /// The member identifier token after the dot.
+    pub fn member_ident(&self) -> Option<SyntaxToken> {
         support::token_after_any(&self.syntax, &[SyntaxKind::Dot], SyntaxKind::Ident)
     }
 }

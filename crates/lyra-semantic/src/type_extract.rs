@@ -37,18 +37,15 @@ pub fn extract_type_from_container(
 pub enum UserTypeRef {
     Simple(NameRef),
     Qualified(QualifiedName),
-    InterfaceModport {
-        iface: NameRef,
-        modport_name: SmolStr,
-    },
+    DottedType { base: NameRef, member: SmolStr },
 }
 
 impl UserTypeRef {
-    /// The simple `NameRef` for `Simple` and `InterfaceModport` variants.
+    /// The simple `NameRef` for `Simple` and `DottedType` variants.
     /// Returns `None` for `Qualified`.
     pub fn name_ref(&self) -> Option<&NameRef> {
         match self {
-            Self::Simple(nr) | Self::InterfaceModport { iface: nr, .. } => Some(nr),
+            Self::Simple(nr) | Self::DottedType { base: nr, .. } => Some(nr),
             Self::Qualified(_) => None,
         }
     }
@@ -72,11 +69,11 @@ pub fn user_type_ref(typespec: &TypeSpec) -> Option<UserTypeRef> {
         TypeNameRef::Simple(nr) => Some(UserTypeRef::Simple(nr)),
         TypeNameRef::Qualified(qn) => Some(UserTypeRef::Qualified(qn)),
         TypeNameRef::Dotted(dn) => {
-            let nr = dn.interface_ref()?;
-            let mp_token = dn.modport_ident()?;
-            Some(UserTypeRef::InterfaceModport {
-                iface: nr,
-                modport_name: SmolStr::new(mp_token.text()),
+            let nr = dn.base_ref()?;
+            let member_token = dn.member_ident()?;
+            Some(UserTypeRef::DottedType {
+                base: nr,
+                member: SmolStr::new(member_token.text()),
             })
         }
     }

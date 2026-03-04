@@ -199,6 +199,10 @@ impl DiagnosticCode {
         namespace: "lyra.type",
         number: 37,
     };
+    pub const MEMBER_NOT_IN_MODPORT: Self = Self {
+        namespace: "lyra.type",
+        number: 38,
+    };
     pub const ENUM_DUPLICATE_VALUE: Self = Self {
         namespace: "lyra.semantic",
         number: 10,

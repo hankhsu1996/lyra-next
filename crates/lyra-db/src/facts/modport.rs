@@ -1,5 +1,5 @@
 use lyra_ast::{FieldExpr, HasSyntax};
-use lyra_semantic::modport_facts::{FieldAccessFact, FieldAccessFacts, FieldAccessTarget};
+use lyra_semantic::modport_facts::{FieldAccessFact, FieldAccessTarget};
 use lyra_semantic::types::{ModportViewTarget, Ty};
 
 use crate::expr_queries::{ExprRef, type_of_expr};
@@ -7,21 +7,26 @@ use crate::pipeline::{ast_id_map, parse_file};
 use crate::record_queries::{ModportRef, modport_sem};
 use crate::{CompilationUnit, SourceFile};
 
-/// Pre-compute modport direction facts for all `FieldExpr` nodes in a file.
+/// Pre-compute direction-access facts for all `FieldExpr` nodes in a file.
+///
+/// Returns facts for members listed in the modport view. Restriction
+/// detection (members not in the modport) is handled by the expression
+/// inference path (`ExprTypeErrorKind::MemberNotInModport`).
 #[salsa::tracked(return_ref)]
 pub fn field_access_facts(
     db: &dyn salsa::Database,
     file: SourceFile,
     unit: CompilationUnit,
-) -> FieldAccessFacts {
+) -> lyra_semantic::modport_facts::FieldAccessFacts {
     let parse = parse_file(db, file);
     let map = ast_id_map(db, file);
-    let mut facts = FieldAccessFacts::new();
+    let mut facts = lyra_semantic::modport_facts::FieldAccessFacts::default();
 
     for field_expr in lyra_ast::field_exprs(&parse.syntax()) {
-        if let Some(fact) = compute_field_fact(&field_expr, db, unit, map)
-            && let Some(ast_id) = map.erased_ast_id(field_expr.syntax())
-        {
+        let Some(ast_id) = map.erased_ast_id(field_expr.syntax()) else {
+            continue;
+        };
+        if let Some(fact) = classify_field_access(&field_expr, db, unit, map) {
             facts.insert(ast_id, fact);
         }
     }
@@ -29,7 +34,7 @@ pub fn field_access_facts(
     facts
 }
 
-fn compute_field_fact(
+fn classify_field_access(
     field_expr: &FieldExpr,
     db: &dyn salsa::Database,
     unit: CompilationUnit,
@@ -50,14 +55,13 @@ fn compute_field_fact(
 
     let mref = ModportRef::new(db, unit, mp_id);
     let sem = modport_sem(db, mref);
-    let entry = sem.view.lookup(member_name)?;
 
+    let entry = sem.view.lookup(member_name)?;
     let target = match &entry.target {
         ModportViewTarget::Member(_) => FieldAccessTarget::Member,
         ModportViewTarget::Expr(expr_id) => FieldAccessTarget::Expr(*expr_id),
         ModportViewTarget::Empty => FieldAccessTarget::Empty,
     };
-
     Some(FieldAccessFact {
         member_name_span: lyra_source::NameSpan::new(field_tok.text_range()),
         port_id: entry.port_id,

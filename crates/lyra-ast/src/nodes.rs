@@ -176,7 +176,7 @@ ast_nodes! {
     QualifiedName(SyntaxKind::QualifiedName) { @custom }
 
     DottedName(SyntaxKind::DottedName) {
-        interface_ref: NameRef,
+        base_ref: NameRef,
     }
 
     TypedefDecl(SyntaxKind::TypedefDecl) {
