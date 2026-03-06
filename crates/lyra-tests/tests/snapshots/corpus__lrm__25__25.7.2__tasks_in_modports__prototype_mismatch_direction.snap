@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.semantic.prototype_mismatch] 11:16..11:16: prototype signature does not match declaration of `Read`: port 1 direction mismatch: prototype has `output` but declaration has `input`
+---
+unit (0 diagnostics)

@@ -116,6 +116,10 @@ pub enum MessageId {
     AssignToForeachVar,
     ForeachVarSameAsArray,
     ForeachTooManyVars,
+    PrototypeMismatchReturnType,
+    PrototypeMismatchPortCount,
+    PrototypeMismatchPortDirection,
+    PrototypeMismatchPortType,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -366,6 +370,36 @@ fn render_other_message(msg: &Message) -> String {
             .unwrap_or_default(),
         MessageId::NotASubroutine => {
             format!("`{}` is not a task or function", name())
+        }
+        MessageId::PrototypeMismatchReturnType => {
+            format!(
+                "prototype signature does not match declaration of `{}`: return type mismatch",
+                name()
+            )
+        }
+        MessageId::PrototypeMismatchPortCount => {
+            let proto = msg.args.get(1).and_then(Arg::as_count).unwrap_or(0);
+            let actual = msg.args.get(2).and_then(Arg::as_count).unwrap_or(0);
+            format!(
+                "prototype signature does not match declaration of `{}`: prototype has {proto} ports but declaration has {actual}",
+                name()
+            )
+        }
+        MessageId::PrototypeMismatchPortDirection => {
+            let index = msg.args.get(1).and_then(Arg::as_count).unwrap_or(0);
+            let proto_dir = msg.args.get(2).and_then(Arg::as_name).unwrap_or("?");
+            let actual_dir = msg.args.get(3).and_then(Arg::as_name).unwrap_or("?");
+            format!(
+                "prototype signature does not match declaration of `{}`: port {index} direction mismatch: prototype has `{proto_dir}` but declaration has `{actual_dir}`",
+                name()
+            )
+        }
+        MessageId::PrototypeMismatchPortType => {
+            let index = msg.args.get(1).and_then(Arg::as_count).unwrap_or(0);
+            format!(
+                "prototype signature does not match declaration of `{}`: port {index} type mismatch",
+                name()
+            )
         }
         MessageId::InternalError => msg
             .args

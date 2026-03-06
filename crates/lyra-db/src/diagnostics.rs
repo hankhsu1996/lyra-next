@@ -8,6 +8,7 @@ use crate::checks_index::{CheckKind, checks_index};
 use crate::enum_queries::{EnumRef, enum_sem, enum_variant_index};
 use crate::expr_queries::{ExprRef, IntegralCtxKey};
 use crate::facts::modport::field_access_facts;
+use crate::modport_queries::ModportRef;
 use crate::pipeline::ast_id_map as query_ast_id_map;
 use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
 use crate::record_queries::{RecordRef, record_diagnostics};
@@ -123,6 +124,9 @@ pub fn file_diagnostics(
         ));
     }
 
+    // Modport diagnostics: resolution errors + prototype validation
+    collect_modport_diagnostics(db, unit, file_id, def, pp, &mut diags);
+
     // Record diagnostics (type resolution errors + packed union width)
     for record_def in &*def.record_defs {
         let record_id = lyra_semantic::record::RecordId::new(record_def.record_type_site);
@@ -192,6 +196,43 @@ fn collect_symbol_diagnostics(
                 );
             }
         }
+    }
+}
+
+fn collect_modport_diagnostics(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    file_id: lyra_source::FileId,
+    def: &lyra_semantic::def_index::DefIndex,
+    pp: &lyra_preprocess::PreprocOutput,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    for modport_def in def.modport_defs.values() {
+        let mref = ModportRef::new(db, unit, modport_def.id);
+
+        let sem = crate::modport_queries::modport_sem(db, mref);
+        lower_semantic_diags(&sem.diags, file_id, pp, diags);
+
+        let proto_diags = crate::modport_check::modport_prototype_diagnostics(db, mref);
+        lower_semantic_diags(proto_diags, file_id, pp, diags);
+    }
+}
+
+fn lower_semantic_diags(
+    sem_diags: &[lyra_semantic::diagnostic::SemanticDiag],
+    file_id: lyra_source::FileId,
+    pp: &lyra_preprocess::PreprocOutput,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    for diag in sem_diags {
+        let chosen = crate::lower_diag::choose_best_diag_span(diag.primary, diag.label);
+        let (primary_span, _) =
+            crate::lower_diag::map_span_or_fallback(file_id, &pp.source_map, chosen);
+        diags.push(crate::lower_diag::lower_semantic_diag(
+            diag,
+            primary_span,
+            &pp.source_map,
+        ));
     }
 }
 

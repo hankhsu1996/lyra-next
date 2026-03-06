@@ -33,6 +33,7 @@ pub const FOREACH_VAR_SAME_AS_ARRAY: DiagKey = "lyra.semantic.foreach_var_same_a
 pub const FOREACH_TOO_MANY_VARS: DiagKey = "lyra.semantic.foreach_too_many_vars";
 pub const CASE_INSIDE_REQUIRES_PLAIN_CASE: DiagKey =
     "lyra.semantic.case_inside_requires_plain_case";
+pub const PROTOTYPE_MISMATCH: DiagKey = "lyra.semantic.prototype_mismatch";
 
 // Type diagnostics
 pub const WIDTH_MISMATCH: DiagKey = "lyra.type.width_mismatch";
@@ -128,6 +129,7 @@ pub const ALL_KEYS: &[DiagKey] = &[
     FOREACH_VAR_SAME_AS_ARRAY,
     FOREACH_TOO_MANY_VARS,
     CASE_INSIDE_REQUIRES_PLAIN_CASE,
+    PROTOTYPE_MISMATCH,
     WIDTH_MISMATCH,
     UNDECLARED_TYPE,
     NOT_A_TYPE,

@@ -25,7 +25,7 @@ pub struct CallableRef<'db> {
 /// provides the resolve index and type-of-symbol function appropriate
 /// for their context (normal uses `resolve_index_file` + `type_of_symbol`,
 /// raw uses `base_resolve_index` + `type_of_symbol_raw`).
-fn resolve_typespec_ty_with(
+pub(crate) fn resolve_typespec_ty_with(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     id_map: &lyra_ast::AstIdMap,
@@ -223,7 +223,7 @@ fn extract_task_sig(
     CallableSig::new(name.clone(), CallableKind::Task, Ty::Void, ports)
 }
 
-fn extract_tf_ports(
+pub(crate) fn extract_tf_ports(
     resolve_ty: &dyn Fn(&TypeSpec) -> Ty,
     port_decls: lyra_ast::AstChildren<lyra_ast::TfPortDecl>,
 ) -> Vec<TfPortSig> {
