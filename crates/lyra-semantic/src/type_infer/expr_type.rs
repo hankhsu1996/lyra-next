@@ -110,7 +110,6 @@ pub enum ExprTypeErrorKind {
     MethodNotValidOnReceiver(MethodInvalidReason),
     MethodArgTypeMismatch,
     MethodArgNotLvalue,
-    MethodKeyTypeUnknown,
     VoidUsedAsExpr,
     CastTargetNotAType,
     InternalStreamOperandError,

@@ -830,7 +830,7 @@ fn expr_type_assoc_wildcard_first_rejected() {
 }
 
 #[test]
-fn expr_type_assoc_wildcard_exists_rejected() {
+fn expr_type_assoc_wildcard_exists_accepted() {
     let db = LyraDatabase::default();
     let file = new_file(
         &db,
@@ -843,9 +843,65 @@ fn expr_type_assoc_wildcard_exists_rejected() {
     let unit = single_file_unit(&db, file);
     assert_eq!(
         expr_type_of_first_param(&db, file, unit),
+        ExprType::from_ty(&Ty::int()),
+    );
+}
+
+#[test]
+fn expr_type_assoc_wildcard_delete_with_key_void_result() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int ww[*];\n\
+         parameter P = ww.delete(42);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::VoidUsedAsExpr),
+    );
+}
+
+#[test]
+fn expr_type_assoc_wildcard_last_rejected() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int ww[*];\n\
+         int k;\n\
+         parameter P = ww.last(k);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
         ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(
             MethodInvalidReason::AssocKeyWildcard
         )),
+    );
+}
+
+#[test]
+fn expr_type_assoc_wildcard_non_integral_key_rejected() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int ww[*];\n\
+         string s;\n\
+         parameter P = ww.exists(s);\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::MethodArgNotIntegral),
     );
 }
 

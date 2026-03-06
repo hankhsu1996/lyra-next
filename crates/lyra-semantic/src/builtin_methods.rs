@@ -174,32 +174,50 @@ fn check_delete_args(
             }
             None
         }
-        ArrayReceiverKind::Assoc => match &recv.assoc_key {
-            Some(AssocKey::Known(key_ty)) => check_typed_key_arg(arg, key_ty, ctx),
-            Some(AssocKey::Wildcard | AssocKey::Unknown) => {
-                Some(ExprType::error(ExprTypeErrorKind::MethodKeyTypeUnknown))
-            }
-            None => None,
-        },
+        ArrayReceiverKind::Assoc => check_assoc_key_arg(args, recv, ctx, false),
         _ => None,
     }
 }
 
+/// Validate a key argument on an associative array method.
+///
+/// Dispatches by associative key class:
+/// - known key: assignment-compatible with the declared key type
+/// - wildcard key: any integral type (LRM 7.8.1)
+/// - unknown key: deferred (no validation)
+///
+/// After key-domain validation, enforces `require_lvalue` uniformly.
 fn check_assoc_key_arg(
     args: &[Expr],
     recv: &ArrayReceiverInfo,
     ctx: &dyn InferCtx,
     require_lvalue: bool,
 ) -> Option<ExprType> {
-    if let Some(arg) = args.first()
-        && let Some(AssocKey::Known(key_ty)) = &recv.assoc_key
-    {
-        if let Some(err) = check_typed_key_arg(arg, key_ty, ctx) {
-            return Some(err);
-        }
-        if require_lvalue && !is_assignable_ref(arg) {
-            return Some(ExprType::error(ExprTypeErrorKind::MethodArgNotLvalue));
-        }
+    let arg = args.first()?;
+    let key_err = match &recv.assoc_key {
+        Some(AssocKey::Known(key_ty)) => check_typed_key_arg(arg, key_ty, ctx),
+        Some(AssocKey::Wildcard) => check_wildcard_key_arg(arg, ctx),
+        Some(AssocKey::Unknown) | None => return None,
+    };
+    if key_err.is_some() {
+        return key_err;
+    }
+    if require_lvalue && !is_assignable_ref(arg) {
+        return Some(ExprType::error(ExprTypeErrorKind::MethodArgNotLvalue));
+    }
+    None
+}
+
+/// Validate a key argument against wildcard associative key rules.
+///
+/// Per LRM 7.8.1, wildcard associative arrays accept any integral key.
+fn check_wildcard_key_arg(arg: &Expr, ctx: &dyn InferCtx) -> Option<ExprType> {
+    let arg_type = infer_expr(arg, ctx, None);
+    if let ExprView::Error(_) = &arg_type.view {
+        return Some(arg_type);
+    }
+    if try_integral_view(&arg_type, ctx).is_none() {
+        return Some(ExprType::error(ExprTypeErrorKind::MethodArgNotIntegral));
     }
     None
 }
