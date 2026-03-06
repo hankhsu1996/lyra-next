@@ -34,6 +34,7 @@ pub const FOREACH_TOO_MANY_VARS: DiagKey = "lyra.semantic.foreach_too_many_vars"
 pub const CASE_INSIDE_REQUIRES_PLAIN_CASE: DiagKey =
     "lyra.semantic.case_inside_requires_plain_case";
 pub const PROTOTYPE_MISMATCH: DiagKey = "lyra.semantic.prototype_mismatch";
+pub const FOREACH_WILDCARD_ASSOC: DiagKey = "lyra.semantic.foreach_wildcard_assoc";
 
 // Type diagnostics
 pub const WIDTH_MISMATCH: DiagKey = "lyra.type.width_mismatch";
@@ -79,6 +80,7 @@ pub const MEMBER_NOT_IN_MODPORT: DiagKey = "lyra.type.member_not_in_modport";
 pub const RECORD_ASSIGN_INCOMPAT: DiagKey = "lyra.type.record_assign_incompat";
 pub const STREAM_SLICE_SIZE_NOT_CONST: DiagKey = "lyra.type.stream_slice_size_not_const";
 pub const UNPACKED_RECORD_INTEGRAL_ASSIGN: DiagKey = "lyra.type.unpacked_record_integral_assign";
+pub const INDEX_KEY_NOT_INTEGRAL: DiagKey = "lyra.type.index_key_not_integral";
 
 // Elaboration diagnostics
 pub const UNRESOLVED_MODULE_INST: DiagKey = "lyra.elab.unresolved_module_inst";
@@ -130,6 +132,7 @@ pub const ALL_KEYS: &[DiagKey] = &[
     FOREACH_TOO_MANY_VARS,
     CASE_INSIDE_REQUIRES_PLAIN_CASE,
     PROTOTYPE_MISMATCH,
+    FOREACH_WILDCARD_ASSOC,
     WIDTH_MISMATCH,
     UNDECLARED_TYPE,
     NOT_A_TYPE,
@@ -171,6 +174,7 @@ pub const ALL_KEYS: &[DiagKey] = &[
     RECORD_ASSIGN_INCOMPAT,
     STREAM_SLICE_SIZE_NOT_CONST,
     UNPACKED_RECORD_INTEGRAL_ASSIGN,
+    INDEX_KEY_NOT_INTEGRAL,
     UNRESOLVED_MODULE_INST,
     NOT_INSTANTIABLE,
     UNKNOWN_PORT,

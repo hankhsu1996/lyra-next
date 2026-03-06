@@ -242,6 +242,26 @@ pub fn check_stream_operand(
     }
 }
 
+/// Check an expression for self-anchored type errors.
+///
+/// Reads the inferred type of `expr` via `ctx.expr_type_stmt()` and harvests
+/// structured `ExprTypeErrorKind`s that carry their own anchoring site.
+/// Currently handles `IndexKeyNotIntegral`.
+pub fn check_expr_self_anchored_errors(
+    expr: &Expr,
+    ctx: &dyn TypeCheckCtx,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    use crate::type_infer::ExprTypeErrorKind;
+
+    let result = ctx.expr_type_stmt(expr);
+    if let ExprView::Error(ExprTypeErrorKind::IndexKeyNotIntegral { index_site }) = &result.view {
+        items.push(TypeCheckItem::IndexKeyNotIntegral {
+            index_site: *index_site,
+        });
+    }
+}
+
 /// Check that an expression-form `slice_size` in a streaming operator is constant.
 ///
 /// Only validates when the slice size is an expression (e.g. a literal or

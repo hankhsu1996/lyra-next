@@ -117,6 +117,7 @@ pub enum ExprTypeErrorKind {
     NewExprNeedsExpectedDynArray,
     WithClauseRequired,
     WithClauseNotAccepted,
+    IndexKeyNotIntegral { index_site: crate::Site },
 }
 
 /// How an expression's type is viewed for operations.

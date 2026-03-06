@@ -111,6 +111,9 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::UnpackedRecordIntegralAssign { .. } => {
             record::lower_unpacked_record_integral_assign(db, unit, item, source_map, diags);
         }
+        TypeCheckItem::IndexKeyNotIntegral { index_site } => {
+            misc::lower_index_key_not_integral(*index_site, source_map, diags);
+        }
     }
 }
 

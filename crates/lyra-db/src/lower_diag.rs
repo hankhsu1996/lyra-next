@@ -694,6 +694,16 @@ pub(crate) fn lower_foreach_check_items(
                     ),
                 )
             }
+            ForeachCheckItem::WildcardAssocArray { foreach_kw_span } => {
+                if !foreach_kw_span.is_valid() {
+                    continue;
+                }
+                (
+                    foreach_kw_span.text_range(),
+                    code::FOREACH_WILDCARD_ASSOC,
+                    Message::simple(MessageId::ForeachWildcardAssoc),
+                )
+            }
         };
         let (span, _) = map_span_or_fallback(file_id, source_map, span_range);
         diags.push(

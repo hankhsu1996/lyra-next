@@ -15,8 +15,9 @@ use crate::types::{SymbolType, Ty, UnpackedDim};
 use crate::type_check_dim::check_type_spec_member_dims;
 pub use crate::type_check_dim::{check_net_decl, check_port_decl, check_typedef_decl};
 pub use crate::type_check_expr::{
-    check_cast_expr, check_field_direction, check_field_modport_restriction, check_method_call,
-    check_stream_operand, check_stream_slice_size_const,
+    check_cast_expr, check_expr_self_anchored_errors, check_field_direction,
+    check_field_modport_restriction, check_method_call, check_stream_operand,
+    check_stream_slice_size_const,
 };
 pub use crate::type_check_system_call::check_system_call;
 
@@ -228,6 +229,9 @@ pub enum TypeCheckItem {
         record_id: RecordId,
         other_ty: Ty,
         record_is_lhs: bool,
+    },
+    IndexKeyNotIntegral {
+        index_site: Site,
     },
 }
 

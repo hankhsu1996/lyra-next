@@ -373,3 +373,26 @@ fn emit_simple_modport_diag(
             }),
     );
 }
+
+pub(super) fn lower_index_key_not_integral(
+    index_site: lyra_semantic::Site,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let Some(span) = source_map.map_span(index_site.text_range()) else {
+        return;
+    };
+    let msg_id = lyra_diag::MessageId::IndexKeyNotIntegral;
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::code::INDEX_KEY_NOT_INTEGRAL,
+            lyra_diag::Message::simple(msg_id),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span,
+            message: lyra_diag::Message::simple(msg_id),
+        }),
+    );
+}

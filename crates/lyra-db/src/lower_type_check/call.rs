@@ -22,11 +22,15 @@ pub(super) fn lower_method_call_error(
         ExprTypeErrorKind::UnknownMember => lyra_diag::MessageId::MethodUnknown,
         ExprTypeErrorKind::NoMembersOnReceiver => lyra_diag::MessageId::MethodNoMethodsOnType,
         ExprTypeErrorKind::MethodArityMismatch => lyra_diag::MessageId::MethodArityMismatch,
-        ExprTypeErrorKind::MethodArgTypeMismatch
-        | ExprTypeErrorKind::MethodArgNotIntegral
-        | ExprTypeErrorKind::MethodNotValidOnReceiver(_) => {
+        ExprTypeErrorKind::MethodArgTypeMismatch | ExprTypeErrorKind::MethodArgNotIntegral => {
             lyra_diag::MessageId::MethodArgTypeMismatch
         }
+        ExprTypeErrorKind::MethodNotValidOnReceiver(reason) => match reason {
+            lyra_semantic::member::MethodInvalidReason::AssocKeyWildcard => {
+                lyra_diag::MessageId::MethodNotValidWildcardAssoc
+            }
+            _ => lyra_diag::MessageId::MethodArgTypeMismatch,
+        },
         ExprTypeErrorKind::WithClauseRequired => lyra_diag::MessageId::MethodWithClauseRequired,
         ExprTypeErrorKind::WithClauseNotAccepted => {
             lyra_diag::MessageId::MethodWithClauseNotAccepted

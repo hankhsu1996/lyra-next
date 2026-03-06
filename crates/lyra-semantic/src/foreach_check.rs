@@ -28,6 +28,8 @@ pub enum ForeachCheckItem {
         dim_count: u32,
         var_count: u32,
     },
+    /// Foreach loop iterates a wildcard associative array (LRM 7.8.1).
+    WildcardAssocArray { foreach_kw_span: TokenSpan },
 }
 
 /// Per-file foreach-legality product.
