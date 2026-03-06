@@ -9,7 +9,7 @@ endpackage
 
 module top;
   import q::x;
-  //    ^ error[lyra.semantic.import_conflict]: import of `x` from package `q` conflicts with wildcard import from package `p`
+  // @q error[lyra.semantic.import_conflict]: import of `x` from package `q` conflicts with wildcard import from package `p`
   import p::*;
   int a = x;
 endmodule

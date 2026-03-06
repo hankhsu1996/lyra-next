@@ -10,13 +10,13 @@ module array_query_error_dim_by_number;
   int r;
 
   assign r = $size(a, 2);
-  //                 ^ error[lyra.type.array_query_var_sized_dim]
+  // @[2] error[lyra.type.array_query_var_sized_dim]
 
   // int b[][5]: dim 1 = [] (dynamic), dim 2 = [5] (fixed)
   int b [][5];
 
   assign r = $size(b, 1);
-  //                 ^ error[lyra.type.array_query_var_sized_dim]
+  // @[1] error[lyra.type.array_query_var_sized_dim]
 
   // Fixed dim: no error
   assign r = $size(a, 1);

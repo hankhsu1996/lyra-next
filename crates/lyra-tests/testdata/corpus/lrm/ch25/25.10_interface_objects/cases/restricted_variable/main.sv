@@ -10,5 +10,5 @@ endinterface
 module consumer(iface_restricted.reader bus);
   logic leaked;
   always_comb leaked = bus.secret;
-  //                       ^ error[lyra.type.member_not_in_modport]: member `secret` is not accessible through this modport
+  // @secret error[lyra.type.member_not_in_modport]: member `secret` is not accessible through this modport
 endmodule

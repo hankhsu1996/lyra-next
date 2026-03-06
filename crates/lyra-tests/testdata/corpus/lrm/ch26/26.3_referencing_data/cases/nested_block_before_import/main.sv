@@ -7,7 +7,7 @@ endpackage
 module top;
   if (1) begin : blk
     int x = val;
-    //     ^ error[lyra.semantic.unresolved_name]: unresolved name `val`
+    // @val error[lyra.semantic.unresolved_name]: unresolved name `val`
   end
   import p::*;
 endmodule

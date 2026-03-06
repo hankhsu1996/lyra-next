@@ -7,6 +7,6 @@ endpackage
 package p6;
   import p1::*;
   export p1::x;
-  //    ^ error[lyra.semantic.import_conflict]: import of `x` from package `p1` conflicts with local declaration
+  // @p1 error[lyra.semantic.import_conflict]: import of `x` from package `p1` conflicts with local declaration
   int x;
 endpackage

@@ -40,19 +40,19 @@ module packed_record_non_integral_member;
 
   typedef union packed {
     real r;
-//       ^ error[lyra.semantic.non_integral_packed_member]: union member `r` is not an integral type (real) in packed union
+// @r error[lyra.semantic.non_integral_packed_member]: union member `r` is not an integral type (real) in packed union
     logic [63:0] bits;
   } packed_union_real_t;
 
   typedef union packed {
     string s;
-//         ^ error[lyra.semantic.non_integral_packed_member]: union member `s` is not an integral type (string) in packed union
+// @s error[lyra.semantic.non_integral_packed_member]: union member `s` is not an integral type (string) in packed union
     logic [7:0] bits;
   } packed_union_string_t;
 
   typedef struct packed {
     real r;
-//       ^ error[lyra.semantic.non_integral_packed_member]: struct member `r` is not an integral type (real) in packed struct
+// @r error[lyra.semantic.non_integral_packed_member]: struct member `r` is not an integral type (real) in packed struct
     logic [7:0] b;
   } packed_struct_real_t;
 
@@ -63,18 +63,18 @@ module packed_record_non_integral_member;
 
   typedef union packed {
     unpacked_struct_t us;
-//                    ^ error[lyra.semantic.non_integral_packed_member]: union member `us` is not an integral type (unpacked struct) in packed union
+// @us error[lyra.semantic.non_integral_packed_member]: union member `us` is not an integral type (unpacked struct) in packed union
     logic [63:0] bits;
   } packed_union_unpacked_struct_t;
 
   typedef struct packed {
     logic [7:0] arr [4];
-//              ^ error[lyra.semantic.non_integral_packed_member]: struct member `arr` is not an integral type (unpacked array) in packed struct
+// @arr error[lyra.semantic.non_integral_packed_member]: struct member `arr` is not an integral type (unpacked array) in packed struct
   } packed_struct_array_t;
 
   typedef union soft packed {
     real r;
-//       ^ error[lyra.semantic.non_integral_packed_member]: union member `r` is not an integral type (real) in soft packed union
+// @r error[lyra.semantic.non_integral_packed_member]: union member `r` is not an integral type (real) in soft packed union
     logic [63:0] bits;
   } soft_packed_real_t;
 

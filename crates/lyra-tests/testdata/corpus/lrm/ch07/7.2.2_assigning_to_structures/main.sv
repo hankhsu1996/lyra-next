@@ -22,11 +22,11 @@ module assigning_to_structures;
 
   // Error: different struct types (structurally identical but distinct)
   assign x = z;
-  //        ^ error[lyra.type.record_assign_incompat]
+  // @z error[lyra.type.record_assign_incompat]
 
   // Error: struct vs union
   assign x = w;
-  //        ^ error[lyra.type.record_assign_incompat]
+  // @w error[lyra.type.record_assign_incompat]
 
   // OK: packed struct from integral (no record-to-record mismatch)
   assign x = 16'hABCD;
@@ -39,14 +39,14 @@ module assigning_to_structures;
   // Truncation: 16-bit packed struct -> 8-bit integral
   logic [7:0] v8;
   assign v8 = x;
-  //    ^ warning[lyra.type.width_mismatch]
+  // @v8 warning[lyra.type.width_mismatch]
 
   // Unpacked struct to/from integral (error)
   typedef struct { logic [7:0] a; logic [7:0] b; } unpacked_t;
   unpacked_t u;
-  //           ^ error[lyra.type.unpacked_record_integral_assign]
+  // @[;] error[lyra.type.unpacked_record_integral_assign]
   assign v16 = u;
-  //             ^ error[lyra.type.unpacked_record_integral_assign]
+  // @[;] error[lyra.type.unpacked_record_integral_assign]
   assign u = v16;
 
 endmodule

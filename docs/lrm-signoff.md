@@ -67,16 +67,24 @@ Each test case is a directory containing one or more `.sv` files with inline ann
 ```sv
 module top;
   int x = y;
-  //        ^ error[lyra.semantic[1]]: unresolved name
+  // @y error[lyra.semantic.unresolved_name]: unresolved name
 endmodule
 ```
 
 The annotation system supports:
 
-- **File-level annotations**: `// ^ severity[code]: message` (caret points to the column on the previous line)
-- **Span annotations**: `// ^~~~ severity[code]` (caret + tildes encode span length)
+- **File-level annotations**: `// @anchor severity[code]: message` (anchor resolves against the previous source line)
 - **Unit-level annotations**: `// unit severity[code]: message` (for cross-file diagnostics)
 - **`// ALLOW-EXTRA-DIAGS`**: opt-in directive for in-progress tests where not all diagnostics are pinned yet
+
+Anchor forms:
+
+- `@token` -- unique whole-word token on the annotated source line
+- `@N:token` -- Nth whole-word occurrence (1-based)
+- `@[text]` -- unique literal substring on the annotated source line
+- `@N:[text]` -- Nth literal occurrence
+
+Rules of thumb: use `@token` for unique identifier/keyword targets; use `@[text]` for punctuation, numeric literals, and fragments that contain non-word characters; add `N:` only when the line contains repeated occurrences. Bare token anchors cannot start with a digit -- use `@[0]` or `@[8'd0]` for numeric anchors.
 
 A file with no annotations is a "pass" test -- the runner asserts zero diagnostics. A file with annotations is a "fail" test -- the runner asserts exactly those diagnostics and no others (unless `ALLOW-EXTRA-DIAGS` is set).
 

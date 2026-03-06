@@ -23,8 +23,8 @@ module consumer(simple_bus.master bus);
   initial begin
     bus.Read(8'hAA);
     bus.Write(8'h10, 8'hFF);
-    //  ^ error[lyra.type.member_not_in_modport]: member `Write` is not accessible through this modport
+    // @Write error[lyra.type.member_not_in_modport]: member `Write` is not accessible through this modport
     bus.Reset();
-    //  ^ error[lyra.type.member_not_in_modport]: member `Reset` is not accessible through this modport
+    // @Reset error[lyra.type.member_not_in_modport]: member `Reset` is not accessible through this modport
   end
 endmodule

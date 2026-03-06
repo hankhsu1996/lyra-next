@@ -10,5 +10,5 @@ endinterface
 module consumer(iface.reader bus);
   int x;
   always_comb x = bus.hidden_fn();
-  //                  ^ error[lyra.type.member_not_in_modport]: member `hidden_fn` is not accessible through this modport
+  // @hidden_fn error[lyra.type.member_not_in_modport]: member `hidden_fn` is not accessible through this modport
 endmodule

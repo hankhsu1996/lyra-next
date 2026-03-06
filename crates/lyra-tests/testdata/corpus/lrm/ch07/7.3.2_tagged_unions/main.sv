@@ -25,14 +25,14 @@ module tagged_unions;
   // Invalid: void member in a struct
   typedef struct packed {
     void bad_field;
-    //  ^ error[lyra.semantic.void_member_non_tagged]
+    // @bad_field error[lyra.semantic.void_member_non_tagged]
     logic [7:0] data;
   } bad_struct_t;
 
   // Invalid: void member in an untagged union
   typedef union packed {
     void bad_field;
-    //  ^ error[lyra.semantic.void_member_non_tagged]
+    // @bad_field error[lyra.semantic.void_member_non_tagged]
     logic [7:0] data;
   } bad_union_t;
 

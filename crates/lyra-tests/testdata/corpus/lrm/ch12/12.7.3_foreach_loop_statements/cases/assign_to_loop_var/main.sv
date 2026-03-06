@@ -9,7 +9,7 @@ module assign_to_loop_var;
   initial begin
     foreach (arr[i]) begin
       i = 0;
-//    ^ error[lyra.semantic.assign_to_foreach_var]: cannot assign to foreach loop variable `i`
+// @i error[lyra.semantic.assign_to_foreach_var]: cannot assign to foreach loop variable `i`
     end
   end
 

@@ -32,16 +32,16 @@ module greedy_absorber;
     // Negative: remainder not element-aligned
     // 64 - 8 = 56 remaining, 56 % 32 != 0
     {>> {b, dyn_arr}} = src64;
-    //     ^ error[lyra.type.stream_unpack_greedy_remainder]: streaming unpack leaves 56 bits for dynamic target of 32-bit elements
+    // @dyn_arr error[lyra.type.stream_unpack_greedy_remainder]: streaming unpack leaves 56 bits for dynamic target of 32-bit elements
 
     // Negative: queue remainder not element-aligned
     // 64 - 8 = 56 remaining, 56 % 32 != 0
     {>> {b, q}} = src64;
-    //     ^ error[lyra.type.stream_unpack_greedy_remainder]: streaming unpack leaves 56 bits for dynamic target of 32-bit elements
+    // @q error[lyra.type.stream_unpack_greedy_remainder]: streaming unpack leaves 56 bits for dynamic target of 32-bit elements
 
     // Negative: source smaller than fixed portion
     // fixed = 32 (a), source = 8 bits
     {>> {a, dyn_arr}} = src8;
-    //                ^ error[lyra.type.stream_unpack_width_mismatch]: streaming unpack target is 32 bits but source is 8 bits
+    // @[=] error[lyra.type.stream_unpack_width_mismatch]: streaming unpack target is 32 bits but source is 8 bits
   end
 endmodule

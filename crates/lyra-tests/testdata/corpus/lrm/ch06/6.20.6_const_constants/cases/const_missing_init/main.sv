@@ -5,6 +5,6 @@
 module const_missing_init;
 
   const int x;
-  //        ^ error[lyra.type.const_missing_init]: const variable must have an initializer
+  // @x error[lyra.type.const_missing_init]: const variable must have an initializer
 
 endmodule

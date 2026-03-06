@@ -3,6 +3,6 @@
 module continue_outside_loop;
   initial begin
     continue;
-//  ^ error[lyra.semantic.continue_outside_loop]: `continue` statement outside of a loop
+// @continue error[lyra.semantic.continue_outside_loop]: `continue` statement outside of a loop
   end
 endmodule

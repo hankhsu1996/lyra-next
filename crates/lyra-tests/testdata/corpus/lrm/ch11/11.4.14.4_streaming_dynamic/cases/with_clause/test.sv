@@ -20,6 +20,6 @@ module streaming_with;
 
     // with on non-array scalar -- error
     packed_val = {<< int {x with [0]}};
-    //                     ^ error[lyra.type.stream_with_non_array]: `with` clause requires an array operand
+    // @with error[lyra.type.stream_with_non_array]: `with` clause requires an array operand
   end
 endmodule
