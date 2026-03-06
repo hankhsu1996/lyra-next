@@ -120,6 +120,11 @@ pub enum MessageId {
     PrototypeMismatchPortCount,
     PrototypeMismatchPortDirection,
     PrototypeMismatchPortType,
+    ForeachWildcardAssoc,
+    // Wildcard associative array method restriction
+    MethodNotValidWildcardAssoc,
+    // Index key legality
+    IndexKeyNotIntegral,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -284,6 +289,7 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::MethodArgTypeMismatch
         | MessageId::MethodWithClauseRequired
         | MessageId::MethodWithClauseNotAccepted
+        | MessageId::MethodNotValidWildcardAssoc
         | MessageId::UnsupportedLhsForm
         | MessageId::InvalidAssignmentLhs
         | MessageId::NewExprNotDynArray
@@ -361,6 +367,12 @@ fn render_other_message(msg: &Message) -> String {
             format!(
                 "foreach has {var_count} loop variables but iterated expression has only {dim_count} dimensions"
             )
+        }
+        MessageId::ForeachWildcardAssoc => {
+            "foreach loop cannot iterate over wildcard associative array".into()
+        }
+        MessageId::IndexKeyNotIntegral => {
+            "index expression must be integral for wildcard associative array".into()
         }
         MessageId::ParseError | MessageId::PreprocessError => msg
             .args
@@ -473,7 +485,8 @@ fn render_type_message(msg: &Message) -> String {
         | MessageId::MethodArityMismatch
         | MessageId::MethodArgTypeMismatch
         | MessageId::MethodWithClauseRequired
-        | MessageId::MethodWithClauseNotAccepted => render_method_message(msg),
+        | MessageId::MethodWithClauseNotAccepted
+        | MessageId::MethodNotValidWildcardAssoc => render_method_message(msg),
         MessageId::UnsupportedLhsForm => "assignment target form is not yet type-checked".into(),
         MessageId::InvalidAssignmentLhs => "expression is not a valid assignment target".into(),
         MessageId::NewExprNotDynArray
@@ -688,6 +701,12 @@ fn render_method_message(msg: &Message) -> String {
         }
         MessageId::MethodWithClauseNotAccepted => {
             format!("method `{}` does not accept a with clause", name())
+        }
+        MessageId::MethodNotValidWildcardAssoc => {
+            format!(
+                "method `{}` cannot be used on wildcard associative arrays",
+                name()
+            )
         }
         _ => String::new(),
     }

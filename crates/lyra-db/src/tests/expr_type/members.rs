@@ -1031,3 +1031,57 @@ fn expr_type_queue_push_back_bad_arg_type() {
         ExprType::error(ExprTypeErrorKind::MethodArgTypeMismatch),
     );
 }
+
+#[test]
+fn expr_type_wildcard_assoc_index_non_integral_rejected() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int ww[*];\n\
+         string s;\n\
+         parameter P = ww[s];\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let result = expr_type_of_first_param(&db, file, unit);
+    assert!(
+        matches!(
+            &result.view,
+            ExprView::Error(ExprTypeErrorKind::IndexKeyNotIntegral { .. })
+        ),
+        "expected IndexKeyNotIntegral, got: {result:?}"
+    );
+}
+
+#[test]
+fn diag_wildcard_assoc_method_restriction_message() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m;\n\
+         int ww[*];\n\
+         int k;\n\
+         int r;\n\
+         initial begin r = ww.first(k); end\n\
+         endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let diags = file_diagnostics(&db, file, unit);
+    let method_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "lyra.type.method_call_error")
+        .collect();
+    assert_eq!(
+        method_diags.len(),
+        1,
+        "expected 1 method call error: {diags:?}"
+    );
+    let msg = method_diags[0].render_message();
+    assert!(
+        msg.contains("wildcard"),
+        "expected wildcard message, got: {msg:?}"
+    );
+}

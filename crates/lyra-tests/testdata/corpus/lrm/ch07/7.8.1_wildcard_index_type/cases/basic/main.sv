@@ -1,4 +1,4 @@
-// LRM 7.8.1 -- Wildcard index type
+// LRM 7.8.1 -- Wildcard index type (basic usage)
 //
 // Associative arrays with wildcard index [*] accept any integral index.
 // Tests declaration, indexing, and compatible built-in methods.

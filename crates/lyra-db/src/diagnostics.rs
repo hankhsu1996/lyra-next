@@ -373,6 +373,11 @@ fn dispatch_check_entry(
                 lyra_semantic::type_check::check_port_decl(&port, ctx, fallback, items);
             }
         }
+        CheckKind::GenericExpr => {
+            if let Some(expr) = lyra_ast::Expr::cast(node) {
+                lyra_semantic::type_check::check_expr_self_anchored_errors(&expr, ctx, items);
+            }
+        }
     }
 }
 

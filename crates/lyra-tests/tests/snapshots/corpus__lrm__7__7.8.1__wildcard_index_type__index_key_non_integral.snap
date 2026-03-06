@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.type.index_key_not_integral] 12:16..12:16: index expression must be integral for wildcard associative array
+  error[lyra.type.index_key_not_integral] 16:11..16:11: index expression must be integral for wildcard associative array
+---
+unit (0 diagnostics)

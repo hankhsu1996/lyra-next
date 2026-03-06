@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.type.method_call_error] 12:11..12:11: method `first` cannot be used on wildcard associative arrays
+  error[lyra.type.method_call_error] 14:11..14:11: method `last` cannot be used on wildcard associative arrays
+---
+unit (0 diagnostics)

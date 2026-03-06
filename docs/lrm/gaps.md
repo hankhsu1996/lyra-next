@@ -108,10 +108,6 @@ Type representation handles all unpacked dimension forms. Built-in array methods
 
 Callable signature infrastructure stores port types and call-site argument checking exists. Specific LRM rules for passing arrays (by reference vs by value, open array parameters, compatibility rules for dynamic/associative/queue arguments) are not validated. Blocked by: array argument passing semantics, open array parameter support. Test: `lrm/ch07/7.7_arrays_as_arguments`.
 
-### 7.8.1: Wildcard index type -- remaining legality and index-validation gaps
-
-Declaration, indexing, basic methods (size, num, delete), `exists(key)`, and `delete(key)` work with integral key validation. `first`/`last`/`next`/`prev` are correctly rejected (requires concrete index type per LRM 7.8.1). Remaining: (1) foreach on wildcard assoc arrays is not diagnosed as illegal (LRM: "shall not be used in a foreach loop"); (2) no user-facing diagnostic explains the wildcard restriction on index-returning methods; (3) index expression type checking (non-integral index = error) is not validated. Blocked by: foreach legality check for wildcard assoc, wildcard restriction diagnostic, index type validation. Test: `lrm/ch07/7.8.1_wildcard_index_type`.
-
 ### 7.8.2: String index -- index type checking
 
 Declaration, string-literal indexing, methods, and foreach iteration work. Remaining: non-string index expressions (e.g., integer used as key on a string-indexed array) are not diagnosed as type errors. Blocked by: index expression type validation against declared key type. Test: `lrm/ch07/7.8.2_string_index`.

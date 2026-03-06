@@ -46,6 +46,8 @@ pub enum CheckKind {
     NetDecl,
     TypedefDecl,
     PortDecl,
+    /// Generic expression node: dispatches self-anchored error harvesting.
+    GenericExpr,
 }
 
 /// Salsa-cached checks index for a file.
@@ -374,7 +376,9 @@ impl IndexBuilder<'_> {
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    self.push(ek.syntax(), CheckKind::GenericExpr, access);
+                }
             }
         }
         for child in expr_children(expr.syntax()) {

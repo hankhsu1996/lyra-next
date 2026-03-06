@@ -72,8 +72,20 @@ fn check_foreach_stmt(
         return;
     };
 
+    // Compute the array expression type and check for wildcard assoc (LRM 7.8.1).
+    let expr_type = compute_array_expr_type(db, unit, id_map, &array_expr);
+    if let Some(ref et) = expr_type
+        && is_wildcard_assoc_array(et)
+    {
+        let foreach_kw_span = foreach_stmt
+            .foreach_keyword()
+            .map_or(TokenSpan::INVALID, |t| TokenSpan::new(t.text_range()));
+        items.push(ForeachCheckItem::WildcardAssocArray { foreach_kw_span });
+        return;
+    }
+
     let array_root_name = extract_root_name(&array_expr);
-    let dim_count = compute_dim_count(db, unit, id_map, &array_expr);
+    let dim_count = expr_type.as_ref().map(foreach_array_dim_count);
 
     let mut var_count: u32 = 0;
     for slot in var_list.slots() {
@@ -117,18 +129,35 @@ fn check_foreach_stmt(
     }
 }
 
-/// Compute the number of iterable dimensions for the array expression.
-fn compute_dim_count(
+/// Compute the `ExprType` for the foreach array expression.
+fn compute_array_expr_type(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     id_map: &AstIdMap,
     array_expr: &Expr,
-) -> Option<u32> {
+) -> Option<lyra_semantic::type_infer::ExprType> {
     let expr_site = id_map.erased_ast_id(array_expr.syntax())?;
     let expr_ref = ExprRef::new(db, unit, expr_site);
-    let expr_type = type_of_expr(db, expr_ref);
-    let dims = ForeachDims::from_iterated_type(&expr_type.ty);
-    Some(dims.len() as u32)
+    Some(type_of_expr(db, expr_ref))
+}
+
+/// Whether the expression type is a wildcard associative array (LRM 7.8.1).
+fn is_wildcard_assoc_array(et: &lyra_semantic::type_infer::ExprType) -> bool {
+    matches!(
+        &et.ty,
+        lyra_semantic::types::Ty::Array {
+            dim: lyra_semantic::types::UnpackedDim::Assoc(
+                lyra_semantic::types::AssocIndex::Wildcard
+            ),
+            ..
+        }
+    )
+}
+
+/// Compute the number of iterable dimensions for a foreach array expression.
+fn foreach_array_dim_count(et: &lyra_semantic::type_infer::ExprType) -> u32 {
+    let dims = ForeachDims::from_iterated_type(&et.ty);
+    dims.len() as u32
 }
 
 /// Extract the root name from an iterated expression.
@@ -415,5 +444,31 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn foreach_wildcard_assoc_rejected() {
+        let (_, idx) = check(
+            "module m;\
+             int aa[*];\
+             initial foreach (aa[i]) begin end\
+             endmodule",
+        );
+        assert_eq!(idx.items.len(), 1);
+        assert!(matches!(
+            &idx.items[0],
+            ForeachCheckItem::WildcardAssocArray { .. }
+        ));
+    }
+
+    #[test]
+    fn foreach_typed_assoc_accepted() {
+        let (_, idx) = check(
+            "module m;\
+             int aa[int];\
+             initial foreach (aa[i]) begin end\
+             endmodule",
+        );
+        assert!(idx.items.is_empty());
     }
 }

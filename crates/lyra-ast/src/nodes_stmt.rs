@@ -422,6 +422,14 @@ impl ReturnStmt {
 }
 
 impl ForeachStmt {
+    /// The `foreach` keyword token.
+    pub fn foreach_keyword(&self) -> Option<SyntaxToken> {
+        self.syntax
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|t| t.kind() == SyntaxKind::ForeachKw)
+    }
+
     /// The array expression before the loop-variable list.
     pub fn array_expr(&self) -> Option<crate::expr::Expr> {
         support::expr_child(&self.syntax, 0)

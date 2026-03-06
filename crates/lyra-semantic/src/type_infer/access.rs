@@ -1,11 +1,12 @@
 use lyra_ast::{FieldExpr, IndexExpr};
 use smol_str::SmolStr;
 
-use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx};
+use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx, try_integral_view};
 use super::infer_expr;
 use crate::member::{MemberKind, MemberLookupError};
 use crate::member_name::MemberNameToken;
-use crate::types::Ty;
+use crate::site;
+use crate::types::{AssocIndex, Ty, UnpackedDim};
 
 /// What kind of indexing operation `a[i]` performs on a given base type.
 enum IndexKind {
@@ -42,6 +43,19 @@ pub(super) fn infer_index(idx_expr: &IndexExpr, ctx: &dyn InferCtx) -> ExprType 
     let idx = infer_expr(&index_node, ctx, None);
     if matches!(idx.view, ExprView::Error(_)) {
         return idx;
+    }
+
+    // LRM 7.8.1: wildcard associative array requires integral index expression.
+    if let Ty::Array {
+        dim: UnpackedDim::Assoc(AssocIndex::Wildcard),
+        ..
+    } = &base.ty
+        && try_integral_view(&idx, ctx).is_none()
+    {
+        let index_site = site::opt_site_of(ctx.ast_id_map(), &index_node)
+            .or_else(|| site::opt_site_of(ctx.ast_id_map(), idx_expr))
+            .unwrap_or_else(|| lyra_ast::ErasedAstId::placeholder(ctx.file_id()));
+        return ExprType::error(ExprTypeErrorKind::IndexKeyNotIntegral { index_site });
     }
 
     apply_index(&base)
