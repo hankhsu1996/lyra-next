@@ -12,6 +12,16 @@ pub enum PortDirection {
 }
 
 impl PortDirection {
+    /// LRM keyword label for this direction.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Input => "input",
+            Self::Output => "output",
+            Self::Inout => "inout",
+            Self::Ref => "ref",
+        }
+    }
+
     fn from_token_kind(kind: SyntaxKind) -> Option<Self> {
         match kind {
             SyntaxKind::InputKw => Some(Self::Input),

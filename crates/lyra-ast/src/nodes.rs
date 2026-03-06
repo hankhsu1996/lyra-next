@@ -390,6 +390,18 @@ impl ModportItem {
     }
 }
 
+impl TaskPrototype {
+    pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
+        support::children(&self.syntax)
+    }
+}
+
+impl FunctionPrototype {
+    pub fn tf_port_decls(&self) -> AstChildren<TfPortDecl> {
+        support::children(&self.syntax)
+    }
+}
+
 impl ModportTfPortEntry {
     /// The bare name token (for entries without a prototype, e.g. `import Read`).
     pub fn bare_name_token(&self) -> Option<SyntaxToken> {

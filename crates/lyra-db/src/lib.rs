@@ -15,6 +15,8 @@ mod foreach_check;
 mod jump_check;
 mod lower_diag;
 mod lower_type_check;
+mod modport_check;
+mod modport_queries;
 mod module_sig;
 pub mod pipeline;
 mod record_queries;
@@ -54,10 +56,13 @@ pub use resolve_at::{TypeAtResult, resolve_at, symbol_global, type_at};
 // Re-export enum queries
 pub use enum_queries::{EnumRef, enum_sem};
 
+// Re-export modport queries
+pub use modport_queries::{ModportRef, ModportSem, modport_sem};
+
 // Re-export record queries
 pub use record_queries::{
-    LoweredFieldTy, ModportRef, ModportSem, RawField, RecordRef, modport_sem, record_diagnostics,
-    record_field_tys, record_fields_raw, record_sem,
+    LoweredFieldTy, RawField, RecordRef, record_diagnostics, record_field_tys, record_fields_raw,
+    record_sem,
 };
 
 // Re-export facts queries

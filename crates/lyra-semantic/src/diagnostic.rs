@@ -86,8 +86,30 @@ pub enum SemanticDiagKind {
     NotASubroutine {
         name: SmolStr,
     },
+    PrototypeMismatch {
+        name: SmolStr,
+        mismatch: PrototypeMismatchDetail,
+    },
     InternalError {
         detail: SmolStr,
+    },
+}
+
+/// Structured detail for prototype signature mismatches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrototypeMismatchDetail {
+    ReturnType,
+    PortCount {
+        proto: usize,
+        actual: usize,
+    },
+    PortDirection {
+        index: usize,
+        proto_dir: lyra_ast::PortDirection,
+        actual_dir: lyra_ast::PortDirection,
+    },
+    PortType {
+        index: usize,
     },
 }
 
@@ -146,6 +168,28 @@ impl SemanticDiag {
             }
             SemanticDiagKind::NotASubroutine { name } => {
                 format!("`{name}` is not a task or function")
+            }
+            SemanticDiagKind::PrototypeMismatch { name, mismatch } => {
+                let detail = match mismatch {
+                    PrototypeMismatchDetail::ReturnType => "return type mismatch".to_string(),
+                    PrototypeMismatchDetail::PortCount { proto, actual } => {
+                        format!("prototype has {proto} ports but declaration has {actual}")
+                    }
+                    PrototypeMismatchDetail::PortDirection {
+                        index,
+                        proto_dir,
+                        actual_dir,
+                    } => format!(
+                        "port {} direction mismatch: prototype has `{}` but declaration has `{}`",
+                        index + 1,
+                        proto_dir.label(),
+                        actual_dir.label(),
+                    ),
+                    PrototypeMismatchDetail::PortType { index } => {
+                        format!("port {} type mismatch", index + 1)
+                    }
+                };
+                format!("prototype signature does not match declaration of `{name}`: {detail}")
             }
             SemanticDiagKind::InternalError { detail } => {
                 format!("internal error: {detail}")

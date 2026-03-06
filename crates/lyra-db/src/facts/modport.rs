@@ -3,8 +3,8 @@ use lyra_semantic::modport_facts::{FieldAccessFact, FieldAccessTarget};
 use lyra_semantic::types::{ModportViewTarget, Ty};
 
 use crate::expr_queries::{ExprRef, type_of_expr};
+use crate::modport_queries::{ModportRef, modport_sem};
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::record_queries::{ModportRef, modport_sem};
 use crate::{CompilationUnit, SourceFile};
 
 /// Pre-compute direction-access facts for all `FieldExpr` nodes in a file.

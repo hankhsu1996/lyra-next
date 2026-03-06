@@ -178,6 +178,9 @@ pub(crate) fn lower_semantic_diag(
             name,
             primary_span,
         ),
+        SemanticDiagKind::PrototypeMismatch { name, mismatch } => {
+            lower_prototype_mismatch(name, mismatch, primary_span)
+        }
         SemanticDiagKind::InternalError { detail } => internal_error_diag(detail, primary_span),
     }
 }
@@ -258,6 +261,7 @@ fn lower_record_enum_diag(kind: &SemanticDiagKind, primary_span: Span) -> Diagno
         | SemanticDiagKind::UndeclaredType { .. }
         | SemanticDiagKind::NotAType { .. }
         | SemanticDiagKind::NotASubroutine { .. }
+        | SemanticDiagKind::PrototypeMismatch { .. }
         | SemanticDiagKind::InternalError { .. } => {
             internal_error_diag("unexpected variant in record/enum lowering", primary_span)
         }
@@ -700,6 +704,47 @@ pub(crate) fn lower_foreach_check_items(
             }),
         );
     }
+}
+
+fn lower_prototype_mismatch(
+    name: &SmolStr,
+    mismatch: &lyra_semantic::diagnostic::PrototypeMismatchDetail,
+    primary_span: Span,
+) -> Diagnostic {
+    use lyra_semantic::diagnostic::PrototypeMismatchDetail;
+
+    let (msg_id, args) = match mismatch {
+        PrototypeMismatchDetail::ReturnType => (
+            MessageId::PrototypeMismatchReturnType,
+            vec![Arg::Name(name.clone())],
+        ),
+        PrototypeMismatchDetail::PortCount { proto, actual } => (
+            MessageId::PrototypeMismatchPortCount,
+            vec![
+                Arg::Name(name.clone()),
+                Arg::Count(*proto),
+                Arg::Count(*actual),
+            ],
+        ),
+        PrototypeMismatchDetail::PortDirection {
+            index,
+            proto_dir,
+            actual_dir,
+        } => (
+            MessageId::PrototypeMismatchPortDirection,
+            vec![
+                Arg::Name(name.clone()),
+                Arg::Count(index + 1),
+                Arg::Name(SmolStr::new(proto_dir.label())),
+                Arg::Name(SmolStr::new(actual_dir.label())),
+            ],
+        ),
+        PrototypeMismatchDetail::PortType { index } => (
+            MessageId::PrototypeMismatchPortType,
+            vec![Arg::Name(name.clone()), Arg::Count(index + 1)],
+        ),
+    };
+    lower_args_diag(code::PROTOTYPE_MISMATCH, msg_id, args, primary_span)
 }
 
 #[cfg(test)]
