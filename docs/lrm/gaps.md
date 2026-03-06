@@ -108,9 +108,21 @@ Type representation handles all unpacked dimension forms. Built-in array methods
 
 Callable signature infrastructure stores port types and call-site argument checking exists. Specific LRM rules for passing arrays (by reference vs by value, open array parameters, compatibility rules for dynamic/associative/queue arguments) are not validated. Blocked by: array argument passing semantics, open array parameter support. Test: `lrm/ch07/7.7_arrays_as_arguments`.
 
+### 7.8.1: Wildcard index type -- foreach prohibition and method restrictions
+
+Declaration, indexing, and basic methods (size, num, delete) work. Remaining: (1) foreach on wildcard assoc arrays is not diagnosed as illegal (LRM: "shall not be used in a foreach loop"); (2) `exists` is incorrectly rejected on wildcard arrays (engine treats it as needing a typed key, but `exists` just checks presence and should accept any integral argument); (3) `first`/`last`/`next`/`prev` are correctly rejected but no user-facing diagnostic explains the wildcard restriction; (4) index expression type checking (non-integral index = error) is not validated. Blocked by: foreach legality check for wildcard assoc, method dispatch fix for `exists`, index type validation. Test: `lrm/ch07/7.8.1_wildcard_index_type`.
+
+### 7.8.2: String index -- index type checking
+
+Declaration, string-literal indexing, methods, and foreach iteration work. Remaining: non-string index expressions (e.g., integer used as key on a string-indexed array) are not diagnosed as type errors. Blocked by: index expression type validation against declared key type. Test: `lrm/ch07/7.8.2_string_index`.
+
 ### 7.8.3: Associative array with class index
 
 Associative arrays with class-type keys (`int aa[SomeClass]`) cannot be declared because class support is absent. `AssocIndex::Typed(Ty)` representation exists but no class types can be constructed. Blocked by: class support (Ch 8). Test: deferred until class support lands.
+
+### 7.8.4: Integral index -- typedef index types and index type checking
+
+Keyword integral index types (`int`, `integer`, `byte`, `shortint`, `longint`, `bit`) work for declaration, indexing, methods, and foreach. Remaining: (1) typedef names as assoc index types (`int aa [SNibble]`) fail because the parser classifies `[TypedefName]` as a sized dimension (bare NameRef), not an associative dimension (TypeSpec child) -- semantic-phase disambiguation is needed; (2) index expression type checking (e.g., implicit cast from real = illegal per LRM) is not validated. Blocked by: parser/semantic disambiguation of `[name]` as type vs size, index expression type validation. Test: `lrm/ch07/7.8.4_integral_index`.
 
 ### 7.9.11: Associative array literals
 
