@@ -9,7 +9,10 @@
 
 use std::collections::HashSet;
 
-use lyra_ast::{AssignStmt, AstIdMap, AstNode, Expr, ExprKind, ForeachStmt, HasSyntax, SourceFile};
+use lyra_ast::{
+    AssignStmt, AstIdMap, AstNode, Expr, ExprKind, ForeachStmt, HasSyntax, SourceFile,
+    foreach_stmts,
+};
 use lyra_parser::SyntaxNode;
 use lyra_source::TokenSpan;
 use smol_str::SmolStr;
@@ -44,10 +47,7 @@ pub fn foreach_check_index(
 
     let mut items = Vec::new();
 
-    for node in root.descendants() {
-        let Some(foreach_stmt) = ForeachStmt::cast(node) else {
-            continue;
-        };
+    for foreach_stmt in foreach_stmts(&root) {
         check_foreach_stmt(db, unit, &foreach_stmt, id_map, &mut items);
     }
 
