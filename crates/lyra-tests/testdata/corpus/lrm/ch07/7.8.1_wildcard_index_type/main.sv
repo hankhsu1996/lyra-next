@@ -29,6 +29,14 @@ module wildcard_index;
 
     // delete with no argument (clear all)
     aa.delete();
+
+    // delete with integral key argument
+    aa.delete(5);
+
+    // exists with integral key argument
+    if (aa.exists(42)) begin
+      result = aa[42];
+    end
   end
 
 endmodule

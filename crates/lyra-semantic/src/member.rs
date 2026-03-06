@@ -341,12 +341,14 @@ impl ArrayMethodKind {
         )
     }
 
-    /// Whether this method requires a typed associative key.
-    fn needs_typed_key(self) -> bool {
-        matches!(
-            self,
-            Self::Exists | Self::First | Self::Last | Self::Next | Self::Prev
-        )
+    /// Whether this method exposes an associative index value.
+    ///
+    /// Per LRM 7.8.1, wildcard associative arrays cannot use methods
+    /// that expose index values through an out-argument or return
+    /// channel. `exists` is not included because it returns a presence
+    /// flag (`int`), not an index value.
+    fn exposes_assoc_index(self) -> bool {
+        matches!(self, Self::First | Self::Last | Self::Next | Self::Prev)
     }
 
     /// Check whether this method is valid on the given receiver.
@@ -397,7 +399,7 @@ impl ArrayMethodKind {
                     }
                     _ => {}
                 }
-                if self.needs_typed_key() {
+                if self.exposes_assoc_index() {
                     match &recv.assoc_key {
                         Some(AssocKey::Known(_)) => Ok(()),
                         Some(AssocKey::Wildcard) => Err(MethodInvalidReason::AssocKeyWildcard),
