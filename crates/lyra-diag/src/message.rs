@@ -110,6 +110,8 @@ pub enum MessageId {
     ReturnOutsideCallable,
     ReturnValueInVoid,
     ReturnMissingValue,
+    // Case statement legality messages
+    CaseInsideRequiresPlainCase,
     // Foreach loop legality messages
     AssignToForeachVar,
     ForeachVarSameAsArray,
@@ -337,6 +339,9 @@ fn render_other_message(msg: &Message) -> String {
         }
         MessageId::ReturnValueInVoid => "cannot return a value from a void function or task".into(),
         MessageId::ReturnMissingValue => "non-void function must return a value".into(),
+        MessageId::CaseInsideRequiresPlainCase => {
+            "`inside` is only allowed with `case`, not `casex` or `casez`".into()
+        }
         MessageId::AssignToForeachVar => {
             format!("cannot assign to foreach loop variable `{}`", name())
         }

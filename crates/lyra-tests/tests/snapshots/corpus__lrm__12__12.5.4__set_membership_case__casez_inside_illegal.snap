@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.semantic.case_inside_requires_plain_case] 5:4..5:4: `inside` is only allowed with `case`, not `casex` or `casez`
+---
+unit (0 diagnostics)

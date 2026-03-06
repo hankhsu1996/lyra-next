@@ -1,4 +1,5 @@
 mod callable_queries;
+mod case_check;
 pub mod checks_index;
 mod const_eval;
 mod diagnostics;

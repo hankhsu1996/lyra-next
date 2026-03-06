@@ -14,6 +14,14 @@ use crate::nodes::{
 use crate::nodes_expr::SyntaxAssignOp;
 use crate::support::{self, AstChildren};
 
+/// Classification of the case statement keyword (LRM 12.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CaseKind {
+    Case,
+    CaseX,
+    CaseZ,
+}
+
 impl BlockStmt {
     /// Iterate over all statement-kind children.
     pub fn statements(&self) -> AstChildren<crate::node::StmtNode> {
@@ -70,6 +78,23 @@ impl IfStmt {
 }
 
 impl CaseStmt {
+    /// The case keyword token (`case`, `casex`, or `casez`) for diagnostic anchoring.
+    pub fn case_keyword_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::CaseKw)
+            .or_else(|| support::token(&self.syntax, SyntaxKind::CasexKw))
+            .or_else(|| support::token(&self.syntax, SyntaxKind::CasezKw))
+    }
+
+    /// Classify the case keyword as `Case`, `CaseX`, or `CaseZ`.
+    pub fn case_kind(&self) -> Option<CaseKind> {
+        match self.case_keyword_token()?.kind() {
+            SyntaxKind::CaseKw => Some(CaseKind::Case),
+            SyntaxKind::CasexKw => Some(CaseKind::CaseX),
+            SyntaxKind::CasezKw => Some(CaseKind::CaseZ),
+            _ => None,
+        }
+    }
+
     /// The selector expression (first expression-kind node between parens).
     pub fn selector(&self) -> Option<crate::expr::Expr> {
         let mut in_parens = false;
