@@ -42,6 +42,6 @@ pub use nodes_expr::{
 };
 pub use nodes_stmt::{CaseItemLike, ValueRangeKind};
 pub use port::PortDirection;
-pub use support::{AstChildren, expr_children, field_exprs};
+pub use support::{AstChildren, expr_children, field_exprs, foreach_stmts};
 pub use type_decl_site::TypeDeclSite;
 pub use type_spec::{Signing, TypeNameRef, TypeSpecKeyword, UnpackedDimKind};

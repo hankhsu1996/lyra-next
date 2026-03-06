@@ -32,6 +32,11 @@ pub fn field_exprs(root: &SyntaxNode) -> impl Iterator<Item = crate::nodes::Fiel
     descendants(root)
 }
 
+/// All `ForeachStmt` nodes in a subtree (depth-first pre-order).
+pub fn foreach_stmts(root: &SyntaxNode) -> impl Iterator<Item = crate::nodes::ForeachStmt> + '_ {
+    descendants(root)
+}
+
 /// Get the first child node of type `N`.
 pub(crate) fn child<N: AstNode>(parent: &SyntaxNode) -> Option<N> {
     parent.children().find_map(N::cast)
