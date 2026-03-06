@@ -15,7 +15,7 @@ module packed_union_width;
   typedef union packed {
     logic [7:0]  c;
     logic [15:0] d;
-  //             ^ error[lyra.type.packed_union_width]: packed union member `d` is 16 bits, expected 8 bits
+  // @d error[lyra.type.packed_union_width]: packed union member `d` is 16 bits, expected 8 bits
 
   } mismatch_t;
 

@@ -7,7 +7,7 @@ module inside_body_checked;
   always_comb begin
     case (sel) inside
       1: narrow = wide;
-//      ^ warning[lyra.type.width_mismatch]
+// @narrow warning[lyra.type.width_mismatch]
       default: ;
     endcase
   end

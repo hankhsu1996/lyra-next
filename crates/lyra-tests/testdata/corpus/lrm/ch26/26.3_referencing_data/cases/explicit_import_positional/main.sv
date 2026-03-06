@@ -5,7 +5,7 @@ endpackage
 
 module top;
   wire a = c;
-  //      ^ error[lyra.semantic.unresolved_name]: unresolved name `c`
+  // @c error[lyra.semantic.unresolved_name]: unresolved name `c`
   import p::c;
   wire b = c;
 endmodule

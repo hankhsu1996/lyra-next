@@ -1,4 +1,5 @@
 pub mod annotation;
+mod resolve;
 
 use std::fmt::Write;
 use std::path::Path;

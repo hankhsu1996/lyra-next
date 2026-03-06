@@ -6,5 +6,5 @@ endpackage
 module m;
   int C;
   import P::C;
-  //    ^ error[lyra.semantic.import_conflict]: import of `C` from package `P` conflicts with local declaration
+  // @P error[lyra.semantic.import_conflict]: import of `C` from package `P` conflicts with local declaration
 endmodule

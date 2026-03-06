@@ -8,7 +8,7 @@ module too_many_vars;
 
   initial begin
     foreach (arr[i, j]) begin
-//                  ^ error[lyra.semantic.foreach_too_many_vars]: foreach has 2 loop variables but iterated expression has only 1 dimensions
+// @j error[lyra.semantic.foreach_too_many_vars]: foreach has 2 loop variables but iterated expression has only 1 dimensions
     end
   end
 

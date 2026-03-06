@@ -301,7 +301,7 @@ No `test.yaml` directly under the owner dir when `cases/` exists (no mixed mode)
 - A `test.yaml` marker file with metadata (required for discovery).
 - One or more `.sv` files with inline annotations encoding expected diagnostics.
 - A passing test has no annotations (runner asserts zero diagnostics).
-- A failing test has `// ^ error[code]: message` annotations pinning each expected diagnostic.
+- A failing test has `// @token error[code]: message` annotations pinning each expected diagnostic. Use `@token` for identifier/keyword targets, `@[text]` for punctuation/numeric literals. Add `N:` for repeated occurrences.
 - Use `// ALLOW-EXTRA-DIAGS` only for in-progress tests where not all diagnostics are pinned yet. Remove it before signing off.
 
 **test.yaml for LRM tests:**

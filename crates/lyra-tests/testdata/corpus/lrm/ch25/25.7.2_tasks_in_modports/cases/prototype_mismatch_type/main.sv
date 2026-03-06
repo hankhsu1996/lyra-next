@@ -10,6 +10,6 @@ interface bus_if;
   modport slave(
     output data,
     import task Read(input logic [15:0] addr)
-//              ^ error[lyra.semantic.prototype_mismatch]: prototype signature does not match declaration of `Read`: port 1 type mismatch
+// @Read error[lyra.semantic.prototype_mismatch]: prototype signature does not match declaration of `Read`: port 1 type mismatch
   );
 endinterface

@@ -3,6 +3,6 @@
 module return_missing_value;
   function int foo();
     return;
-//  ^ error[lyra.semantic.return_missing_value]: non-void function must return a value
+// @return error[lyra.semantic.return_missing_value]: non-void function must return a value
   endfunction
 endmodule

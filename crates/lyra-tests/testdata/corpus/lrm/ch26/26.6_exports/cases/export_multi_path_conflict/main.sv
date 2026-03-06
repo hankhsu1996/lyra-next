@@ -11,5 +11,5 @@ module m;
   import P::*;
   import Q::*;
   parameter int y = x;
-  //               ^ error[lyra.semantic.ambiguous_import]: name `x` is ambiguous: imported from packages `P`, `Q`
+  // @x error[lyra.semantic.ambiguous_import]: name `x` is ambiguous: imported from packages `P`, `Q`
 endmodule
