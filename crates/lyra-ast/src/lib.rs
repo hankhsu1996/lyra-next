@@ -40,7 +40,7 @@ pub use nodes_decl::NetDeclKind;
 pub use nodes_expr::{
     RangeKind, StreamDir, StreamRangeOp, SyntaxAssignOp, SyntaxBinaryOp, SyntaxPrefixOp,
 };
-pub use nodes_stmt::{CaseItemLike, ValueRangeKind};
+pub use nodes_stmt::{CaseItemLike, CaseKind, ValueRangeKind};
 pub use port::PortDirection;
 pub use support::{AstChildren, expr_children, field_exprs, foreach_stmts};
 pub use type_decl_site::TypeDeclSite;

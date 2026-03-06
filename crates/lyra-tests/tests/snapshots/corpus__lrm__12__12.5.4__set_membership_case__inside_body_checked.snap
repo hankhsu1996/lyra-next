@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  warning[lyra.type.width_mismatch] 8:8..8:8: implicit truncation: 8-bit value assigned to 4-bit target
+---
+unit (0 diagnostics)

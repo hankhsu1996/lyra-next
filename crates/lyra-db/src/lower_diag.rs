@@ -595,6 +595,39 @@ pub(crate) fn lower_jump_check_items(
     }
 }
 
+/// Lower case-statement legality items (LRM 12.5.4) into diagnostics.
+pub(crate) fn lower_case_check_items(
+    file_id: FileId,
+    source_map: &lyra_preprocess::SourceMap,
+    items: &[lyra_semantic::case_check::CaseCheckItem],
+    diags: &mut Vec<Diagnostic>,
+) {
+    use lyra_semantic::case_check::CaseCheckItem;
+    for item in items {
+        match item {
+            CaseCheckItem::IllegalInsideCaseKind { kw_span, .. } => {
+                if !kw_span.is_valid() {
+                    continue;
+                }
+                let (span, _) = map_span_or_fallback(file_id, source_map, kw_span.text_range());
+                let msg_id = MessageId::CaseInsideRequiresPlainCase;
+                diags.push(
+                    Diagnostic::new(
+                        Severity::Error,
+                        code::CASE_INSIDE_REQUIRES_PLAIN_CASE,
+                        Message::simple(msg_id),
+                    )
+                    .with_label(Label {
+                        kind: LabelKind::Primary,
+                        span,
+                        message: Message::simple(msg_id),
+                    }),
+                );
+            }
+        }
+    }
+}
+
 /// Lower foreach-legality items (LRM 12.7.3) into diagnostics.
 pub(crate) fn lower_foreach_check_items(
     file_id: FileId,

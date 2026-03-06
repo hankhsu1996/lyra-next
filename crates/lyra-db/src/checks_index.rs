@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
 use lyra_ast::{
-    AssignStmt, AstIdMap, AstNode, BlockStmt, CaseStmt, ContinuousAssign, ErasedAstId, Expr,
-    ExprKind, ForStmt, ForeachStmt, ForeverStmt, FunctionDecl, GenerateItem, GenerateRegion,
-    HasSyntax, IfStmt, ModuleBody, RepeatStmt, ReturnStmt, SourceFile, StmtNode, SystemTfCall,
-    TaskDecl, TimingControl, VarDecl, WhileStmt, expr_children,
+    AssignStmt, AstIdMap, AstNode, BlockStmt, CaseInsideItem, CaseItem, CaseItemLike, CaseStmt,
+    ContinuousAssign, ErasedAstId, Expr, ExprKind, ForStmt, ForeachStmt, ForeverStmt, FunctionDecl,
+    GenerateItem, GenerateRegion, HasSyntax, IfStmt, ModuleBody, RepeatStmt, ReturnStmt,
+    SourceFile, StmtNode, SystemTfCall, TaskDecl, TimingControl, ValueRangeKind, VarDecl,
+    WhileStmt, expr_children,
 };
 use lyra_parser::SyntaxNode;
 use lyra_semantic::type_check::AccessMode;
@@ -167,14 +168,7 @@ impl IndexBuilder<'_> {
                 if let Some(sel) = case.selector() {
                     self.collect_from_expr(&sel, AccessMode::Read);
                 }
-                for ci in case.normal_items() {
-                    for expr in expr_children(ci.syntax()) {
-                        self.collect_from_expr(&expr, AccessMode::Read);
-                    }
-                    if let Some(b) = ci.body() {
-                        self.collect_stmt(&b, AccessMode::Read);
-                    }
-                }
+                self.collect_case_items(case, AccessMode::Read);
             }
             GenerateItem::GenerateRegion(region) => {
                 self.collect_generate_region(region);
@@ -190,6 +184,48 @@ impl IndexBuilder<'_> {
     fn collect_generate_region(&mut self, region: &GenerateRegion) {
         for gi in region.generate_items() {
             self.collect_generate_item(&gi);
+        }
+    }
+
+    fn collect_case_items(&mut self, case: &CaseStmt, access: AccessMode) {
+        for item in case.items() {
+            match item {
+                CaseItemLike::Normal(ci) => {
+                    self.collect_normal_case_item(&ci, access);
+                }
+                CaseItemLike::Inside(ci) => {
+                    self.collect_inside_case_item(&ci, access);
+                }
+            }
+        }
+    }
+
+    fn collect_normal_case_item(&mut self, ci: &CaseItem, access: AccessMode) {
+        for expr in expr_children(ci.syntax()) {
+            self.collect_from_expr(&expr, access);
+        }
+        if let Some(b) = ci.body() {
+            self.collect_stmt(&b, access);
+        }
+    }
+
+    fn collect_inside_case_item(&mut self, ci: &CaseInsideItem, access: AccessMode) {
+        if let Some(rl) = ci.range_list() {
+            for vr in rl.value_ranges() {
+                match vr.kind() {
+                    Some(ValueRangeKind::SingleExpr(e)) => {
+                        self.collect_from_expr(&e, access);
+                    }
+                    Some(ValueRangeKind::BracketRange { lo, hi }) => {
+                        self.collect_from_expr(&lo, access);
+                        self.collect_from_expr(&hi, access);
+                    }
+                    None => {}
+                }
+            }
+        }
+        if let Some(b) = ci.body() {
+            self.collect_stmt(&b, access);
         }
     }
 
@@ -251,14 +287,7 @@ impl IndexBuilder<'_> {
             if let Some(sel) = case.selector() {
                 self.collect_from_expr(&sel, access);
             }
-            for item in case.normal_items() {
-                for expr in expr_children(item.syntax()) {
-                    self.collect_from_expr(&expr, access);
-                }
-                if let Some(b) = item.body() {
-                    self.collect_stmt(&b, access);
-                }
-            }
+            self.collect_case_items(&case, access);
         } else if let Some(for_s) = ForStmt::cast(node.clone()) {
             for expr in expr_children(for_s.syntax()) {
                 self.collect_from_expr(&expr, access);

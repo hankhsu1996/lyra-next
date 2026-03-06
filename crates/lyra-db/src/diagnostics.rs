@@ -57,6 +57,17 @@ pub fn file_diagnostics(
         );
     }
 
+    // Case statement legality diagnostics (LRM 12.5.4)
+    {
+        let case_index = crate::case_check::case_check_index(db, file);
+        crate::lower_diag::lower_case_check_items(
+            file.file_id(db),
+            &pp.source_map,
+            &case_index.items,
+            &mut diags,
+        );
+    }
+
     // Foreach loop legality diagnostics (LRM 12.7.3)
     {
         let foreach_index = crate::foreach_check::foreach_check_index(db, file, unit);
