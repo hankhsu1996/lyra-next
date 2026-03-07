@@ -388,10 +388,41 @@ impl DottedName {
 
 // VarDecl accessors
 
+/// Syntactic classification of an explicit lifetime qualifier on a declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeclLifetimeSyntax {
+    Static(SyntaxToken),
+    Automatic(SyntaxToken),
+}
+
+impl DeclLifetimeSyntax {
+    /// The underlying syntax token.
+    pub fn token(&self) -> &SyntaxToken {
+        match self {
+            Self::Static(t) | Self::Automatic(t) => t,
+        }
+    }
+}
+
 impl crate::nodes::VarDecl {
     /// The `const` keyword token, if present (LRM 6.20.6).
     pub fn const_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::ConstKw)
+    }
+
+    /// The explicit lifetime qualifier (`static` or `automatic`), if present (LRM 6.21).
+    pub fn lifetime(&self) -> Option<DeclLifetimeSyntax> {
+        support::token_in(
+            &self.syntax,
+            &[SyntaxKind::StaticKw, SyntaxKind::AutomaticKw],
+        )
+        .map(|tok| {
+            if tok.kind() == SyntaxKind::StaticKw {
+                DeclLifetimeSyntax::Static(tok)
+            } else {
+                DeclLifetimeSyntax::Automatic(tok)
+            }
+        })
     }
 }
 

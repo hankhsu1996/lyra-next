@@ -47,38 +47,7 @@ pub fn file_diagnostics(
     ));
     diags.extend(type_diagnostics(db, file, unit).iter().cloned());
 
-    // Jump statement legality diagnostics (LRM 12.8)
-    {
-        let jump_index = crate::jump_check::jump_check_index(db, file);
-        crate::lower_diag::lower_jump_check_items(
-            file.file_id(db),
-            &pp.source_map,
-            &jump_index.items,
-            &mut diags,
-        );
-    }
-
-    // Case statement legality diagnostics (LRM 12.5.4)
-    {
-        let case_index = crate::case_check::case_check_index(db, file);
-        crate::lower_diag::lower_case_check_items(
-            file.file_id(db),
-            &pp.source_map,
-            &case_index.items,
-            &mut diags,
-        );
-    }
-
-    // Foreach loop legality diagnostics (LRM 12.7.3)
-    {
-        let foreach_index = crate::foreach_check::foreach_check_index(db, file, unit);
-        crate::lower_diag::lower_foreach_check_items(
-            file.file_id(db),
-            &pp.source_map,
-            &foreach_index.items,
-            &mut diags,
-        );
-    }
+    collect_legality_diagnostics(db, file, unit, pp, &mut diags);
 
     // Enum base type diagnostics
     let file_id = file.file_id(db);
@@ -138,6 +107,33 @@ pub fn file_diagnostics(
     collect_symbol_diagnostics(db, file, unit, def, pp, &mut diags);
 
     diags
+}
+
+fn collect_legality_diagnostics(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+    pp: &lyra_preprocess::PreprocOutput,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let file_id = file.file_id(db);
+
+    let jump_index = crate::jump_check::jump_check_index(db, file);
+    crate::lower_diag::lower_jump_check_items(file_id, &pp.source_map, &jump_index.items, diags);
+
+    let case_index = crate::case_check::case_check_index(db, file);
+    crate::lower_diag::lower_case_check_items(file_id, &pp.source_map, &case_index.items, diags);
+
+    let foreach_index = crate::foreach_check::foreach_check_index(db, file, unit);
+    crate::lower_diag::lower_foreach_check_items(
+        file_id,
+        &pp.source_map,
+        &foreach_index.items,
+        diags,
+    );
+
+    let decl_index = crate::decl_check::decl_check_index(db, file);
+    crate::lower_diag::lower_decl_check_items(file_id, &pp.source_map, &decl_index.items, diags);
 }
 
 /// Collect per-symbol diagnostics: type-extraction internal errors and

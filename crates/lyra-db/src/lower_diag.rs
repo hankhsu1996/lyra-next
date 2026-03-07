@@ -716,6 +716,39 @@ pub(crate) fn lower_foreach_check_items(
     }
 }
 
+/// Lower declaration-legality items (LRM 6.21) into diagnostics.
+pub(crate) fn lower_decl_check_items(
+    file_id: FileId,
+    source_map: &lyra_preprocess::SourceMap,
+    items: &[crate::decl_check::DeclCheckItem],
+    diags: &mut Vec<Diagnostic>,
+) {
+    use crate::decl_check::DeclCheckItem;
+    for item in items {
+        match item {
+            DeclCheckItem::AutomaticVarNonProcedural { kw } => {
+                if !kw.is_valid() {
+                    continue;
+                }
+                let (span, _) = map_span_or_fallback(file_id, source_map, kw.text_range());
+                let msg_id = MessageId::AutomaticVarNonProcedural;
+                diags.push(
+                    Diagnostic::new(
+                        Severity::Error,
+                        code::AUTOMATIC_VAR_NON_PROCEDURAL,
+                        Message::simple(msg_id),
+                    )
+                    .with_label(Label {
+                        kind: LabelKind::Primary,
+                        span,
+                        message: Message::simple(msg_id),
+                    }),
+                );
+            }
+        }
+    }
+}
+
 fn lower_prototype_mismatch(
     name: &SmolStr,
     mismatch: &lyra_semantic::diagnostic::PrototypeMismatchDetail,

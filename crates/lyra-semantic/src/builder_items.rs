@@ -1,7 +1,7 @@
 use lyra_ast::{
-    AstNode, Declarator, ExportDecl, ExportItem, ForeachStmt, FunctionDecl, HasSyntax, ImportItem,
-    ModportDecl, ModportPortKind, ModportTfPortsGroup, ModuleInstantiation, TaskDecl, TfPortDecl,
-    TimeprecisionDecl, TimeunitDecl, TypeSpec,
+    AstNode, DeclLifetimeSyntax, Declarator, ExportDecl, ExportItem, ForeachStmt, FunctionDecl,
+    HasSyntax, ImportItem, ModportDecl, ModportPortKind, ModportTfPortsGroup, ModuleInstantiation,
+    TaskDecl, TfPortDecl, TimeprecisionDecl, TimeunitDecl, TypeSpec,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -664,18 +664,23 @@ pub(crate) fn collect_declarators(
     // Detect inline enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
     // Detect const qualifier (LRM 6.20.6)
-    let constness = match node.kind() {
-        SyntaxKind::VarDecl => {
-            if lyra_ast::VarDecl::cast(node.clone())
-                .and_then(|vd| vd.const_token())
-                .is_some()
-            {
-                Constness::Const
-            } else {
-                Constness::Mutable
-            }
-        }
-        _ => Constness::Mutable,
+    let var_decl_ast = match node.kind() {
+        SyntaxKind::VarDecl => lyra_ast::VarDecl::cast(node.clone()),
+        _ => None,
+    };
+    let constness = if var_decl_ast
+        .as_ref()
+        .and_then(|vd| vd.const_token())
+        .is_some()
+    {
+        Constness::Const
+    } else {
+        Constness::Mutable
+    };
+    // Detect explicit lifetime qualifier (LRM 6.21)
+    let lifetime = match var_decl_ast.as_ref().and_then(|vd| vd.lifetime()) {
+        Some(DeclLifetimeSyntax::Automatic(_)) => Lifetime::Automatic,
+        Some(DeclLifetimeSyntax::Static(_)) | None => Lifetime::Static,
     };
     let decl_type_site = match node.kind() {
         SyntaxKind::VarDecl => lyra_ast::VarDecl::cast(node.clone())
@@ -707,7 +712,7 @@ pub(crate) fn collect_declarators(
                     name: SmolStr::new(name_tok.text()),
                     kind,
                     constness,
-                    lifetime: Lifetime::Static,
+                    lifetime,
                     decl_site,
                     name_site: decl_name_site,
                     type_site: decl_type_site,

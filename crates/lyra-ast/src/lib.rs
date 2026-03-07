@@ -44,4 +44,4 @@ pub use nodes_stmt::{CaseItemLike, CaseKind, ValueRangeKind};
 pub use port::PortDirection;
 pub use support::{AstChildren, expr_children, field_exprs, foreach_stmts};
 pub use type_decl_site::TypeDeclSite;
-pub use type_spec::{Signing, TypeNameRef, TypeSpecKeyword, UnpackedDimKind};
+pub use type_spec::{DeclLifetimeSyntax, Signing, TypeNameRef, TypeSpecKeyword, UnpackedDimKind};

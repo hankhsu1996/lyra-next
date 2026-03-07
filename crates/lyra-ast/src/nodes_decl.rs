@@ -25,10 +25,6 @@ impl PackageDecl {
 }
 
 impl PackageBody {
-    pub fn var_decls(&self) -> AstChildren<VarDecl> {
-        support::children(&self.syntax)
-    }
-
     pub fn net_decls(&self) -> AstChildren<NetDecl> {
         support::children(&self.syntax)
     }
@@ -38,6 +34,18 @@ impl PackageBody {
     }
 
     pub fn import_decls(&self) -> AstChildren<ImportDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn var_decls(&self) -> AstChildren<VarDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn function_decls(&self) -> AstChildren<FunctionDecl> {
+        support::children(&self.syntax)
+    }
+
+    pub fn task_decls(&self) -> AstChildren<TaskDecl> {
         support::children(&self.syntax)
     }
 }
