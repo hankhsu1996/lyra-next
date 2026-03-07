@@ -6,9 +6,9 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 3 -- Design and Verification Building Blocks
 
-### 3.12.1: Compilation units
+### 3.12.1: Compilation units -- `$unit::` scoped name prefix
 
-`$unit::` scoped name prefix is not parsed. Compilation-unit scope declarations (variables, functions declared outside any design element) are not tracked in a dedicated compilation-unit scope. Blocked by: `$unit::` parser support, compilation-unit scope model. Test: deferred until compilation-unit scope lands.
+File-level declarative items are parsed, collected into file scope, aggregated into compilation-unit scope, and visible to design elements within the same compilation unit. Remaining gap: explicit `$unit::` scoped-name syntax is not yet parsed. That follow-up should resolve through the existing compilation-unit scope summary rather than introducing a separate semantic path.
 
 ## Chapter 5 -- Lexical Conventions
 

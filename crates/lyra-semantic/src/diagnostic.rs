@@ -90,6 +90,10 @@ pub enum SemanticDiagKind {
         name: SmolStr,
         mismatch: PrototypeMismatchDetail,
     },
+    AmbiguousCuScope {
+        name: SmolStr,
+        sites: Box<[Site]>,
+    },
     InternalError {
         detail: SmolStr,
     },
@@ -190,6 +194,12 @@ impl SemanticDiag {
                     }
                 };
                 format!("prototype signature does not match declaration of `{name}`: {detail}")
+            }
+            SemanticDiagKind::AmbiguousCuScope { name, sites } => {
+                format!(
+                    "name `{name}` is ambiguous: {} declarations in compilation-unit scope",
+                    sites.len()
+                )
             }
             SemanticDiagKind::InternalError { detail } => {
                 format!("internal error: {detail}")

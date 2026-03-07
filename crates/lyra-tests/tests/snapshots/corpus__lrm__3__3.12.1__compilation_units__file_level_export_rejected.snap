@@ -1,0 +1,10 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (3 diagnostics)
+  error[lyra.parse.error] 3:0..3:0: expected top-level declaration
+  error[lyra.semantic.package_not_found] 3:6..3:6: package `pkg` not found
+  error[lyra.parse.error] 3:15..3:15: expected identifier
+---
+unit (0 diagnostics)

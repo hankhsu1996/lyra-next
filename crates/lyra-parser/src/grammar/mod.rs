@@ -89,8 +89,8 @@ pub(crate) fn source_file(p: &mut Parser) {
             items::primitive_decl(p);
         } else if p.at(SyntaxKind::ConfigKw) {
             items::config_decl(p);
-        } else {
-            p.error_bump("expected top-level declaration");
+        } else if !items::file_item(p) {
+            break;
         }
     }
     // Trailing trivia must be inside the root node for a valid rowan tree.

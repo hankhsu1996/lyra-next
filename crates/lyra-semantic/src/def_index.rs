@@ -140,6 +140,13 @@ impl DefIndex {
     pub fn record_id(&self, idx: RecordDefIdx) -> RecordId {
         RecordId::new(self.record_defs[idx.0 as usize].record_type_site)
     }
+
+    /// File scope is always `ScopeId(0)` with `ScopeKind::File`.
+    pub fn file_scope(&self) -> Option<ScopeId> {
+        let scope = ScopeId(0);
+        let data = self.scopes.get(scope);
+        (data.kind == ScopeKind::File).then_some(scope)
+    }
 }
 
 /// A name path: simple identifier or qualified path.

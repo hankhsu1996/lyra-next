@@ -15,6 +15,7 @@ pub enum MessageId {
     PackageNotFound,
     MemberNotFound,
     AmbiguousWildcardImport,
+    AmbiguousCuScope,
     UnsupportedQualifiedPath,
     ExplicitImportConflictsWithLocal,
     ExplicitConflictsWithWildcard,
@@ -331,6 +332,21 @@ pub fn render_message(msg: &Message) -> String {
 fn render_other_message(msg: &Message) -> String {
     let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
     match msg.id {
+        MessageId::AmbiguousCuScope => {
+            let count = msg.args.get(1).and_then(Arg::as_count).unwrap_or(0);
+            if count > 0 {
+                format!(
+                    "name `{}` is ambiguous: {} declarations in compilation-unit scope",
+                    name(),
+                    count
+                )
+            } else {
+                format!(
+                    "name `{}` is ambiguous: multiple declarations in compilation-unit scope",
+                    name()
+                )
+            }
+        }
         MessageId::WildcardLocalConflict => {
             let sym_name = name();
             let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");

@@ -41,15 +41,15 @@ pub enum CoreResolution {
 }
 
 impl CoreResolution {
-    /// Construct a Pkg resolution.
+    /// Construct a site-based resolution (package scope or CU file scope).
     ///
     /// Returns `Err` if namespace is `Definition` (structurally prevented
     /// by `PackageScopeIndex::resolve()` returning `None` for `Definition`,
     /// and `resolve_qualified` remapping `Definition` to `Value`).
-    pub(crate) fn pkg(name_site: Site, namespace: Namespace) -> Result<Self, SmolStr> {
+    pub(crate) fn from_site(name_site: Site, namespace: Namespace) -> Result<Self, SmolStr> {
         if namespace == Namespace::Definition {
             return Err(SmolStr::new(format!(
-                "Pkg resolution carries Definition namespace (anchor={name_site:?})"
+                "site-based resolution carries Definition namespace (anchor={name_site:?})"
             )));
         }
         Ok(Self::Pkg {
@@ -80,6 +80,8 @@ pub enum UnresolvedReason {
     MemberNotFound { package: SmolStr, member: SmolStr },
     /// Multiple wildcard imports provide the same name.
     AmbiguousWildcardImport { candidates: Box<[SmolStr]> },
+    /// Multiple compilation-unit file-scope declarations share this name.
+    AmbiguousCuScope { sites: Box<[Site]> },
     /// Qualified path has more than 2 segments (not yet supported).
     UnsupportedQualifiedPath { len: usize },
     /// Internal invariant violation (e.g. Pkg with Definition namespace).
@@ -211,6 +213,14 @@ pub(crate) fn reason_to_diagnostic(
             kind: SemanticDiagKind::AmbiguousWildcardImport {
                 name: SmolStr::new(path.display_name()),
                 candidates: candidates.clone(),
+            },
+            primary,
+            label: None,
+        },
+        UnresolvedReason::AmbiguousCuScope { sites } => SemanticDiag {
+            kind: SemanticDiagKind::AmbiguousCuScope {
+                name: SmolStr::new(path.display_name()),
+                sites: sites.clone(),
             },
             primary,
             label: None,

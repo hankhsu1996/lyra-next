@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use smallvec::{SmallVec, smallvec};
 use smol_str::SmolStr;
 
+use crate::Site;
 use crate::def_index::{
     CompilationUnitEnv, DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, LocalDeclId,
     NamePath,
 };
 use crate::diagnostic::{DiagSpan, SemanticDiag};
 use crate::enum_def::{EnumVariantIndex, PkgEnumVariantIndex};
-use crate::global_index::{GlobalDefIndex, PackageScopeIndex};
+use crate::global_index::{CuScopeIndex, GlobalDefIndex, PackageScopeIndex, ScopeLookup};
 use crate::name_graph::NameGraph;
 use crate::resolve_index::{
     self, CoreResolution, CoreResolveOutput, CoreResolveResult, ImportConflict, ImportConflictKind,
@@ -24,6 +25,7 @@ struct ResolveCtx<'a> {
     global: &'a GlobalDefIndex,
     pkg_scope: &'a PackageScopeIndex,
     cu_env: &'a CompilationUnitEnv,
+    cu_scope: &'a CuScopeIndex,
     local_enum_variants: Option<&'a EnumVariantIndex>,
     pkg_enum_variants: Option<&'a PkgEnumVariantIndex>,
 }
@@ -44,6 +46,7 @@ pub fn build_resolve_core(
     global: &GlobalDefIndex,
     pkg_scope: &PackageScopeIndex,
     cu_env: &CompilationUnitEnv,
+    cu_scope: &CuScopeIndex,
     local_enum_variants: Option<&EnumVariantIndex>,
     pkg_enum_variants: Option<&PkgEnumVariantIndex>,
 ) -> CoreResolveOutput {
@@ -77,6 +80,7 @@ pub fn build_resolve_core(
         global,
         pkg_scope,
         cu_env,
+        cu_scope,
         local_enum_variants,
         pkg_enum_variants,
     };
@@ -414,23 +418,30 @@ fn ns_list(expected: ExpectedNs) -> ([Namespace; 2], usize) {
 /// Use-site resolution goes through `build_resolve_core` which supplies
 /// each use-site's actual `order_key`.
 pub fn resolve_name_in_scope(
-    graph: &NameGraph,
-    global: &GlobalDefIndex,
-    pkg_scope: &PackageScopeIndex,
-    cu_env: &CompilationUnitEnv,
+    env: &ResolveEnv<'_>,
     scope: ScopeId,
     name: &str,
     expected: ExpectedNs,
 ) -> CoreResolveResult {
     let ctx = ResolveCtx {
-        graph,
-        global,
-        pkg_scope,
-        cu_env,
+        graph: env.graph,
+        global: env.global,
+        pkg_scope: env.pkg_scope,
+        cu_env: env.cu_env,
+        cu_scope: env.cu_scope,
         local_enum_variants: None,
         pkg_enum_variants: None,
     };
     resolve_simple(&ctx, scope, name, expected, u32::MAX)
+}
+
+/// Bundled resolution environment for `resolve_name_in_scope`.
+pub struct ResolveEnv<'a> {
+    pub graph: &'a NameGraph,
+    pub global: &'a GlobalDefIndex,
+    pub pkg_scope: &'a PackageScopeIndex,
+    pub cu_env: &'a CompilationUnitEnv,
+    pub cu_scope: &'a CuScopeIndex,
 }
 
 /// Resolve a qualified name (e.g. `Pkg::member`).
@@ -528,6 +539,22 @@ fn resolve_simple(
             }
             WildcardResult::NotFound => {}
         }
+        // 5. Compilation-unit file-scope declarations
+        match ctx.cu_scope.resolve(name, ns) {
+            ScopeLookup::Unique(site) => match CoreResolution::from_site(site, ns) {
+                Ok(res) => return CoreResolveResult::Resolved(res),
+                Err(detail) => {
+                    return CoreResolveResult::Unresolved(UnresolvedReason::InternalError {
+                        detail,
+                    });
+                }
+            },
+            ScopeLookup::Ambiguous(entries) => {
+                let sites: Box<[Site]> = entries.iter().map(|(_, s)| *s).collect();
+                return CoreResolveResult::Unresolved(UnresolvedReason::AmbiguousCuScope { sites });
+            }
+            ScopeLookup::Missing => {}
+        }
     }
 
     // For type-position lookups, fall back to the definition namespace.
@@ -571,7 +598,7 @@ fn resolve_qualified(
     });
     for &ns in &nss[..len] {
         if let Some(ast_id) = pkg_scope.resolve(pkg_name, member_name, ns) {
-            return match CoreResolution::pkg(ast_id, ns) {
+            return match CoreResolution::from_site(ast_id, ns) {
                 Ok(res) => CoreResolveResult::Resolved(res),
                 Err(detail) => {
                     CoreResolveResult::Unresolved(UnresolvedReason::InternalError { detail })
@@ -602,7 +629,7 @@ fn resolve_via_explicit_import(
                 && imp.order_key < use_order_key
                 && let Some(ast_id) = pkg_scope.resolve(&imp.package, name, ns)
             {
-                return Ok(Some(CoreResolution::pkg(ast_id, ns)?));
+                return Ok(Some(CoreResolution::from_site(ast_id, ns)?));
             }
         }
         current = graph.scopes.get(sid).parent;
@@ -688,7 +715,7 @@ fn resolve_via_wildcard_import(
         }
         match found {
             Some(WildcardFound::Symbol(ast_id, _)) => {
-                return match CoreResolution::pkg(ast_id, ns) {
+                return match CoreResolution::from_site(ast_id, ns) {
                     Ok(res) => WildcardResult::Found(res),
                     Err(detail) => WildcardResult::InternalError(detail),
                 };
@@ -741,7 +768,7 @@ fn resolve_via_implicit_import(
             && member.as_str() == name
             && let Some(ast_id) = pkg_scope.resolve(&imp.package, name, ns)
         {
-            return match CoreResolution::pkg(ast_id, ns) {
+            return match CoreResolution::from_site(ast_id, ns) {
                 Ok(res) => WildcardResult::Found(res),
                 Err(detail) => WildcardResult::InternalError(detail),
             };
@@ -752,7 +779,7 @@ fn resolve_via_implicit_import(
         return WildcardResult::Ambiguous(ambiguous_pkgs.into_boxed_slice());
     }
     if let Some((ast_id, _)) = found {
-        return match CoreResolution::pkg(ast_id, ns) {
+        return match CoreResolution::from_site(ast_id, ns) {
             Ok(res) => WildcardResult::Found(res),
             Err(detail) => WildcardResult::InternalError(detail),
         };

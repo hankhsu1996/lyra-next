@@ -8,10 +8,7 @@ use smol_str::SmolStr;
 
 use crate::expr_queries::{ExprRef, type_of_expr_raw};
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::semantic::{
-    base_resolve_index, compilation_unit_env, def_index_file, global_def_index, name_graph_file,
-    package_scope_index,
-};
+use crate::semantic::{base_resolve_index, def_index_file};
 use crate::type_queries::{SymbolRef, TyRef, bit_width_total, type_of_symbol_raw};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
@@ -312,8 +309,7 @@ fn resolve_name_as_type(
     expr: &Expr,
 ) -> Option<Ty> {
     let expected = lyra_semantic::def_index::ExpectedNs::Exact(Namespace::Type);
-    let global = global_def_index(db, unit);
-    let pkg_scope = package_scope_index(db, unit);
+    let env = crate::semantic::resolve_env(db, source_file, unit);
 
     let ek = expr.classify()?;
 
@@ -323,18 +319,14 @@ fn resolve_name_as_type(
             let name = ident.text();
             let def = def_index_file(db, source_file);
             let scope = find_use_site_scope(def, expr.syntax(), map)?;
-            let graph = name_graph_file(db, source_file);
-            let cu_env = compilation_unit_env(db, unit);
-            lyra_semantic::resolve_name_in_scope(
-                graph, global, pkg_scope, cu_env, scope, name, expected,
-            )
+            lyra_semantic::resolve_name_in_scope(&env, scope, name, expected)
         }
         ExprKind::QualifiedName(qn) => {
             let segments: Vec<SmolStr> = qn.segments().map(|t| SmolStr::new(t.text())).collect();
             if segments.len() < 2 {
                 return None;
             }
-            lyra_semantic::resolve_qualified_name(&segments, global, pkg_scope, expected)
+            lyra_semantic::resolve_qualified_name(&segments, env.global, env.pkg_scope, expected)
         }
         _ => return None,
     };
