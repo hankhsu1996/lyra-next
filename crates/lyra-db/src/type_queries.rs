@@ -171,7 +171,7 @@ pub fn type_of_symbol_raw<'db>(
 ) -> lyra_semantic::types::SymbolType {
     use lyra_semantic::symbols::SymbolKind;
     use lyra_semantic::types::{SymbolType, SymbolTypeError};
-    use lyra_semantic::{extract_type_from_container, user_type_ref};
+    use lyra_semantic::user_type_ref;
 
     let unit = sym_ref.unit(db);
     let gsym = sym_ref.symbol(db);
@@ -208,7 +208,7 @@ pub fn type_of_symbol_raw<'db>(
             let parse = parse_file(db, source_file);
             let map = ast_id_map(db, source_file);
             let dim_src = UnpackedDimSource::from_name_site(&parse.syntax(), map, sym.name_site);
-            let ty = wrap_unpacked_dims(ty, dim_src.as_ref(), map);
+            let ty = resolve_wrap_unpacked(db, unit, source_file, ty, dim_src.as_ref(), map);
             return classify(ty, sym.kind);
         }
         SymbolOrigin::Record(idx) => {
@@ -217,7 +217,7 @@ pub fn type_of_symbol_raw<'db>(
             let parse = parse_file(db, source_file);
             let map = ast_id_map(db, source_file);
             let dim_src = UnpackedDimSource::from_name_site(&parse.syntax(), map, sym.name_site);
-            let ty = wrap_unpacked_dims(ty, dim_src.as_ref(), map);
+            let ty = resolve_wrap_unpacked(db, unit, source_file, ty, dim_src.as_ref(), map);
             return classify(ty, sym.kind);
         }
         SymbolOrigin::EnumVariant(enum_idx) => {
@@ -279,12 +279,46 @@ pub fn type_of_symbol_raw<'db>(
             TypeDeclSite::Port(port) => Some(UnpackedDimSource::Port(port.clone())),
             _ => declarator.clone().map(UnpackedDimSource::Declarator),
         };
-        let ty = wrap_unpacked_dims(base_ty, dim_src.as_ref(), map);
+        let ty = resolve_wrap_unpacked(db, unit, source_file, base_ty, dim_src.as_ref(), map);
         return classify(ty, sym.kind);
     }
 
-    // No user-defined type -- pure extraction
-    extract_type_from_container(&container, declarator.as_ref(), map)
+    // No user-defined type -- extract base (no declarator dims) then apply resolved dims
+    extract_with_resolved_dims(db, unit, source_file, &container, declarator, map)
+}
+
+/// Extract base type from container (no declarator dims) and apply resolved dims.
+fn extract_with_resolved_dims(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    container: &TypeDeclSite,
+    declarator: Option<lyra_ast::Declarator>,
+    map: &lyra_ast::AstIdMap,
+) -> lyra_semantic::types::SymbolType {
+    use lyra_semantic::extract_type_from_container;
+    use lyra_semantic::types::SymbolType;
+
+    let base_st = extract_type_from_container(container, None, map);
+    let dim_owner = match container {
+        TypeDeclSite::Port(port) => Some(UnpackedDimSource::Port(port.clone())),
+        _ => declarator.map(UnpackedDimSource::Declarator),
+    };
+    match base_st {
+        SymbolType::Value(ty) => {
+            let ty = resolve_wrap_unpacked(db, unit, source_file, ty, dim_owner.as_ref(), map);
+            SymbolType::Value(ty)
+        }
+        SymbolType::Net(net) => {
+            let data =
+                resolve_wrap_unpacked(db, unit, source_file, net.data, dim_owner.as_ref(), map);
+            SymbolType::Net(lyra_semantic::types::NetType {
+                kind: net.kind,
+                data,
+            })
+        }
+        other => other,
+    }
 }
 
 /// Resolve the type of a module/interface instance.
@@ -583,12 +617,12 @@ fn expand_typedef(
         }
     };
 
-    // Apply use-site unpacked dims uniformly
+    // Apply use-site unpacked dims with resolution-aware extraction
     let use_site_unpacked: Vec<UnpackedDim> = dim_owner
         .map(|owner| {
             owner
                 .unpacked_dimensions()
-                .map(|dim| lyra_semantic::extract_unpacked_dim(&dim, id_map))
+                .map(|dim| resolve_unpacked_dim(db, unit, source_file, &dim, id_map))
                 .collect()
         })
         .unwrap_or_default();
@@ -679,15 +713,65 @@ fn classify(ty: Ty, kind: lyra_semantic::symbols::SymbolKind) -> lyra_semantic::
     }
 }
 
-fn wrap_unpacked_dims(
+/// Resolve a single unpacked dimension, checking name resolution for bare `NameRef`s.
+///
+/// If the dim is `Size { expr }` with a bare `NameRef` that resolves to a type-namespace
+/// target (typedef/type param), returns `Assoc(Typed(resolved_ty))`. Otherwise falls
+/// through to standard `extract_unpacked_dim`.
+pub(crate) fn resolve_unpacked_dim(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
+    dim: &lyra_ast::UnpackedDimension,
+    ast_id_map: &lyra_ast::AstIdMap,
+) -> UnpackedDim {
+    use lyra_ast::UnpackedDimKind;
+    use lyra_semantic::types::AssocIndex;
+
+    if let UnpackedDimKind::Size { ref expr } = dim.classify()
+        && let Some(utr) = lyra_semantic::user_type_ref_from_expr(expr)
+    {
+        let resolve_node = crate::resolve_helpers::utr_syntax(&utr);
+        let resolve = resolve_index_file(db, source_file, unit);
+        if let Some(name_site_id) = ast_id_map.erased_ast_id(resolve_node)
+            && let Some(resolution) = resolve.resolutions.get(&name_site_id)
+            && resolution.namespace == lyra_semantic::symbols::Namespace::Type
+        {
+            let resolved_ty = match &resolution.target {
+                lyra_semantic::resolve_index::ResolvedTarget::Symbol(sym_id) => {
+                    let sym_ref = SymbolRef::new(db, unit, *sym_id);
+                    let sym_type = type_of_symbol(db, sym_ref);
+                    match sym_type {
+                        lyra_semantic::types::SymbolType::TypeAlias(ty) => ty,
+                        _ => Ty::Error,
+                    }
+                }
+                lyra_semantic::resolve_index::ResolvedTarget::Def(def_id) => {
+                    crate::ty_resolve::def_target_ty(db, unit, *def_id)
+                }
+                lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
+                    Ty::Enum(target.enum_id)
+                }
+            };
+            return UnpackedDim::Assoc(AssocIndex::Typed(Box::new(resolved_ty)));
+        }
+    }
+    lyra_semantic::extract_unpacked_dim(dim, ast_id_map)
+}
+
+/// Wrap a base type with resolved unpacked dims from a dim source.
+fn resolve_wrap_unpacked(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    source_file: SourceFile,
     ty: Ty,
     owner: Option<&UnpackedDimSource>,
     ast_id_map: &lyra_ast::AstIdMap,
 ) -> Ty {
     let Some(owner) = owner else { return ty };
-    let dims: Vec<lyra_semantic::types::UnpackedDim> = owner
+    let dims: Vec<UnpackedDim> = owner
         .unpacked_dimensions()
-        .map(|dim| lyra_semantic::extract_unpacked_dim(&dim, ast_id_map))
+        .map(|dim| resolve_unpacked_dim(db, unit, source_file, &dim, ast_id_map))
         .collect();
     if dims.is_empty() {
         return ty;

@@ -659,9 +659,12 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
             });
             ctx.register_binding(sym_id);
             // Collect type-spec name refs for port typedef resolution
+            // and unpacked dim refs for typedef-as-assoc-key resolution
             for port_child in child.children() {
-                if let Some(ts) = TypeSpec::cast(port_child) {
+                if let Some(ts) = TypeSpec::cast(port_child.clone()) {
                     collect_type_spec_refs(ctx, &ts, scope);
+                } else if port_child.kind() == SyntaxKind::UnpackedDimension {
+                    crate::builder_types::collect_name_refs(ctx, &port_child, scope);
                 }
             }
         }

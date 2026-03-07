@@ -144,7 +144,7 @@ pub fn record_field_tys<'db>(
 
         // Apply field declarator unpacked dims
         let dim_src = UnpackedDimSource::from_name_site(&parse.syntax(), map, field.name_site);
-        let ty = wrap_field_unpacked_dims(lowered.ty, dim_src.as_ref(), map);
+        let ty = wrap_field_unpacked_dims(db, unit, source_file, lowered.ty, dim_src.as_ref(), map);
         result.push(LoweredFieldTy {
             ty,
             err: lowered.err,
@@ -240,6 +240,9 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
 }
 
 fn wrap_field_unpacked_dims(
+    db: &dyn salsa::Database,
+    unit: crate::CompilationUnit,
+    source_file: crate::SourceFile,
     ty: Ty,
     owner: Option<&UnpackedDimSource>,
     ast_id_map: &lyra_ast::AstIdMap,
@@ -247,7 +250,9 @@ fn wrap_field_unpacked_dims(
     let Some(owner) = owner else { return ty };
     let dims: Vec<lyra_semantic::types::UnpackedDim> = owner
         .unpacked_dimensions()
-        .map(|dim| lyra_semantic::extract_unpacked_dim(&dim, ast_id_map))
+        .map(|dim| {
+            crate::type_queries::resolve_unpacked_dim(db, unit, source_file, &dim, ast_id_map)
+        })
         .collect();
     if dims.is_empty() {
         return ty;

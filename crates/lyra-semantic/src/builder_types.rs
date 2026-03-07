@@ -166,8 +166,10 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
     // Detect enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
     for child in node.children() {
-        if let Some(ts) = TypeSpec::cast(child) {
+        if let Some(ts) = TypeSpec::cast(child.clone()) {
             collect_type_spec_refs(ctx, &ts, scope);
+        } else if child.kind() == SyntaxKind::UnpackedDimension {
+            collect_name_refs(ctx, &child, scope);
         }
     }
     if let Some(td) = TypedefDecl::cast(node.clone())
@@ -495,7 +497,66 @@ fn collect_record_def(
     Some(idx)
 }
 
+/// Collect name refs from an unpacked dimension, registering bare `NameRef`s
+/// with `TypeOrValue` namespace so `[TypedefName]` can resolve as a type.
+fn collect_unpacked_dim_refs(
+    ctx: &mut DefContext<'_>,
+    dim: &lyra_ast::UnpackedDimension,
+    scope: ScopeId,
+) {
+    use lyra_ast::UnpackedDimKind;
+    if let UnpackedDimKind::Size { ref expr } = dim.classify()
+        && let Some(utr) = crate::type_extract::user_type_ref_from_expr(expr)
+    {
+        match &utr {
+            crate::type_extract::UserTypeRef::Simple(nr) => {
+                if let Some(ident) = nr.ident()
+                    && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
+                {
+                    ctx.use_sites.push(UseSite {
+                        path: NamePath::Simple(SmolStr::new(ident.text())),
+                        expected_ns: ExpectedNs::TypeOrValue,
+                        scope,
+                        name_ref_site: ast_id.erase(),
+                        order_key: 0,
+                    });
+                }
+                return;
+            }
+            crate::type_extract::UserTypeRef::Qualified(qn) => {
+                if let Some(ast_id) = ctx.ast_id_map.ast_id(qn) {
+                    let segments: Box<[SmolStr]> = qn
+                        .segments()
+                        .map(|ident| SmolStr::new(ident.text()))
+                        .collect();
+                    if !segments.is_empty() {
+                        ctx.use_sites.push(UseSite {
+                            path: NamePath::Qualified { segments },
+                            expected_ns: ExpectedNs::TypeOrValue,
+                            scope,
+                            name_ref_site: ast_id.erase(),
+                            order_key: 0,
+                        });
+                    }
+                }
+                return;
+            }
+            crate::type_extract::UserTypeRef::DottedType { .. } => {}
+        }
+    }
+    collect_name_refs_inner(ctx, dim.syntax(), scope);
+}
+
 pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    // When called directly on an UnpackedDimension, apply TypeOrValue semantics.
+    if let Some(dim) = lyra_ast::UnpackedDimension::cast(node.clone()) {
+        collect_unpacked_dim_refs(ctx, &dim, scope);
+        return;
+    }
+    collect_name_refs_inner(ctx, node, scope);
+}
+
+fn collect_name_refs_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
         if child.kind() == SyntaxKind::NameRef {
             if let Some(name_ref) = NameRef::cast(child.clone())
@@ -578,6 +639,8 @@ pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, sco
             } else {
                 collect_name_refs(ctx, &child, scope);
             }
+        } else if let Some(dim) = lyra_ast::UnpackedDimension::cast(child.clone()) {
+            collect_unpacked_dim_refs(ctx, &dim, scope);
         } else {
             collect_name_refs(ctx, &child, scope);
         }

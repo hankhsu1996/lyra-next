@@ -27,6 +27,24 @@ fn check_typed_assoc_key_compat(declared_key_ty: &Ty, actual_key_ty: &Ty) -> Ass
                 }
             }
         }
+        Ty::Integral(_) => {
+            if matches!(actual_key_ty, Ty::Integral(_) | Ty::Enum(_)) {
+                AssocKeyCheck::Compatible
+            } else {
+                AssocKeyCheck::Incompatible {
+                    expected: declared_key_ty.clone(),
+                    actual: actual_key_ty.clone(),
+                }
+            }
+        }
+        Ty::Enum(declared_id) => match actual_key_ty {
+            Ty::Integral(_) => AssocKeyCheck::Compatible,
+            Ty::Enum(actual_id) if actual_id == declared_id => AssocKeyCheck::Compatible,
+            _ => AssocKeyCheck::Incompatible {
+                expected: declared_key_ty.clone(),
+                actual: actual_key_ty.clone(),
+            },
+        },
         _ => AssocKeyCheck::Deferred,
     }
 }
