@@ -100,6 +100,10 @@ fn net_declarator(p: &mut Parser) {
 // Also handles declarations starting with direction keywords, `const`, or user-defined types.
 pub(crate) fn var_decl(p: &mut Parser) {
     let m = p.start();
+    // Optional lifetime qualifier (LRM 6.21)
+    if matches!(p.current(), SyntaxKind::StaticKw | SyntaxKind::AutomaticKw) {
+        p.bump();
+    }
     // Optional const qualifier (LRM 6.20.6)
     if p.at(SyntaxKind::ConstKw) {
         p.bump();
@@ -486,7 +490,9 @@ pub(crate) fn at_unambiguous_data_decl_start(p: &Parser) -> bool {
             | SyntaxKind::InputKw
             | SyntaxKind::OutputKw
             | SyntaxKind::InoutKw
-    ) || (k == SyntaxKind::Ident && p.nth(1) == SyntaxKind::ColonColon)
+    ) || (matches!(k, SyntaxKind::StaticKw | SyntaxKind::AutomaticKw)
+        && !matches!(p.nth(1), SyntaxKind::FunctionKw | SyntaxKind::TaskKw))
+        || (k == SyntaxKind::Ident && p.nth(1) == SyntaxKind::ColonColon)
         || (k == SyntaxKind::Ident
             && p.nth(1) == SyntaxKind::Dot
             && p.nth(2) == SyntaxKind::Ident

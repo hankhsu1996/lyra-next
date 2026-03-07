@@ -206,7 +206,11 @@ ast_nodes! {
         body: InterfaceBody,
     }
 
-    InterfaceBody(SyntaxKind::InterfaceBody) {}
+    InterfaceBody(SyntaxKind::InterfaceBody) {
+        var_decls: [VarDecl],
+        function_decls: [FunctionDecl],
+        task_decls: [TaskDecl],
+    }
 
     GenerateRegion(SyntaxKind::GenerateRegion) {}
 
@@ -253,7 +257,11 @@ ast_nodes! {
         body: ProgramBody,
     }
 
-    ProgramBody(SyntaxKind::ProgramBody) {}
+    ProgramBody(SyntaxKind::ProgramBody) {
+        var_decls: [VarDecl],
+        function_decls: [FunctionDecl],
+        task_decls: [TaskDecl],
+    }
 
     PrimitiveDecl(SyntaxKind::PrimitiveDecl) {
         name: token([Ident, EscapedIdent]),

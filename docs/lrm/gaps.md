@@ -60,7 +60,7 @@ Class declarations (`class`/`endclass`) are not parsed. Keywords are in the lexe
 
 ### 6.21: Scope and lifetime
 
-Lifetime qualifiers are stored on function/task symbols, defaulting to static when unspecified. Remaining gaps: variable-level lifetime qualifiers, lifetime inheritance to locals within callable scope, class-context defaults (blocked on class support), program/module/package/interface container lifetime modeling. Test: `lrm/ch06/6.21_scope_and_lifetime`.
+Lifetime qualifiers are stored on function/task symbols. Variable declarations parse `static`/`automatic` qualifiers and store them on symbols created by `collect_declarators`; unqualified declarations default to static for the currently modeled declaration paths. Explicit `automatic` on variable declarations in non-procedural contexts (module, package, interface, program) is diagnosed. Remaining gaps: callable-local lifetime inheritance/defaulting, class-context defaults (blocked on class support), container-level default lifetime modeling. Test: `lrm/ch06/6.21_scope_and_lifetime`.
 
 ### 6.22: Type compatibility -- formal matching and equivalence rules
 

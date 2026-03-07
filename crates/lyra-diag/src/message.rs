@@ -126,6 +126,8 @@ pub enum MessageId {
     // Index key legality
     IndexKeyNotIntegral,
     AssocIndexKeyMismatch,
+    // Declaration legality
+    AutomaticVarNonProcedural,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -376,6 +378,9 @@ fn render_other_message(msg: &Message) -> String {
         MessageId::IndexKeyNotIntegral => {
             "index expression must be integral for wildcard associative array".into()
         }
+        MessageId::AutomaticVarNonProcedural => {
+            "automatic variable declarations are only allowed in procedural contexts".into()
+        }
         MessageId::ParseError | MessageId::PreprocessError => msg
             .args
             .first()
@@ -385,6 +390,23 @@ fn render_other_message(msg: &Message) -> String {
         MessageId::NotASubroutine => {
             format!("`{}` is not a task or function", name())
         }
+        MessageId::PrototypeMismatchReturnType
+        | MessageId::PrototypeMismatchPortCount
+        | MessageId::PrototypeMismatchPortDirection
+        | MessageId::PrototypeMismatchPortType => render_prototype_message(msg),
+        MessageId::InternalError => msg
+            .args
+            .first()
+            .and_then(|a| a.as_detail().or_else(|| a.as_name()))
+            .map(String::from)
+            .unwrap_or_default(),
+        _ => render_elab_message(msg),
+    }
+}
+
+fn render_prototype_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
         MessageId::PrototypeMismatchReturnType => {
             format!(
                 "prototype signature does not match declaration of `{}`: return type mismatch",
@@ -415,13 +437,7 @@ fn render_other_message(msg: &Message) -> String {
                 name()
             )
         }
-        MessageId::InternalError => msg
-            .args
-            .first()
-            .and_then(|a| a.as_detail().or_else(|| a.as_name()))
-            .map(String::from)
-            .unwrap_or_default(),
-        _ => render_elab_message(msg),
+        _ => String::new(),
     }
 }
 
