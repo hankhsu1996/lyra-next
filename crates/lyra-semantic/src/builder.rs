@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use lyra_ast::{AstIdMap, AstNode, ExportDecl, HasSyntax, Port, TypeSpec};
 use lyra_lexer::SyntaxKind;
-use lyra_parser::{Parse, SyntaxNode};
+use lyra_parser::{Parse, SyntaxNode, SyntaxToken};
 use lyra_source::{FileId, NameSpan};
 use smol_str::SmolStr;
 
@@ -144,8 +144,33 @@ pub(crate) struct RawModportEntry {
     pub(crate) def: ModportDef,
 }
 
+/// Two-slot lifetime environment for the builder.
+///
+/// `callable_default` controls the lifetime assigned to unqualified
+/// task/function declarations. Container-level `automatic`/`static` keywords
+/// change this slot (LRM 6.21, 12.7.1).
+///
+/// `local_default` controls the lifetime assigned to unqualified local variable
+/// declarations inside a procedural context. Entering a callable body sets
+/// this to the callable's resolved lifetime.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LifetimeEnv {
+    pub(crate) callable_default: Lifetime,
+    pub(crate) local_default: Lifetime,
+}
+
+impl Default for LifetimeEnv {
+    fn default() -> Self {
+        Self {
+            callable_default: Lifetime::Static,
+            local_default: Lifetime::Static,
+        }
+    }
+}
+
 pub(crate) struct DefContext<'a> {
     pub(crate) ast_id_map: &'a AstIdMap,
+    pub(crate) lifetime_env: LifetimeEnv,
     pub(crate) symbols: SymbolTableBuilder,
     pub(crate) scopes: ScopeTreeBuilder,
     pub(crate) def_entries: DefEntryBuilder,
@@ -176,6 +201,7 @@ impl<'a> DefContext<'a> {
     pub(crate) fn new(_file: FileId, ast_id_map: &'a AstIdMap) -> Self {
         Self {
             ast_id_map,
+            lifetime_env: LifetimeEnv::default(),
             symbols: SymbolTableBuilder::new(),
             scopes: ScopeTreeBuilder::new(),
             def_entries: DefEntryBuilder::new(),
@@ -201,6 +227,28 @@ impl<'a> DefContext<'a> {
             diagnostics: Vec::new(),
             internal_errors: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_callable_default(&mut self, lt: Lifetime, f: impl FnOnce(&mut Self)) {
+        let prev = self.lifetime_env;
+        self.lifetime_env.callable_default = lt;
+        f(self);
+        self.lifetime_env = prev;
+    }
+
+    pub(crate) fn with_local_default(&mut self, lt: Lifetime, f: impl FnOnce(&mut Self)) {
+        let prev = self.lifetime_env;
+        self.lifetime_env.local_default = lt;
+        f(self);
+        self.lifetime_env = prev;
+    }
+
+    pub(crate) fn with_iface_def_id(&mut self, id: Option<GlobalDefId>, f: impl FnOnce(&mut Self)) {
+        let prev = self.current_iface_def_id;
+        self.current_iface_def_id = id;
+        self.modport_ordinal = 0;
+        f(self);
+        self.current_iface_def_id = prev;
     }
 
     pub(crate) fn emit_internal_error(&mut self, detail: &str, site: crate::Site) {
@@ -398,8 +446,12 @@ fn collect_file_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
 
 fn collect_declarative_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     match node.kind() {
-        SyntaxKind::VarDecl => collect_declarators(ctx, node, SymbolKind::Variable, scope),
-        SyntaxKind::NetDecl => collect_declarators(ctx, node, SymbolKind::Net, scope),
+        SyntaxKind::VarDecl => {
+            collect_declarators(ctx, node, SymbolKind::Variable, scope, Lifetime::Static);
+        }
+        SyntaxKind::NetDecl => {
+            collect_declarators(ctx, node, SymbolKind::Net, scope, Lifetime::Static);
+        }
         SyntaxKind::ParamDecl => collect_param_decl(ctx, node, scope),
         SyntaxKind::ImportDecl => collect_import_decl(ctx, node, scope),
         SyntaxKind::TypedefDecl => collect_typedef(ctx, node, scope),
@@ -413,8 +465,16 @@ fn collect_declarative_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: 
     }
 }
 
+fn container_callable_default(lifetime_tok: Option<&SyntaxToken>) -> Lifetime {
+    match lifetime_tok.map(|t| t.kind()) {
+        Some(SyntaxKind::AutomaticKw) => Lifetime::Automatic,
+        _ => Lifetime::Static,
+    }
+}
+
 fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: ScopeId) {
-    let Some(name_tok) = lyra_ast::ModuleDecl::cast(node.clone()).and_then(|m| m.name()) else {
+    let module_ast = lyra_ast::ModuleDecl::cast(node.clone());
+    let Some(name_tok) = module_ast.as_ref().and_then(|m| m.name()) else {
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
@@ -435,31 +495,40 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
         DefScope::Owned(module_scope),
     );
 
-    // Pass 1: header imports (scope facts collected first so ports see them)
-    for child in node.children() {
-        if child.kind() == SyntaxKind::ImportDecl {
-            collect_import_decl(ctx, &child, module_scope);
+    let container_lifetime = container_callable_default(
+        module_ast
+            .as_ref()
+            .and_then(|m| m.lifetime_token())
+            .as_ref(),
+    );
+    ctx.with_callable_default(container_lifetime, |ctx| {
+        // Pass 1: header imports (scope facts collected first so ports see them)
+        for child in node.children() {
+            if child.kind() == SyntaxKind::ImportDecl {
+                collect_import_decl(ctx, &child, module_scope);
+            }
         }
-    }
-    // Pass 2: ports and body
-    for child in node.children() {
-        match child.kind() {
-            SyntaxKind::ParamPortList => {
-                collect_param_port_list(ctx, &child, module_scope);
+        // Pass 2: ports and body
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::ParamPortList => {
+                    collect_param_port_list(ctx, &child, module_scope);
+                }
+                SyntaxKind::PortList => {
+                    collect_port_list(ctx, &child, module_scope);
+                }
+                SyntaxKind::ModuleBody => {
+                    collect_module_body(ctx, &child, module_scope);
+                }
+                _ => {}
             }
-            SyntaxKind::PortList => {
-                collect_port_list(ctx, &child, module_scope);
-            }
-            SyntaxKind::ModuleBody => {
-                collect_module_body(ctx, &child, module_scope);
-            }
-            _ => {}
         }
-    }
+    });
 }
 
 fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: ScopeId) {
-    let Some(name_tok) = lyra_ast::PackageDecl::cast(node.clone()).and_then(|p| p.name()) else {
+    let pkg_ast = lyra_ast::PackageDecl::cast(node.clone());
+    let Some(name_tok) = pkg_ast.as_ref().and_then(|p| p.name()) else {
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
@@ -480,15 +549,20 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
         DefScope::Owned(package_scope),
     );
 
-    for child in node.children() {
-        if child.kind() == SyntaxKind::PackageBody {
-            collect_package_body(ctx, &child, package_scope);
+    let container_lifetime =
+        container_callable_default(pkg_ast.as_ref().and_then(|p| p.lifetime_token()).as_ref());
+    ctx.with_callable_default(container_lifetime, |ctx| {
+        for child in node.children() {
+            if child.kind() == SyntaxKind::PackageBody {
+                collect_package_body(ctx, &child, package_scope);
+            }
         }
-    }
+    });
 }
 
 fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
-    let Some(name_tok) = lyra_ast::InterfaceDecl::cast(node.clone()).and_then(|i| i.name()) else {
+    let iface_ast = lyra_ast::InterfaceDecl::cast(node.clone());
+    let Some(name_tok) = iface_ast.as_ref().and_then(|i| i.name()) else {
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
@@ -508,37 +582,39 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         name_span,
         DefScope::Owned(iface_scope),
     );
-    let iface_def_id = Some(def_id);
+    let container_lifetime =
+        container_callable_default(iface_ast.as_ref().and_then(|i| i.lifetime_token()).as_ref());
 
-    let prev_iface = ctx.current_iface_def_id.take();
-    ctx.current_iface_def_id = iface_def_id;
-    ctx.modport_ordinal = 0;
-    // Pass 1: header imports
-    for child in node.children() {
-        if child.kind() == SyntaxKind::ImportDecl {
-            collect_import_decl(ctx, &child, iface_scope);
-        }
-    }
-    // Pass 2: ports and body
-    for child in node.children() {
-        match child.kind() {
-            SyntaxKind::ParamPortList => {
-                collect_param_port_list(ctx, &child, iface_scope);
+    ctx.with_iface_def_id(Some(def_id), |ctx| {
+        ctx.with_callable_default(container_lifetime, |ctx| {
+            // Pass 1: header imports
+            for child in node.children() {
+                if child.kind() == SyntaxKind::ImportDecl {
+                    collect_import_decl(ctx, &child, iface_scope);
+                }
             }
-            SyntaxKind::PortList => {
-                collect_port_list(ctx, &child, iface_scope);
+            // Pass 2: ports and body
+            for child in node.children() {
+                match child.kind() {
+                    SyntaxKind::ParamPortList => {
+                        collect_param_port_list(ctx, &child, iface_scope);
+                    }
+                    SyntaxKind::PortList => {
+                        collect_port_list(ctx, &child, iface_scope);
+                    }
+                    SyntaxKind::InterfaceBody => {
+                        collect_module_body(ctx, &child, iface_scope);
+                    }
+                    _ => {}
+                }
             }
-            SyntaxKind::InterfaceBody => {
-                collect_module_body(ctx, &child, iface_scope);
-            }
-            _ => {}
-        }
-    }
-    ctx.current_iface_def_id = prev_iface;
+        });
+    });
 }
 
 fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
-    let Some(name_tok) = lyra_ast::ProgramDecl::cast(node.clone()).and_then(|p| p.name()) else {
+    let prog_ast = lyra_ast::ProgramDecl::cast(node.clone());
+    let Some(name_tok) = prog_ast.as_ref().and_then(|p| p.name()) else {
         return;
     };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
@@ -559,27 +635,31 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         DefScope::Owned(prog_scope),
     );
 
-    // Pass 1: header imports
-    for child in node.children() {
-        if child.kind() == SyntaxKind::ImportDecl {
-            collect_import_decl(ctx, &child, prog_scope);
+    let container_lifetime =
+        container_callable_default(prog_ast.as_ref().and_then(|p| p.lifetime_token()).as_ref());
+    ctx.with_callable_default(container_lifetime, |ctx| {
+        // Pass 1: header imports
+        for child in node.children() {
+            if child.kind() == SyntaxKind::ImportDecl {
+                collect_import_decl(ctx, &child, prog_scope);
+            }
         }
-    }
-    // Pass 2: ports and body
-    for child in node.children() {
-        match child.kind() {
-            SyntaxKind::ParamPortList => {
-                collect_param_port_list(ctx, &child, prog_scope);
+        // Pass 2: ports and body
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::ParamPortList => {
+                    collect_param_port_list(ctx, &child, prog_scope);
+                }
+                SyntaxKind::PortList => {
+                    collect_port_list(ctx, &child, prog_scope);
+                }
+                SyntaxKind::ProgramBody => {
+                    collect_module_body(ctx, &child, prog_scope);
+                }
+                _ => {}
             }
-            SyntaxKind::PortList => {
-                collect_port_list(ctx, &child, prog_scope);
-            }
-            SyntaxKind::ProgramBody => {
-                collect_module_body(ctx, &child, prog_scope);
-            }
-            _ => {}
         }
-    }
+    });
 }
 
 fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
@@ -701,10 +781,10 @@ fn collect_module_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
 fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     match node.kind() {
         SyntaxKind::NetDecl => {
-            collect_declarators(ctx, node, SymbolKind::Net, scope);
+            collect_declarators(ctx, node, SymbolKind::Net, scope, Lifetime::Static);
         }
         SyntaxKind::VarDecl => {
-            collect_declarators(ctx, node, SymbolKind::Variable, scope);
+            collect_declarators(ctx, node, SymbolKind::Variable, scope, Lifetime::Static);
         }
         SyntaxKind::ParamDecl => {
             collect_param_decl(ctx, node, scope);

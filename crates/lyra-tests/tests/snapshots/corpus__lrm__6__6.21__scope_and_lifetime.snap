@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.decl.automatic_var_non_procedural] 59:2..59:2: automatic variable declarations are only allowed in procedural contexts
+---
+unit (0 diagnostics)
