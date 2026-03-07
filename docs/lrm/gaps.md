@@ -14,10 +14,6 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 The preprocessor recognizes the \`timescale directive keyword but does not consume it or track the active timescale. Blocked by: directive event consumption (shared with Ch 5.6.4 gap). Test: deferred until \`timescale consumption lands.
 
-### 3.14.2.2: timeunit and timeprecision keywords
-
-`timeunit` and `timeprecision` keywords are in the lexer but no parser grammar exists for these declarations. Blocked by: parser grammar, semantic storage for per-module time unit/precision. Test: deferred until timeunit/timeprecision parsing lands.
-
 ### 3.14.2.3: Precedence rules for time units
 
 Depends on both \`timescale directive consumption (3.14.2.1) and timeunit/timeprecision parsing (3.14.2.2). Cannot be tested until both prerequisites land. Test: deferred.

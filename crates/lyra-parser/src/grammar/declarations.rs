@@ -449,6 +449,27 @@ pub(crate) fn at_cast_type(kind: SyntaxKind) -> bool {
     is_scalar_type_keyword(kind) || kind == SyntaxKind::Ident || kind == SyntaxKind::TypeKw
 }
 
+// `timeunit time_literal [ / time_literal ] ;`
+pub(crate) fn timeunit_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // timeunit
+    p.expect(SyntaxKind::TimeLiteral);
+    if p.eat(SyntaxKind::Slash) {
+        p.expect(SyntaxKind::TimeLiteral);
+    }
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::TimeunitDecl);
+}
+
+// `timeprecision time_literal ;`
+pub(crate) fn timeprecision_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(); // timeprecision
+    p.expect(SyntaxKind::TimeLiteral);
+    p.expect(SyntaxKind::Semicolon);
+    m.complete(p, SyntaxKind::TimeprecisionDecl);
+}
+
 /// Tokens that unambiguously start a data declaration.
 /// Does NOT handle bare `Ident Ident` (ambiguous with module instantiation).
 pub(crate) fn at_unambiguous_data_decl_start(p: &Parser) -> bool {

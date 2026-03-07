@@ -77,6 +77,14 @@ fn package_item(p: &mut Parser) -> bool {
             subprograms::task_decl(p);
             true
         }
+        SyntaxKind::TimeunitKw => {
+            declarations::timeunit_decl(p);
+            true
+        }
+        SyntaxKind::TimeprecisionKw => {
+            declarations::timeprecision_decl(p);
+            true
+        }
         _ if declarations::at_unambiguous_data_decl_start(p) => {
             if super::net::is_net_type_kw(p.current()) {
                 declarations::net_decl(p);
@@ -233,6 +241,21 @@ pub(crate) fn module_decl(p: &mut Parser) {
     m.complete(p, SyntaxKind::ModuleDecl);
 }
 
+// Dispatch a generate-construct keyword to the appropriate parser.
+fn generate_item(p: &mut Parser) {
+    match p.current() {
+        SyntaxKind::GenerateKw => generate::generate_region(p),
+        SyntaxKind::IfKw => generate::generate_if(p),
+        SyntaxKind::ForKw => generate::generate_for(p),
+        SyntaxKind::CaseKw | SyntaxKind::CasexKw | SyntaxKind::CasezKw => {
+            generate::generate_case(p);
+        }
+        SyntaxKind::BeginKw => generate::generate_block(p),
+        SyntaxKind::GenvarKw => generate::genvar_decl(p),
+        _ => {}
+    }
+}
+
 // Parse one module item. Returns false if no progress was made.
 pub(super) fn module_item(p: &mut Parser) -> bool {
     super::eat_attr_instances(p);
@@ -268,28 +291,15 @@ pub(super) fn module_item(p: &mut Parser) -> bool {
             declarations::nettype_decl(p);
             true
         }
-        SyntaxKind::GenerateKw => {
-            generate::generate_region(p);
-            true
-        }
-        SyntaxKind::IfKw => {
-            generate::generate_if(p);
-            true
-        }
-        SyntaxKind::ForKw => {
-            generate::generate_for(p);
-            true
-        }
-        SyntaxKind::CaseKw | SyntaxKind::CasexKw | SyntaxKind::CasezKw => {
-            generate::generate_case(p);
-            true
-        }
-        SyntaxKind::BeginKw => {
-            generate::generate_block(p);
-            true
-        }
-        SyntaxKind::GenvarKw => {
-            generate::genvar_decl(p);
+        SyntaxKind::GenerateKw
+        | SyntaxKind::IfKw
+        | SyntaxKind::ForKw
+        | SyntaxKind::CaseKw
+        | SyntaxKind::CasexKw
+        | SyntaxKind::CasezKw
+        | SyntaxKind::BeginKw
+        | SyntaxKind::GenvarKw => {
+            generate_item(p);
             true
         }
         SyntaxKind::FunctionKw => {
@@ -302,6 +312,14 @@ pub(super) fn module_item(p: &mut Parser) -> bool {
         }
         SyntaxKind::ModportKw => {
             subprograms::modport_decl(p);
+            true
+        }
+        SyntaxKind::TimeunitKw => {
+            declarations::timeunit_decl(p);
+            true
+        }
+        SyntaxKind::TimeprecisionKw => {
+            declarations::timeprecision_decl(p);
             true
         }
         _ if declarations::at_unambiguous_data_decl_start(p) => {

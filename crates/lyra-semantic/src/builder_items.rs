@@ -1,7 +1,7 @@
 use lyra_ast::{
     AstNode, Declarator, ExportDecl, ExportItem, ForeachStmt, FunctionDecl, HasSyntax, ImportItem,
     ModportDecl, ModportPortKind, ModportTfPortsGroup, ModuleInstantiation, TaskDecl, TfPortDecl,
-    TypeSpec,
+    TimeprecisionDecl, TimeunitDecl, TypeSpec,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -23,6 +23,7 @@ use crate::modport_def::{
 use crate::record::SymbolOrigin;
 use crate::scopes::{ScopeId, ScopeKind};
 use crate::symbols::{Constness, Lifetime, Namespace, Symbol, SymbolKind};
+use crate::time_scale::{TimeLiteral, TimeUnitsDecl};
 
 use crate::builder::RawModportEntry;
 
@@ -719,6 +720,78 @@ pub(crate) fn collect_declarators(
             collect_name_refs(ctx, &child, scope);
         }
     }
+}
+
+pub(crate) fn collect_timeunit_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_timeunit_decl",
+            node.kind()
+        ));
+        return;
+    };
+    let Some(decl) = TimeunitDecl::cast(node.clone()) else {
+        ctx.emit_internal_error("TimeunitDecl::cast failed on TimeunitDecl node", decl_site);
+        return;
+    };
+    let Some(unit_tok) = decl.unit_literal_token() else {
+        ctx.emit_internal_error("missing unit literal token in TimeunitDecl", decl_site);
+        return;
+    };
+    let precision = decl.precision_literal_token().map(|tok| TimeLiteral {
+        raw: SmolStr::new(tok.text()),
+    });
+    let entry = TimeUnitsDecl::Timeunit {
+        decl_site,
+        unit: TimeLiteral {
+            raw: SmolStr::new(unit_tok.text()),
+        },
+        precision,
+    };
+    ctx.scope_time_units
+        .entry(scope)
+        .or_default()
+        .decls
+        .push(entry);
+}
+
+pub(crate) fn collect_timeprecision_decl(
+    ctx: &mut DefContext<'_>,
+    node: &SyntaxNode,
+    scope: ScopeId,
+) {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_timeprecision_decl",
+            node.kind()
+        ));
+        return;
+    };
+    let Some(decl) = TimeprecisionDecl::cast(node.clone()) else {
+        ctx.emit_internal_error(
+            "TimeprecisionDecl::cast failed on TimeprecisionDecl node",
+            decl_site,
+        );
+        return;
+    };
+    let Some(prec_tok) = decl.precision_literal_token() else {
+        ctx.emit_internal_error(
+            "missing precision literal token in TimeprecisionDecl",
+            decl_site,
+        );
+        return;
+    };
+    let entry = TimeUnitsDecl::Timeprecision {
+        decl_site,
+        precision: TimeLiteral {
+            raw: SmolStr::new(prec_tok.text()),
+        },
+    };
+    ctx.scope_time_units
+        .entry(scope)
+        .or_default()
+        .decls
+        .push(entry);
 }
 
 pub(crate) use lyra_ast::is_expression_kind;

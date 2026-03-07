@@ -32,6 +32,7 @@ pub mod site;
 pub(crate) mod streaming;
 pub mod symbols;
 pub(crate) mod system_functions;
+pub mod time_scale;
 pub mod type_check;
 pub(crate) mod type_check_array_query;
 pub(crate) mod type_check_dim;

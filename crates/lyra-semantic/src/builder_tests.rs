@@ -6,7 +6,9 @@ use crate::builder::build_def_index;
 use crate::def_index::{ExpectedNs, ImportName};
 use crate::diagnostic::SemanticDiagKind;
 use crate::name_graph::NameGraph;
+use crate::scopes::ScopeKind;
 use crate::symbols::SymbolKind;
+use crate::time_scale::TimeUnitsDecl;
 
 fn parse_source(src: &str) -> (lyra_parser::Parse, lyra_ast::AstIdMap) {
     let tokens = lyra_lexer::lex(src);
@@ -528,4 +530,124 @@ fn type_site_none_for_task() {
         "Task should have no type_site"
     );
     assert_eq!(task.expect("task").name_site, task.expect("task").decl_site);
+}
+
+fn find_scope_by_kind(def: &crate::def_index::DefIndex, kind: ScopeKind) -> crate::scopes::ScopeId {
+    for &scope_id in def.scope_time_units.keys() {
+        if def.scopes.get(scope_id).kind == kind {
+            return scope_id;
+        }
+    }
+    panic!("no scope with kind {kind:?} found in scope_time_units");
+}
+
+#[test]
+fn timeunit_collected_in_module() {
+    let src = "module m; timeunit 100ps; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let tu = &def.scope_time_units[&scope_id];
+    assert_eq!(tu.decls.len(), 1);
+    assert!(
+        matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, precision, .. }
+        if unit.raw == "100ps" && precision.is_none())
+    );
+}
+
+#[test]
+fn timeprecision_collected_in_module() {
+    let src = "module m; timeprecision 1ns; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let tu = &def.scope_time_units[&scope_id];
+    assert_eq!(tu.decls.len(), 1);
+    assert!(
+        matches!(&tu.decls[0], TimeUnitsDecl::Timeprecision { precision, .. }
+        if precision.raw == "1ns")
+    );
+}
+
+#[test]
+fn timeunit_with_precision_preserves_both() {
+    let src = "module m; timeunit 100ps / 10fs; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let tu = &def.scope_time_units[&scope_id];
+    assert_eq!(tu.decls.len(), 1);
+    assert!(
+        matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, precision: Some(prec), .. }
+        if unit.raw == "100ps" && prec.raw == "10fs")
+    );
+}
+
+#[test]
+fn timeunit_then_timeprecision_preserves_order() {
+    let src = "module m; timeunit 100ps; timeprecision 10fs; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let tu = &def.scope_time_units[&scope_id];
+    assert_eq!(tu.decls.len(), 2);
+    assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "100ps"));
+    assert!(
+        matches!(&tu.decls[1], TimeUnitsDecl::Timeprecision { precision, .. } if precision.raw == "10fs")
+    );
+}
+
+#[test]
+fn timeprecision_then_timeunit_preserves_order() {
+    let src = "module m; timeprecision 10fs; timeunit 100ps; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let tu = &def.scope_time_units[&scope_id];
+    assert_eq!(tu.decls.len(), 2);
+    assert!(
+        matches!(&tu.decls[0], TimeUnitsDecl::Timeprecision { precision, .. } if precision.raw == "10fs")
+    );
+    assert!(matches!(&tu.decls[1], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "100ps"));
+}
+
+#[test]
+fn timeunit_in_package() {
+    let src = "package p; timeunit 1ns; endpackage";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_id = find_scope_by_kind(&def, ScopeKind::Package);
+    let tu = &def.scope_time_units[&scope_id];
+    assert_eq!(tu.decls.len(), 1);
+    assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "1ns"));
+}
+
+#[test]
+fn timeunit_in_interface() {
+    let src = "interface i; timeunit 10ns; endinterface";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_id = find_scope_by_kind(&def, ScopeKind::Interface);
+    let tu = &def.scope_time_units[&scope_id];
+    assert_eq!(tu.decls.len(), 1);
+    assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "10ns"));
+}
+
+#[test]
+fn timeunit_in_program() {
+    let src = "program p; timeunit 1us; endprogram";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_id = find_scope_by_kind(&def, ScopeKind::Program);
+    let tu = &def.scope_time_units[&scope_id];
+    assert_eq!(tu.decls.len(), 1);
+    assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "1us"));
 }
