@@ -233,6 +233,11 @@ pub enum TypeCheckItem {
     IndexKeyNotIntegral {
         index_site: Site,
     },
+    AssocIndexKeyMismatch {
+        index_site: Site,
+        expected: Ty,
+        actual: Ty,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.

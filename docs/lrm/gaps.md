@@ -108,9 +108,9 @@ Type representation handles all unpacked dimension forms. Built-in array methods
 
 Callable signature infrastructure stores port types and call-site argument checking exists. Specific LRM rules for passing arrays (by reference vs by value, open array parameters, compatibility rules for dynamic/associative/queue arguments) are not validated. Blocked by: array argument passing semantics, open array parameter support. Test: `lrm/ch07/7.7_arrays_as_arguments`.
 
-### 7.8.2: String index -- index type checking
+### 7.8.2: String index -- remaining typed key coverage
 
-Declaration, string-literal indexing, methods, and foreach iteration work. Remaining: non-string index expressions (e.g., integer used as key on a string-indexed array) are not diagnosed as type errors. Blocked by: index expression type validation against declared key type. Test: `lrm/ch07/7.8.2_string_index`.
+Declaration, string-literal indexing, methods, foreach iteration, and string-key compatibility checking all work. Non-string index expressions on string-keyed arrays are diagnosed. The semantic path supports typed associative-key compatibility checking structurally. Remaining: typed non-string key coverage (e.g., integral key type checking) belongs to the separate 7.8.4 work. Test: `lrm/ch07/7.8.2_string_index`.
 
 ### 7.8.3: Associative array with class index
 

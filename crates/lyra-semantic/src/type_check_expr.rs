@@ -81,7 +81,7 @@ pub fn check_method_call(call: &CallExpr, ctx: &dyn TypeCheckCtx, items: &mut Ve
             items.push(TypeCheckItem::MethodCallError {
                 call_name_span,
                 method_name: smol_str::SmolStr::new(field_tok.text()),
-                error_kind: *error_kind,
+                error_kind: error_kind.clone(),
             });
         }
         _ => {}
@@ -246,7 +246,7 @@ pub fn check_stream_operand(
 ///
 /// Reads the inferred type of `expr` via `ctx.expr_type_stmt()` and harvests
 /// structured `ExprTypeErrorKind`s that carry their own anchoring site.
-/// Currently handles `IndexKeyNotIntegral`.
+/// Currently handles `IndexKeyNotIntegral` and `AssocIndexKeyMismatch`.
 pub fn check_expr_self_anchored_errors(
     expr: &Expr,
     ctx: &dyn TypeCheckCtx,
@@ -255,10 +255,24 @@ pub fn check_expr_self_anchored_errors(
     use crate::type_infer::ExprTypeErrorKind;
 
     let result = ctx.expr_type_stmt(expr);
-    if let ExprView::Error(ExprTypeErrorKind::IndexKeyNotIntegral { index_site }) = &result.view {
-        items.push(TypeCheckItem::IndexKeyNotIntegral {
-            index_site: *index_site,
-        });
+    match &result.view {
+        ExprView::Error(ExprTypeErrorKind::IndexKeyNotIntegral { index_site }) => {
+            items.push(TypeCheckItem::IndexKeyNotIntegral {
+                index_site: *index_site,
+            });
+        }
+        ExprView::Error(ExprTypeErrorKind::AssocIndexKeyMismatch {
+            index_site,
+            expected,
+            actual,
+        }) => {
+            items.push(TypeCheckItem::AssocIndexKeyMismatch {
+                index_site: *index_site,
+                expected: (**expected).clone(),
+                actual: (**actual).clone(),
+            });
+        }
+        _ => {}
     }
 }
 

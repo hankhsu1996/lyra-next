@@ -2,7 +2,7 @@
 //
 // Associative arrays with string index accept string or string literal keys.
 // Empty string "" is a valid index. Tests declaration, indexing, methods,
-// and foreach iteration (string-indexed arrays yield string loop variables).
+// foreach iteration, and key type compatibility.
 
 module string_index;
 
@@ -39,6 +39,26 @@ module string_index;
     foreach (aa[key]) begin
       bb[key] = 16'h0;
     end
+  end
+
+  // Key type mismatch: non-string index on string-keyed array
+  int i;
+  string s;
+  initial begin
+    s = "x";
+    i = aa[s];          // valid: string index
+
+    i = aa[42];
+    // @[42] error[lyra.type.assoc_index_key_mismatch]: associative array index type `bit signed [31:0]` does not match declared key type `string`
+
+    i = aa[i];
+    // @2:i error[lyra.type.assoc_index_key_mismatch]: associative array index type `int` does not match declared key type `string`
+
+    aa[42] = 1;
+    // @[42] error[lyra.type.assoc_index_key_mismatch]: associative array index type `bit signed [31:0]` does not match declared key type `string`
+
+    aa[i] = 1;
+    // @i error[lyra.type.assoc_index_key_mismatch]: associative array index type `int` does not match declared key type `string`
   end
 
 endmodule

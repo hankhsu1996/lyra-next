@@ -125,6 +125,7 @@ pub enum MessageId {
     MethodNotValidWildcardAssoc,
     // Index key legality
     IndexKeyNotIntegral,
+    AssocIndexKeyMismatch,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -310,7 +311,8 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::NonIntegralPackedMember
         | MessageId::RecordAssignWrongRecord
         | MessageId::RecordTypeHere
-        | MessageId::UnpackedRecordIntegralAssign => render_type_message(msg),
+        | MessageId::UnpackedRecordIntegralAssign
+        | MessageId::AssocIndexKeyMismatch => render_type_message(msg),
         MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
         | MessageId::StreamUnpackGreedyRemainder
@@ -514,6 +516,13 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::QueueBoundNotConst => "queue bound must be a constant positive integer".into(),
         MessageId::QueueBoundNotPositive => {
             format!("queue bound must be a positive integer, got {}", name())
+        }
+        MessageId::AssocIndexKeyMismatch => {
+            let expected = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            let actual = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!(
+                "associative array index type `{actual}` does not match declared key type `{expected}`"
+            )
         }
         _ => String::new(),
     }

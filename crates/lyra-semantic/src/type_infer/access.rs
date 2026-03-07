@@ -8,6 +8,29 @@ use crate::member_name::MemberNameToken;
 use crate::site;
 use crate::types::{AssocIndex, Ty, UnpackedDim};
 
+/// Result of checking an index expression against a typed associative array key.
+enum AssocKeyCheck {
+    Compatible,
+    Incompatible { expected: Ty, actual: Ty },
+    Deferred,
+}
+
+fn check_typed_assoc_key_compat(declared_key_ty: &Ty, actual_key_ty: &Ty) -> AssocKeyCheck {
+    match declared_key_ty {
+        Ty::String => {
+            if matches!(actual_key_ty, Ty::String) {
+                AssocKeyCheck::Compatible
+            } else {
+                AssocKeyCheck::Incompatible {
+                    expected: declared_key_ty.clone(),
+                    actual: actual_key_ty.clone(),
+                }
+            }
+        }
+        _ => AssocKeyCheck::Deferred,
+    }
+}
+
 /// What kind of indexing operation `a[i]` performs on a given base type.
 enum IndexKind {
     /// Base is `Ty::Array` -- peel outermost unpacked dimension.
@@ -45,17 +68,38 @@ pub(super) fn infer_index(idx_expr: &IndexExpr, ctx: &dyn InferCtx) -> ExprType 
         return idx;
     }
 
-    // LRM 7.8.1: wildcard associative array requires integral index expression.
+    // Associative array key validation
     if let Ty::Array {
-        dim: UnpackedDim::Assoc(AssocIndex::Wildcard),
+        dim: UnpackedDim::Assoc(assoc_index),
         ..
     } = &base.ty
-        && try_integral_view(&idx, ctx).is_none()
     {
-        let index_site = site::opt_site_of(ctx.ast_id_map(), &index_node)
-            .or_else(|| site::opt_site_of(ctx.ast_id_map(), idx_expr))
-            .unwrap_or_else(|| lyra_ast::ErasedAstId::placeholder(ctx.file_id()));
-        return ExprType::error(ExprTypeErrorKind::IndexKeyNotIntegral { index_site });
+        match assoc_index {
+            // LRM 7.8.1: wildcard associative array requires integral index expression.
+            AssocIndex::Wildcard => {
+                if try_integral_view(&idx, ctx).is_none() {
+                    let index_site = site::opt_site_of(ctx.ast_id_map(), &index_node)
+                        .or_else(|| site::opt_site_of(ctx.ast_id_map(), idx_expr))
+                        .unwrap_or_else(|| lyra_ast::ErasedAstId::placeholder(ctx.file_id()));
+                    return ExprType::error(ExprTypeErrorKind::IndexKeyNotIntegral { index_site });
+                }
+            }
+            // Typed associative array key compatibility check.
+            AssocIndex::Typed(key_ty) => {
+                if let AssocKeyCheck::Incompatible { expected, actual } =
+                    check_typed_assoc_key_compat(key_ty, &idx.ty)
+                {
+                    let index_site = site::opt_site_of(ctx.ast_id_map(), &index_node)
+                        .or_else(|| site::opt_site_of(ctx.ast_id_map(), idx_expr))
+                        .unwrap_or_else(|| lyra_ast::ErasedAstId::placeholder(ctx.file_id()));
+                    return ExprType::error(ExprTypeErrorKind::AssocIndexKeyMismatch {
+                        index_site,
+                        expected: Box::new(expected),
+                        actual: Box::new(actual),
+                    });
+                }
+            }
+        }
     }
 
     apply_index(&base)
