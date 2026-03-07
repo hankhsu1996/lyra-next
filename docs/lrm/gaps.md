@@ -14,7 +14,7 @@ File-level declarative items are parsed, collected into file scope, aggregated i
 
 ### 5.6.4: Compiler directives -- non-conditional directive semantics
 
-Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: triple-quote stringify (`` `""" ``) and `` `default_nettype `` directive semantics. Blocked by: `default_nettype` directive event consumer. Test: `lrm/ch05/5.6.4_compiler_directives`.
+Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). `` `default_nettype `` directive parsing and semantic policy summary are implemented. Remaining gap: triple-quote stringify (`` `""" ``). Blocked by: triple-quote stringify parsing. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
 ## Chapter 6 -- Data Types
 
@@ -32,7 +32,7 @@ Drive strength and charge strength syntax is parsed. Illegal both-highz drive st
 
 ### 6.10: Implicit declarations
 
-Undeclared identifiers used in net contexts should implicitly declare a 1-bit wire (or the type set by `` `default_nettype ``). No implicit net creation exists. The preprocessor recognizes the `default_nettype` directive keyword but does not consume it. Blocked by: `default_nettype` directive event consumption (Ch 5.6.4 gap), name resolution special-case for implicit nets. Test: `lrm/ch06/6.10_implicit_declarations`.
+Undeclared identifiers used in net contexts should implicitly declare a 1-bit wire (or the type set by `` `default_nettype ``). No implicit net creation exists. The `default_nettype` directive is parsed and a per-file policy summary is available via `file_default_nettype_summary`. Blocked by: implicit net creation model in name resolution, applying file policy from the summary at declaration/use sites. Test: `lrm/ch06/6.10_implicit_declarations`.
 
 ### 6.14: Chandle data type
 

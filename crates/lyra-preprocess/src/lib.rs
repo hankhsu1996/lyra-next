@@ -86,6 +86,85 @@ pub struct DirectiveEvent {
     pub event_seq: u32,
 }
 
+/// The net type value carried by a `` `default_nettype `` directive (LRM 22.8).
+///
+/// This is a closed vocabulary: the LRM defines exactly these keywords.
+/// The preprocessor parses directly to this enum so the event stream
+/// carries semantically stable values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DefaultNettypeValue {
+    Wire,
+    Tri,
+    Tri0,
+    Tri1,
+    Wand,
+    Triand,
+    Wor,
+    Trior,
+    Trireg,
+    Uwire,
+    None,
+}
+
+impl DefaultNettypeValue {
+    /// The keyword spelling of this value as it appears in source.
+    pub fn keyword_str(self) -> &'static str {
+        match self {
+            Self::Wire => "wire",
+            Self::Tri => "tri",
+            Self::Tri0 => "tri0",
+            Self::Tri1 => "tri1",
+            Self::Wand => "wand",
+            Self::Triand => "triand",
+            Self::Wor => "wor",
+            Self::Trior => "trior",
+            Self::Trireg => "trireg",
+            Self::Uwire => "uwire",
+            Self::None => "none",
+        }
+    }
+}
+
+impl std::str::FromStr for DefaultNettypeValue {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "wire" => Ok(Self::Wire),
+            "tri" => Ok(Self::Tri),
+            "tri0" => Ok(Self::Tri0),
+            "tri1" => Ok(Self::Tri1),
+            "wand" => Ok(Self::Wand),
+            "triand" => Ok(Self::Triand),
+            "wor" => Ok(Self::Wor),
+            "trior" => Ok(Self::Trior),
+            "trireg" => Ok(Self::Trireg),
+            "uwire" => Ok(Self::Uwire),
+            "none" => Ok(Self::None),
+            _ => Err(()),
+        }
+    }
+}
+
+impl std::fmt::Display for DefaultNettypeValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.keyword_str())
+    }
+}
+
+/// A successfully parsed `` `default_nettype `` directive.
+///
+/// The canonical directive span (keyword through argument) is carried
+/// by the enclosing `DirectiveEvent.span`. This payload carries only
+/// the value and its precise span.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefaultNettypeDirective {
+    /// The parsed net type value.
+    pub value: DefaultNettypeValue,
+    /// Span of the argument token only.
+    pub value_span: Span,
+}
+
 /// A successfully parsed `` `timescale `` directive payload.
 ///
 /// Stores the raw textual forms of the unit and precision operands
@@ -113,6 +192,9 @@ pub enum DirectiveEventKind {
     /// A successfully parsed `` `timescale `` directive with structured
     /// unit and precision operands.
     Timescale(TimescaleDirective),
+    /// A successfully parsed `` `default_nettype `` directive with a
+    /// recognized net type value.
+    DefaultNettype(DefaultNettypeDirective),
     /// Use of an undefined macro name.
     UndefinedMacro(SmolStr),
     /// Malformed or unrecognized directive form.

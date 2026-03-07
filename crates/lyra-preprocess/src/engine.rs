@@ -7,8 +7,9 @@ use crate::engine_cond::{CondState, ElseError, ElsifError};
 use crate::env::MacroEnv;
 use crate::source_map::{Segment, SegmentKind, SourceMap};
 use crate::{
-    DirectiveEvent, DirectiveEventKind, DirectiveEventOrigin, IncludeGraph, IncludeProvider,
-    PreprocError, PreprocOutput, PreprocessInputs, TimescaleDirective, find_include_path,
+    DefaultNettypeDirective, DirectiveEvent, DirectiveEventKind, DirectiveEventOrigin,
+    IncludeGraph, IncludeProvider, PreprocError, PreprocOutput, PreprocessInputs,
+    TimescaleDirective, find_include_path,
 };
 
 pub(crate) struct Preprocessor<'a> {
@@ -135,6 +136,7 @@ impl<'a> Preprocessor<'a> {
             "`undef" => self.handle_undef(idx),
             "`include" => self.handle_include(idx),
             "`timescale" => self.handle_timescale(idx),
+            "`default_nettype" => self.handle_default_nettype(idx),
             _ => match classify_directive(directive_text) {
                 DirectiveClass::MacroInvoke { name } => {
                     if self.cond.currently_emitting() {
@@ -475,6 +477,146 @@ impl<'a> Preprocessor<'a> {
         Err("`timescale expected time literal (e.g. 1ns)")
     }
 
+    /// Skip trivia tokens on the current line, stopping at newline or EOF.
+    /// Returns the updated `(token_index, byte_cursor)`.
+    fn skip_line_trivia(&self, mut j: usize, mut cursor: usize) -> (usize, usize) {
+        while j < self.tokens.len() {
+            let t = self.tokens[j];
+            if t.kind == SyntaxKind::Eof {
+                break;
+            }
+            let t_len: usize = t.len.into();
+            if !t.kind.is_trivia() {
+                break;
+            }
+            let t_text = &self.text[cursor..cursor + t_len];
+            if token_carries_newline(t.kind, t_text) {
+                break;
+            }
+            cursor += t_len;
+            j += 1;
+        }
+        (j, cursor)
+    }
+
+    /// Whether token at `(j, cursor)` is a significant (non-trivia) token
+    /// before the line end boundary.
+    fn is_significant_before(&self, j: usize, cursor: usize, line_end: usize) -> bool {
+        j < self.tokens.len()
+            && self.tokens[j].kind != SyntaxKind::Eof
+            && cursor < line_end
+            && !self.tokens[j].kind.is_trivia()
+    }
+
+    fn handle_default_nettype(&mut self, idx: usize) -> usize {
+        if !self.cond.currently_emitting() {
+            return self.strip_directive_line(idx);
+        }
+
+        let dir_len: usize = self.tokens[idx].len.into();
+        let dir_start = self.src_cursor;
+        self.flush_identity();
+
+        let (end_idx, end_cursor) = self.scan_to_line_end(idx, self.src_cursor);
+        let expanded_offset = TextSize::new(self.expanded_text.len() as u32);
+
+        match self.parse_default_nettype_line(idx, dir_start, end_cursor) {
+            Ok((value, value_span, arg_end)) => {
+                let event_seq = self.next_event_seq();
+                self.directive_events.push(DirectiveEvent {
+                    span: Span {
+                        file: self.file,
+                        range: TextRange::new(
+                            TextSize::new(dir_start as u32),
+                            TextSize::new(arg_end as u32),
+                        ),
+                    },
+                    kind: DirectiveEventKind::DefaultNettype(DefaultNettypeDirective {
+                        value,
+                        value_span,
+                    }),
+                    origin: DirectiveEventOrigin::TopLevel,
+                    expanded_offset,
+                    event_seq,
+                });
+            }
+            Err(err) => {
+                let (range, msg) = match err {
+                    DefaultNettypeParseError::MissingValue => (
+                        TextRange::new(
+                            TextSize::new(dir_start as u32),
+                            TextSize::new((dir_start + dir_len) as u32),
+                        ),
+                        SmolStr::from("`default_nettype missing net type value"),
+                    ),
+                    DefaultNettypeParseError::InvalidValue(range) => {
+                        let bad = &self.text[usize::from(range.start())..usize::from(range.end())];
+                        (
+                            range,
+                            SmolStr::from(format!("`default_nettype invalid value '{bad}'")),
+                        )
+                    }
+                    DefaultNettypeParseError::TrailingTokens(range) => (
+                        range,
+                        SmolStr::from("`default_nettype unexpected tokens after value"),
+                    ),
+                };
+                self.push_error(range, msg);
+            }
+        }
+
+        self.src_cursor = end_cursor;
+        self.flush_start = end_cursor;
+        end_idx - idx
+    }
+
+    /// Parse a complete `` `default_nettype `` directive line.
+    ///
+    /// Validates: exactly one argument token, must be a recognized net
+    /// type value, no trailing non-trivia tokens. Returns
+    /// `(value, value_span, byte_offset_after_arg)` on success.
+    fn parse_default_nettype_line(
+        &self,
+        idx: usize,
+        dir_start: usize,
+        line_end_cursor: usize,
+    ) -> Result<(crate::DefaultNettypeValue, Span, usize), DefaultNettypeParseError> {
+        let dir_len: usize = self.tokens[idx].len.into();
+        let (j, cursor) = self.skip_line_trivia(idx + 1, dir_start + dir_len);
+
+        if !self.is_significant_before(j, cursor, line_end_cursor) {
+            return Err(DefaultNettypeParseError::MissingValue);
+        }
+
+        let arg_len: usize = self.tokens[j].len.into();
+        let arg_text = &self.text[cursor..cursor + arg_len];
+        let arg_range = TextRange::new(
+            TextSize::new(cursor as u32),
+            TextSize::new((cursor + arg_len) as u32),
+        );
+
+        let value: crate::DefaultNettypeValue = arg_text
+            .parse()
+            .map_err(|()| DefaultNettypeParseError::InvalidValue(arg_range))?;
+
+        let value_span = Span {
+            file: self.file,
+            range: arg_range,
+        };
+        let arg_end = cursor + arg_len;
+
+        let (trail_j, trail_cursor) = self.skip_line_trivia(j + 1, arg_end);
+        if self.is_significant_before(trail_j, trail_cursor, line_end_cursor) {
+            let trail_len: usize = self.tokens[trail_j].len.into();
+            return Err(DefaultNettypeParseError::TrailingTokens(TextRange::new(
+                TextSize::new(trail_cursor as u32),
+                TextSize::new((trail_cursor + trail_len) as u32),
+            )));
+        }
+
+        Ok((value, value_span, arg_end))
+    }
+
     fn handle_known_directive(&mut self, idx: usize, kw: DirectiveKeyword) -> usize {
         let dir_len: usize = self.tokens[idx].len.into();
         let dir_start = self.src_cursor;
@@ -682,6 +824,13 @@ impl<'a> Preprocessor<'a> {
 
         self.flush_start = self.src_cursor;
     }
+}
+
+/// Structured parse error for `` `default_nettype `` directives.
+enum DefaultNettypeParseError {
+    MissingValue,
+    InvalidValue(TextRange),
+    TrailingTokens(TextRange),
 }
 
 /// Whether a token with the given kind and text carries a newline.

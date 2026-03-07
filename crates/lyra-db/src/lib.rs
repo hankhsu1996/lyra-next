@@ -3,6 +3,7 @@ mod case_check;
 pub mod checks_index;
 mod const_eval;
 mod decl_check;
+mod default_nettype_queries;
 mod diagnostics;
 mod dim_model;
 mod elab_eval;
@@ -78,6 +79,12 @@ pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};
 
 // Re-export timescale queries
 pub use timescale_queries::{effective_time_params, file_timescale_summary};
+
+// Re-export default_nettype queries
+pub use default_nettype_queries::{
+    DefaultNettypePolicyEntry, FileDefaultNettypeSummary, active_default_nettype_at,
+    default_nettype_is_none_at, file_default_nettype_summary,
+};
 
 // Re-export elaboration queries
 pub use elab_lower::elab_diagnostics;
