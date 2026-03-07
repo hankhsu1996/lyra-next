@@ -8,7 +8,7 @@ use crate::env::MacroEnv;
 use crate::source_map::{Segment, SegmentKind, SourceMap};
 use crate::{
     DirectiveEvent, DirectiveEventKind, DirectiveEventOrigin, IncludeGraph, IncludeProvider,
-    PreprocError, PreprocOutput, PreprocessInputs, find_include_path,
+    PreprocError, PreprocOutput, PreprocessInputs, TimescaleDirective, find_include_path,
 };
 
 pub(crate) struct Preprocessor<'a> {
@@ -134,6 +134,7 @@ impl<'a> Preprocessor<'a> {
             "`define" => self.handle_define(idx),
             "`undef" => self.handle_undef(idx),
             "`include" => self.handle_include(idx),
+            "`timescale" => self.handle_timescale(idx),
             _ => match classify_directive(directive_text) {
                 DirectiveClass::MacroInvoke { name } => {
                     if self.cond.currently_emitting() {
@@ -294,6 +295,184 @@ impl<'a> Preprocessor<'a> {
         }
 
         self.strip_directive_line(idx)
+    }
+
+    fn handle_timescale(&mut self, idx: usize) -> usize {
+        if !self.cond.currently_emitting() {
+            return self.strip_directive_line(idx);
+        }
+
+        let dir_len: usize = self.tokens[idx].len.into();
+        let dir_start = self.src_cursor;
+        self.flush_identity();
+
+        let (end_idx, end_cursor) = self.scan_to_line_end(idx, self.src_cursor);
+
+        let expanded_offset = TextSize::new(self.expanded_text.len() as u32);
+        let dir_range = TextRange::new(
+            TextSize::new(dir_start as u32),
+            TextSize::new((dir_start + dir_len) as u32),
+        );
+
+        let parsed = self.parse_timescale_tokens(idx, dir_start, end_cursor);
+
+        let event_kind = match parsed {
+            Ok(ts) => DirectiveEventKind::Timescale(ts),
+            Err(msg) => {
+                let full_range = TextRange::new(
+                    TextSize::new(dir_start as u32),
+                    TextSize::new(end_cursor as u32),
+                );
+                self.push_error(full_range, SmolStr::from(msg));
+                DirectiveEventKind::KnownDirective(DirectiveKeyword::Timescale)
+            }
+        };
+
+        let event_seq = self.next_event_seq();
+        self.directive_events.push(DirectiveEvent {
+            span: Span {
+                file: self.file,
+                range: dir_range,
+            },
+            kind: event_kind,
+            origin: DirectiveEventOrigin::TopLevel,
+            expanded_offset,
+            event_seq,
+        });
+
+        self.src_cursor = end_cursor;
+        self.flush_start = end_cursor;
+        end_idx - idx
+    }
+
+    /// Parse `` `timescale `` payload directly from the token stream.
+    ///
+    /// Expects: `<time_value> / <time_value>` where each time value is
+    /// either a single `TimeLiteral` token (e.g. `1ns`) or an
+    /// `IntLiteral` + `Ident` pair (e.g. `1` `ns`). Only validates
+    /// structural shape; semantic validation is deferred to
+    /// `TimeScaleValue::parse()` in the DB summary query.
+    fn parse_timescale_tokens(
+        &self,
+        dir_idx: usize,
+        dir_start: usize,
+        line_end_cursor: usize,
+    ) -> Result<TimescaleDirective, &'static str> {
+        let dir_len: usize = self.tokens[dir_idx].len.into();
+        let mut j = dir_idx + 1;
+        let mut cursor = self.src_cursor + dir_len;
+
+        let skip_trivia = |j: &mut usize, cursor: &mut usize| {
+            while *j < self.tokens.len() {
+                let t = self.tokens[*j];
+                if t.kind == SyntaxKind::Eof {
+                    break;
+                }
+                let t_len: usize = t.len.into();
+                if !t.kind.is_trivia() {
+                    break;
+                }
+                *cursor += t_len;
+                *j += 1;
+            }
+        };
+
+        let at_end = |j: usize, cursor: usize| -> bool {
+            j >= self.tokens.len()
+                || self.tokens[j].kind == SyntaxKind::Eof
+                || cursor >= line_end_cursor
+        };
+
+        skip_trivia(&mut j, &mut cursor);
+        if at_end(j, cursor) {
+            return Err("`timescale directive missing time unit and precision");
+        }
+
+        let (unit_text, unit_end) =
+            self.consume_time_value(&mut j, &mut cursor, &skip_trivia, line_end_cursor)?;
+
+        skip_trivia(&mut j, &mut cursor);
+        if at_end(j, cursor) {
+            return Err("`timescale directive missing '/' separator");
+        }
+        if self.tokens[j].kind != SyntaxKind::Slash {
+            return Err("`timescale directive missing '/' separator");
+        }
+        let sep_len: usize = self.tokens[j].len.into();
+        cursor += sep_len;
+        j += 1;
+
+        skip_trivia(&mut j, &mut cursor);
+        if at_end(j, cursor) {
+            return Err("`timescale directive missing time precision");
+        }
+
+        let (prec_text, payload_end) =
+            self.consume_time_value(&mut j, &mut cursor, &skip_trivia, line_end_cursor)?;
+
+        let _ = unit_end;
+        let full_span = Span {
+            file: self.file,
+            range: TextRange::new(
+                TextSize::new(dir_start as u32),
+                TextSize::new(payload_end as u32),
+            ),
+        };
+
+        Ok(TimescaleDirective {
+            unit_text: SmolStr::from(unit_text),
+            precision_text: SmolStr::from(prec_text),
+            full_span,
+        })
+    }
+
+    /// Consume a time value from the token stream. Accepts either a
+    /// single `TimeLiteral` token or an `IntLiteral` + `Ident` pair
+    /// (magnitude + unit suffix). Returns the combined text and the
+    /// byte offset after the last consumed token.
+    fn consume_time_value<'b>(
+        &'b self,
+        j: &mut usize,
+        cursor: &mut usize,
+        skip_trivia: &dyn Fn(&mut usize, &mut usize),
+        line_end_cursor: usize,
+    ) -> Result<(&'b str, usize), &'static str> {
+        let tok = self.tokens[*j];
+        let tok_len: usize = tok.len.into();
+
+        if tok.kind == SyntaxKind::TimeLiteral {
+            let text = &self.text[*cursor..*cursor + tok_len];
+            let end = *cursor + tok_len;
+            *cursor = end;
+            *j += 1;
+            return Ok((text, end));
+        }
+
+        if tok.kind == SyntaxKind::IntLiteral {
+            let mag_start = *cursor;
+            *cursor += tok_len;
+            *j += 1;
+
+            skip_trivia(j, cursor);
+            if *j >= self.tokens.len()
+                || self.tokens[*j].kind == SyntaxKind::Eof
+                || *cursor >= line_end_cursor
+            {
+                return Err("`timescale time value missing unit suffix");
+            }
+            let suffix_tok = self.tokens[*j];
+            if suffix_tok.kind == SyntaxKind::Ident {
+                let suffix_len: usize = suffix_tok.len.into();
+                let end = *cursor + suffix_len;
+                let combined = &self.text[mag_start..end];
+                *cursor = end;
+                *j += 1;
+                return Ok((combined, end));
+            }
+            return Err("`timescale time value missing unit suffix");
+        }
+
+        Err("`timescale expected time literal (e.g. 1ns)")
     }
 
     fn handle_known_directive(&mut self, idx: usize, kw: DirectiveKeyword) -> usize {

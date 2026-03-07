@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.preprocess.timescale_precision_exceeds_unit] 1:0..1:20: `timescale precision (1ns) must not exceed time unit (1ps)
+---
+unit (0 diagnostics)

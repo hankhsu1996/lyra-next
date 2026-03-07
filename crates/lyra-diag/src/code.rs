@@ -101,6 +101,11 @@ pub const GENVAR_NOT_CONST: DiagKey = "lyra.elab.genvar_not_const";
 pub const GENERATE_ITERATION_LIMIT: DiagKey = "lyra.elab.generate_iteration_limit";
 pub const MODPORT_CONFLICT: DiagKey = "lyra.elab.modport_conflict";
 
+// Preprocess diagnostics (semantic-level)
+pub const TIMESCALE_INVALID_VALUE: DiagKey = "lyra.preprocess.timescale_invalid_value";
+pub const TIMESCALE_PRECISION_EXCEEDS_UNIT: DiagKey =
+    "lyra.preprocess.timescale_precision_exceeds_unit";
+
 // Internal diagnostics
 pub const INTERNAL_ERROR: DiagKey = "lyra.internal.error";
 
@@ -194,6 +199,8 @@ pub const ALL_KEYS: &[DiagKey] = &[
     GENVAR_NOT_CONST,
     GENERATE_ITERATION_LIMIT,
     MODPORT_CONFLICT,
+    TIMESCALE_INVALID_VALUE,
+    TIMESCALE_PRECISION_EXCEEDS_UNIT,
     INTERNAL_ERROR,
 ];
 

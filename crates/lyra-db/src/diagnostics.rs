@@ -96,6 +96,9 @@ pub fn file_diagnostics(
     // Modport diagnostics: resolution errors + prototype validation
     collect_modport_diagnostics(db, unit, file_id, def, pp, &mut diags);
 
+    // Timescale precision-exceeds-unit diagnostics (LRM 3.14.2.1)
+    collect_timescale_diagnostics(db, file, &mut diags);
+
     // Record diagnostics (type resolution errors + packed union width)
     for record_def in &*def.record_defs {
         let record_id = lyra_semantic::record::RecordId::new(record_def.record_type_site);
@@ -211,6 +214,64 @@ fn collect_modport_diagnostics(
 
         let proto_diags = crate::modport_check::modport_prototype_diagnostics(db, mref);
         lower_semantic_diags(proto_diags, file_id, pp, diags);
+    }
+}
+
+fn collect_timescale_diagnostics(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let summary = crate::timescale_queries::file_timescale_summary(db, file);
+    for td in &summary.diagnostics {
+        match &td.kind {
+            lyra_semantic::time_scale::TimescaleDiagKind::InvalidValue(val) => {
+                diags.push(
+                    lyra_diag::Diagnostic::new(
+                        lyra_diag::Severity::Error,
+                        lyra_diag::code::TIMESCALE_INVALID_VALUE,
+                        lyra_diag::Message::new(
+                            lyra_diag::MessageId::TimescaleInvalidValue,
+                            vec![lyra_diag::Arg::Name(val.clone())],
+                        ),
+                    )
+                    .with_label(lyra_diag::Label {
+                        kind: lyra_diag::LabelKind::Primary,
+                        span: td.span,
+                        message: lyra_diag::Message::simple(
+                            lyra_diag::MessageId::TimescaleInvalidValue,
+                        ),
+                    }),
+                );
+            }
+            lyra_semantic::time_scale::TimescaleDiagKind::PrecisionExceedsUnit {
+                unit,
+                precision,
+            } => {
+                diags.push(
+                    lyra_diag::Diagnostic::new(
+                        lyra_diag::Severity::Error,
+                        lyra_diag::code::TIMESCALE_PRECISION_EXCEEDS_UNIT,
+                        lyra_diag::Message::new(
+                            lyra_diag::MessageId::TimescalePrecisionExceedsUnit,
+                            vec![
+                                lyra_diag::Arg::Name(smol_str::SmolStr::from(unit.to_string())),
+                                lyra_diag::Arg::Name(smol_str::SmolStr::from(
+                                    precision.to_string(),
+                                )),
+                            ],
+                        ),
+                    )
+                    .with_label(lyra_diag::Label {
+                        kind: lyra_diag::LabelKind::Primary,
+                        span: td.span,
+                        message: lyra_diag::Message::simple(
+                            lyra_diag::MessageId::TimescalePrecisionExceedsUnit,
+                        ),
+                    }),
+                );
+            }
+        }
     }
 }
 
