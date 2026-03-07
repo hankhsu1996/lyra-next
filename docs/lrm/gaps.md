@@ -98,15 +98,15 @@ Callable signature infrastructure stores port types and call-site argument check
 
 ### 7.8.2: String index -- remaining typed key coverage
 
-Declaration, string-literal indexing, methods, foreach iteration, and string-key compatibility checking all work. Non-string index expressions on string-keyed arrays are diagnosed. The semantic path supports typed associative-key compatibility checking structurally. Remaining: typed non-string key coverage (e.g., integral key type checking) belongs to the separate 7.8.4 work. Test: `lrm/ch07/7.8.2_string_index`.
+Declaration, string-literal indexing, methods, foreach iteration, and string-key compatibility checking all work. Non-string index expressions on string-keyed arrays are diagnosed. Typed non-string key coverage (integral, enum) is implemented via the 7.8.4 work. Test: `lrm/ch07/7.8.2_string_index`.
+
+### 7.8.4: Architecture cleanup -- resolved dim lowering
+
+Typedef-as-associative-key resolution and typed key compatibility checking work end-to-end. Two architecture shape items remain: (1) `resolve_unpacked_dim` and `resolve_wrap_unpacked` live in `type_queries.rs` but are shared lowering logic consumed by both `type_queries` and `record_queries` -- they should move to a shared lowering module in `lyra-db`. (2) Each dim resolution call takes `db + unit + source_file` and internally fetches the per-file resolve index; a shared lowering context or pre-fetched semantic context would avoid per-call setup. Neither affects correctness or LRM coverage. Blocked by: nothing (pure refactor). Test: existing `lrm/ch07/7.8.4_integral_index` tests cover the feature.
 
 ### 7.8.3: Associative array with class index
 
 Associative arrays with class-type keys (`int aa[SomeClass]`) cannot be declared because class support is absent. `AssocIndex::Typed(Ty)` representation exists but no class types can be constructed. Blocked by: class support (Ch 8). Test: deferred until class support lands.
-
-### 7.8.4: Integral index -- typedef index types and index type checking
-
-Keyword integral index types (`int`, `integer`, `byte`, `shortint`, `longint`, `bit`) work for declaration, indexing, methods, and foreach. Remaining: (1) typedef names as assoc index types (`int aa [SNibble]`) fail because the parser classifies `[TypedefName]` as a sized dimension (bare NameRef), not an associative dimension (TypeSpec child) -- semantic-phase disambiguation is needed; (2) index expression type checking (e.g., implicit cast from real = illegal per LRM) is not validated. Blocked by: parser/semantic disambiguation of `[name]` as type vs size, index expression type validation. Test: `lrm/ch07/7.8.4_integral_index`.
 
 ### 7.9.11: Associative array literals
 

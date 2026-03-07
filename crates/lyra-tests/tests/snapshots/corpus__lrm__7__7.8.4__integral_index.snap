@@ -2,6 +2,9 @@
 source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
-// file: main.sv (0 diagnostics)
+// file: main.sv (3 diagnostics)
+  error[lyra.type.assoc_index_key_mismatch] 67:11..67:11: associative array index type `real` does not match declared key type `int`
+  error[lyra.type.assoc_index_key_mismatch] 69:15..69:15: associative array index type `real` does not match declared key type `shortint`
+  error[lyra.type.assoc_index_key_mismatch] 76:15..76:15: associative array index type `string` does not match declared key type `integer`
 ---
 unit (0 diagnostics)
