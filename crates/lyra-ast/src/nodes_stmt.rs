@@ -256,6 +256,22 @@ impl CaseItem {
 }
 
 impl ForStmt {
+    /// The init-clause variable declaration (`int i = 0`), if present.
+    pub fn init_var_decl(&self) -> Option<crate::nodes::VarDecl> {
+        for el in self.syntax.children_with_tokens() {
+            match el {
+                rowan::NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::Semicolon => {
+                    return None;
+                }
+                rowan::NodeOrToken::Node(node) if node.kind() == SyntaxKind::VarDecl => {
+                    return crate::nodes::VarDecl::cast(node);
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
     /// The loop body (last statement-kind child).
     pub fn body(&self) -> Option<crate::node::StmtNode> {
         support::children::<crate::node::StmtNode>(&self.syntax).last()

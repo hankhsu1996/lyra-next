@@ -1,4 +1,4 @@
-use lyra_ast::{AstNode, ForeachStmt, HasSyntax, NameRef, QualifiedName};
+use lyra_ast::{AstNode, ForStmt, ForeachStmt, HasSyntax, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
@@ -8,7 +8,7 @@ use crate::builder_items::collect_foreach_vars;
 use crate::builder_types::collect_name_refs;
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::scopes::ScopeKind;
-use crate::symbols::{Namespace, SymbolKind};
+use crate::symbols::{Lifetime, Namespace, SymbolKind};
 
 pub(crate) fn collect_procedural_block(
     ctx: &mut DefContext<'_>,
@@ -25,13 +25,22 @@ pub(crate) fn collect_statement(
     node: &SyntaxNode,
     scope: crate::scopes::ScopeId,
 ) {
+    // Blocks inherit surrounding procedural lifetime context; no independent
+    // block lifetime declaration is modeled.
     match node.kind() {
         SyntaxKind::BlockStmt => {
             let block_scope = ctx.scopes.push(ScopeKind::Block, Some(scope));
+            let local_lt = ctx.lifetime_env.local_default;
             for child in node.children() {
                 match child.kind() {
                     SyntaxKind::VarDecl => {
-                        collect_declarators(ctx, &child, SymbolKind::Variable, block_scope);
+                        collect_declarators(
+                            ctx,
+                            &child,
+                            SymbolKind::Variable,
+                            block_scope,
+                            local_lt,
+                        );
                     }
                     _ => {
                         collect_statement(ctx, &child, block_scope);
@@ -40,7 +49,8 @@ pub(crate) fn collect_statement(
             }
         }
         SyntaxKind::VarDecl => {
-            collect_declarators(ctx, node, SymbolKind::Variable, scope);
+            let local_lt = ctx.lifetime_env.local_default;
+            collect_declarators(ctx, node, SymbolKind::Variable, scope, local_lt);
         }
         SyntaxKind::ForeachStmt => {
             // Name refs in the array expression resolve in the parent scope.
@@ -54,11 +64,13 @@ pub(crate) fn collect_statement(
                 collect_statement(ctx, body.syntax(), foreach_scope);
             }
         }
+        SyntaxKind::ForStmt => {
+            collect_for_stmt(ctx, node, scope);
+        }
         SyntaxKind::IfStmt
         | SyntaxKind::CaseStmt
         | SyntaxKind::CaseItem
         | SyntaxKind::CaseInsideItem
-        | SyntaxKind::ForStmt
         | SyntaxKind::WhileStmt
         | SyntaxKind::RepeatStmt
         | SyntaxKind::ForeverStmt
@@ -84,6 +96,28 @@ pub(crate) fn collect_statement(
                 }
             }
         }
+    }
+}
+
+fn collect_for_stmt(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: crate::scopes::ScopeId) {
+    let Some(for_stmt) = ForStmt::cast(node.clone()) else {
+        return;
+    };
+    // Init: variable declaration with forced automatic lifetime (LRM 6.21)
+    if let Some(var_decl) = for_stmt.init_var_decl() {
+        collect_declarators(
+            ctx,
+            var_decl.syntax(),
+            SymbolKind::Variable,
+            scope,
+            Lifetime::Automatic,
+        );
+    }
+    // Init/condition/step expressions: collect name refs
+    collect_direct_name_refs(ctx, node, scope);
+    // Body
+    if let Some(body) = for_stmt.body() {
+        collect_statement(ctx, body.syntax(), scope);
     }
 }
 

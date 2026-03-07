@@ -127,7 +127,7 @@ pub(crate) fn collect_foreach_vars(
             name: SmolStr::new(name_tok.text()),
             kind: SymbolKind::Variable,
             constness: Constness::Mutable,
-            lifetime: Lifetime::Static,
+            lifetime: Lifetime::Automatic,
             decl_site: foreach_stmt_site,
             name_site: decl_name_site,
             type_site: None,
@@ -185,13 +185,10 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
     let callable_type_site = type_spec
         .as_ref()
         .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
-    let lifetime = if lifetime_tok
-        .as_ref()
-        .is_some_and(|t| t.kind() == SyntaxKind::AutomaticKw)
-    {
-        Lifetime::Automatic
-    } else {
-        Lifetime::Static
+    let lifetime = match lifetime_tok.as_ref().map(|t| t.kind()) {
+        Some(SyntaxKind::AutomaticKw) => Lifetime::Automatic,
+        Some(SyntaxKind::StaticKw) => Lifetime::Static,
+        _ => ctx.lifetime_env.callable_default,
     };
     let sym_id = ctx.push_symbol(Symbol {
         name: name.clone(),
@@ -213,6 +210,40 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
     }
 
     collect_tf_ports(ctx, &tf_port_decls, callable_scope);
+
+    // Lower callable body under the callable's procedural lifetime context.
+    ctx.with_local_default(lifetime, |ctx| {
+        if let Some(f) = FunctionDecl::cast(node.clone()) {
+            collect_callable_body(ctx, f.statements(), callable_scope);
+        } else if let Some(t) = TaskDecl::cast(node.clone()) {
+            collect_callable_body(ctx, t.statements(), callable_scope);
+        }
+    });
+}
+
+/// Lower the body of a callable (function or task) using pre-extracted
+/// typed statement iterators. Dispatches `VarDecl` children through
+/// `collect_declarators` with the inherited local lifetime, and all
+/// other statements through the statement walker.
+fn collect_callable_body(
+    ctx: &mut DefContext<'_>,
+    stmts: impl Iterator<Item = lyra_ast::StmtNode>,
+    callable_scope: ScopeId,
+) {
+    let local_lt = ctx.lifetime_env.local_default;
+    for stmt in stmts {
+        if stmt.syntax().kind() == SyntaxKind::VarDecl {
+            collect_declarators(
+                ctx,
+                stmt.syntax(),
+                SymbolKind::Variable,
+                callable_scope,
+                local_lt,
+            );
+        } else {
+            crate::builder_stmt::collect_statement(ctx, stmt.syntax(), callable_scope);
+        }
+    }
 }
 
 fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: ScopeId) {
@@ -653,6 +684,7 @@ pub(crate) fn collect_declarators(
     node: &SyntaxNode,
     kind: SymbolKind,
     scope: ScopeId,
+    unqualified_lifetime: Lifetime,
 ) {
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error_unanchored(&format!(
@@ -680,7 +712,8 @@ pub(crate) fn collect_declarators(
     // Detect explicit lifetime qualifier (LRM 6.21)
     let lifetime = match var_decl_ast.as_ref().and_then(|vd| vd.lifetime()) {
         Some(DeclLifetimeSyntax::Automatic(_)) => Lifetime::Automatic,
-        Some(DeclLifetimeSyntax::Static(_)) | None => Lifetime::Static,
+        Some(DeclLifetimeSyntax::Static(_)) => Lifetime::Static,
+        None => unqualified_lifetime,
     };
     let decl_type_site = match node.kind() {
         SyntaxKind::VarDecl => lyra_ast::VarDecl::cast(node.clone())

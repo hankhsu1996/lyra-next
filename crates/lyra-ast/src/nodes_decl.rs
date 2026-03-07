@@ -7,14 +7,59 @@ use lyra_parser::SyntaxToken;
 
 use crate::node::StmtNode;
 use crate::nodes::{
-    ExportItem, FunctionDecl, ImportDecl, ImportItem, InterfaceBody, NetDecl, NettypeDecl,
-    PackageBody, PackageDecl, ParamDecl, ProgramBody, QualifiedName, TaskDecl, TfPortDecl,
-    TimeprecisionDecl, TimeunitDecl, VarDecl,
+    ExportItem, FunctionDecl, ImportDecl, ImportItem, InterfaceBody, InterfaceDecl, ModuleDecl,
+    NetDecl, NettypeDecl, PackageBody, PackageDecl, ParamDecl, ProgramBody, ProgramDecl,
+    QualifiedName, TaskDecl, TfPortDecl, TimeprecisionDecl, TimeunitDecl, VarDecl,
 };
 use crate::support::{self, AstChildren};
 use crate::type_spec::TypeSpecKeyword;
 
+/// Find the `automatic` or `static` lifetime token immediately after
+/// the declaration keyword `kw` in a container or callable header.
+fn decl_lifetime_token(syntax: &lyra_parser::SyntaxNode, kw: SyntaxKind) -> Option<SyntaxToken> {
+    let mut past_kw = false;
+    for el in syntax.children_with_tokens() {
+        if let Some(tok) = el.into_token() {
+            let k = tok.kind();
+            if k == kw {
+                past_kw = true;
+                continue;
+            }
+            if !past_kw || k.is_trivia() {
+                continue;
+            }
+            if matches!(k, SyntaxKind::AutomaticKw | SyntaxKind::StaticKw) {
+                return Some(tok);
+            }
+            return None;
+        }
+    }
+    None
+}
+
+impl ModuleDecl {
+    pub fn lifetime_token(&self) -> Option<SyntaxToken> {
+        decl_lifetime_token(&self.syntax, SyntaxKind::ModuleKw)
+    }
+}
+
+impl InterfaceDecl {
+    pub fn lifetime_token(&self) -> Option<SyntaxToken> {
+        decl_lifetime_token(&self.syntax, SyntaxKind::InterfaceKw)
+    }
+}
+
+impl ProgramDecl {
+    pub fn lifetime_token(&self) -> Option<SyntaxToken> {
+        decl_lifetime_token(&self.syntax, SyntaxKind::ProgramKw)
+    }
+}
+
 impl PackageDecl {
+    pub fn lifetime_token(&self) -> Option<SyntaxToken> {
+        decl_lifetime_token(&self.syntax, SyntaxKind::PackageKw)
+    }
+
     pub fn name(&self) -> Option<SyntaxToken> {
         support::token_in(&self.syntax, &[SyntaxKind::Ident, SyntaxKind::EscapedIdent])
     }
@@ -133,24 +178,7 @@ impl QualifiedName {
 
 impl FunctionDecl {
     pub fn lifetime_token(&self) -> Option<SyntaxToken> {
-        let mut past_kw = false;
-        for el in self.syntax.children_with_tokens() {
-            if let Some(tok) = el.into_token() {
-                let k = tok.kind();
-                if k == SyntaxKind::FunctionKw {
-                    past_kw = true;
-                    continue;
-                }
-                if !past_kw || k.is_trivia() {
-                    continue;
-                }
-                if matches!(k, SyntaxKind::AutomaticKw | SyntaxKind::StaticKw) {
-                    return Some(tok);
-                }
-                return None;
-            }
-        }
-        None
+        decl_lifetime_token(&self.syntax, SyntaxKind::FunctionKw)
     }
 
     pub fn name(&self) -> Option<SyntaxToken> {
@@ -202,24 +230,7 @@ impl FunctionDecl {
 
 impl TaskDecl {
     pub fn lifetime_token(&self) -> Option<SyntaxToken> {
-        let mut past_kw = false;
-        for el in self.syntax.children_with_tokens() {
-            if let Some(tok) = el.into_token() {
-                let k = tok.kind();
-                if k == SyntaxKind::TaskKw {
-                    past_kw = true;
-                    continue;
-                }
-                if !past_kw || k.is_trivia() {
-                    continue;
-                }
-                if matches!(k, SyntaxKind::AutomaticKw | SyntaxKind::StaticKw) {
-                    return Some(tok);
-                }
-                return None;
-            }
-        }
-        None
+        decl_lifetime_token(&self.syntax, SyntaxKind::TaskKw)
     }
 
     pub fn name(&self) -> Option<SyntaxToken> {
