@@ -81,6 +81,7 @@ pub const RECORD_ASSIGN_INCOMPAT: DiagKey = "lyra.type.record_assign_incompat";
 pub const STREAM_SLICE_SIZE_NOT_CONST: DiagKey = "lyra.type.stream_slice_size_not_const";
 pub const UNPACKED_RECORD_INTEGRAL_ASSIGN: DiagKey = "lyra.type.unpacked_record_integral_assign";
 pub const INDEX_KEY_NOT_INTEGRAL: DiagKey = "lyra.type.index_key_not_integral";
+pub const ASSOC_INDEX_KEY_MISMATCH: DiagKey = "lyra.type.assoc_index_key_mismatch";
 
 // Elaboration diagnostics
 pub const UNRESOLVED_MODULE_INST: DiagKey = "lyra.elab.unresolved_module_inst";
@@ -175,6 +176,7 @@ pub const ALL_KEYS: &[DiagKey] = &[
     STREAM_SLICE_SIZE_NOT_CONST,
     UNPACKED_RECORD_INTEGRAL_ASSIGN,
     INDEX_KEY_NOT_INTEGRAL,
+    ASSOC_INDEX_KEY_MISMATCH,
     UNRESOLVED_MODULE_INST,
     NOT_INSTANTIABLE,
     UNKNOWN_PORT,

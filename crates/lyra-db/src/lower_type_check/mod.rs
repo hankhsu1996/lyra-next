@@ -83,14 +83,8 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::ConstMissingInit { .. } => {
             misc::lower_const_missing_init(item, source_map, diags);
         }
-        TypeCheckItem::VoidObjectType {
-            decl_site,
-            name_span,
-        } => {
-            misc::lower_void_object_type(*decl_site, *name_span, source_map, diags);
-        }
-        TypeCheckItem::VoidUsedAsValue { expr_site } => {
-            misc::lower_void_used_as_value(*expr_site, source_map, diags);
+        TypeCheckItem::VoidObjectType { .. } | TypeCheckItem::VoidUsedAsValue { .. } => {
+            misc::lower_void_item(item, source_map, diags);
         }
         TypeCheckItem::ArrayQueryDynTypeForm { .. }
         | TypeCheckItem::ArrayQueryVarSizedDimByNumber { .. } => {
@@ -113,6 +107,13 @@ pub(crate) fn lower_type_check_item(
         }
         TypeCheckItem::IndexKeyNotIntegral { index_site } => {
             misc::lower_index_key_not_integral(*index_site, source_map, diags);
+        }
+        TypeCheckItem::AssocIndexKeyMismatch {
+            index_site,
+            expected,
+            actual,
+        } => {
+            misc::lower_assoc_key_mismatch(*index_site, expected, actual, source_map, diags);
         }
     }
 }

@@ -2,6 +2,10 @@
 source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
-// file: main.sv (0 diagnostics)
+// file: main.sv (4 diagnostics)
+  error[lyra.type.assoc_index_key_mismatch] 50:11..50:11: associative array index type `bit signed [31:0]` does not match declared key type `string`
+  error[lyra.type.assoc_index_key_mismatch] 53:11..53:11: associative array index type `int` does not match declared key type `string`
+  error[lyra.type.assoc_index_key_mismatch] 56:7..56:7: associative array index type `bit signed [31:0]` does not match declared key type `string`
+  error[lyra.type.assoc_index_key_mismatch] 59:7..59:7: associative array index type `int` does not match declared key type `string`
 ---
 unit (0 diagnostics)

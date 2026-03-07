@@ -79,7 +79,7 @@ impl BitVecType {
 }
 
 /// Reasons an expression's type could not be determined.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprTypeErrorKind {
     Unresolved,
     NameRefIsTypeNotValue,
@@ -117,7 +117,14 @@ pub enum ExprTypeErrorKind {
     NewExprNeedsExpectedDynArray,
     WithClauseRequired,
     WithClauseNotAccepted,
-    IndexKeyNotIntegral { index_site: crate::Site },
+    IndexKeyNotIntegral {
+        index_site: crate::Site,
+    },
+    AssocIndexKeyMismatch {
+        index_site: crate::Site,
+        expected: Box<crate::types::Ty>,
+        actual: Box<crate::types::Ty>,
+    },
 }
 
 /// How an expression's type is viewed for operations.

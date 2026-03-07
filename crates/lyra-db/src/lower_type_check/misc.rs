@@ -228,50 +228,50 @@ pub(super) fn lower_const_missing_init(
     );
 }
 
-pub(super) fn lower_void_object_type(
-    decl_site: lyra_semantic::Site,
-    name_span: lyra_source::NameSpan,
+pub(super) fn lower_void_item(
+    item: &TypeCheckItem,
     source_map: &lyra_preprocess::SourceMap,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
-    let Some(decl_span) = source_map.map_span(decl_site.text_range()) else {
-        return;
+    let (span, code, msg_id) = match item {
+        TypeCheckItem::VoidObjectType {
+            decl_site,
+            name_span,
+        } => {
+            let Some(decl_span) = source_map.map_span(decl_site.text_range()) else {
+                return;
+            };
+            let span = source_map
+                .map_span(name_span.text_range())
+                .unwrap_or(decl_span);
+            (
+                span,
+                lyra_diag::code::VOID_OBJECT_TYPE,
+                lyra_diag::MessageId::VoidObjectType,
+            )
+        }
+        TypeCheckItem::VoidUsedAsValue { expr_site } => {
+            let Some(span) = source_map.map_span(expr_site.text_range()) else {
+                return;
+            };
+            (
+                span,
+                lyra_diag::code::VOID_USED_AS_VALUE,
+                lyra_diag::MessageId::VoidUsedAsValue,
+            )
+        }
+        _ => return,
     };
-    let span = source_map
-        .map_span(name_span.text_range())
-        .unwrap_or(decl_span);
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
-            lyra_diag::code::VOID_OBJECT_TYPE,
-            lyra_diag::Message::simple(lyra_diag::MessageId::VoidObjectType),
+            code,
+            lyra_diag::Message::simple(msg_id),
         )
         .with_label(lyra_diag::Label {
             kind: lyra_diag::LabelKind::Primary,
             span,
-            message: lyra_diag::Message::simple(lyra_diag::MessageId::VoidObjectType),
-        }),
-    );
-}
-
-pub(super) fn lower_void_used_as_value(
-    expr_site: lyra_semantic::Site,
-    source_map: &lyra_preprocess::SourceMap,
-    diags: &mut Vec<lyra_diag::Diagnostic>,
-) {
-    let Some(span) = source_map.map_span(expr_site.text_range()) else {
-        return;
-    };
-    diags.push(
-        lyra_diag::Diagnostic::new(
-            lyra_diag::Severity::Error,
-            lyra_diag::code::VOID_USED_AS_VALUE,
-            lyra_diag::Message::simple(lyra_diag::MessageId::VoidUsedAsValue),
-        )
-        .with_label(lyra_diag::Label {
-            kind: lyra_diag::LabelKind::Primary,
-            span,
-            message: lyra_diag::Message::simple(lyra_diag::MessageId::VoidUsedAsValue),
+            message: lyra_diag::Message::simple(msg_id),
         }),
     );
 }
@@ -382,17 +382,46 @@ pub(super) fn lower_index_key_not_integral(
     let Some(span) = source_map.map_span(index_site.text_range()) else {
         return;
     };
-    let msg_id = lyra_diag::MessageId::IndexKeyNotIntegral;
+    let msg = lyra_diag::Message::simple(lyra_diag::MessageId::IndexKeyNotIntegral);
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,
             lyra_diag::code::INDEX_KEY_NOT_INTEGRAL,
-            lyra_diag::Message::simple(msg_id),
+            msg.clone(),
         )
         .with_label(lyra_diag::Label {
             kind: lyra_diag::LabelKind::Primary,
             span,
-            message: lyra_diag::Message::simple(msg_id),
+            message: msg,
+        }),
+    );
+}
+
+pub(super) fn lower_assoc_key_mismatch(
+    index_site: lyra_semantic::Site,
+    expected: &lyra_semantic::types::Ty,
+    actual: &lyra_semantic::types::Ty,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let Some(span) = source_map.map_span(index_site.text_range()) else {
+        return;
+    };
+    let args = vec![
+        lyra_diag::Arg::Name(expected.pretty()),
+        lyra_diag::Arg::Name(actual.pretty()),
+    ];
+    let msg = lyra_diag::Message::new(lyra_diag::MessageId::AssocIndexKeyMismatch, args);
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::code::ASSOC_INDEX_KEY_MISMATCH,
+            msg.clone(),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span,
+            message: msg,
         }),
     );
 }
