@@ -167,6 +167,20 @@ impl ScopeTree {
     pub fn is_empty(&self) -> bool {
         self.scopes.is_empty()
     }
+
+    /// Find all direct child scopes of `parent` with a given kind.
+    ///
+    /// Returns children in allocation order. The builder pushes scopes
+    /// in preorder syntax traversal, so allocation order is guaranteed
+    /// to match lexical (source) order. Callers may rely on this.
+    pub fn children_of_kind(&self, parent: ScopeId, kind: ScopeKind) -> Vec<ScopeId> {
+        self.scopes
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.kind == kind && s.parent == Some(parent))
+            .map(|(i, _)| ScopeId(i as u32))
+            .collect()
+    }
 }
 
 #[cfg(test)]

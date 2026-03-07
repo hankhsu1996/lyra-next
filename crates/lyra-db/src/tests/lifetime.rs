@@ -1,4 +1,5 @@
 use super::*;
+use lyra_semantic::scopes::ScopeKind;
 use lyra_semantic::symbols::Lifetime;
 
 fn find_symbol_lifetime(db: &LyraDatabase, file: SourceFile, name: &str) -> Lifetime {
@@ -11,13 +12,50 @@ fn find_symbol_lifetime(db: &LyraDatabase, file: SourceFile, name: &str) -> Life
     sym.lifetime
 }
 
-fn all_symbol_lifetimes(db: &LyraDatabase, file: SourceFile, name: &str) -> Vec<Lifetime> {
+/// Find the scope owned by a named declaration. For symbol-namespace owners
+/// (functions, tasks), finds the symbol's `decl_site` and looks up the scope
+/// owned by that site. For definition-namespace owners (modules, packages),
+/// finds the def entry's `decl_site`. Panics if no match found.
+fn find_owner_scope(
+    db: &LyraDatabase,
+    file: SourceFile,
+    name: &str,
+) -> lyra_semantic::scopes::ScopeId {
     let def = def_index_file(db, file);
-    def.symbols
-        .iter()
-        .filter(|(_, s)| s.name == name)
-        .map(|(_, s)| s.lifetime)
-        .collect()
+    if let Some((_id, sym)) = def.symbols.iter().find(|(_, s)| s.name == name)
+        && let Some(sid) = def.find_scope_by_owner(sym.decl_site)
+    {
+        return sid;
+    }
+    if let Some(entry) = def.def_entries.iter().find(|e| e.name == name)
+        && let Some(sid) = def.find_scope_by_owner(entry.decl_site)
+    {
+        return sid;
+    }
+    panic!("no scope owned by declaration '{name}'");
+}
+
+/// Find the lifetime of a symbol named `name` declared in exactly `scope`.
+/// Searches only that scope's bindings, not descendants. Panics if zero or
+/// more than one match.
+fn find_symbol_lifetime_in_scope(
+    db: &LyraDatabase,
+    file: SourceFile,
+    scope: lyra_semantic::scopes::ScopeId,
+    name: &str,
+) -> Lifetime {
+    let def = def_index_file(db, file);
+    let mut matches: Vec<Lifetime> = Vec::new();
+    for (_id, sym) in def.symbols.iter() {
+        if sym.scope == scope && sym.name == name {
+            matches.push(sym.lifetime);
+        }
+    }
+    match matches.len() {
+        0 => panic!("no symbol '{name}' in scope {scope:?}"),
+        1 => matches[0],
+        n => panic!("expected exactly 1 symbol '{name}' in scope {scope:?}, found {n}"),
+    }
 }
 
 #[test]
@@ -237,7 +275,7 @@ fn for_init_var_automatic_even_in_static_context() {
     assert_eq!(find_symbol_lifetime(&db, file, "j"), Lifetime::Automatic);
 }
 
-// Scope-anchored tests: same name in different scopes
+// Owner-anchored tests: same name in different scopes, verified by exact owner
 
 #[test]
 fn same_name_container_vs_callable_local() {
@@ -247,11 +285,16 @@ fn same_name_container_vs_callable_local() {
         0,
         "module automatic m; int x; function void f; int x; endfunction endmodule",
     );
-    let lifetimes = all_symbol_lifetimes(&db, file, "x");
-    assert_eq!(lifetimes.len(), 2);
-    // Container-body x is static, callable-local x is automatic
-    assert!(lifetimes.contains(&Lifetime::Static));
-    assert!(lifetimes.contains(&Lifetime::Automatic));
+    let module_scope = find_owner_scope(&db, file, "m");
+    let fn_scope = find_owner_scope(&db, file, "f");
+    assert_eq!(
+        find_symbol_lifetime_in_scope(&db, file, module_scope, "x"),
+        Lifetime::Static,
+    );
+    assert_eq!(
+        find_symbol_lifetime_in_scope(&db, file, fn_scope, "x"),
+        Lifetime::Automatic,
+    );
 }
 
 #[test]
@@ -262,7 +305,21 @@ fn nested_block_same_name_both_automatic() {
         0,
         "module m; function automatic void f; int x; begin int x; end endfunction endmodule",
     );
-    let lifetimes = all_symbol_lifetimes(&db, file, "x");
-    assert_eq!(lifetimes.len(), 2);
-    assert!(lifetimes.iter().all(|lt| *lt == Lifetime::Automatic));
+    let def = def_index_file(&db, file);
+    let fn_scope = find_owner_scope(&db, file, "f");
+    let block_scopes = def.scopes.children_of_kind(fn_scope, ScopeKind::Block);
+    assert_eq!(
+        block_scopes.len(),
+        1,
+        "function f should have exactly one block child"
+    );
+    let block_scope = block_scopes[0];
+    assert_eq!(
+        find_symbol_lifetime_in_scope(&db, file, fn_scope, "x"),
+        Lifetime::Automatic,
+    );
+    assert_eq!(
+        find_symbol_lifetime_in_scope(&db, file, block_scope, "x"),
+        Lifetime::Automatic,
+    );
 }

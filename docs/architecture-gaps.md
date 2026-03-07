@@ -20,14 +20,18 @@ All `collect_*` functions in `builder_items.rs` take `&SyntaxNode` and re-cast i
 
 `decl_lifetime_token` in `nodes_decl.rs` scans the raw token stream after a keyword to find `automatic`/`static`. This works but encodes structure assumptions as "find token after keyword." The long-term shape is typed header-modifier accessors that parse declaration headers structurally, shared across container and callable declaration kinds. Exposed by: LRM 6.21 lifetime inheritance (module/interface/program/package/function/task lifetime tokens).
 
-## Declarator lifetime context passed as raw Lifetime values
-
-`collect_declarators` takes an `unqualified_lifetime: Lifetime` parameter. Call sites pass raw constants (`Lifetime::Static` for container items, `Lifetime::Automatic` for for-init). This works but the API exposes the symptom, not the semantic reason. A cleaner shape would use semantic modes (e.g. split helpers by role: `collect_container_declarators`, `collect_local_declarators`, `collect_for_init_declarators`) or a typed mode enum. Exposed by: LRM 6.21 callable-local lifetime inheritance.
-
-## Lifetime test helpers not truly scope-anchored
-
-`all_symbol_lifetimes` in lifetime tests checks the multiset of lifetimes for a symbol name, not which specific declaration got which lifetime. This leaves room for false positives when the wrong declaration gets the wrong lifetime but the set coincidentally balances. Long-term want helpers that identify declarations by containing scope or declaration site. Exposed by: scope-anchored lifetime tests (same-name variables across container and callable scopes).
-
 ## Test scope resolution: kind-based vs structural lookup
 
 Unit tests for scope-keyed semantic data use `find_scope_by_kind()` which searches by `ScopeKind`. This is adequate when test inputs contain exactly one scope of each kind, but becomes ambiguous with multiple same-kind scopes (e.g. two modules in one file). A more robust approach would resolve the exact owner scope from the parsed file structure. Exposed by: timeunit/timeprecision builder tests.
+
+## Scope ownership as side metadata
+
+Scope ownership (`scope_owners: HashMap<ScopeId, Site>`) lives in `DefIndex` as a side table rather than on the `Scope` struct itself. Ownership is structural data that describes what declaration created a scope. The long-term shape is `Scope { parent, kind, owner: Option<ScopeOwner> }` where `ScopeOwner` is a typed discriminant (e.g. `Symbol(SymbolId)`, `Def(GlobalDefId)`). This is blocked by the `NameGraph` offset-independence constraint: `ScopeTree` is embedded in `NameGraph` for Salsa incremental backdating, and `Site` contains text offsets. A proper fix requires either making the owner representation offset-free or restructuring `NameGraph` to separate offset-dependent scope metadata. Exposed by: callable and container scope ownership recording.
+
+## Scope owner reverse lookup is linear scan
+
+`DefIndex::find_scope_by_owner(Site)` does a linear scan over `scope_owners`. This is adequate for tests but not viable as a hot-path production API. If owner lookup becomes performance-critical, store both directions explicitly (scope-to-owner and owner-to-scope) or move ownership onto the scope struct (see "Scope ownership as side metadata" above). Exposed by: owner-anchored lifetime test helpers.
+
+## Test owner lookup is name-based
+
+`find_owner_scope(name)` in lifetime tests resolves an owner declaration by name, then looks up its owning scope. This is not fully exact if a file contains two owners with the same name in different containers (e.g. two modules each with a function `f`). The long-term shape is structural resolution from AST/site, then querying the def index for the owning scope. Name-based lookup is acceptable for current single-container test inputs. Exposed by: owner-anchored lifetime test helpers.

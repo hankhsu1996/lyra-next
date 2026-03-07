@@ -182,6 +182,7 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
     };
     let name = SmolStr::new(name_tok.text());
     let callable_scope = ctx.scopes.push(scope_kind, Some(scope));
+    ctx.scope_owners.insert(callable_scope, decl_site);
     let callable_type_site = type_spec
         .as_ref()
         .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
@@ -230,7 +231,6 @@ fn collect_callable_body(
     stmts: impl Iterator<Item = lyra_ast::StmtNode>,
     callable_scope: ScopeId,
 ) {
-    let local_lt = ctx.lifetime_env.local_default;
     for stmt in stmts {
         if stmt.syntax().kind() == SyntaxKind::VarDecl {
             collect_declarators(
@@ -238,7 +238,7 @@ fn collect_callable_body(
                 stmt.syntax(),
                 SymbolKind::Variable,
                 callable_scope,
-                local_lt,
+                DeclaratorContext::ProceduralLocal,
             );
         } else {
             crate::builder_stmt::collect_statement(ctx, stmt.syntax(), callable_scope);
@@ -679,12 +679,28 @@ fn collect_type_param_decl(
     }
 }
 
+/// Semantic context that determines the unqualified lifetime of a declarator.
+///
+/// Call sites express intent (container item, procedural local, for-init)
+/// rather than the derived lifetime value. The collector computes the
+/// effective lifetime internally from this context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeclaratorContext {
+    /// Module/interface/program/package body item: always static.
+    ContainerItem,
+    /// Local declaration inside a callable body or procedural block:
+    /// inherits from `ctx.lifetime_env.local_default`.
+    ProceduralLocal,
+    /// `for`-init variable declaration: always automatic (LRM 6.21).
+    ForInit,
+}
+
 pub(crate) fn collect_declarators(
     ctx: &mut DefContext<'_>,
     node: &SyntaxNode,
     kind: SymbolKind,
     scope: ScopeId,
-    unqualified_lifetime: Lifetime,
+    decl_ctx: DeclaratorContext,
 ) {
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error_unanchored(&format!(
@@ -693,6 +709,29 @@ pub(crate) fn collect_declarators(
         ));
         return;
     };
+    // ForInit invariant: only variable declarations in for-init context
+    if decl_ctx == DeclaratorContext::ForInit {
+        debug_assert!(
+            kind == SymbolKind::Variable && node.kind() == SyntaxKind::VarDecl,
+            "ForInit context requires SymbolKind::Variable on VarDecl, got {kind:?} on {:?}",
+            node.kind(),
+        );
+        if kind != SymbolKind::Variable {
+            ctx.emit_internal_error(
+                &format!("ForInit context used with non-variable kind {kind:?}"),
+                decl_site,
+            );
+        }
+        if node.kind() != SyntaxKind::VarDecl {
+            ctx.emit_internal_error(
+                &format!(
+                    "ForInit context used with non-VarDecl node {:?}",
+                    node.kind()
+                ),
+                decl_site,
+            );
+        }
+    }
     // Detect inline enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
     // Detect const qualifier (LRM 6.20.6)
@@ -708,6 +747,12 @@ pub(crate) fn collect_declarators(
         Constness::Const
     } else {
         Constness::Mutable
+    };
+    // Derive unqualified lifetime from semantic context
+    let unqualified_lifetime = match decl_ctx {
+        DeclaratorContext::ContainerItem => Lifetime::Static,
+        DeclaratorContext::ProceduralLocal => ctx.lifetime_env.local_default,
+        DeclaratorContext::ForInit => Lifetime::Automatic,
     };
     // Detect explicit lifetime qualifier (LRM 6.21)
     let lifetime = match var_decl_ast.as_ref().and_then(|vd| vd.lifetime()) {

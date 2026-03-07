@@ -106,6 +106,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         export_decls: ctx.export_decls.into_boxed_slice(),
         foreach_var_defs: ctx.foreach_var_defs,
         scope_time_units: ctx.scope_time_units,
+        scope_owners: ctx.scope_owners,
         diagnostics: diagnostics.into_boxed_slice(),
         internal_errors: ctx.internal_errors.into_boxed_slice(),
     };
@@ -193,6 +194,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) export_ordinals: HashMap<ScopeId, u32>,
     pub(crate) current_iface_def_id: Option<GlobalDefId>,
     pub(crate) modport_ordinal: u32,
+    pub(crate) scope_owners: HashMap<ScopeId, crate::Site>,
     pub(crate) diagnostics: Vec<SemanticDiag>,
     pub(crate) internal_errors: Vec<(Option<crate::Site>, SmolStr)>,
 }
@@ -224,6 +226,7 @@ impl<'a> DefContext<'a> {
             export_ordinals: HashMap::new(),
             current_iface_def_id: None,
             modport_ordinal: 0,
+            scope_owners: HashMap::new(),
             diagnostics: Vec::new(),
             internal_errors: Vec::new(),
         }
@@ -447,10 +450,22 @@ fn collect_file_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
 fn collect_declarative_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     match node.kind() {
         SyntaxKind::VarDecl => {
-            collect_declarators(ctx, node, SymbolKind::Variable, scope, Lifetime::Static);
+            collect_declarators(
+                ctx,
+                node,
+                SymbolKind::Variable,
+                scope,
+                DeclaratorContext::ContainerItem,
+            );
         }
         SyntaxKind::NetDecl => {
-            collect_declarators(ctx, node, SymbolKind::Net, scope, Lifetime::Static);
+            collect_declarators(
+                ctx,
+                node,
+                SymbolKind::Net,
+                scope,
+                DeclaratorContext::ContainerItem,
+            );
         }
         SyntaxKind::ParamDecl => collect_param_decl(ctx, node, scope),
         SyntaxKind::ImportDecl => collect_import_decl(ctx, node, scope),
@@ -487,6 +502,7 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let module_scope = ctx.scopes.push(ScopeKind::Module, None);
+    ctx.scope_owners.insert(module_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Module,
@@ -541,6 +557,7 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let package_scope = ctx.scopes.push(ScopeKind::Package, None);
+    ctx.scope_owners.insert(package_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Package,
@@ -575,6 +592,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
+    ctx.scope_owners.insert(iface_scope, decl_site);
     let def_id = ctx.push_def_entry(
         decl_site,
         DefinitionKind::Interface,
@@ -627,6 +645,7 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
+    ctx.scope_owners.insert(prog_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Program,
@@ -676,6 +695,7 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let prim_scope = ctx.scopes.push(ScopeKind::Module, None);
+    ctx.scope_owners.insert(prim_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Primitive,
@@ -699,6 +719,7 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
+    ctx.scope_owners.insert(cfg_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Config,
@@ -781,10 +802,22 @@ fn collect_module_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
 fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     match node.kind() {
         SyntaxKind::NetDecl => {
-            collect_declarators(ctx, node, SymbolKind::Net, scope, Lifetime::Static);
+            collect_declarators(
+                ctx,
+                node,
+                SymbolKind::Net,
+                scope,
+                DeclaratorContext::ContainerItem,
+            );
         }
         SyntaxKind::VarDecl => {
-            collect_declarators(ctx, node, SymbolKind::Variable, scope, Lifetime::Static);
+            collect_declarators(
+                ctx,
+                node,
+                SymbolKind::Variable,
+                scope,
+                DeclaratorContext::ContainerItem,
+            );
         }
         SyntaxKind::ParamDecl => {
             collect_param_decl(ctx, node, scope);
@@ -836,12 +869,12 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
     }
 }
 
+pub(crate) use crate::builder_items::{DeclaratorContext, collect_declarators, is_expression_kind};
 use crate::builder_items::{
     collect_callable_decl, collect_export_decl, collect_import_decl, collect_modport_decl,
     collect_module_instantiation, collect_param_decl, collect_timeprecision_decl,
     collect_timeunit_decl,
 };
-pub(crate) use crate::builder_items::{collect_declarators, is_expression_kind};
 
 #[cfg(test)]
 #[path = "builder_tests.rs"]
