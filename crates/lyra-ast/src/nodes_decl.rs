@@ -8,7 +8,8 @@ use lyra_parser::SyntaxToken;
 use crate::node::StmtNode;
 use crate::nodes::{
     ExportItem, FunctionDecl, ImportDecl, ImportItem, InterfaceBody, NetDecl, NettypeDecl,
-    PackageBody, PackageDecl, ParamDecl, ProgramBody, QualifiedName, TaskDecl, TfPortDecl, VarDecl,
+    PackageBody, PackageDecl, ParamDecl, ProgramBody, QualifiedName, TaskDecl, TfPortDecl,
+    TimeprecisionDecl, TimeunitDecl, VarDecl,
 };
 use crate::support::{self, AstChildren};
 use crate::type_spec::TypeSpecKeyword;
@@ -281,5 +282,34 @@ impl NettypeDecl {
             }
         }
         None
+    }
+}
+
+impl TimeunitDecl {
+    /// The unit time literal token (always present if well-formed).
+    pub fn unit_literal_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::TimeLiteral)
+    }
+
+    /// The precision time literal token after `/`, if present.
+    pub fn precision_literal_token(&self) -> Option<SyntaxToken> {
+        let mut saw_slash = false;
+        for el in self.syntax.children_with_tokens() {
+            if let Some(tok) = el.into_token() {
+                if tok.kind() == SyntaxKind::Slash {
+                    saw_slash = true;
+                } else if saw_slash && tok.kind() == SyntaxKind::TimeLiteral {
+                    return Some(tok);
+                }
+            }
+        }
+        None
+    }
+}
+
+impl TimeprecisionDecl {
+    /// The precision time literal token.
+    pub fn precision_literal_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::TimeLiteral)
     }
 }

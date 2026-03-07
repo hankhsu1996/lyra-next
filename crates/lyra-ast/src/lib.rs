@@ -33,8 +33,8 @@ pub use nodes::{
     RangeExpr, RangeList, RepeatStmt, ReplicExpr, ReturnStmt, SourceFile, StreamExpr,
     StreamOperandItem, StreamOperands, StreamRange, StreamSliceSize, StreamWithClause,
     StructMember, StructType, SystemTfArgList, SystemTfCall, TaskDecl, TaskPrototype, TfPortDecl,
-    TimingControl, TypeExpr, TypeSpec, TypedefDecl, UnpackedDimension, ValueRange, VarDecl,
-    WhileStmt,
+    TimeprecisionDecl, TimeunitDecl, TimingControl, TypeExpr, TypeSpec, TypedefDecl,
+    UnpackedDimension, ValueRange, VarDecl, WhileStmt,
 };
 pub use nodes_decl::NetDeclKind;
 pub use nodes_expr::{

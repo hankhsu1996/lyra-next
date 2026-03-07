@@ -15,6 +15,7 @@ use crate::nettype_def::{NettypeDef, NettypeDefIdx};
 use crate::record::{RecordDef, RecordDefIdx, RecordId};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTree};
 use crate::symbols::{GlobalDefId, Namespace, SymbolId, SymbolTable};
+use crate::time_scale::ScopeTimeUnits;
 
 /// Lookup strategy for a use-site.
 ///
@@ -72,6 +73,7 @@ pub struct DefIndex {
     pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
     pub export_decls: Box<[ExportDecl]>,
     pub foreach_var_defs: HashMap<SymbolId, ForeachVarDef>,
+    pub scope_time_units: HashMap<ScopeId, ScopeTimeUnits>,
     pub diagnostics: Box<[SemanticDiag]>,
     pub internal_errors: Box<[(Option<Site>, SmolStr)]>,
 }

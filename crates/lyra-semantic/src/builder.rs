@@ -23,6 +23,7 @@ use crate::nettype_def::NettypeDef;
 use crate::record::{RecordDef, SymbolOrigin};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{GlobalDefId, Lifetime, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
+use crate::time_scale::ScopeTimeUnits;
 
 pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> DefIndex {
     let mut ctx = DefContext::new(file, ast_id_map);
@@ -104,6 +105,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         modport_name_map: HashMap::new(),
         export_decls: ctx.export_decls.into_boxed_slice(),
         foreach_var_defs: ctx.foreach_var_defs,
+        scope_time_units: ctx.scope_time_units,
         diagnostics: diagnostics.into_boxed_slice(),
         internal_errors: ctx.internal_errors.into_boxed_slice(),
     };
@@ -159,6 +161,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) raw_modport_defs: Vec<RawModportEntry>,
     pub(crate) export_decls: Vec<crate::def_index::ExportDecl>,
     pub(crate) foreach_var_defs: HashMap<crate::symbols::SymbolId, ForeachVarDef>,
+    pub(crate) scope_time_units: HashMap<ScopeId, ScopeTimeUnits>,
     pub(crate) local_decls: Vec<LocalDecl>,
     pub(crate) local_decl_ordinals: HashMap<ScopeId, u32>,
     pub(crate) import_ordinals: HashMap<ScopeId, u32>,
@@ -188,6 +191,7 @@ impl<'a> DefContext<'a> {
             raw_modport_defs: Vec::new(),
             export_decls: Vec::new(),
             foreach_var_defs: HashMap::new(),
+            scope_time_units: HashMap::new(),
             local_decls: Vec::new(),
             local_decl_ordinals: HashMap::new(),
             import_ordinals: HashMap::new(),
@@ -705,6 +709,12 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         SyntaxKind::ModportDecl => {
             collect_modport_decl(ctx, node, scope);
         }
+        SyntaxKind::TimeunitDecl => {
+            collect_timeunit_decl(ctx, node, scope);
+        }
+        SyntaxKind::TimeprecisionDecl => {
+            collect_timeprecision_decl(ctx, node, scope);
+        }
         SyntaxKind::IfStmt => {
             // Conditional generate: recurse into children (BlockStmt, etc.)
             for child in node.children() {
@@ -724,7 +734,8 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
 
 use crate::builder_items::{
     collect_callable_decl, collect_export_decl, collect_import_decl, collect_modport_decl,
-    collect_module_instantiation, collect_param_decl,
+    collect_module_instantiation, collect_param_decl, collect_timeprecision_decl,
+    collect_timeunit_decl,
 };
 pub(crate) use crate::builder_items::{collect_declarators, is_expression_kind};
 

@@ -520,6 +520,10 @@ pub enum SyntaxKind {
     // Assignment pattern expression (LRM 10.9.1)
     AssignmentPatternExpr,
 
+    // Time unit/precision declarations (LRM 3.14.2.2)
+    TimeunitDecl,
+    TimeprecisionDecl,
+
     #[doc(hidden)]
     __Last,
 }

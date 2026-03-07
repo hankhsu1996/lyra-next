@@ -292,6 +292,10 @@ ast_nodes! {
     // Strength specifications (LRM 6.3.2)
     DriveStrength(SyntaxKind::DriveStrength) { @custom }
     ChargeStrength(SyntaxKind::ChargeStrength) { @custom }
+
+    // Time unit/precision declarations (LRM 3.14.2.2)
+    TimeunitDecl(SyntaxKind::TimeunitDecl) { @custom }
+    TimeprecisionDecl(SyntaxKind::TimeprecisionDecl) { @custom }
 }
 
 // Custom accessors
