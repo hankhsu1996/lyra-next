@@ -74,6 +74,10 @@ pub struct DefIndex {
     pub export_decls: Box<[ExportDecl]>,
     pub foreach_var_defs: HashMap<SymbolId, ForeachVarDef>,
     pub scope_time_units: HashMap<ScopeId, ScopeTimeUnits>,
+    /// Maps a scope to the `decl_site` of the declaration that owns it.
+    /// Present for named scopes (modules, packages, callables); absent
+    /// for anonymous scopes (blocks, generates, file).
+    pub scope_owners: HashMap<ScopeId, Site>,
     pub diagnostics: Box<[SemanticDiag]>,
     pub internal_errors: Box<[(Option<Site>, SmolStr)]>,
 }
@@ -84,6 +88,14 @@ impl DefIndex {
         let def_id = self.name_site_to_def.get(&id.ast_id())?;
         debug_assert_eq!(*def_id, id);
         self.def_entries.iter().find(|e| e.decl_site == id.ast_id())
+    }
+
+    /// Find the scope owned by a specific declaration site.
+    pub fn find_scope_by_owner(&self, owner: Site) -> Option<ScopeId> {
+        self.scope_owners
+            .iter()
+            .find(|(_, site)| **site == owner)
+            .map(|(sid, _)| *sid)
     }
 
     pub fn enum_def(&self, idx: EnumDefIdx) -> &EnumDef {

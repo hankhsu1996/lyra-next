@@ -3,12 +3,12 @@ use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 use smol_str::SmolStr;
 
-use crate::builder::{DefContext, collect_declarators, is_expression_kind};
+use crate::builder::{DeclaratorContext, DefContext, collect_declarators, is_expression_kind};
 use crate::builder_items::collect_foreach_vars;
 use crate::builder_types::collect_name_refs;
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::scopes::ScopeKind;
-use crate::symbols::{Lifetime, Namespace, SymbolKind};
+use crate::symbols::{Namespace, SymbolKind};
 
 pub(crate) fn collect_procedural_block(
     ctx: &mut DefContext<'_>,
@@ -30,7 +30,6 @@ pub(crate) fn collect_statement(
     match node.kind() {
         SyntaxKind::BlockStmt => {
             let block_scope = ctx.scopes.push(ScopeKind::Block, Some(scope));
-            let local_lt = ctx.lifetime_env.local_default;
             for child in node.children() {
                 match child.kind() {
                     SyntaxKind::VarDecl => {
@@ -39,7 +38,7 @@ pub(crate) fn collect_statement(
                             &child,
                             SymbolKind::Variable,
                             block_scope,
-                            local_lt,
+                            DeclaratorContext::ProceduralLocal,
                         );
                     }
                     _ => {
@@ -49,8 +48,13 @@ pub(crate) fn collect_statement(
             }
         }
         SyntaxKind::VarDecl => {
-            let local_lt = ctx.lifetime_env.local_default;
-            collect_declarators(ctx, node, SymbolKind::Variable, scope, local_lt);
+            collect_declarators(
+                ctx,
+                node,
+                SymbolKind::Variable,
+                scope,
+                DeclaratorContext::ProceduralLocal,
+            );
         }
         SyntaxKind::ForeachStmt => {
             // Name refs in the array expression resolve in the parent scope.
@@ -110,7 +114,7 @@ fn collect_for_stmt(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: crate::s
             var_decl.syntax(),
             SymbolKind::Variable,
             scope,
-            Lifetime::Automatic,
+            DeclaratorContext::ForInit,
         );
     }
     // Init/condition/step expressions: collect name refs
