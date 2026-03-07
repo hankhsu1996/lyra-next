@@ -4,3 +4,4 @@ Cargo.lock
 *.pdf
 *.local.md
 /playground/
+__pycache__/
