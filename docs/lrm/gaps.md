@@ -10,12 +10,6 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 File-level declarative items are parsed, collected into file scope, aggregated into compilation-unit scope, and visible to design elements within the same compilation unit. Remaining gap: explicit `$unit::` scoped-name syntax is not yet parsed. That follow-up should resolve through the existing compilation-unit scope summary rather than introducing a separate semantic path.
 
-## Chapter 5 -- Lexical Conventions
-
-### 5.6.4: Compiler directives -- non-conditional directive semantics
-
-Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). `` `default_nettype `` directive parsing and semantic policy summary are implemented. Remaining gap: triple-quote stringify (`` `""" ``). Blocked by: triple-quote stringify parsing. Test: `lrm/ch05/5.6.4_compiler_directives`.
-
 ## Chapter 6 -- Data Types
 
 ### 6.3.2: Strengths -- type-level strength tracking

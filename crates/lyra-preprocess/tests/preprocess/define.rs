@@ -186,6 +186,79 @@ fn continuation_comment_in_body() {
     assert_object_like_text(out.final_env.get("FOO").map(|d| &d.value), "bar");
 }
 
+// Triple-quoted string contract tests (LRM 22.5.1)
+//
+// Triple-quoted literals are lexed as a single StringLiteral token,
+// including any embedded newlines. The preprocessor body collector and
+// argument splitter operate on token kinds, not raw text, so embedded
+// newlines and delimiter characters inside a literal token are opaque.
+// These tests lock that contract.
+
+#[test]
+fn triple_quoted_string_in_define_body_does_not_terminate_on_embedded_newline() {
+    let out = pp(concat!(
+        "`define MSG \"\"\"\n",
+        "line1\n",
+        "line2\n",
+        "\"\"\"\n",
+        "`MSG\n",
+    ));
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let expanded = &out.expanded_text;
+    assert!(
+        expanded.contains("line1") && expanded.contains("line2"),
+        "expansion should preserve full triple-quoted literal: {expanded:?}",
+    );
+}
+
+#[test]
+fn triple_quoted_string_in_define_body_preserves_delimiter_text() {
+    let out = pp(concat!(
+        "`define DELIMS \"\"\"\n",
+        "a, b, (c), d)\n",
+        "\"\"\"\n",
+        "`DELIMS\n",
+    ));
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let expanded = &out.expanded_text;
+    assert!(
+        expanded.contains("a, b, (c), d)"),
+        "delimiters inside triple-quoted literal must be preserved: {expanded:?}",
+    );
+}
+
+#[test]
+fn triple_quoted_string_actual_is_single_function_macro_argument() {
+    let out = pp(concat!(
+        "`define ECHO(x) x\n",
+        "`ECHO(\"\"\"has, commas) and parens\"\"\")\n",
+    ));
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let expanded = &out.expanded_text;
+    assert!(
+        expanded.contains("has, commas) and parens"),
+        "triple-quoted actual should be a single argument: {expanded:?}",
+    );
+}
+
+#[test]
+fn triple_quoted_string_and_line_continuation_coexist_in_define_body() {
+    let out = pp(concat!(
+        "`define BOTH \\\n",
+        "\"\"\"\n",
+        "inside\n",
+        "\"\"\" \\\n",
+        "+ suffix\n",
+        "`BOTH\n",
+    ));
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    let expanded = &out.expanded_text;
+    assert!(
+        expanded.contains("inside") && expanded.contains("+ suffix"),
+        "continuation and triple-quoted literal should coexist: {expanded:?}",
+    );
+}
+
 #[test]
 fn no_continuation_when_spaces_after_backslash() {
     // `\` followed by spaces then newline is NOT a continuation per LRM;

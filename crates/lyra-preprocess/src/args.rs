@@ -41,6 +41,12 @@ pub(crate) struct TokenStreamParsedArgs {
 ///
 /// Nested parentheses adjust depth but do not split arguments.
 /// Arguments may span multiple lines (newlines are valid per LRM 22.5.1).
+///
+/// Token-opacity invariant: argument splitting operates on
+/// `SyntaxKind` only. Commas, parentheses, and other delimiter
+/// characters embedded inside literal tokens (including triple-quoted
+/// `StringLiteral` tokens) are opaque to the splitter and do not
+/// affect argument boundaries.
 pub(crate) fn parse_args_from_seq(
     toks: &[MacroTok],
     start_lparen_idx: usize,
@@ -88,6 +94,11 @@ pub(crate) fn parse_args_from_seq(
 /// Purely structural: operates on `SyntaxKind` only, does not touch
 /// source text or track byte cursors. The caller materializes
 /// `MacroTokenSeq` from the returned ranges.
+///
+/// Token-opacity invariant: delimiter characters inside literal
+/// tokens (e.g. commas or parentheses in triple-quoted strings) are
+/// invisible to the splitter because they share a single token with
+/// `SyntaxKind::StringLiteral`, not individual punctuation kinds.
 ///
 /// `lparen_idx` is the index of the opening `(` in `tokens`.
 /// On success, returns the argument ranges and the index past the

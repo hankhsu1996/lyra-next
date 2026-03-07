@@ -178,6 +178,14 @@ impl Preprocessor<'_> {
 
     /// Skip trivia and collect body tokens until newline or EOF.
     /// Handles backslash-newline line continuations (LRM 5.6.4).
+    ///
+    /// Token-opacity invariant: only trivia tokens (`is_trivia()`) are
+    /// inspected for newline characters. Non-trivia tokens such as
+    /// `StringLiteral` (including triple-quoted literals that embed
+    /// newlines) are collected verbatim without examining their content.
+    /// This ensures triple-quoted string literals (LRM 22.5.1) do not
+    /// prematurely terminate a macro body.
+    ///
     /// Returns `(body_tokens, end_token_idx, end_byte_cursor)`.
     fn collect_define_body(
         &self,
