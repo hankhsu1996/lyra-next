@@ -128,6 +128,9 @@ pub enum MessageId {
     AssocIndexKeyMismatch,
     // Declaration legality
     AutomaticVarNonProcedural,
+    // Timescale directive
+    TimescaleInvalidValue,
+    TimescalePrecisionExceedsUnit,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -387,6 +390,33 @@ fn render_other_message(msg: &Message) -> String {
             .and_then(Arg::as_name)
             .map(String::from)
             .unwrap_or_default(),
+        MessageId::NotASubroutine
+        | MessageId::PrototypeMismatchReturnType
+        | MessageId::PrototypeMismatchPortCount
+        | MessageId::PrototypeMismatchPortDirection
+        | MessageId::PrototypeMismatchPortType => render_callable_message(msg),
+        MessageId::TimescaleInvalidValue => {
+            let val = name();
+            format!("`timescale has invalid time value '{val}'")
+        }
+        MessageId::TimescalePrecisionExceedsUnit => {
+            let unit = name();
+            let prec = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("`timescale precision ({prec}) must not exceed time unit ({unit})")
+        }
+        MessageId::InternalError => msg
+            .args
+            .first()
+            .and_then(|a| a.as_detail().or_else(|| a.as_name()))
+            .map(String::from)
+            .unwrap_or_default(),
+        _ => render_elab_message(msg),
+    }
+}
+
+fn render_callable_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
         MessageId::NotASubroutine => {
             format!("`{}` is not a task or function", name())
         }

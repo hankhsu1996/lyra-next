@@ -24,6 +24,7 @@ mod record_queries;
 mod resolve_at;
 mod resolve_helpers;
 pub mod semantic;
+mod timescale_queries;
 mod ty_resolve;
 pub mod type_queries;
 
@@ -74,6 +75,9 @@ pub use checks_index::{CheckEntry, CheckKind, ChecksIndex};
 
 // Re-export diagnostics
 pub use diagnostics::{file_diagnostics, type_diagnostics, unit_diagnostics};
+
+// Re-export timescale queries
+pub use timescale_queries::{effective_time_params, file_timescale_summary};
 
 // Re-export elaboration queries
 pub use elab_lower::elab_diagnostics;

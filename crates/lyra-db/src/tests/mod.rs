@@ -6,6 +6,7 @@ mod expr_type;
 mod lifetime;
 mod modport;
 mod resolve;
+mod timescale;
 mod type_at;
 mod type_diag;
 mod type_of;

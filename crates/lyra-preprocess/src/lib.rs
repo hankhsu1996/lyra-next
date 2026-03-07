@@ -86,12 +86,33 @@ pub struct DirectiveEvent {
     pub event_seq: u32,
 }
 
+/// A successfully parsed `` `timescale `` directive payload.
+///
+/// Stores the raw textual forms of the unit and precision operands
+/// exactly as written in source (e.g. `"1ns"`, `"100ps"`), extracted
+/// directly from the token stream without string reconstruction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimescaleDirective {
+    pub unit_text: SmolStr,
+    pub precision_text: SmolStr,
+    /// Span covering the full directive line (keyword through last
+    /// payload token), in origin space.
+    pub full_span: Span,
+}
+
 /// Classification of a directive event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DirectiveEventKind {
     /// A recognized LRM directive keyword encountered outside the
-    /// preprocessor's own handling (e.g., `` `timescale ``).
+    /// preprocessor's own handling (e.g., `` `default_nettype ``).
+    ///
+    /// For `` `timescale ``, a successful parse produces the
+    /// `Timescale` variant instead. This variant is only used when
+    /// `` `timescale `` parsing fails (malformed payload).
     KnownDirective(DirectiveKeyword),
+    /// A successfully parsed `` `timescale `` directive with structured
+    /// unit and precision operands.
+    Timescale(TimescaleDirective),
     /// Use of an undefined macro name.
     UndefinedMacro(SmolStr),
     /// Malformed or unrecognized directive form.

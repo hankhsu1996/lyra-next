@@ -10,19 +10,11 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 `$unit::` scoped name prefix is not parsed. Compilation-unit scope declarations (variables, functions declared outside any design element) are not tracked in a dedicated compilation-unit scope. Blocked by: `$unit::` parser support, compilation-unit scope model. Test: deferred until compilation-unit scope lands.
 
-### 3.14.2.1: `timescale compiler directive
-
-The preprocessor recognizes the \`timescale directive keyword but does not consume it or track the active timescale. Blocked by: directive event consumption (shared with Ch 5.6.4 gap). Test: deferred until \`timescale consumption lands.
-
-### 3.14.2.3: Precedence rules for time units
-
-Depends on both \`timescale directive consumption (3.14.2.1) and timeunit/timeprecision parsing (3.14.2.2). Cannot be tested until both prerequisites land. Test: deferred.
-
 ## Chapter 5 -- Lexical Conventions
 
 ### 5.6.4: Compiler directives -- non-conditional directive semantics
 
-Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: triple-quote stringify (`` `""" ``) and non-conditional directive semantics via event consumption (`` `timescale ``, `` `default_nettype ``). Blocked by: directive event consumers. Test: `lrm/ch05/5.6.4_compiler_directives`.
+Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: triple-quote stringify (`` `""" ``) and `` `default_nettype `` directive semantics. Blocked by: `default_nettype` directive event consumer. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
 ## Chapter 6 -- Data Types
 
