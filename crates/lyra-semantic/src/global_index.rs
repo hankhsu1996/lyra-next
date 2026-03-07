@@ -1,4 +1,5 @@
 use crate::Site;
+use crate::def_index::DefIndex;
 use smol_str::SmolStr;
 
 use crate::symbols::{GlobalDefId, Namespace};
@@ -330,5 +331,124 @@ fn merge_ns_entries(
         if !local_names.contains(name) && !target.iter().any(|(n, _)| n == name) {
             target.push((name.clone(), *id));
         }
+    }
+}
+
+/// File-level declarative symbols collected in compilation-unit scope
+/// for one source file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileScopeIndex {
+    pub value_ns: Box<[(SmolStr, Site)]>,
+    pub type_ns: Box<[(SmolStr, Site)]>,
+}
+
+impl FileScopeIndex {
+    /// True if no file-scope declarations exist.
+    pub fn is_empty(&self) -> bool {
+        self.value_ns.is_empty() && self.type_ns.is_empty()
+    }
+}
+
+/// Build a `FileScopeIndex` from a single file's definition index.
+pub fn build_file_scope_index(def: &DefIndex) -> FileScopeIndex {
+    let Some(file_scope) = def.file_scope() else {
+        return FileScopeIndex {
+            value_ns: Box::new([]),
+            type_ns: Box::new([]),
+        };
+    };
+
+    let scope = def.scopes.get(file_scope);
+
+    let mut value_ns = Vec::new();
+    for &sym_id in &*scope.value_ns {
+        let sym = def.symbols.get(sym_id);
+        value_ns.push((sym.name.clone(), sym.name_site));
+    }
+    value_ns.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut type_ns = Vec::new();
+    for &sym_id in &*scope.type_ns {
+        let sym = def.symbols.get(sym_id);
+        type_ns.push((sym.name.clone(), sym.name_site));
+    }
+    type_ns.sort_by(|a, b| a.0.cmp(&b.0));
+
+    FileScopeIndex {
+        value_ns: value_ns.into(),
+        type_ns: type_ns.into(),
+    }
+}
+
+/// Compilation-unit scope aggregated across all files in the unit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CuScopeIndex {
+    pub value_ns: Box<[(SmolStr, Site)]>,
+    pub type_ns: Box<[(SmolStr, Site)]>,
+}
+
+/// Result of a name lookup in a scope summary that preserves ambiguity.
+///
+/// Borrows from the underlying sorted slice to avoid per-lookup allocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopeLookup<'a> {
+    /// Name not found in this scope.
+    Missing,
+    /// Exactly one declaration with this name.
+    Unique(Site),
+    /// Multiple declarations share this name (e.g. across files).
+    /// Borrows the matching range from the sorted index.
+    Ambiguous(&'a [(SmolStr, Site)]),
+}
+
+impl CuScopeIndex {
+    /// Resolve a name in the compilation-unit scope by namespace.
+    ///
+    /// Preserves ambiguity: if multiple files declare the same name,
+    /// returns `Ambiguous` with all sites.
+    pub fn resolve(&self, name: &str, ns: Namespace) -> ScopeLookup<'_> {
+        let entries = match ns {
+            Namespace::Value => &self.value_ns,
+            Namespace::Type => &self.type_ns,
+            Namespace::Definition => return ScopeLookup::Missing,
+        };
+        scope_lookup_in_sorted(entries, name)
+    }
+
+    /// True if no compilation-unit scope declarations exist.
+    pub fn is_empty(&self) -> bool {
+        self.value_ns.is_empty() && self.type_ns.is_empty()
+    }
+}
+
+/// Shared lookup in a sorted `(name, site)` slice that preserves multiplicity.
+///
+/// Returns a borrowed range for the ambiguous case -- no per-lookup allocation.
+fn scope_lookup_in_sorted<'a>(entries: &'a [(SmolStr, Site)], name: &str) -> ScopeLookup<'a> {
+    let start = entries.partition_point(|(n, _)| n.as_str() < name);
+    let end = entries[start..].partition_point(|(n, _)| n.as_str() == name) + start;
+    match end - start {
+        0 => ScopeLookup::Missing,
+        1 => ScopeLookup::Unique(entries[start].1),
+        _ => ScopeLookup::Ambiguous(&entries[start..end]),
+    }
+}
+
+/// Build a `CuScopeIndex` from per-file summaries.
+pub fn build_cu_scope_index(files: &[&FileScopeIndex]) -> CuScopeIndex {
+    let mut value_ns = Vec::new();
+    let mut type_ns = Vec::new();
+
+    for file in files {
+        value_ns.extend(file.value_ns.iter().cloned());
+        type_ns.extend(file.type_ns.iter().cloned());
+    }
+
+    value_ns.sort_by(|a, b| a.0.cmp(&b.0));
+    type_ns.sort_by(|a, b| a.0.cmp(&b.0));
+
+    CuScopeIndex {
+        value_ns: value_ns.into(),
+        type_ns: type_ns.into(),
     }
 }

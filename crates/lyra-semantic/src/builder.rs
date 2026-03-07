@@ -387,8 +387,29 @@ fn collect_source_file(ctx: &mut DefContext<'_>, root: &SyntaxNode, file_scope: 
             SyntaxKind::ConfigDecl => {
                 collect_config(ctx, &child);
             }
-            _ => {}
+            _ => collect_file_item(ctx, &child, file_scope),
         }
+    }
+}
+
+fn collect_file_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    collect_declarative_item(ctx, node, scope);
+}
+
+fn collect_declarative_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+    match node.kind() {
+        SyntaxKind::VarDecl => collect_declarators(ctx, node, SymbolKind::Variable, scope),
+        SyntaxKind::NetDecl => collect_declarators(ctx, node, SymbolKind::Net, scope),
+        SyntaxKind::ParamDecl => collect_param_decl(ctx, node, scope),
+        SyntaxKind::ImportDecl => collect_import_decl(ctx, node, scope),
+        SyntaxKind::TypedefDecl => collect_typedef(ctx, node, scope),
+        SyntaxKind::NettypeDecl => collect_nettype_decl(ctx, node, scope),
+        SyntaxKind::FunctionDecl | SyntaxKind::TaskDecl => {
+            collect_callable_decl(ctx, node, scope);
+        }
+        SyntaxKind::TimeunitDecl => collect_timeunit_decl(ctx, node, scope),
+        SyntaxKind::TimeprecisionDecl => collect_timeprecision_decl(ctx, node, scope),
+        _ => {}
     }
 }
 
@@ -612,7 +633,7 @@ fn collect_package_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
         if ExportDecl::cast(child.clone()).is_some() {
             collect_export_decl(ctx, &child, scope);
         } else {
-            collect_module_item(ctx, &child, scope);
+            collect_declarative_item(ctx, &child, scope);
         }
     }
 }

@@ -46,9 +46,10 @@ pub use site::Site;
 pub use streaming::fixed_stream_width_bits_of_expr_type;
 
 pub use builder::build_def_index;
+pub use global_index::{build_cu_scope_index, build_file_scope_index};
 pub use resolve::{
-    build_resolve_core, build_resolve_index, detect_import_conflicts, resolve_name_in_scope,
-    resolve_qualified_name,
+    ResolveEnv, build_resolve_core, build_resolve_index, detect_import_conflicts,
+    resolve_name_in_scope, resolve_qualified_name,
 };
 pub use type_extract::{
     UserTypeRef, extract_base_ty_from_type_ref, extract_base_ty_from_typespec,

@@ -4,7 +4,8 @@ use lyra_ast::ErasedAstId;
 use lyra_semantic::def_index::{CompilationUnitEnv, DefIndex, ImplicitImport, ImportName};
 use lyra_semantic::enum_def::PkgEnumVariantIndex;
 use lyra_semantic::global_index::{
-    DefinitionKind, GlobalDefIndex, PackageLocalFacts, PackageScope, PackageScopeIndex,
+    CuScopeIndex, DefinitionKind, FileScopeIndex, GlobalDefIndex, PackageLocalFacts, PackageScope,
+    PackageScopeIndex,
 };
 use lyra_semantic::instance_decl::InstanceDeclIdx;
 use lyra_semantic::interface_id::InterfaceDefId;
@@ -199,6 +200,49 @@ pub fn compilation_unit_env(
     }
 }
 
+/// Per-file file-scope summary (Salsa-cached).
+///
+/// Extracts file-level declarative symbols from the file scope into a
+/// sorted, namespace-split summary for compilation-unit aggregation.
+#[salsa::tracked(return_ref)]
+pub fn file_scope_index(db: &dyn salsa::Database, file: SourceFile) -> FileScopeIndex {
+    let def = def_index_file(db, file);
+    lyra_semantic::build_file_scope_index(def)
+}
+
+/// Compilation-unit scope aggregated across all files (Salsa-cached).
+///
+/// Merges per-file `FileScopeIndex` summaries into a single CU-scope
+/// summary used by the resolver for file-level declaration lookup.
+#[salsa::tracked(return_ref)]
+pub fn cu_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> CuScopeIndex {
+    let files: Vec<&FileScopeIndex> = unit
+        .files(db)
+        .iter()
+        .map(|file| file_scope_index(db, *file))
+        .collect();
+    lyra_semantic::build_cu_scope_index(&files)
+}
+
+/// Build a `ResolveEnv` from Salsa-cached per-file and per-unit queries.
+///
+/// Centralizes the plumbing that fetches resolution context from the DB.
+/// Used by callers that need ad-hoc name resolution (const-eval, enum base,
+/// record field type resolution).
+pub fn resolve_env(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    unit: CompilationUnit,
+) -> lyra_semantic::ResolveEnv<'_> {
+    lyra_semantic::ResolveEnv {
+        graph: name_graph_file(db, file),
+        global: global_def_index(db, unit),
+        pkg_scope: package_scope_index(db, unit),
+        cu_env: compilation_unit_env(db, unit),
+        cu_scope: cu_scope_index(db, unit),
+    }
+}
+
 /// Resolve all use-sites using only offset-independent data (Salsa-cached).
 ///
 /// Base version: no enum variant data. Used by `base_resolve_index`
@@ -213,7 +257,8 @@ pub fn resolve_core_file(
     let global = global_def_index(db, unit);
     let pkg_scope = package_scope_index(db, unit);
     let cu_env = compilation_unit_env(db, unit);
-    lyra_semantic::build_resolve_core(graph, global, pkg_scope, cu_env, None, None)
+    let cu_scope = cu_scope_index(db, unit);
+    lyra_semantic::build_resolve_core(graph, global, pkg_scope, cu_env, cu_scope, None, None)
 }
 
 /// Enriched core resolution with enum variant data (Salsa-cached).
@@ -230,6 +275,7 @@ fn enriched_resolve_core(
     let global = global_def_index(db, unit);
     let pkg_scope = package_scope_index(db, unit);
     let cu_env = compilation_unit_env(db, unit);
+    let cu_scope = cu_scope_index(db, unit);
     let local_ev = enum_variant_index(db, file, unit);
     let pkg_ev = build_pkg_enum_variant_index(db, unit, graph, global);
     lyra_semantic::build_resolve_core(
@@ -237,6 +283,7 @@ fn enriched_resolve_core(
         global,
         pkg_scope,
         cu_env,
+        cu_scope,
         Some(local_ev),
         if pkg_ev.is_empty() {
             None

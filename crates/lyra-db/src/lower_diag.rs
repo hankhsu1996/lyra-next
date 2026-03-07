@@ -141,6 +141,9 @@ pub(crate) fn lower_semantic_diag(
         SemanticDiagKind::AmbiguousWildcardImport { name, candidates } => {
             lower_ambiguous_wildcard(name, candidates, primary_span)
         }
+        SemanticDiagKind::AmbiguousCuScope { name, sites } => {
+            lower_ambiguous_cu_scope(name, sites, primary_span)
+        }
         SemanticDiagKind::UnsupportedQualifiedPath { path } => lower_args_diag(
             code::UNSUPPORTED_QUALIFIED_PATH,
             MessageId::UnsupportedQualifiedPath,
@@ -257,6 +260,7 @@ fn lower_record_enum_diag(kind: &SemanticDiagKind, primary_span: Span) -> Diagno
         | SemanticDiagKind::PackageNotFound { .. }
         | SemanticDiagKind::MemberNotFound { .. }
         | SemanticDiagKind::AmbiguousWildcardImport { .. }
+        | SemanticDiagKind::AmbiguousCuScope { .. }
         | SemanticDiagKind::UnsupportedQualifiedPath { .. }
         | SemanticDiagKind::UndeclaredType { .. }
         | SemanticDiagKind::NotAType { .. }
@@ -479,6 +483,26 @@ fn lower_ambiguous_wildcard(name: &SmolStr, candidates: &[SmolStr], span: Span) 
         kind: LabelKind::Primary,
         span,
         message: Message::simple(MessageId::AmbiguousWildcardImport),
+    })
+}
+
+fn lower_ambiguous_cu_scope(
+    name: &SmolStr,
+    sites: &[lyra_semantic::Site],
+    span: Span,
+) -> Diagnostic {
+    Diagnostic::new(
+        Severity::Error,
+        code::AMBIGUOUS_CU_SCOPE,
+        Message::new(
+            MessageId::AmbiguousCuScope,
+            vec![Arg::Name(name.clone()), Arg::Count(sites.len())],
+        ),
+    )
+    .with_label(Label {
+        kind: LabelKind::Primary,
+        span,
+        message: Message::simple(MessageId::AmbiguousCuScope),
     })
 }
 

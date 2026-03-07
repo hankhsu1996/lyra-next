@@ -45,9 +45,10 @@ pub(crate) fn package_decl(p: &mut Parser) {
     m.complete(p, SyntaxKind::PackageDecl);
 }
 
-// Parse one package item. Returns false if no progress was made.
-fn package_item(p: &mut Parser) -> bool {
-    super::eat_attr_instances(p);
+// Shared declarative subset legal at both file scope and package scope.
+// Assumes attributes have already been consumed by the caller.
+// Returns true if a declarative item was parsed.
+fn declarative_item(p: &mut Parser) -> bool {
     match p.current() {
         SyntaxKind::ParameterKw | SyntaxKind::LocalparamKw => {
             declarations::param_decl(p);
@@ -55,10 +56,6 @@ fn package_item(p: &mut Parser) -> bool {
         }
         SyntaxKind::ImportKw => {
             import_decl(p);
-            true
-        }
-        SyntaxKind::ExportKw => {
-            export_decl(p);
             true
         }
         SyntaxKind::TypedefKw => {
@@ -93,19 +90,38 @@ fn package_item(p: &mut Parser) -> bool {
             }
             true
         }
-        SyntaxKind::Ident => {
-            if declarations::at_udt_data_decl_start(p) {
-                declarations::var_decl(p);
-            } else {
-                p.error_bump("unexpected token in package body");
-            }
+        SyntaxKind::Ident if declarations::at_udt_data_decl_start(p) => {
+            declarations::var_decl(p);
             true
         }
-        _ => {
-            p.error_bump("unexpected token in package body");
-            !p.at_end()
-        }
+        _ => false,
     }
+}
+
+// Parse one file-level declarative item. Returns false if no progress was made.
+// Assumes attributes have already been consumed by source_file().
+pub(super) fn file_item(p: &mut Parser) -> bool {
+    if declarative_item(p) {
+        return true;
+    }
+    if !p.at_end() {
+        p.error_bump("expected top-level declaration");
+    }
+    !p.at_end()
+}
+
+// Parse one package item. Returns false if no progress was made.
+fn package_item(p: &mut Parser) -> bool {
+    super::eat_attr_instances(p);
+    if p.current() == SyntaxKind::ExportKw {
+        export_decl(p);
+        return true;
+    }
+    if declarative_item(p) {
+        return true;
+    }
+    p.error_bump("unexpected token in package body");
+    !p.at_end()
 }
 
 // Parse an import declaration: `import pkg::sym, pkg::* ;`

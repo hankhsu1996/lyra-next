@@ -12,9 +12,7 @@ use lyra_semantic::types::{ConstInt, Ty};
 use smol_str::SmolStr;
 
 use crate::const_eval::{ConstExprRef, eval_const_int};
-use crate::semantic::{
-    compilation_unit_env, def_index_file, global_def_index, name_graph_file, package_scope_index,
-};
+use crate::semantic::def_index_file;
 use crate::ty_resolve::{TypeResolveDiagAnchor, resolve_result_to_ty};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
 
@@ -306,10 +304,7 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
         return empty_enum_sem();
     };
 
-    let graph = name_graph_file(db, source_file);
-    let global = global_def_index(db, unit);
-    let pkg_scope = package_scope_index(db, unit);
-    let cu_env = compilation_unit_env(db, unit);
+    let resolve_env = crate::semantic::resolve_env(db, source_file, unit);
 
     let eval = |expr_ast_id: lyra_ast::ErasedAstId| -> ConstInt {
         let expr_ref = ConstExprRef::new(db, unit, expr_ast_id);
@@ -324,10 +319,7 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
         TypeRef::Resolved(ty) => lyra_semantic::normalize_ty(ty, &eval),
         TypeRef::Named { name, .. } => {
             let result = lyra_semantic::resolve_name_in_scope(
-                graph,
-                global,
-                pkg_scope,
-                cu_env,
+                &resolve_env,
                 enum_def.scope,
                 name,
                 ExpectedNs::TypeThenValue,
@@ -341,8 +333,8 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
         TypeRef::Qualified { segments, .. } => {
             let result = lyra_semantic::resolve_qualified_name(
                 segments,
-                global,
-                pkg_scope,
+                resolve_env.global,
+                resolve_env.pkg_scope,
                 ExpectedNs::TypeThenValue,
             );
             let display_name = segments.join("::");

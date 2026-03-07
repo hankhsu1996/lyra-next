@@ -12,6 +12,7 @@ pub const DUPLICATE_DEFINITION: DiagKey = "lyra.semantic.duplicate_definition";
 pub const PACKAGE_NOT_FOUND: DiagKey = "lyra.semantic.package_not_found";
 pub const MEMBER_NOT_FOUND: DiagKey = "lyra.semantic.member_not_found";
 pub const AMBIGUOUS_IMPORT: DiagKey = "lyra.semantic.ambiguous_import";
+pub const AMBIGUOUS_CU_SCOPE: DiagKey = "lyra.semantic.ambiguous_cu_scope";
 pub const UNSUPPORTED_QUALIFIED_PATH: DiagKey = "lyra.semantic.unsupported_qualified_path";
 pub const IMPORT_CONFLICT: DiagKey = "lyra.semantic.import_conflict";
 pub const ENUM_RANGE_INVALID: DiagKey = "lyra.semantic.enum_range_invalid";
@@ -118,6 +119,7 @@ pub const ALL_KEYS: &[DiagKey] = &[
     PACKAGE_NOT_FOUND,
     MEMBER_NOT_FOUND,
     AMBIGUOUS_IMPORT,
+    AMBIGUOUS_CU_SCOPE,
     UNSUPPORTED_QUALIFIED_PATH,
     IMPORT_CONFLICT,
     ENUM_RANGE_INVALID,
