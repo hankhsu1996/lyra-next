@@ -23,9 +23,13 @@ Usage:
 
 import argparse
 import re
-import subprocess
 import sys
 from pathlib import Path
+
+from policy_base import (
+    Finding, add_scope_args, compute_test_lines, get_repo_root,
+    report_findings, resolve_files,
+)
 
 # Per-rule allowlists for each checked crate. Modules listed here are exempt
 # from the specified rule only.
@@ -161,30 +165,6 @@ RE_HAS_SYNTAX = re.compile(r'\bHasSyntax\b')
 RE_ID_OF_CALL = re.compile(r'\.\s*id_of\s*\(')
 
 
-def get_repo_root() -> Path:
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, check=True
-    )
-    return Path(result.stdout.strip())
-
-
-def get_git_files(args: list[str]) -> list[str]:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=ACMRT"] + args,
-        capture_output=True, text=True, check=True
-    )
-    return [f for f in result.stdout.strip().split("\n") if f]
-
-
-def get_all_files(repo_root: Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "ls-files"],
-        capture_output=True, text=True, check=True, cwd=repo_root
-    )
-    return [f for f in result.stdout.strip().split("\n") if f]
-
-
 # Prefixes sorted longest-first so the most specific match wins.
 _SORTED_PREFIXES = sorted(CHECKED_CRATES, key=len, reverse=True)
 
@@ -228,63 +208,6 @@ def _is_allowed(filepath: str, allowlist: dict[str, frozenset[str]]) -> bool:
     return _module_name(filepath) in allowlist.get(prefix, frozenset())
 
 
-# Test detection for files that embed #[cfg(test)] blocks.
-RE_CFG_TEST = re.compile(r'#\[cfg\(test\)\]')
-RE_TEST_FN = re.compile(r'#\[test\]')
-
-
-def _find_item_extent(lines: list[str], start: int) -> int:
-    """Find the last line of the item starting at `start`.
-
-    Scans forward from `start`. If a `{` is found before a bare `;`,
-    tracks brace depth and returns the line where depth reaches 0.
-    If a `;` is found first (non-braced item), returns that line.
-    If the file ends without either, returns `start` (defensive).
-    """
-    n = len(lines)
-    depth = 0
-    found_open = False
-    for j in range(start, n):
-        line_j = lines[j]
-        # Bare semicolon before any brace -> single item (e.g. `use foo;`)
-        if not found_open and ';' in line_j and '{' not in line_j:
-            return j
-        depth += line_j.count('{') - line_j.count('}')
-        if not found_open and '{' in line_j:
-            found_open = True
-        if found_open and depth <= 0:
-            return j
-    return start
-
-
-def compute_test_lines(lines: list[str]) -> set[int]:
-    """Compute the set of 0-based line indices that are inside test code.
-
-    Handles #[cfg(test)] mod ... { } blocks by tracking brace depth,
-    and individual #[test] fn blocks. Non-braced items (e.g.
-    `#[cfg(test)] use foo;`) exempt only the item itself.
-    """
-    test_lines: set[int] = set()
-    i = 0
-    n = len(lines)
-    while i < n:
-        line = lines[i]
-        if RE_CFG_TEST.search(line):
-            end = _find_item_extent(lines, i)
-            for j in range(i, end + 1):
-                test_lines.add(j)
-            i = end + 1
-            continue
-        if RE_TEST_FN.search(line):
-            end = _find_item_extent(lines, i)
-            for j in range(i, end + 1):
-                test_lines.add(j)
-            i = end + 1
-            continue
-        i += 1
-    return test_lines
-
-
 def strip_comments(lines: list[str]) -> list[str]:
     """Strip Rust comments from lines, preserving line count.
 
@@ -322,12 +245,19 @@ def strip_comments(lines: list[str]) -> list[str]:
     return result
 
 
-def check_violations(filepath: str, repo_root: Path) -> list[str]:
-    """Check a file for C001-C006 violations.
+RULES = {
+    "C001": "No .children()/.descendants()/etc. CST traversal",
+    "C002": "No SyntaxKind::Expression/ParenExpr matching (use Expr::peeled())",
+    "C003": "No SyntaxKind discrimination (use typed AST accessors)",
+    "C004": "No raw SyntaxNode/SyntaxToken in lyra-semantic (use typed wrappers)",
+    "C005": "No .syntax() calls in lyra-semantic (add typed accessor in lyra-ast)",
+    "C006": "No HasSyntax/id_of() in lyra-semantic outside site.rs",
+}
 
-    Returns list of violation messages.
-    """
-    errors = []
+
+def check_violations(filepath, repo_root):
+    """Check a file for C001-C006 violations."""
+    findings = []
     full_path = repo_root / filepath
     prefix = _matching_crate(filepath)
     crate_label = _CRATE_LABELS.get(prefix, "unknown") if prefix else "unknown"
@@ -335,20 +265,17 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
     c001_ok = _is_allowed(filepath, C001_ALLOWED)
     c002_ok = _is_allowed(filepath, C002_ALLOWED)
     c003_ok = _is_allowed(filepath, C003_ALLOWED)
-    # C004 only applies to crates listed in C004_ALLOWED (lyra-semantic).
     c004_applies = prefix is not None and prefix in C004_ALLOWED
     c004_ok = not c004_applies or _is_allowed(filepath, C004_ALLOWED)
-    # C005 only applies to crates listed in C005_ALLOWED (lyra-semantic).
     c005_applies = prefix is not None and prefix in C005_ALLOWED
     c005_ok = not c005_applies or _is_allowed(filepath, C005_ALLOWED)
-    # C006 only applies to crates listed in C006_ALLOWED (lyra-semantic).
     c006_applies = prefix is not None and prefix in C006_ALLOWED
     c006_ok = not c006_applies or _is_allowed(filepath, C006_ALLOWED)
 
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
-        return [f"{filepath}: failed to read: {e}"]
+        return [Finding("error", "C000", filepath, 0, f"failed to read: {e}")]
 
     lines = content.splitlines()
     test_lines = compute_test_lines(lines)
@@ -357,52 +284,46 @@ def check_violations(filepath: str, repo_root: Path) -> list[str]:
     for lineno_0, stripped in enumerate(stripped_lines):
         lineno = lineno_0 + 1
 
-        # Skip test code.
         if lineno_0 in test_lines:
             continue
 
         if not c001_ok and RE_CST_TRAVERSAL.search(stripped):
-            errors.append(
-                f"{filepath}:{lineno}: C001 CST traversal call ({crate_label})"
-            )
+            findings.append(Finding(
+                "error", "C001", filepath, lineno,
+                f"CST traversal call ({crate_label})"))
 
         if not c002_ok and RE_WRAPPER_MATCH.search(stripped):
-            errors.append(
-                f"{filepath}:{lineno}: C002 manual wrapper match ({crate_label})"
-            )
+            findings.append(Finding(
+                "error", "C002", filepath, lineno,
+                f"manual wrapper match ({crate_label})"))
 
         if not c003_ok:
             if RE_SYNTAX_KIND_USE.search(stripped) or RE_SYNTAX_KIND_IMPORT.search(stripped):
-                errors.append(
-                    f"{filepath}:{lineno}: C003 SyntaxKind discrimination"
-                    f" ({crate_label})"
-                )
+                findings.append(Finding(
+                    "error", "C003", filepath, lineno,
+                    f"SyntaxKind discrimination ({crate_label})"))
 
         if not c004_ok and RE_SYNTAX_NODE_TOKEN.search(stripped):
-            errors.append(
-                f"{filepath}:{lineno}: C004 raw SyntaxNode/SyntaxToken"
-                f" ({crate_label})"
-            )
+            findings.append(Finding(
+                "error", "C004", filepath, lineno,
+                f"raw SyntaxNode/SyntaxToken ({crate_label})"))
 
         if not c005_ok and RE_DOT_SYNTAX.search(stripped):
-            errors.append(
-                f"{filepath}:{lineno}: C005 .syntax() call"
-                f" ({crate_label})"
-            )
+            findings.append(Finding(
+                "error", "C005", filepath, lineno,
+                f".syntax() call ({crate_label})"))
 
         if not c006_ok:
             if RE_HAS_SYNTAX.search(stripped):
-                errors.append(
-                    f"{filepath}:{lineno}: C006 HasSyntax outside site.rs"
-                    f" ({crate_label})"
-                )
+                findings.append(Finding(
+                    "error", "C006", filepath, lineno,
+                    f"HasSyntax outside site.rs ({crate_label})"))
             if RE_ID_OF_CALL.search(stripped):
-                errors.append(
-                    f"{filepath}:{lineno}: C006 id_of() outside site.rs"
-                    f" ({crate_label})"
-                )
+                findings.append(Finding(
+                    "error", "C006", filepath, lineno,
+                    f"id_of() outside site.rs ({crate_label})"))
 
-    return errors
+    return findings
 
 
 def self_test() -> int:
@@ -780,68 +701,29 @@ def self_test() -> int:
     return 0
 
 
-def main() -> int:
+def main():
     parser = argparse.ArgumentParser(
-        description="Check CST layering policy in lyra-semantic and lyra-db"
-    )
+        description="Check CST layering policy in lyra-semantic and lyra-db")
+    add_scope_args(parser)
     parser.add_argument(
-        "--diff-base", help="Check files changed since git ref"
-    )
-    parser.add_argument(
-        "--staged", action="store_true", help="Check staged files"
-    )
-    parser.add_argument(
-        "--self-test", action="store_true", help="Run built-in self-tests"
-    )
+        "--self-test", action="store_true", help="Run built-in self-tests")
     args = parser.parse_args()
 
     if args.self_test:
         return self_test()
 
     repo_root = get_repo_root()
-
-    if args.staged:
-        files = get_git_files(["--cached"])
-    elif args.diff_base:
-        files = get_git_files([args.diff_base])
-    else:
-        files = get_all_files(repo_root)
-
-    files = [f for f in files if should_check_file(f)]
+    files = resolve_files(args, repo_root, should_check_file)
 
     if not files:
         print("No files to check")
         return 0
 
-    all_errors = []
-    for filepath in sorted(set(files)):
-        if not (repo_root / filepath).exists():
-            continue
-        all_errors.extend(check_violations(filepath, repo_root))
+    all_findings = []
+    for filepath in files:
+        all_findings.extend(check_violations(filepath, repo_root))
 
-    if all_errors:
-        print("CST layering violations:\n")
-        for error in all_errors:
-            print(f"  {error}")
-        print(f"\nTotal: {len(all_errors)} violations")
-        print("\nRules:")
-        print("  C001: No .children()/.descendants()/etc. CST traversal")
-        print("  C002: No SyntaxKind::Expression/ParenExpr matching "
-              "(use Expr::peeled())")
-        print("  C003: No SyntaxKind discrimination "
-              "(use typed AST accessors)")
-        print("  C004: No raw SyntaxNode/SyntaxToken in lyra-semantic "
-              "(use typed wrappers)")
-        print("  C005: No .syntax() calls in lyra-semantic "
-              "(add typed accessor in lyra-ast)")
-        print("  C006: No HasSyntax/id_of() in lyra-semantic outside site.rs "
-              "(use site:: helpers)")
-        print("Allowlisted modules: see C00x_ALLOWED in this script")
-        return 1
-
-    checked = len(files)
-    print(f"Checked {checked} files, no violations")
-    return 0
+    return report_findings(all_findings, RULES, len(files))
 
 
 if __name__ == "__main__":

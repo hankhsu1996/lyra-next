@@ -11,10 +11,11 @@ Usage:
   python3 tools/policy/check_all.py --all                    # All files
 """
 
-import argparse
 import subprocess
 import sys
 from pathlib import Path
+
+from policy_base import add_scope_args
 
 CHECKS = [
     "check_errors.py",
@@ -25,7 +26,7 @@ CHECKS = [
 ]
 
 
-def resolve_diff_base() -> str:
+def resolve_diff_base():
     """Compute default diff base via git merge-base origin/main HEAD."""
     result = subprocess.run(
         ["git", "merge-base", "origin/main", "HEAD"],
@@ -36,37 +37,33 @@ def resolve_diff_base() -> str:
     return result.stdout.strip()
 
 
-def main() -> int:
+def build_scope_args(args):
+    """Convert parsed args to CLI flags for child scripts."""
+    if args.staged:
+        return ["--staged"]
+    if getattr(args, "all", False):
+        return ["--all"]
+    if args.diff_base:
+        return ["--diff-base", args.diff_base]
+    base = resolve_diff_base()
+    if not base:
+        print(
+            "warning: could not resolve merge-base (no origin/main?), "
+            "falling back to checking ALL files",
+            file=sys.stderr,
+        )
+        return ["--all"]
+    return ["--diff-base", base]
+
+
+def main():
+    import argparse
     parser = argparse.ArgumentParser(description="Run all policy checks")
-    scope = parser.add_mutually_exclusive_group()
-    scope.add_argument(
-        "--diff-base", help="Check files changed since git ref")
-    scope.add_argument("--staged", action="store_true",
-                       help="Check staged files")
-    scope.add_argument("--all", action="store_true",
-                       help="Check all files (no diff filtering)")
+    add_scope_args(parser)
     args = parser.parse_args()
 
     policy_dir = Path(__file__).parent
-
-    # Build the scope args passed to each check script.
-    if args.staged:
-        scope_args = ["--staged"]
-    elif args.all:
-        scope_args = []
-    elif args.diff_base:
-        scope_args = ["--diff-base", args.diff_base]
-    else:
-        base = resolve_diff_base()
-        if not base:
-            print(
-                "warning: could not resolve merge-base (no origin/main?), "
-                "falling back to checking ALL files",
-                file=sys.stderr,
-            )
-            scope_args = []
-        else:
-            scope_args = ["--diff-base", base]
+    scope_args = build_scope_args(args)
 
     failed = []
     for check in CHECKS:
