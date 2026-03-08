@@ -401,7 +401,7 @@ impl<'a> Preprocessor<'a> {
             return Err("`timescale directive missing time unit and precision");
         }
 
-        let (unit_text, unit_end) =
+        let unit_val =
             self.consume_time_value(&mut j, &mut cursor, &skip_trivia, line_end_cursor)?;
 
         skip_trivia(&mut j, &mut cursor);
@@ -420,49 +420,49 @@ impl<'a> Preprocessor<'a> {
             return Err("`timescale directive missing time precision");
         }
 
-        let (prec_text, payload_end) =
+        let prec_val =
             self.consume_time_value(&mut j, &mut cursor, &skip_trivia, line_end_cursor)?;
 
-        let _ = unit_end;
         let full_span = Span {
             file: self.file,
             range: TextRange::new(
                 TextSize::new(dir_start as u32),
-                TextSize::new(payload_end as u32),
+                TextSize::new(prec_val.end as u32),
             ),
         };
 
         Ok(TimescaleDirective {
-            unit_text: SmolStr::from(unit_text),
-            precision_text: SmolStr::from(prec_text),
+            unit_text: unit_val.text,
+            precision_text: prec_val.text,
             full_span,
         })
     }
 
     /// Consume a time value from the token stream. Accepts either a
     /// single `TimeLiteral` token or an `IntLiteral` + `Ident` pair
-    /// (magnitude + unit suffix). Returns the combined text and the
-    /// byte offset after the last consumed token.
-    fn consume_time_value<'b>(
-        &'b self,
+    /// (magnitude + unit suffix). Returns a `ParsedTimeValue` with
+    /// canonical token-composed text (no trivia) and the byte offset
+    /// after the last consumed token.
+    fn consume_time_value(
+        &self,
         j: &mut usize,
         cursor: &mut usize,
         skip_trivia: &dyn Fn(&mut usize, &mut usize),
         line_end_cursor: usize,
-    ) -> Result<(&'b str, usize), &'static str> {
+    ) -> Result<ParsedTimeValue, &'static str> {
         let tok = self.tokens[*j];
         let tok_len: usize = tok.len.into();
 
         if tok.kind == SyntaxKind::TimeLiteral {
-            let text = &self.text[*cursor..*cursor + tok_len];
+            let text = SmolStr::from(&self.text[*cursor..*cursor + tok_len]);
             let end = *cursor + tok_len;
             *cursor = end;
             *j += 1;
-            return Ok((text, end));
+            return Ok(ParsedTimeValue { text, end });
         }
 
         if tok.kind == SyntaxKind::IntLiteral {
-            let mag_start = *cursor;
+            let mag_text = &self.text[*cursor..*cursor + tok_len];
             *cursor += tok_len;
             *j += 1;
 
@@ -476,11 +476,18 @@ impl<'a> Preprocessor<'a> {
             let suffix_tok = self.tokens[*j];
             if suffix_tok.kind == SyntaxKind::Ident {
                 let suffix_len: usize = suffix_tok.len.into();
+                let suffix_text = &self.text[*cursor..*cursor + suffix_len];
                 let end = *cursor + suffix_len;
-                let combined = &self.text[mag_start..end];
+                let mut buf = String::with_capacity(mag_text.len() + suffix_text.len());
+                buf.push_str(mag_text);
+                buf.push_str(suffix_text);
+                let canonical = SmolStr::from(buf);
                 *cursor = end;
                 *j += 1;
-                return Ok((combined, end));
+                return Ok(ParsedTimeValue {
+                    text: canonical,
+                    end,
+                });
             }
             return Err("`timescale time value missing unit suffix");
         }
@@ -835,6 +842,16 @@ impl<'a> Preprocessor<'a> {
 
         self.flush_start = self.src_cursor;
     }
+}
+
+/// A canonicalized time value parsed from the token stream.
+///
+/// `text` holds the token-composed canonical form (e.g. `"1ns"`) with
+/// no trivia, regardless of whitespace in source. `end` is the byte
+/// offset after the last consumed token.
+struct ParsedTimeValue {
+    text: SmolStr,
+    end: usize,
 }
 
 /// Structured parse error for `` `default_nettype `` directives.
