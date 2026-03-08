@@ -1,6 +1,6 @@
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{SyntaxNode, SyntaxToken};
-use lyra_source::NameSpan;
+use lyra_source::TokenSpan;
 
 use crate::node::{AstNode, HasSyntax, is_expression_kind};
 use crate::nodes::{
@@ -96,11 +96,11 @@ impl Expr {
     ///
     /// Unlike `text_range()` on the node (which includes leading trivia),
     /// this returns the exact range of the name token.
-    pub fn ident_name_span(&self) -> Option<NameSpan> {
+    pub fn ident_name_span(&self) -> Option<TokenSpan> {
         match self.classify()? {
-            ExprKind::NameRef(nr) => nr.ident().map(|t| NameSpan::new(t.text_range())),
+            ExprKind::NameRef(nr) => nr.ident().map(|t| TokenSpan::new(t.text_range())),
             ExprKind::QualifiedName(qn) => {
-                qn.segments().last().map(|t| NameSpan::new(t.text_range()))
+                qn.segments().last().map(|t| TokenSpan::new(t.text_range()))
             }
             _ => None,
         }

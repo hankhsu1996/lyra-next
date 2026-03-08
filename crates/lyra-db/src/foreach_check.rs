@@ -96,15 +96,14 @@ fn check_foreach_stmt(
         let Some(name_tok) = decl.name() else {
             continue;
         };
-        let var_name: SmolStr = SmolStr::new(name_tok.text());
+        let var_name = name_tok.text();
         let var_span = TokenSpan::new(name_tok.text_range());
 
         if let Some(ref arr_name) = array_root_name
-            && var_name == *arr_name
+            && var_name == arr_name.as_str()
         {
             items.push(ForeachCheckItem::VarSameNameAsArray {
                 var_name_span: var_span,
-                array_name: arr_name.clone(),
             });
         }
     }
@@ -229,7 +228,6 @@ fn check_assign_to_foreach_vars(
             continue;
         }
 
-        let var_name = def.symbols.get(gsym.local).name.clone();
         let span = lyra_ast::NameRef::cast(use_node.clone())
             .and_then(|nr| nr.ident())
             .map_or_else(
@@ -238,7 +236,6 @@ fn check_assign_to_foreach_vars(
             );
         items.push(ForeachCheckItem::AssignToForeachVar {
             lhs_name_span: span,
-            var_name,
         });
     }
 }

@@ -1,6 +1,3 @@
-use lyra_ast::{CallExpr, Expr, ExprKind, FieldExpr, SystemTfCall};
-use smol_str::SmolStr;
-
 use super::expr_type::{
     CallableKind, CallableSigRef, CalleeFormKind, ExprType, ExprTypeErrorKind, ExprView, InferCtx,
     ResolveCallableError,
@@ -8,9 +5,9 @@ use super::expr_type::{
 use super::infer_expr;
 use crate::coerce::IntegralCtx;
 use crate::member::{MemberInfo, MemberKind, MemberLookupError};
-use crate::member_name::MemberNameToken;
 use crate::symbols::GlobalSymbolId;
 use crate::types::Ty;
+use lyra_ast::{CallExpr, Expr, ExprKind, FieldExpr, SystemTfCall};
 
 pub(super) fn infer_call(call: &CallExpr, ctx: &dyn InferCtx) -> ExprType {
     let Some(callee_expr) = call.callee() else {
@@ -106,11 +103,7 @@ fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx
         return lhs_type;
     }
 
-    let member = MemberNameToken {
-        kind: field_tok.kind(),
-        text: SmolStr::new(field_tok.text()),
-    };
-    match ctx.member_lookup(&lhs_type.ty, &member) {
+    match ctx.member_lookup(&lhs_type.ty, field_tok.text()) {
         Ok(MemberInfo {
             kind: MemberKind::BuiltinMethod(bm),
             ty,

@@ -185,7 +185,7 @@ fn compare_signatures(
     diags: &mut Vec<SemanticDiag>,
 ) {
     let tf_primary = DiagSpan::Site(tf.port_site);
-    let tf_label = DiagSpan::Name(tf.name_span);
+    let tf_label = DiagSpan::Decl(tf.name_span);
 
     if proto_kind != actual_kind {
         return;

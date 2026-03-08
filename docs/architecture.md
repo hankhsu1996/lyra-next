@@ -140,6 +140,18 @@ Every semantic object is identified by a small, copyable, comparable ID. Semanti
 | `EnumId`         | `lyra-semantic` | Enum definition identity: `file`, `owner` scope, `ordinal`.              |
 | `RecordId`       | `lyra-semantic` | Struct/union definition identity: `file`, `owner` scope, `ordinal`.      |
 
+### Token anchoring
+
+These types are lightweight lexical payloads, not semantic identity objects. They carry token position (and optionally kind) for diagnostic anchoring and text recovery.
+
+| Type          | Crate        | Definition                                                             |
+| ------------- | ------------ | ---------------------------------------------------------------------- |
+| `DeclSpan`    | `lyra-source` | Span of a declared-name identifier token. `text_from()` recovers text. |
+| `TokenSpan`   | `lyra-source` | Span of a non-declaration token anchor (keywords, operators, refs).    |
+| `TokenAnchor` | `lyra-lexer`  | Kind-aware token payload: `SyntaxKind` + `TokenSpan`.                  |
+
+Lowering recovers token text from anchored source via `text_from(&str)` instead of storing redundant `SmolStr` fields.
+
 Invariant: IDs are stable for nodes whose `(kind, start_offset, len)` is
 unchanged. Tree-shape changes (error recovery reshaping, wrapper node
 insertion) that do not move byte offsets no longer cause ID churn. Edits

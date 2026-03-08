@@ -5,7 +5,7 @@ use lyra_ast::{
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
-use lyra_source::NameSpan;
+use lyra_source::DeclSpan;
 use smol_str::SmolStr;
 
 use crate::builder::DefContext;
@@ -74,7 +74,7 @@ pub(crate) fn collect_module_instantiation(
                 decl_site,
                 name_site: inst_name_site,
                 type_site: None,
-                name_span: NameSpan::new(inst_name_tok.text_range()),
+                name_span: DeclSpan::new(inst_name_tok.text_range()),
                 scope,
                 origin: SymbolOrigin::Instance(idx),
             });
@@ -128,7 +128,7 @@ pub(crate) fn collect_foreach_vars(
             decl_site: foreach_stmt_site,
             name_site: decl_name_site,
             type_site: None,
-            name_span: NameSpan::new(name_tok.text_range()),
+            name_span: DeclSpan::new(name_tok.text_range()),
             scope: foreach_scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -229,7 +229,7 @@ fn collect_callable_inner(
         decl_site,
         name_site: decl_site,
         type_site: callable_type_site,
-        name_span: NameSpan::new(name_tok.text_range()),
+        name_span: DeclSpan::new(name_tok.text_range()),
         scope,
         origin: SymbolOrigin::TypeSpec,
     });
@@ -297,7 +297,7 @@ fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: 
                     decl_site: port_decl_site,
                     name_site: decl_name_site,
                     type_site: port_type_site,
-                    name_span: NameSpan::new(name_tok.text_range()),
+                    name_span: DeclSpan::new(name_tok.text_range()),
                     scope,
                     origin: SymbolOrigin::TypeSpec,
                 });
@@ -348,7 +348,7 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, decl: &ModportDecl,
             decl_site: modport_decl_site,
             name_site: modport_decl_site,
             type_site: None,
-            name_span: NameSpan::new(name_tok.text_range()),
+            name_span: DeclSpan::new(name_tok.text_range()),
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -395,7 +395,7 @@ fn collect_modport_entries(
                         direction: dir,
                         target: ModportTarget::ImplicitMember { member_name: name },
                         port_id,
-                        name_span: NameSpan::new(port_name_tok.text_range()),
+                        name_span: DeclSpan::new(port_name_tok.text_range()),
                     });
                 }
             }
@@ -420,7 +420,7 @@ fn collect_modport_entries(
                         direction: dir,
                         target,
                         port_id,
-                        name_span: NameSpan::new(port_name_tok.text_range()),
+                        name_span: DeclSpan::new(port_name_tok.text_range()),
                     });
                 }
             }
@@ -461,7 +461,7 @@ fn collect_tf_group_entries(
             name: SmolStr::new(name_tok.text()),
             form,
             port_site,
-            name_span: NameSpan::new(name_tok.text_range()),
+            name_span: DeclSpan::new(name_tok.text_range()),
         });
     }
 }
@@ -612,7 +612,7 @@ pub(crate) fn collect_param_decl(
                     decl_site,
                     name_site: decl_name_site,
                     type_site: param_type_site,
-                    name_span: NameSpan::new(name_tok.text_range()),
+                    name_span: DeclSpan::new(name_tok.text_range()),
                     scope,
                     origin: SymbolOrigin::TypeSpec,
                 });
@@ -666,7 +666,7 @@ fn collect_type_param_decl(
             decl_site,
             name_site: decl_name_site,
             type_site: default_type_site,
-            name_span: NameSpan::new(name_tok.text_range()),
+            name_span: DeclSpan::new(name_tok.text_range()),
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -803,7 +803,7 @@ fn collect_declarators_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, facts:
                     decl_site: facts.decl_site,
                     name_site: decl_name_site,
                     type_site: facts.decl_type_site,
-                    name_span: NameSpan::new(name_tok.text_range()),
+                    name_span: DeclSpan::new(name_tok.text_range()),
                     scope: facts.scope,
                     origin: facts.origin,
                 });

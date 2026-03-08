@@ -5,7 +5,7 @@ use lyra_semantic::modport_def::ModportDefId;
 use lyra_semantic::modport_def::ModportTarget;
 use lyra_semantic::symbols::Namespace;
 use lyra_semantic::types::{ModportTfViewEntry, ModportView, ModportViewEntry, ModportViewTarget};
-use lyra_source::NameSpan;
+use lyra_source::DeclSpan;
 use smol_str::SmolStr;
 
 use crate::semantic::def_index_file;
@@ -51,18 +51,18 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
 
     let mut entries = Vec::new();
     let mut diags = Vec::new();
-    let mut seen_signal_ports: std::collections::HashMap<SmolStr, (Site, NameSpan)> =
+    let mut seen_signal_ports: std::collections::HashMap<SmolStr, (Site, DeclSpan)> =
         std::collections::HashMap::new();
 
     for entry in &*modport_def.entries {
         let entry_primary = DiagSpan::Site(entry.port_id);
-        let entry_label = DiagSpan::Name(entry.name_span);
+        let entry_label = DiagSpan::Decl(entry.name_span);
         if let Some(&(prev_site, prev_name_span)) = seen_signal_ports.get(&entry.port_name) {
             diags.push(SemanticDiag {
                 kind: SemanticDiagKind::DuplicateDefinition {
                     name: entry.port_name.clone(),
                     original_primary: DiagSpan::Site(prev_site),
-                    original_label: Some(DiagSpan::Name(prev_name_span)),
+                    original_label: Some(DiagSpan::Decl(prev_name_span)),
                 },
                 primary: entry_primary,
                 label: Some(entry_label),
@@ -116,17 +116,17 @@ fn resolve_modport_tf_entries(
     diags: &mut Vec<SemanticDiag>,
 ) -> Vec<ModportTfViewEntry> {
     let mut result = Vec::new();
-    let mut seen_tf_ports: std::collections::HashMap<SmolStr, (Site, NameSpan)> =
+    let mut seen_tf_ports: std::collections::HashMap<SmolStr, (Site, DeclSpan)> =
         std::collections::HashMap::new();
     for tf in tf_entries {
         let tf_primary = DiagSpan::Site(tf.port_site);
-        let tf_label = DiagSpan::Name(tf.name_span);
+        let tf_label = DiagSpan::Decl(tf.name_span);
         if let Some(&(prev_site, prev_name_span)) = seen_tf_ports.get(&tf.name) {
             diags.push(SemanticDiag {
                 kind: SemanticDiagKind::DuplicateDefinition {
                     name: tf.name.clone(),
                     original_primary: DiagSpan::Site(prev_site),
-                    original_label: Some(DiagSpan::Name(prev_name_span)),
+                    original_label: Some(DiagSpan::Decl(prev_name_span)),
                 },
                 primary: tf_primary,
                 label: Some(tf_label),

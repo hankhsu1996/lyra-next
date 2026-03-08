@@ -17,16 +17,16 @@ use super::*;
 
 // DiagSpan fallback contract tests
 
-/// When the label is `Name(NameSpan::INVALID)`, the lowering layer must fall
+/// When the label is `Name(DeclSpan::INVALID)`, the lowering layer must fall
 /// back to the primary `Site`, not produce a zero-length range at offset 0.
 #[test]
 fn choose_best_diag_span_falls_back_on_invalid_name() {
     use lyra_semantic::diagnostic::DiagSpan;
-    use lyra_source::NameSpan;
+    use lyra_source::DeclSpan;
 
     let site = lyra_ast::ErasedAstId::placeholder(lyra_source::FileId(0));
     let primary = DiagSpan::Site(site);
-    let label = Some(DiagSpan::Name(NameSpan::INVALID));
+    let label = Some(DiagSpan::Decl(DeclSpan::INVALID));
 
     let tr = crate::lower_diag::choose_best_diag_span(primary, label);
     // Must use the primary's range, not INVALID's 0..0
@@ -51,12 +51,12 @@ fn choose_best_diag_span_falls_back_on_invalid_token() {
 #[test]
 fn choose_best_diag_span_prefers_valid_name() {
     use lyra_semantic::diagnostic::DiagSpan;
-    use lyra_source::{NameSpan, TextRange, TextSize};
+    use lyra_source::{DeclSpan, TextRange, TextSize};
 
     let site = lyra_ast::ErasedAstId::placeholder(lyra_source::FileId(0));
     let primary = DiagSpan::Site(site);
-    let name = NameSpan::new(TextRange::new(TextSize::new(10), TextSize::new(13)));
-    let label = Some(DiagSpan::Name(name));
+    let name = DeclSpan::new(TextRange::new(TextSize::new(10), TextSize::new(13)));
+    let label = Some(DiagSpan::Decl(name));
 
     let tr = crate::lower_diag::choose_best_diag_span(primary, label);
     assert_eq!(tr, name.text_range());

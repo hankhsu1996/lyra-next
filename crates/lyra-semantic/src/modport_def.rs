@@ -1,5 +1,5 @@
 use crate::Site;
-use lyra_source::NameSpan;
+use lyra_source::DeclSpan;
 use smol_str::SmolStr;
 
 use crate::interface_id::InterfaceDefId;
@@ -31,7 +31,7 @@ pub struct ModportEntry {
     pub direction: PortDirection,
     pub target: ModportTarget,
     pub port_id: Site,
-    pub name_span: NameSpan,
+    pub name_span: DeclSpan,
 }
 
 /// What a modport port maps to.
@@ -74,5 +74,5 @@ pub struct ModportTfEntry {
     pub name: SmolStr,
     pub form: ModportTfForm,
     pub port_site: Site,
-    pub name_span: NameSpan,
+    pub name_span: DeclSpan,
 }

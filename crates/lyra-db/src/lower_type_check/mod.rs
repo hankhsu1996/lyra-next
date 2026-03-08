@@ -12,6 +12,7 @@ pub(crate) fn lower_type_check_item(
     unit: crate::CompilationUnit,
     item: &TypeCheckItem,
     source_map: &lyra_preprocess::SourceMap,
+    expanded_text: &str,
     seen: &mut std::collections::HashSet<(
         lyra_ast::ErasedAstId,
         lyra_ast::ErasedAstId,
@@ -38,7 +39,7 @@ pub(crate) fn lower_type_check_item(
         | TypeCheckItem::ModportEmptyPortAccess { .. }
         | TypeCheckItem::ModportExprNotAssignable { .. }
         | TypeCheckItem::MemberNotInModport { .. } => {
-            misc::lower_modport_item(item, source_map, diags);
+            misc::lower_modport_item(item, source_map, expanded_text, diags);
         }
         TypeCheckItem::EnumCastOutOfRange { .. } => {
             enum_diag::lower_enum_cast_item(db, unit, item, source_map, diags);
@@ -47,7 +48,7 @@ pub(crate) fn lower_type_check_item(
             stream::lower_stream_with_non_array(item, source_map, diags);
         }
         TypeCheckItem::MethodCallError { .. } => {
-            call::lower_method_call_error(item, source_map, diags);
+            call::lower_method_call_error(item, source_map, expanded_text, diags);
         }
         TypeCheckItem::UnsupportedLhsForm { .. } | TypeCheckItem::InvalidLhs { .. } => {
             misc::lower_lhs_item(item, source_map, diags);

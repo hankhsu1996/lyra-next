@@ -1,7 +1,7 @@
 use lyra_ast::{AstIdMap, TypeNameRef, TypeSpec};
 
 use crate::Site;
-use lyra_source::{FileId, NameSpan};
+use lyra_source::{DeclSpan, FileId};
 use smol_str::SmolStr;
 
 use crate::enum_def::EnumDefIdx;
@@ -89,7 +89,7 @@ pub struct RecordDef {
 pub struct RecordField {
     pub name: SmolStr,
     pub name_site: Site,
-    pub name_span: NameSpan,
+    pub name_span: DeclSpan,
     pub ty: TypeRef,
 }
 

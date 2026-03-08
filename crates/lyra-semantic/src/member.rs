@@ -1,9 +1,6 @@
 use crate::Site;
 
 use crate::enum_def::EnumId;
-use lyra_lexer::SyntaxKind;
-
-use crate::member_name::MemberNameToken;
 use crate::symbols::{GlobalSymbolId, SymbolId};
 use crate::types::{AssocIndex, Ty, UnpackedDim};
 
@@ -243,14 +240,14 @@ enum ArrayMethodReturn {
 }
 
 impl ArrayMethodKind {
-    /// Resolve from a `MemberNameToken`, using token kind for keyword methods.
-    pub fn from_member_token(tok: &MemberNameToken) -> Option<Self> {
-        match tok.kind {
-            SyntaxKind::AndKw => Some(Self::And),
-            SyntaxKind::OrKw => Some(Self::Or),
-            SyntaxKind::XorKw => Some(Self::Xor),
-            SyntaxKind::UniqueKw => Some(Self::Unique),
-            _ => Self::from_ident_text(tok.text.as_str()),
+    /// Resolve method name to kind from token text.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "and" => Some(Self::And),
+            "or" => Some(Self::Or),
+            "xor" => Some(Self::Xor),
+            "unique" => Some(Self::Unique),
+            _ => Self::from_ident_text(name),
         }
     }
 

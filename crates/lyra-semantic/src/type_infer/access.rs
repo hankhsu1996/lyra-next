@@ -1,12 +1,9 @@
-use lyra_ast::{FieldExpr, IndexExpr};
-use smol_str::SmolStr;
-
 use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx, try_integral_view};
 use super::infer_expr;
 use crate::member::{MemberKind, MemberLookupError};
-use crate::member_name::MemberNameToken;
 use crate::site;
 use crate::types::{AssocIndex, Ty, UnpackedDim};
+use lyra_ast::{FieldExpr, IndexExpr};
 
 /// Result of checking an index expression against a typed associative array key.
 enum AssocKeyCheck {
@@ -155,11 +152,7 @@ pub(super) fn infer_field_access(field_expr: &FieldExpr, ctx: &dyn InferCtx) -> 
         return lhs_type;
     }
 
-    let member = MemberNameToken {
-        kind: field_tok.kind(),
-        text: SmolStr::new(field_tok.text()),
-    };
-    match ctx.member_lookup(&lhs_type.ty, &member) {
+    match ctx.member_lookup(&lhs_type.ty, field_tok.text()) {
         Ok(info) => match info.kind {
             MemberKind::BuiltinMethod(_) | MemberKind::InterfaceCallable { .. } => {
                 ExprType::error(ExprTypeErrorKind::MethodRequiresCall)

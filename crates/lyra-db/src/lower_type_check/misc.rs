@@ -4,6 +4,7 @@ use lyra_semantic::type_check::{AccessKind, TypeCheckItem};
 pub(super) fn lower_modport_item(
     item: &TypeCheckItem,
     source_map: &lyra_preprocess::SourceMap,
+    expanded_text: &str,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
     match item {
@@ -78,14 +79,12 @@ pub(super) fn lower_modport_item(
                 lyra_diag::MessageId::ModportExprNotAssignable,
             );
         }
-        TypeCheckItem::MemberNotInModport {
-            member_name_span,
-            member_name,
-        } => {
+        TypeCheckItem::MemberNotInModport { member_name_span } => {
             let Some(span) = source_map.map_span(member_name_span.text_range()) else {
                 return;
             };
-            let args = vec![lyra_diag::Arg::Name(member_name.clone())];
+            let name = member_name_span.text_from(expanded_text);
+            let args = vec![lyra_diag::Arg::Name(smol_str::SmolStr::new(name))];
             diags.push(
                 lyra_diag::Diagnostic::new(
                     lyra_diag::Severity::Error,
@@ -356,7 +355,7 @@ pub(super) fn lower_queue_bound_item(
 fn emit_simple_modport_diag(
     source_map: &lyra_preprocess::SourceMap,
     diags: &mut Vec<lyra_diag::Diagnostic>,
-    name_span: lyra_source::NameSpan,
+    name_span: lyra_source::TokenSpan,
     severity: lyra_diag::Severity,
     code: lyra_diag::DiagKey,
     message_id: lyra_diag::MessageId,

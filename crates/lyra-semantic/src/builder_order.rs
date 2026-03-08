@@ -102,10 +102,10 @@ pub(crate) fn detect_duplicates(
                 kind: SemanticDiagKind::DuplicateDefinition {
                     name: curr.name.clone(),
                     original_primary: DiagSpan::Site(prev.name_site),
-                    original_label: Some(DiagSpan::Name(prev.name_span)),
+                    original_label: Some(DiagSpan::Decl(prev.name_span)),
                 },
                 primary: DiagSpan::Site(curr.name_site),
-                label: Some(DiagSpan::Name(curr.name_span)),
+                label: Some(DiagSpan::Decl(curr.name_span)),
             });
         }
     }

@@ -83,7 +83,7 @@ pub fn enum_variants<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> E
         let primary = member
             .range_site
             .map_or(DiagSpan::Site(member.name_site), DiagSpan::Site);
-        let label = Some(DiagSpan::Name(member.name_span));
+        let label = Some(DiagSpan::Decl(member.name_span));
         match range_kind {
             EnumMemberRangeKind::Count(expr_id) => {
                 let result = eval_const_int(db, ConstExprRef::new(db, unit, *expr_id));
@@ -239,7 +239,7 @@ pub fn enum_variant_index(
         for variant in &*expanded.variants {
             let member = &enum_def.members[variant.source_member as usize];
             let variant_primary = DiagSpan::Site(member.name_site);
-            let variant_label = Some(DiagSpan::Name(member.name_span));
+            let variant_label = Some(DiagSpan::Decl(member.name_span));
             // Check collision with other generated names in this scope
             if scope_map.contains_key(&variant.name) {
                 diagnostics.push(SemanticDiag {

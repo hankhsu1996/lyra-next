@@ -16,12 +16,6 @@ This is broader than any single feature. Any cross-file join keyed by `GlobalDef
 
 The long-term fix is to give global definitions their own stable semantic identity rather than reusing `Site` as the definition ID. Exposed by: any cross-file semantic relation that wants to treat definitions as durable semantic entities rather than syntax anchors.
 
-### Semantic identity model lacks token-granular stable identity
-
-The stable identity model currently covers AST nodes only (`Site` / `ErasedAstId`), not individual tokens. Any semantic product that needs to anchor a specific token -- a keyword, an operator, a time literal -- is forced into a weaker representation: raw text (`SmolStr`) without source identity, or ad hoc token rescans at consumption time.
-
-This is not a local feature issue. It is a limitation of the identity model itself. Token-granular semantic products (operator anchoring, keyword-level diagnostics, time literal identity) cannot be represented with the same precision and stability as node-level products until the identity model is extended. Exposed by: timeunit/timeprecision collection (LRM 3.14.2.2), operator tokens in expressions.
-
 ## Layer and API shape gaps
 
 These are worth fixing but are not foundational limitations of the semantic data model.

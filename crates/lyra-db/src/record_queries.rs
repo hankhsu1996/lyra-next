@@ -392,7 +392,7 @@ pub fn record_diagnostics<'db>(
                             packing: SmolStr::new(pk),
                             category: SmolStr::new(category),
                         },
-                        primary: DiagSpan::Name(def_field.name_span),
+                        primary: DiagSpan::Decl(def_field.name_span),
                         label: None,
                     });
                 }

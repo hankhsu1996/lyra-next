@@ -1,4 +1,4 @@
-use lyra_source::{NameSpan, TokenSpan};
+use lyra_source::{DeclSpan, TokenSpan};
 use smol_str::SmolStr;
 
 use crate::Site;
@@ -11,8 +11,8 @@ use crate::Site;
 pub enum DiagSpan {
     /// CST node anchor.
     Site(Site),
-    /// Identifier token span. May be INVALID (parse recovery).
-    Name(NameSpan),
+    /// Declared-name token span. May be INVALID (parse recovery).
+    Decl(DeclSpan),
     /// Non-identifier token span (keyword, operator, punctuation).
     Token(TokenSpan),
 }

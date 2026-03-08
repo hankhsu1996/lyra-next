@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::Site;
-use lyra_source::{FileId, NameSpan};
+use lyra_source::{DeclSpan, FileId};
 use smol_str::SmolStr;
 
 use crate::def_entry::{DefEntry, DefScope};
@@ -332,7 +332,7 @@ pub struct LocalDecl {
     pub name: SmolStr,
     pub namespace: Namespace,
     pub decl_site: Site,
-    pub name_span: NameSpan,
+    pub name_span: DeclSpan,
     /// File-local monotonic rank from preorder syntax traversal.
     pub order_key: u32,
 }

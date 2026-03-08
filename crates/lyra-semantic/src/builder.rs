@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lyra_ast::{AstIdMap, AstNode, ExportDecl, HasSyntax, Port, TypeSpec};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode, SyntaxToken};
-use lyra_source::{FileId, NameSpan};
+use lyra_source::{DeclSpan, FileId};
 use smol_str::SmolStr;
 
 use crate::builder_order::{assign_order_keys, detect_duplicates};
@@ -392,7 +392,7 @@ impl<'a> DefContext<'a> {
         decl_site: crate::Site,
         kind: DefinitionKind,
         name: SmolStr,
-        name_span: NameSpan,
+        name_span: DeclSpan,
         scope: DefScope,
     ) -> GlobalDefId {
         let entry = DefEntry {
@@ -567,7 +567,7 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = NameSpan::new(name_tok.text_range());
+    let name_span = DeclSpan::new(name_tok.text_range());
     let module_scope = ctx.scopes.push(ScopeKind::Module, None);
     ctx.register_scope_owner(module_scope, decl_site);
     ctx.push_def_entry(
@@ -622,7 +622,7 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = NameSpan::new(name_tok.text_range());
+    let name_span = DeclSpan::new(name_tok.text_range());
     let package_scope = ctx.scopes.push(ScopeKind::Package, None);
     ctx.register_scope_owner(package_scope, decl_site);
     ctx.push_def_entry(
@@ -657,7 +657,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = NameSpan::new(name_tok.text_range());
+    let name_span = DeclSpan::new(name_tok.text_range());
     let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
     ctx.register_scope_owner(iface_scope, decl_site);
     let def_id = ctx.push_def_entry(
@@ -710,7 +710,7 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = NameSpan::new(name_tok.text_range());
+    let name_span = DeclSpan::new(name_tok.text_range());
     let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
     ctx.register_scope_owner(prog_scope, decl_site);
     ctx.push_def_entry(
@@ -760,7 +760,7 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = NameSpan::new(name_tok.text_range());
+    let name_span = DeclSpan::new(name_tok.text_range());
     let prim_scope = ctx.scopes.push(ScopeKind::Module, None);
     ctx.register_scope_owner(prim_scope, decl_site);
     ctx.push_def_entry(
@@ -784,7 +784,7 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let name_span = NameSpan::new(name_tok.text_range());
+    let name_span = DeclSpan::new(name_tok.text_range());
     let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
     ctx.register_scope_owner(cfg_scope, decl_site);
     ctx.push_def_entry(
@@ -830,7 +830,7 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 ));
                 continue;
             };
-            let name_span = NameSpan::new(name_tok.text_range());
+            let name_span = DeclSpan::new(name_tok.text_range());
             let port_type_site = port
                 .type_spec()
                 .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));

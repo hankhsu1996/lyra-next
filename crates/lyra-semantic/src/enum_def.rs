@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Site;
-use lyra_source::{FileId, NameSpan};
+use lyra_source::{DeclSpan, FileId};
 use smol_str::SmolStr;
 
 use crate::diagnostic::SemanticDiag;
@@ -56,7 +56,7 @@ pub enum EnumMemberRangeKind {
 pub struct EnumMemberDef {
     pub name: SmolStr,
     pub name_site: Site,
-    pub name_span: NameSpan,
+    pub name_span: DeclSpan,
     pub range: Option<EnumMemberRangeKind>,
     pub range_site: Option<Site>,
     pub init: Option<Site>,

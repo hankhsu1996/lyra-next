@@ -4,7 +4,7 @@ use lyra_ast::{
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
-use lyra_source::NameSpan;
+use lyra_source::{DeclSpan, TokenSpan};
 use smol_str::SmolStr;
 
 use crate::builder::DefContext;
@@ -209,7 +209,7 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, td: &TypedefDecl, scope:
             decl_site,
             name_site: decl_site,
             type_site: typedef_type_site,
-            name_span: NameSpan::new(name_tok.text_range()),
+            name_span: DeclSpan::new(name_tok.text_range()),
             scope,
             origin,
         });
@@ -241,7 +241,7 @@ pub(crate) fn collect_nettype_decl(ctx: &mut DefContext<'_>, nd: &NettypeDecl, s
     };
     let resolve_fn = nd.resolve_fn_token().map(|tok| ResolveFnRef {
         name: SmolStr::new(tok.text()),
-        span: NameSpan::new(tok.text_range()),
+        span: TokenSpan::new(tok.text_range()),
     });
     let idx = NettypeDefIdx(ctx.nettype_defs.len() as u32);
     ctx.nettype_defs.push(NettypeDef {
@@ -258,7 +258,7 @@ pub(crate) fn collect_nettype_decl(ctx: &mut DefContext<'_>, nd: &NettypeDecl, s
         decl_site,
         name_site: decl_site,
         type_site: Some(first_type_site),
-        name_span: NameSpan::new(name_tok.text_range()),
+        name_span: DeclSpan::new(name_tok.text_range()),
         scope,
         origin: SymbolOrigin::Nettype(idx),
     });
@@ -367,7 +367,7 @@ fn collect_enum_def(
         members.push(EnumMemberDef {
             name: name.clone(),
             name_site: erased_ast_id,
-            name_span: NameSpan::new(name_tok.text_range()),
+            name_span: DeclSpan::new(name_tok.text_range()),
             range: range_kind,
             range_site,
             init,
@@ -389,7 +389,7 @@ fn collect_enum_def(
                 decl_site: erased_ast_id,
                 name_site: erased_ast_id,
                 type_site: None,
-                name_span: NameSpan::new(name_tok.text_range()),
+                name_span: DeclSpan::new(name_tok.text_range()),
                 scope,
                 origin: SymbolOrigin::EnumVariant(idx),
             });
@@ -484,7 +484,7 @@ fn collect_record_def(
                 fields.push(RecordField {
                     name: SmolStr::new(name_tok.text()),
                     name_site: decl_site,
-                    name_span: NameSpan::new(name_tok.text_range()),
+                    name_span: DeclSpan::new(name_tok.text_range()),
                     ty: ty.clone(),
                 });
             }
