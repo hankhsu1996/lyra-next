@@ -373,6 +373,7 @@ pub enum SyntaxKind {
 
     // Macro operators (only emitted in LexMode::Preprocess)
     MacroStringify,
+    MacroTripleStringify,
     MacroConcat,
     MacroEscapedQuote,
 

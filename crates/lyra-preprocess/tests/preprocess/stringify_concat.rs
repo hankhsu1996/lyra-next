@@ -141,6 +141,7 @@ fn no_operator_tokens_in_output() {
             !matches!(
                 t.kind,
                 lyra_lexer::SyntaxKind::MacroStringify
+                    | lyra_lexer::SyntaxKind::MacroTripleStringify
                     | lyra_lexer::SyntaxKind::MacroConcat
                     | lyra_lexer::SyntaxKind::MacroEscapedQuote
             ),
@@ -200,5 +201,99 @@ fn stringify_with_nested_macro() {
         out.expanded_text.contains("\"Hello world\""),
         "expanded: {:?}",
         out.expanded_text
+    );
+}
+
+// Triple-quote stringify: basic wrapped text
+#[test]
+fn triple_stringify_basic() {
+    let out = pp("`define MSG(x) `\"\"\"Hello x`\"\"\"\n`MSG(world)\n");
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert!(
+        out.expanded_text.contains("\"\"\"Hello world\"\"\""),
+        "expanded: {:?}",
+        out.expanded_text
+    );
+}
+
+// Triple-quote stringify: argument substitution
+#[test]
+fn triple_stringify_with_arg_expansion() {
+    let out = pp("`define Q(a,b) `\"\"\"a and b`\"\"\"\n`Q(left,right)\n");
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert!(
+        out.expanded_text.contains("\"\"\"left and right\"\"\""),
+        "expanded: {:?}",
+        out.expanded_text
+    );
+}
+
+// Triple-quote stringify: nested macro expansion
+#[test]
+fn triple_stringify_with_nested_macro_expansion() {
+    let out = pp("`define INNER world\n`define MSG(x) `\"\"\"Hello x`\"\"\"\n`MSG(`INNER)\n");
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert!(
+        out.expanded_text.contains("\"\"\"Hello world\"\"\""),
+        "expanded: {:?}",
+        out.expanded_text
+    );
+}
+
+// Triple-quote stringify: empty body produces """"""
+#[test]
+fn triple_stringify_empty() {
+    let out = pp("`define Q `\"\"\"`\"\"\"\n`Q\n");
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert!(
+        out.expanded_text.contains("\"\"\"\"\"\""),
+        "expanded: {:?}",
+        out.expanded_text
+    );
+}
+
+// Triple-quote stringify: escaped quote works inside
+#[test]
+fn triple_stringify_with_escaped_quote() {
+    let out = pp("`define MSG(x,y) `\"\"\"x: `\\`\"y`\\`\"`\"\"\"\n`MSG(left,right)\n");
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert!(
+        out.expanded_text
+            .contains("\"\"\"left: \\\"right\\\"\"\"\""),
+        "expanded: {:?}",
+        out.expanded_text
+    );
+}
+
+// Triple-quote stringify: newline terminates macro definition body even after opening `"""
+#[test]
+fn triple_stringify_definition_newline_terminates() {
+    // The opening `""" does not start a multiline region in the macro body;
+    // the newline terminates the definition normally, so "EXTRA" on the
+    // next line is NOT absorbed into the macro body.
+    let out = pp("`define MSG(x) `\"\"\"Hello\nEXTRA x`\"\"\"\n`MSG(world)\n");
+    // "EXTRA" should appear as top-level text, not inside the stringify
+    assert!(
+        out.expanded_text.contains("EXTRA"),
+        "EXTRA should be in expanded text as top-level content: {:?}",
+        out.expanded_text
+    );
+    assert!(
+        !out.expanded_text.contains("EXTRA world"),
+        "EXTRA should not be inside the macro expansion: {:?}",
+        out.expanded_text
+    );
+}
+
+// Triple-quote stringify: unterminated produces diagnostic
+#[test]
+fn triple_stringify_unterminated() {
+    let out = pp("`define BAD(x) `\"\"\"Hello x\n`BAD(world)\n");
+    assert!(
+        out.errors
+            .iter()
+            .any(|e| e.message.contains("unterminated")),
+        "errors: {:?}",
+        out.errors
     );
 }

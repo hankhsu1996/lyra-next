@@ -22,7 +22,10 @@ pub(crate) fn has_macro_operators(tokens: &[Token]) -> bool {
     tokens.iter().any(|t| {
         matches!(
             t.kind,
-            SyntaxKind::MacroStringify | SyntaxKind::MacroConcat | SyntaxKind::MacroEscapedQuote
+            SyntaxKind::MacroStringify
+                | SyntaxKind::MacroTripleStringify
+                | SyntaxKind::MacroConcat
+                | SyntaxKind::MacroEscapedQuote
         )
     })
 }
@@ -37,14 +40,150 @@ pub(crate) struct OperatorError {
     pub exp_range: TextRange,
 }
 
-fn emit_string_literal(buf: &str) -> MacroTok {
-    let literal = format!("\"{buf}\"");
+/// Delimiter kind for the stringify operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StringifyDelimiter {
+    Regular,
+    Triple,
+}
+
+fn emit_stringified_literal(delimiter: StringifyDelimiter, buf: &str) -> MacroTok {
+    let literal = match delimiter {
+        StringifyDelimiter::Regular => format!("\"{buf}\""),
+        StringifyDelimiter::Triple => format!("\"\"\"{buf}\"\"\""),
+    };
     MacroTok {
         token: Token {
             kind: SyntaxKind::StringLiteral,
             len: TextSize::new(literal.len() as u32),
         },
         text: SmolStr::from(&literal),
+    }
+}
+
+struct OperatorResolver {
+    out: Vec<MacroTok>,
+    errors: Vec<OperatorError>,
+    active_stringify: Option<StringifyDelimiter>,
+    stringify_buf: String,
+    pending_concat: bool,
+    byte_offset: u32,
+    concat_range: TextRange,
+}
+
+impl OperatorResolver {
+    fn new() -> Self {
+        Self {
+            out: Vec::new(),
+            errors: Vec::new(),
+            active_stringify: None,
+            stringify_buf: String::new(),
+            pending_concat: false,
+            byte_offset: 0,
+            concat_range: TextRange::empty(TextSize::new(0)),
+        }
+    }
+
+    fn handle_stringify(&mut self, tok: &MacroTok) {
+        let this_delim = if tok.token.kind == SyntaxKind::MacroTripleStringify {
+            StringifyDelimiter::Triple
+        } else {
+            StringifyDelimiter::Regular
+        };
+        if let Some(delim) = self.active_stringify {
+            if delim == this_delim {
+                let lit_tok = emit_stringified_literal(delim, &self.stringify_buf);
+                if self.pending_concat {
+                    apply_concat(&mut self.out, lit_tok, &mut self.errors, self.concat_range);
+                    self.pending_concat = false;
+                } else {
+                    self.out.push(lit_tok);
+                }
+                self.active_stringify = None;
+            } else {
+                self.stringify_buf.push_str(&tok.text);
+            }
+        } else {
+            self.active_stringify = Some(this_delim);
+            self.stringify_buf.clear();
+        }
+    }
+
+    fn handle_escaped_quote(&mut self, tok_range: TextRange) {
+        if self.active_stringify.is_some() {
+            self.stringify_buf.push_str("\\\"");
+        } else {
+            self.errors.push(OperatorError {
+                message: SmolStr::from(
+                    "escaped quote operator `\\`\" used outside stringify context",
+                ),
+                exp_range: tok_range,
+            });
+        }
+    }
+
+    fn handle_concat(&mut self, tok_range: TextRange) {
+        if self.active_stringify.is_some() {
+            let trimmed_len = self.stringify_buf.trim_end().len();
+            self.stringify_buf.truncate(trimmed_len);
+        } else {
+            while self.out.last().is_some_and(|t| t.token.kind.is_trivia()) {
+                self.out.pop();
+            }
+        }
+        self.concat_range = tok_range;
+        self.pending_concat = true;
+    }
+
+    fn handle_content(&mut self, tok: &MacroTok) -> bool {
+        if self.active_stringify.is_some() {
+            if self.pending_concat {
+                if tok.token.kind.is_trivia() {
+                    return true;
+                }
+                self.stringify_buf.push_str(&tok.text);
+                self.pending_concat = false;
+            } else {
+                self.stringify_buf.push_str(&tok.text);
+            }
+        } else if self.pending_concat {
+            if tok.token.kind.is_trivia() {
+                return true;
+            }
+            apply_concat(
+                &mut self.out,
+                tok.clone(),
+                &mut self.errors,
+                self.concat_range,
+            );
+            self.pending_concat = false;
+        } else {
+            self.out.push(tok.clone());
+        }
+        false
+    }
+
+    fn finalize(mut self) -> (Vec<MacroTok>, Vec<OperatorError>) {
+        if let Some(delim) = self.active_stringify {
+            let end_pos = TextSize::new(self.byte_offset);
+            let label = match delim {
+                StringifyDelimiter::Regular => "unterminated macro stringify",
+                StringifyDelimiter::Triple => "unterminated macro triple-quote stringify",
+            };
+            self.errors.push(OperatorError {
+                message: SmolStr::from(label),
+                exp_range: TextRange::empty(end_pos),
+            });
+            self.out
+                .push(emit_stringified_literal(delim, &self.stringify_buf));
+        }
+        if self.pending_concat {
+            self.errors.push(OperatorError {
+                message: SmolStr::from("token concatenation operator at end of macro body"),
+                exp_range: self.concat_range,
+            });
+        }
+        (self.out, self.errors)
     }
 }
 
@@ -55,109 +194,29 @@ fn emit_string_literal(buf: &str) -> MacroTok {
 /// Operates on `MacroTok` (token + text pairs) so it can produce
 /// correct output text without access to a source string.
 pub(crate) fn resolve_macro_operators(tokens: &[MacroTok]) -> (Vec<MacroTok>, Vec<OperatorError>) {
-    let mut errors = Vec::new();
-    let mut out: Vec<MacroTok> = Vec::new();
-
-    let mut in_stringify = false;
-    let mut stringify_buf = String::new();
-    let mut pending_concat = false;
-    let mut byte_offset: u32 = 0;
-    let mut concat_range = TextRange::empty(TextSize::new(0));
-
+    let mut r = OperatorResolver::new();
     for tok in tokens {
         let tok_len = u32::from(tok.token.len);
         let tok_range = TextRange::new(
-            TextSize::new(byte_offset),
-            TextSize::new(byte_offset + tok_len),
+            TextSize::new(r.byte_offset),
+            TextSize::new(r.byte_offset + tok_len),
         );
         match tok.token.kind {
-            SyntaxKind::MacroStringify => {
-                if in_stringify {
-                    // End stringify: emit string literal
-                    let lit_tok = emit_string_literal(&stringify_buf);
-                    if pending_concat {
-                        apply_concat(&mut out, lit_tok, &mut errors, concat_range);
-                        pending_concat = false;
-                    } else {
-                        out.push(lit_tok);
-                    }
-                    in_stringify = false;
-                } else {
-                    in_stringify = true;
-                    stringify_buf.clear();
-                }
+            SyntaxKind::MacroStringify | SyntaxKind::MacroTripleStringify => {
+                r.handle_stringify(tok);
             }
-            SyntaxKind::MacroEscapedQuote => {
-                if in_stringify {
-                    stringify_buf.push_str("\\\"");
-                } else {
-                    errors.push(OperatorError {
-                        message: SmolStr::from(
-                            "escaped quote operator `\\`\" used outside stringify context",
-                        ),
-                        exp_range: tok_range,
-                    });
-                }
-            }
-            SyntaxKind::MacroConcat => {
-                if in_stringify {
-                    // Trim trailing whitespace in stringify buffer
-                    let trimmed_len = stringify_buf.trim_end().len();
-                    stringify_buf.truncate(trimmed_len);
-                } else {
-                    // Eagerly remove trailing trivia from output so error
-                    // recovery (missing RHS) produces clean results.
-                    while out.last().is_some_and(|t| t.token.kind.is_trivia()) {
-                        out.pop();
-                    }
-                }
-                concat_range = tok_range;
-                pending_concat = true;
-            }
+            SyntaxKind::MacroEscapedQuote => r.handle_escaped_quote(tok_range),
+            SyntaxKind::MacroConcat => r.handle_concat(tok_range),
             _ => {
-                if in_stringify {
-                    if pending_concat {
-                        if tok.token.kind.is_trivia() {
-                            byte_offset += tok_len;
-                            continue;
-                        }
-                        stringify_buf.push_str(&tok.text);
-                        pending_concat = false;
-                    } else {
-                        stringify_buf.push_str(&tok.text);
-                    }
-                } else if pending_concat {
-                    if tok.token.kind.is_trivia() {
-                        byte_offset += tok_len;
-                        continue;
-                    }
-                    apply_concat(&mut out, tok.clone(), &mut errors, concat_range);
-                    pending_concat = false;
-                } else {
-                    out.push(tok.clone());
+                if r.handle_content(tok) {
+                    r.byte_offset += tok_len;
+                    continue;
                 }
             }
         }
-        byte_offset += tok_len;
+        r.byte_offset += tok_len;
     }
-
-    if in_stringify {
-        let end_pos = TextSize::new(byte_offset);
-        errors.push(OperatorError {
-            message: SmolStr::from("unterminated macro stringify"),
-            exp_range: TextRange::empty(end_pos),
-        });
-        out.push(emit_string_literal(&stringify_buf));
-    }
-
-    if pending_concat {
-        errors.push(OperatorError {
-            message: SmolStr::from("token concatenation operator at end of macro body"),
-            exp_range: concat_range,
-        });
-    }
-
-    (out, errors)
+    r.finalize()
 }
 
 /// Apply token concatenation: pop trailing trivia and the last
@@ -254,7 +313,10 @@ pub(crate) fn strip_preprocess_only(tokens: &mut Vec<Token>, text: &mut String) 
         let len: usize = t.len.into();
         if !matches!(
             t.kind,
-            SyntaxKind::MacroStringify | SyntaxKind::MacroConcat | SyntaxKind::MacroEscapedQuote
+            SyntaxKind::MacroStringify
+                | SyntaxKind::MacroTripleStringify
+                | SyntaxKind::MacroConcat
+                | SyntaxKind::MacroEscapedQuote
         ) {
             kept_tokens.push(*t);
             kept_text.push_str(&text[cursor..cursor + len]);
