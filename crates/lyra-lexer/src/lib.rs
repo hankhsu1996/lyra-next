@@ -14,8 +14,9 @@ pub enum LexMode {
     /// token set; no preprocess-only operators are emitted.
     Parse,
     /// Lexing for preprocessor input. Recognizes macro operators
-    /// (`MacroStringify`, `MacroConcat`, `MacroEscapedQuote`) as
-    /// distinct tokens in addition to all standard tokens.
+    /// (`MacroStringify`, `MacroTripleStringify`, `MacroConcat`,
+    /// `MacroEscapedQuote`) as distinct tokens in addition to all
+    /// standard tokens.
     Preprocess,
 }
 
@@ -546,6 +547,11 @@ fn lex_directive(bytes: &[u8], mode: LexMode) -> (SyntaxKind, usize) {
             && bytes.get(3) == Some(&b'"')
         {
             return (SyntaxKind::MacroEscapedQuote, 4);
+        }
+        // `""" -- triple-quote stringify toggle (4 bytes)
+        if bytes.get(1) == Some(&b'"') && bytes.get(2) == Some(&b'"') && bytes.get(3) == Some(&b'"')
+        {
+            return (SyntaxKind::MacroTripleStringify, 4);
         }
         // `" -- stringify toggle (2 bytes)
         if bytes.get(1) == Some(&b'"') {
