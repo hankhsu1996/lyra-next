@@ -71,21 +71,33 @@ pub(crate) fn parse_literal_shape(literal: &Literal) -> Option<LiteralShape> {
         }),
         LiteralKind::Based {
             size_token,
-            base_token,
-        } => parse_based_shape(size_token.as_ref().map(|t| t.text()), base_token.text()),
+            prefix_token,
+            digits_token,
+        } => parse_based_shape(
+            size_token.as_ref().map(|t| t.text()),
+            prefix_token.text(),
+            digits_token.as_ref().map(|t| t.text()),
+        ),
         _ => None,
     }
 }
 
-/// Parse a based literal token (with optional size prefix text) into its shape.
-fn parse_based_shape(size_text: Option<&str>, based_text: &str) -> Option<LiteralShape> {
-    // based_text starts with ' (tick)
-    let after_tick = based_text.strip_prefix('\'')?;
+/// Parse a based literal from prefix text and optional digits text into its shape.
+///
+/// `prefix_text` is the `BasedLiteralPrefix` token: tick + optional 's' + base char
+/// (e.g. `'h`, `'sb`).
+/// `digits_text` is the `BasedLiteralDigits` token (e.g. `FF`, `1010`).
+/// Returns `None` if digits are missing (malformed literal).
+fn parse_based_shape(
+    size_text: Option<&str>,
+    prefix_text: &str,
+    digits_text: Option<&str>,
+) -> Option<LiteralShape> {
+    let after_tick = prefix_text.strip_prefix('\'')?;
     if after_tick.is_empty() {
         return None;
     }
 
-    // Check for signed prefix
     let (rest, signed) = if after_tick
         .as_bytes()
         .first()
@@ -101,7 +113,7 @@ fn parse_based_shape(size_text: Option<&str>, based_text: &str) -> Option<Litera
     }
 
     let base_char = rest.as_bytes()[0];
-    let digits_str = &rest[1..];
+    let digits_str = digits_text?;
 
     let base = match base_char {
         b'h' | b'H' => Base::Hex,
@@ -253,5 +265,84 @@ mod tests {
         assert_eq!(s.base, Base::Binary);
         assert!(!s.is_unsized);
         assert!(!s.has_xz);
+    }
+
+    #[test]
+    fn spaced_prefix_digits_hex() {
+        let s = parse_shape("'h FF").expect("should parse");
+        assert_eq!(s.width, 32);
+        assert!(!s.signed);
+        assert_eq!(s.base, Base::Hex);
+        assert!(s.is_unsized);
+    }
+
+    #[test]
+    fn fully_spaced_sized_hex() {
+        let s = parse_shape("32 'h 12ab_f001").expect("should parse");
+        assert_eq!(s.width, 32);
+        assert!(!s.signed);
+        assert_eq!(s.base, Base::Hex);
+        assert!(!s.is_unsized);
+    }
+
+    #[test]
+    fn spaced_signed_decimal() {
+        let s = parse_shape("16'sd 42").expect("should parse");
+        assert_eq!(s.width, 16);
+        assert!(s.signed);
+        assert_eq!(s.base, Base::Decimal);
+        assert!(!s.is_unsized);
+    }
+
+    #[test]
+    fn spaced_xz_digits() {
+        let s = parse_shape("'h 3x").expect("should parse");
+        assert!(s.has_xz);
+    }
+
+    #[test]
+    fn spaced_question_digit() {
+        let s = parse_shape("16'sd ?").expect("should parse");
+        assert!(s.has_xz);
+        assert!(s.signed);
+    }
+
+    #[test]
+    fn malformed_prefix_no_digits_hex() {
+        assert!(parse_shape("'h ;").is_none());
+    }
+
+    #[test]
+    fn malformed_sized_prefix_no_digits() {
+        assert!(parse_shape("16'sd").is_none());
+    }
+
+    #[test]
+    fn malformed_prefix_comment_no_digits() {
+        assert!(parse_shape("'b /*comment*/ ;").is_none());
+    }
+
+    #[test]
+    fn comment_between_prefix_and_digits() {
+        let s = parse_shape("'h/*c*/FF").expect("should parse");
+        assert_eq!(s.width, 32);
+        assert_eq!(s.base, Base::Hex);
+        assert!(s.is_unsized);
+    }
+
+    #[test]
+    fn comment_between_size_prefix_digits() {
+        let s = parse_shape("8 'h/*c*/FF").expect("should parse");
+        assert_eq!(s.width, 8);
+        assert_eq!(s.base, Base::Hex);
+        assert!(!s.is_unsized);
+    }
+
+    #[test]
+    fn line_comment_between_prefix_and_digits() {
+        let s = parse_shape("8 'h // c\n FF").expect("should parse");
+        assert_eq!(s.width, 8);
+        assert_eq!(s.base, Base::Hex);
+        assert!(!s.is_unsized);
     }
 }

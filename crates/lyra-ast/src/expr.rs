@@ -273,7 +273,8 @@ pub enum LiteralKind {
     },
     Based {
         size_token: Option<SyntaxToken>,
-        base_token: SyntaxToken,
+        prefix_token: SyntaxToken,
+        digits_token: Option<SyntaxToken>,
     },
     UnbasedUnsized {
         token: SyntaxToken,
