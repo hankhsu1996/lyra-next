@@ -195,11 +195,13 @@ fn literal_kind_based() {
     match lk {
         lyra_ast::LiteralKind::Based {
             size_token,
-            base_token,
+            prefix_token,
+            digits_token,
         } => {
             assert!(size_token.is_some());
             assert_eq!(size_token.expect("size").text(), "8");
-            assert_eq!(base_token.text(), "'hFF");
+            assert_eq!(prefix_token.text(), "'h");
+            assert_eq!(digits_token.expect("digits").text(), "FF");
         }
         other => panic!("expected Based, got {other:?}"),
     }

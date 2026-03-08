@@ -1,0 +1,167 @@
+---
+source: crates/lyra-tests/tests/parse.rs
+expression: ws.dump_parse()
+---
+// file: main.sv
+SourceFile@0..617
+  ModuleDecl@0..616
+    ModuleKw@0..6 "module"
+    Whitespace@6..7 " "
+    Ident@7..21 "based_lit_test"
+    Semicolon@21..22 ";"
+    ModuleBody@22..606
+      ParamDecl@22..64
+        Whitespace@22..25 "\n  "
+        LineComment@25..41 "// Compact forms"
+        Whitespace@41..44 "\n  "
+        ParameterKw@44..53 "parameter"
+        Declarator@53..63
+          Whitespace@53..54 " "
+          Ident@54..55 "A"
+          Whitespace@55..56 " "
+          Assign@56..57 "="
+          Literal@57..63
+            Whitespace@57..58 " "
+            IntLiteral@58..59 "8"
+            BasedLiteralPrefix@59..61 "'h"
+            BasedLiteralDigits@61..63 "FF"
+        Semicolon@63..64 ";"
+      ParamDecl@64..89
+        Whitespace@64..67 "\n  "
+        ParameterKw@67..76 "parameter"
+        Declarator@76..88
+          Whitespace@76..77 " "
+          Ident@77..78 "B"
+          Whitespace@78..79 " "
+          Assign@79..80 "="
+          Literal@80..88
+            Whitespace@80..81 " "
+            IntLiteral@81..82 "4"
+            BasedLiteralPrefix@82..84 "'b"
+            BasedLiteralDigits@84..88 "1010"
+        Semicolon@88..89 ";"
+      ParamDecl@89..154
+        Whitespace@89..93 "\n\n  "
+        LineComment@93..130 "// Spaced: size separated from prefix"
+        Whitespace@130..133 "\n  "
+        ParameterKw@133..142 "parameter"
+        Declarator@142..153
+          Whitespace@142..143 " "
+          Ident@143..144 "C"
+          Whitespace@144..145 " "
+          Assign@145..146 "="
+          Literal@146..153
+            Whitespace@146..147 " "
+            IntLiteral@147..148 "8"
+            Whitespace@148..149 " "
+            BasedLiteralPrefix@149..151 "'h"
+            BasedLiteralDigits@151..153 "FF"
+        Semicolon@153..154 ";"
+      ParamDecl@154..220
+        Whitespace@154..158 "\n\n  "
+        LineComment@158..197 "// Spaced: prefix separated from digits"
+        Whitespace@197..200 "\n  "
+        ParameterKw@200..209 "parameter"
+        Declarator@209..219
+          Whitespace@209..210 " "
+          Ident@210..211 "D"
+          Whitespace@211..212 " "
+          Assign@212..213 "="
+          Literal@213..219
+            Whitespace@213..214 " "
+            BasedLiteralPrefix@214..216 "'h"
+            Whitespace@216..217 " "
+            BasedLiteralDigits@217..219 "FF"
+        Semicolon@219..220 ";"
+      ParamDecl@220..312
+        Whitespace@220..224 "\n\n  "
+        LineComment@224..279 "// Fully spaced: size, prefix, and digits all separated"
+        Whitespace@279..282 "\n  "
+        ParameterKw@282..291 "parameter"
+        Declarator@291..311
+          Whitespace@291..292 " "
+          Ident@292..293 "E"
+          Whitespace@293..294 " "
+          Assign@294..295 "="
+          Literal@295..311
+            Whitespace@295..296 " "
+            IntLiteral@296..298 "32"
+            Whitespace@298..299 " "
+            BasedLiteralPrefix@299..301 "'h"
+            Whitespace@301..302 " "
+            BasedLiteralDigits@302..311 "12ab_f001"
+        Semicolon@311..312 ";"
+      ParamDecl@312..385
+        Whitespace@312..316 "\n\n  "
+        LineComment@316..358 "// Block comment between prefix and digits"
+        Whitespace@358..361 "\n  "
+        ParameterKw@361..370 "parameter"
+        Declarator@370..384
+          Whitespace@370..371 " "
+          Ident@371..372 "F"
+          Whitespace@372..373 " "
+          Assign@373..374 "="
+          Literal@374..384
+            Whitespace@374..375 " "
+            BasedLiteralPrefix@375..377 "'h"
+            BlockComment@377..382 "/*c*/"
+            BasedLiteralDigits@382..384 "FF"
+        Semicolon@384..385 ";"
+      ParamDecl@385..467
+        Whitespace@385..389 "\n\n  "
+        LineComment@389..438 "// Block comment between size, prefix, and digits"
+        Whitespace@438..441 "\n  "
+        ParameterKw@441..450 "parameter"
+        Declarator@450..466
+          Whitespace@450..451 " "
+          Ident@451..452 "G"
+          Whitespace@452..453 " "
+          Assign@453..454 "="
+          Literal@454..466
+            Whitespace@454..455 " "
+            IntLiteral@455..456 "8"
+            Whitespace@456..457 " "
+            BasedLiteralPrefix@457..459 "'h"
+            BlockComment@459..464 "/*c*/"
+            BasedLiteralDigits@464..466 "FF"
+        Semicolon@466..467 ";"
+      ParamDecl@467..546
+        Whitespace@467..471 "\n\n  "
+        LineComment@471..512 "// Line comment between prefix and digits"
+        Whitespace@512..515 "\n  "
+        ParameterKw@515..524 "parameter"
+        Declarator@524..545
+          Whitespace@524..525 " "
+          Ident@525..526 "H"
+          Whitespace@526..527 " "
+          Assign@527..528 "="
+          Literal@528..545
+            Whitespace@528..529 " "
+            IntLiteral@529..530 "8"
+            Whitespace@530..531 " "
+            BasedLiteralPrefix@531..533 "'h"
+            Whitespace@533..534 " "
+            LineComment@534..538 "// c"
+            Whitespace@538..543 "\n    "
+            BasedLiteralDigits@543..545 "FF"
+        Semicolon@545..546 ";"
+      ParamDecl@546..606
+        Whitespace@546..550 "\n\n  "
+        LineComment@550..585 "// Malformed: prefix without digits"
+        Whitespace@585..588 "\n  "
+        ParameterKw@588..597 "parameter"
+        Declarator@597..604
+          Whitespace@597..598 " "
+          Ident@598..599 "I"
+          Whitespace@599..600 " "
+          Assign@600..601 "="
+          Literal@601..604
+            Whitespace@601..602 " "
+            BasedLiteralPrefix@602..604 "'h"
+        Whitespace@604..605 " "
+        Semicolon@605..606 ";"
+    Whitespace@606..607 "\n"
+    EndmoduleKw@607..616 "endmodule"
+  Whitespace@616..617 "\n"
+---
+no diagnostics

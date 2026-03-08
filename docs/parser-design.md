@@ -73,10 +73,7 @@ tokens like `endmodule`, `end`, `endcase`, `)`, `]`).
 
 ### Based Literal Lexing
 
-The lexer splits `2'b00` into `IntLiteral(2)` + `BasedLiteral('b00)`.
-The parser cannot combine them, causing case items with sized based
-literals to misparse. Fix belongs in `lyra-lexer`: sized based literals
-should be a single token.
+The lexer splits `2'b00` into `IntLiteral(2)` + `BasedLiteralPrefix('b)` + `BasedLiteralDigits(00)`. Trivia (whitespace, comments) between components remains as separate tokens. The lexer uses a `pending_based_digits` mode after emitting `BasedLiteralPrefix` to lex the next non-trivia token with base-aware digit rules. The parser then assembles these structural tokens into a single `Literal` node, with its normal trivia-skipping behavior handling the optional whitespace and comments between components. This supports the LRM 5.7.1 allowance for spaces between size, base specifier, and digits (e.g. `32 'h 12ab_f001`).
 
 ### ParseError Richness
 

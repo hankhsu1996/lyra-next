@@ -65,7 +65,8 @@ SourceFile@0..240
               Literal@97..109
                 Whitespace@97..104 "\n      "
                 IntLiteral@104..105 "2"
-                BasedLiteral@105..109 "'b00"
+                BasedLiteralPrefix@105..107 "'b"
+                BasedLiteralDigits@107..109 "00"
               Colon@109..110 ":"
               AssignStmt@110..125
                 NameRef@110..114
@@ -76,13 +77,15 @@ SourceFile@0..240
                 Literal@116..124
                   Whitespace@116..117 " "
                   IntLiteral@117..118 "4"
-                  BasedLiteral@118..124 "'b0001"
+                  BasedLiteralPrefix@118..120 "'b"
+                  BasedLiteralDigits@120..124 "0001"
                 Semicolon@124..125 ";"
             CaseItem@125..153
               Literal@125..137
                 Whitespace@125..132 "\n      "
                 IntLiteral@132..133 "2"
-                BasedLiteral@133..137 "'b01"
+                BasedLiteralPrefix@133..135 "'b"
+                BasedLiteralDigits@135..137 "01"
               Colon@137..138 ":"
               AssignStmt@138..153
                 NameRef@138..142
@@ -93,13 +96,15 @@ SourceFile@0..240
                 Literal@144..152
                   Whitespace@144..145 " "
                   IntLiteral@145..146 "4"
-                  BasedLiteral@146..152 "'b0010"
+                  BasedLiteralPrefix@146..148 "'b"
+                  BasedLiteralDigits@148..152 "0010"
                 Semicolon@152..153 ";"
             CaseItem@153..181
               Literal@153..165
                 Whitespace@153..160 "\n      "
                 IntLiteral@160..161 "2"
-                BasedLiteral@161..165 "'b10"
+                BasedLiteralPrefix@161..163 "'b"
+                BasedLiteralDigits@163..165 "10"
               Colon@165..166 ":"
               AssignStmt@166..181
                 NameRef@166..170
@@ -110,7 +115,8 @@ SourceFile@0..240
                 Literal@172..180
                   Whitespace@172..173 " "
                   IntLiteral@173..174 "4"
-                  BasedLiteral@174..180 "'b0100"
+                  BasedLiteralPrefix@174..176 "'b"
+                  BasedLiteralDigits@176..180 "0100"
                 Semicolon@180..181 ";"
             CaseItem@181..211
               Whitespace@181..188 "\n      "
@@ -125,7 +131,8 @@ SourceFile@0..240
                 Literal@202..210
                   Whitespace@202..203 " "
                   IntLiteral@203..204 "4"
-                  BasedLiteral@204..210 "'b1000"
+                  BasedLiteralPrefix@204..206 "'b"
+                  BasedLiteralDigits@206..210 "1000"
                 Semicolon@210..211 ";"
             Whitespace@211..216 "\n    "
             EndcaseKw@216..223 "endcase"

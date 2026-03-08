@@ -13,30 +13,36 @@ fn plain_decimal() {
 fn based_literals() {
     let k = lex_kinds("4'b1001");
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "4"));
-    assert_eq!(k[1], (SyntaxKind::BasedLiteral, "'b1001"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralPrefix, "'b"));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "1001"));
 
     let k = lex_kinds("8'hFF");
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "8"));
-    assert_eq!(k[1], (SyntaxKind::BasedLiteral, "'hFF"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "FF"));
 
     let k = lex_kinds("16'o777");
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "16"));
-    assert_eq!(k[1], (SyntaxKind::BasedLiteral, "'o777"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralPrefix, "'o"));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "777"));
 
     let k = lex_kinds("32'd100");
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "32"));
-    assert_eq!(k[1], (SyntaxKind::BasedLiteral, "'d100"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralPrefix, "'d"));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "100"));
 }
 
 #[test]
 fn signed_based_literals() {
     let k = lex_kinds("4'sb1010");
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "4"));
-    assert_eq!(k[1], (SyntaxKind::BasedLiteral, "'sb1010"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralPrefix, "'sb"));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "1010"));
 
     let k = lex_kinds("8'shFF");
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "8"));
-    assert_eq!(k[1], (SyntaxKind::BasedLiteral, "'shFF"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralPrefix, "'sh"));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "FF"));
 }
 
 #[test]
@@ -79,7 +85,11 @@ fn numeric_negative_cases() {
 fn underscores_in_based() {
     let k = lex_kinds("16'b0011_0101_0001_1111");
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "16"));
-    assert_eq!(k[1], (SyntaxKind::BasedLiteral, "'b0011_0101_0001_1111"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralPrefix, "'b"));
+    assert_eq!(
+        k[2],
+        (SyntaxKind::BasedLiteralDigits, "0011_0101_0001_1111")
+    );
 }
 
 #[test]
@@ -142,5 +152,87 @@ fn time_literal_negative_cases() {
     // Sized literal not affected
     let k = lex_kinds("4'shA");
     assert_eq!(k[0], (SyntaxKind::IntLiteral, "4"));
-    assert_eq!(k[1], (SyntaxKind::BasedLiteral, "'shA"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralPrefix, "'sh"));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "A"));
+}
+
+#[test]
+fn spaced_based_literals() {
+    // Space between prefix and digits: 'h FF
+    let k = lex_kinds("'h FF");
+    assert_eq!(k[0], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[1], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "FF"));
+
+    // Space between size and prefix: 8 'hFF
+    let k = lex_kinds("8 'hFF");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "8"));
+    assert_eq!(k[1], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[3], (SyntaxKind::BasedLiteralDigits, "FF"));
+
+    // All three spaced: 32 'h 12ab_f001
+    let k = lex_kinds("32 'h 12ab_f001");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "32"));
+    assert_eq!(k[1], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[3], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[4], (SyntaxKind::BasedLiteralDigits, "12ab_f001"));
+
+    // Signed spaced: 16'sd ?
+    let k = lex_kinds("16'sd ?");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "16"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralPrefix, "'sd"));
+    assert_eq!(k[2], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[3], (SyntaxKind::BasedLiteralDigits, "?"));
+
+    // Prefix without digits: 'h with no valid digits
+    let k = lex_kinds("'h ;");
+    assert_eq!(k[0], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[1], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[2], (SyntaxKind::Semicolon, ";"));
+
+    // Binary base-aware: 'b G is not valid binary digits
+    let k = lex_kinds("'b G");
+    assert_eq!(k[0], (SyntaxKind::BasedLiteralPrefix, "'b"));
+    assert_eq!(k[1], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[2], (SyntaxKind::Ident, "G"));
+
+    // Question mark as only digit
+    let k = lex_kinds("'h?");
+    assert_eq!(k[0], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[1], (SyntaxKind::BasedLiteralDigits, "?"));
+
+    // xz digits in based literal
+    let k = lex_kinds("'h 3x");
+    assert_eq!(k[0], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[1], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "3x"));
+}
+
+#[test]
+fn comment_trivia_in_based_literals() {
+    // Block comment between prefix and digits
+    let k = lex_kinds("'h/*c*/FF");
+    assert_eq!(k[0], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[1], (SyntaxKind::BlockComment, "/*c*/"));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralDigits, "FF"));
+
+    // Block comment between size, prefix, and digits
+    let k = lex_kinds("8 'h/*c*/FF");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "8"));
+    assert_eq!(k[1], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[3], (SyntaxKind::BlockComment, "/*c*/"));
+    assert_eq!(k[4], (SyntaxKind::BasedLiteralDigits, "FF"));
+
+    // Line comment between prefix and digits (next line)
+    let k = lex_kinds("8 'h // c\n FF");
+    assert_eq!(k[0], (SyntaxKind::IntLiteral, "8"));
+    assert_eq!(k[1], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[2], (SyntaxKind::BasedLiteralPrefix, "'h"));
+    assert_eq!(k[3], (SyntaxKind::Whitespace, " "));
+    assert_eq!(k[4], (SyntaxKind::LineComment, "// c"));
+    assert_eq!(k[5], (SyntaxKind::Whitespace, "\n "));
+    assert_eq!(k[6], (SyntaxKind::BasedLiteralDigits, "FF"));
 }

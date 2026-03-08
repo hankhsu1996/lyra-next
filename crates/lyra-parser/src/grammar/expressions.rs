@@ -109,6 +109,36 @@ fn type_expr_or_cast(p: &mut Parser) -> CompletedMarker {
     super::declarations::type_expr(p)
 }
 
+// Parse a literal: IntLiteral (optionally followed by based parts),
+// BasedLiteralPrefix (+ optional digits), or simple literal tokens.
+fn literal(p: &mut Parser) -> CompletedMarker {
+    let m = p.start();
+    match p.current() {
+        SyntaxKind::IntLiteral => {
+            p.bump();
+            // Sized based literal: IntLiteral followed by BasedLiteralPrefix
+            // (+ optional BasedLiteralDigits). Trivia between parts is allowed
+            // per LRM 5.7.1.
+            if p.at(SyntaxKind::BasedLiteralPrefix) {
+                p.bump();
+                if p.at(SyntaxKind::BasedLiteralDigits) {
+                    p.bump();
+                }
+            }
+        }
+        SyntaxKind::BasedLiteralPrefix => {
+            p.bump();
+            if p.at(SyntaxKind::BasedLiteralDigits) {
+                p.bump();
+            }
+        }
+        _ => {
+            p.bump();
+        }
+    }
+    m.complete(p, SyntaxKind::Literal)
+}
+
 fn atom(p: &mut Parser) -> Option<CompletedMarker> {
     if p.at(SyntaxKind::TypeKw) && p.nth(1) == SyntaxKind::LParen {
         return Some(type_expr_or_cast(p));
@@ -132,27 +162,12 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
     }
 
     match p.current() {
-        SyntaxKind::IntLiteral => {
-            let m = p.start();
-            p.bump();
-            // Sized based literal: IntLiteral followed by BasedLiteral.
-            // Trivia (whitespace, comments) between them is allowed -- the LRM
-            // grammar operates on post-preprocessor token streams where
-            // macro/include expansion can insert trivia between tokens.
-            if p.current() == SyntaxKind::BasedLiteral {
-                p.bump();
-            }
-            Some(m.complete(p, SyntaxKind::Literal))
-        }
-        SyntaxKind::RealLiteral
-        | SyntaxKind::BasedLiteral
+        SyntaxKind::IntLiteral
+        | SyntaxKind::BasedLiteralPrefix
+        | SyntaxKind::RealLiteral
         | SyntaxKind::UnbasedUnsizedLiteral
         | SyntaxKind::StringLiteral
-        | SyntaxKind::TimeLiteral => {
-            let m = p.start();
-            p.bump();
-            Some(m.complete(p, SyntaxKind::Literal))
-        }
+        | SyntaxKind::TimeLiteral => Some(literal(p)),
         SyntaxKind::Ident | SyntaxKind::SystemIdent => {
             // System function/task call: $foo(...)
             if p.current() == SyntaxKind::SystemIdent && p.nth(1) == SyntaxKind::LParen {

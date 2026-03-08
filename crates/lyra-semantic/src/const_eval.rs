@@ -104,12 +104,15 @@ fn eval_literal(lit: &Literal) -> EvalResult {
             let text = token.text().replace('_', "");
             text.parse::<i64>().map_err(|_| ConstEvalError::Overflow)
         }
-        LiteralKind::Based { base_token, .. } => {
+        LiteralKind::Based { digits_token, .. } => {
             if shape.signed {
                 return Err(ConstEvalError::Unsupported);
             }
-            let digits_str = extract_based_digits(base_token.text())?;
-            let clean_digits: String = digits_str.chars().filter(|&c| c != '_').collect();
+            let digits_str = digits_token
+                .as_ref()
+                .map(|t| t.text())
+                .ok_or(ConstEvalError::Unsupported)?;
+            let clean_digits: String = digits_str.chars().filter(|c| *c != '_').collect();
             if clean_digits.is_empty() {
                 return Err(ConstEvalError::Unsupported);
             }
@@ -124,29 +127,6 @@ fn eval_literal(lit: &Literal) -> EvalResult {
         }
         _ => Err(ConstEvalError::Unsupported),
     }
-}
-
-/// Extract the digit portion from a `BasedLiteral` token text (after tick + optional signed + base char).
-fn extract_based_digits(text: &str) -> Result<&str, ConstEvalError> {
-    let after_tick = text.strip_prefix('\'').ok_or(ConstEvalError::Unsupported)?;
-    if after_tick.is_empty() {
-        return Err(ConstEvalError::Unsupported);
-    }
-    // Skip optional signed prefix
-    let rest = if after_tick
-        .as_bytes()
-        .first()
-        .is_some_and(|&b| b == b's' || b == b'S')
-    {
-        &after_tick[1..]
-    } else {
-        after_tick
-    };
-    // Skip base character
-    if rest.is_empty() {
-        return Err(ConstEvalError::Unsupported);
-    }
-    Ok(&rest[1..])
 }
 
 fn base_radix(base: Base) -> u32 {
@@ -570,5 +550,45 @@ mod tests {
     #[test]
     fn time_literal_unsupported() {
         assert_eq!(eval("2ns"), Err(ConstEvalError::Unsupported));
+    }
+
+    #[test]
+    fn spaced_based_hex() {
+        assert_eq!(eval("'h FF"), Ok(255));
+    }
+
+    #[test]
+    fn spaced_sized_hex() {
+        assert_eq!(eval("8 'h FF"), Ok(255));
+    }
+
+    #[test]
+    fn fully_spaced_sized_hex() {
+        assert_eq!(eval("32 'h 12ab"), Ok(0x12ab));
+    }
+
+    #[test]
+    fn spaced_based_binary() {
+        assert_eq!(eval("4 'b 1010"), Ok(10));
+    }
+
+    #[test]
+    fn spaced_based_truncation() {
+        assert_eq!(eval("4 'h FF"), Ok(15));
+    }
+
+    #[test]
+    fn malformed_prefix_no_digits() {
+        assert_eq!(eval("'h ;"), Err(ConstEvalError::Unsupported));
+    }
+
+    #[test]
+    fn comment_between_prefix_and_digits() {
+        assert_eq!(eval("'h/*c*/FF"), Ok(255));
+    }
+
+    #[test]
+    fn comment_between_size_prefix_digits() {
+        assert_eq!(eval("8 'h/*c*/FF"), Ok(255));
     }
 }

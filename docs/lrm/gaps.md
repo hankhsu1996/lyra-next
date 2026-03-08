@@ -6,6 +6,10 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 5 -- Lexical Conventions
 
+### 5.7.1: Integer literal spacing -- LRM corpus coverage
+
+Lexer, parser, AST, and semantic layers correctly handle optional whitespace and comments between size, base specifier, and digits in based integer literals (e.g. `32 'h 12ab_f001`). Remaining: LRM test corpus coverage under `lrm/ch05/5.7.1_integer_literals/` to sign off the section. Blocked by: test corpus authoring. Test: `lrm/ch05/5.7.1_integer_literals`.
+
 ### 5.6.1: Escaped identifiers -- remaining semantic equivalence coverage
 
 Escaped and plain identifiers resolve to the same semantic name via `semantic_spelling` normalization (LRM 5.6.1). Lexical acceptance (special-character escaped identifiers), declaration/reference equivalence (both directions), escaped keyword identifiers, struct field access, and package-qualified names are tested. Remaining: escaped identifiers in port, instance, modport, and import/export contexts; diagnostic display source-spelling preservation. Blocked by: broader test coverage across semantic surfaces. Test: `lrm/ch05/5.6.1_escaped_identifiers/cases/`.
@@ -13,10 +17,6 @@ Escaped and plain identifiers resolve to the same semantic name via `semantic_sp
 ### 5.6.4: Compiler directives -- non-conditional directive semantics
 
 Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `""" `` triple-quote stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: `` `default_nettype `` directive semantics, `` `begin_keywords ``/`` `end_keywords `` (keyword set selection), `` `timescale `` with space between value and unit (e.g. `1 ns` rejected, only `1ns` accepted), and include path resolution (no `-I`/`--incdir` CLI support). Blocked by: `default_nettype` directive event consumer, keyword set infrastructure, include search path model. Test: `lrm/ch05/5.6.4_compiler_directives`.
-
-### 5.7.1: Integer literals -- spaces in sized literals
-
-The lexer does not handle optional whitespace between the size, base specifier, and digits in sized integer literals (e.g. `'h x`, `'h 3x`, `32 'h 12ab_f001`, `-8'd 6`, `16'sd?`). The LRM allows spaces in these positions. This causes parse errors for valid integer literals. Blocked by: lexer token boundary rules for sized literals with embedded whitespace. Test: sv-tests `integers-left-padding`, `integers-unsized`, `integers-signed`, `integers-underscores`, `number_test_*`.
 
 ### 5.8: Time literals
 

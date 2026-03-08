@@ -468,7 +468,7 @@ impl Literal {
             &[
                 SyntaxKind::IntLiteral,
                 SyntaxKind::RealLiteral,
-                SyntaxKind::BasedLiteral,
+                SyntaxKind::BasedLiteralPrefix,
                 SyntaxKind::UnbasedUnsizedLiteral,
                 SyntaxKind::StringLiteral,
             ],
@@ -480,31 +480,31 @@ impl Literal {
             .syntax
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|t| {
-                !matches!(
-                    t.kind(),
-                    SyntaxKind::Whitespace | SyntaxKind::LineComment | SyntaxKind::BlockComment
-                )
-            })
+            .filter(|t| !t.kind().is_trivia())
             .collect();
 
         if tokens.is_empty() {
             return None;
         }
 
-        // Check for BasedLiteral anywhere
-        let based_pos = tokens
+        // Check for BasedLiteralPrefix (new split representation)
+        let prefix_pos = tokens
             .iter()
-            .position(|t| t.kind() == SyntaxKind::BasedLiteral);
-        if let Some(bp) = based_pos {
-            let size_token = if bp > 0 && tokens[bp - 1].kind() == SyntaxKind::IntLiteral {
-                Some(tokens[bp - 1].clone())
+            .position(|t| t.kind() == SyntaxKind::BasedLiteralPrefix);
+        if let Some(pp) = prefix_pos {
+            let size_token = if pp > 0 && tokens[pp - 1].kind() == SyntaxKind::IntLiteral {
+                Some(tokens[pp - 1].clone())
             } else {
                 None
             };
+            let digits_token = tokens
+                .get(pp + 1)
+                .filter(|t| t.kind() == SyntaxKind::BasedLiteralDigits)
+                .cloned();
             return Some(crate::expr::LiteralKind::Based {
                 size_token,
-                base_token: tokens[bp].clone(),
+                prefix_token: tokens[pp].clone(),
+                digits_token,
             });
         }
 

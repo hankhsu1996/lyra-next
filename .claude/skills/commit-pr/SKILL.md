@@ -57,20 +57,10 @@ Before committing, format and check everything:
    cargo test
    ```
 
-5. **Policy checks** - First get merge base, then run checks:
+5. **Policy checks** - runs all policy checks with auto diff-base:
 
    ```bash
-   git merge-base origin/main HEAD
-   # Use the returned SHA in subsequent commands
-   python3 tools/policy/check_ascii.py --diff-base <SHA>
-   python3 tools/policy/check_errors.py --diff-base <SHA>
-   ```
-
-   If merge base fails (no remote yet), run without `--diff-base`:
-
-   ```bash
-   python3 tools/policy/check_ascii.py
-   python3 tools/policy/check_errors.py
+   python3 tools/policy/check_all.py
    ```
 
    If any fail, fix violations before committing.

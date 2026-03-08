@@ -34,6 +34,15 @@ pub fn lex(src: &str) -> Vec<Token> {
     lex_with_mode(src, LexMode::Parse)
 }
 
+/// Radix for pending based-digit lexing.
+#[derive(Debug, Clone, Copy)]
+enum BasedRadix {
+    Binary,
+    Octal,
+    Decimal,
+    Hex,
+}
+
 /// Lex with an explicit mode. `LexMode::Preprocess` recognizes macro
 /// operator tokens (`MacroStringify`, `MacroConcat`, `MacroEscapedQuote`).
 pub fn lex_with_mode(src: &str, mode: LexMode) -> Vec<Token> {
@@ -41,8 +50,41 @@ pub fn lex_with_mode(src: &str, mode: LexMode) -> Vec<Token> {
     let mut rest = src;
     let mut prev_sig_kind = SyntaxKind::Eof;
     let mut attr_depth: u32 = 0;
+    let mut pending_based_digits: Option<BasedRadix> = None;
 
     while !rest.is_empty() {
+        // Pending based-digits mode: after a BasedLiteralPrefix, try to
+        // lex the digit body before falling through to normal lex_one.
+        if let Some(radix) = pending_based_digits {
+            let bytes = rest.as_bytes();
+            let first = bytes[0];
+            // If trivia, lex it normally and keep pending
+            if first.is_ascii_whitespace()
+                || (first == b'/' && matches!(bytes.get(1), Some(b'/' | b'*')))
+            {
+                let (kind, consumed) = lex_one(rest, false, attr_depth, mode);
+                tokens.push(Token {
+                    kind,
+                    len: TextSize::new(consumed as u32),
+                });
+                rest = &rest[consumed..];
+                continue;
+            }
+            // Try to lex based digits
+            pending_based_digits = None;
+            let consumed = lex_based_digits(bytes, radix);
+            if consumed > 0 {
+                tokens.push(Token {
+                    kind: SyntaxKind::BasedLiteralDigits,
+                    len: TextSize::new(consumed as u32),
+                });
+                prev_sig_kind = SyntaxKind::BasedLiteralDigits;
+                rest = &rest[consumed..];
+                continue;
+            }
+            // No valid digits: fall through to normal lex_one
+        }
+
         let after_at = prev_sig_kind == SyntaxKind::At;
         let (kind, consumed) = lex_one(rest, after_at, attr_depth, mode);
 
@@ -54,6 +96,12 @@ pub fn lex_with_mode(src: &str, mode: LexMode) -> Vec<Token> {
 
         if is_attr_depth_reset(kind) {
             attr_depth = 0;
+        }
+
+        // After emitting a BasedLiteralPrefix, enter pending mode
+        if kind == SyntaxKind::BasedLiteralPrefix {
+            let prefix_bytes = &rest.as_bytes()[..consumed];
+            pending_based_digits = radix_from_prefix_bytes(prefix_bytes);
         }
 
         if !kind.is_trivia() {
@@ -72,6 +120,46 @@ pub fn lex_with_mode(src: &str, mode: LexMode) -> Vec<Token> {
         len: TextSize::new(0),
     });
     tokens
+}
+
+/// Extract the radix from a `BasedLiteralPrefix` token's bytes.
+/// The last byte is the base character.
+fn radix_from_prefix_bytes(bytes: &[u8]) -> Option<BasedRadix> {
+    let last = *bytes.last()?;
+    match last {
+        b'b' | b'B' => Some(BasedRadix::Binary),
+        b'o' | b'O' => Some(BasedRadix::Octal),
+        b'd' | b'D' => Some(BasedRadix::Decimal),
+        b'h' | b'H' => Some(BasedRadix::Hex),
+        _ => None,
+    }
+}
+
+/// Consume based literal digit characters from position 0.
+/// Returns the number of bytes consumed (0 if no valid start).
+fn lex_based_digits(bytes: &[u8], radix: BasedRadix) -> usize {
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        let valid = match radix {
+            BasedRadix::Binary => {
+                matches!(c, b'0' | b'1' | b'x' | b'X' | b'z' | b'Z' | b'?' | b'_')
+            }
+            BasedRadix::Octal => matches!(c, b'0'..=b'7' | b'x' | b'X' | b'z' | b'Z' | b'?' | b'_'),
+            BasedRadix::Decimal => {
+                matches!(c, b'0'..=b'9' | b'x' | b'X' | b'z' | b'Z' | b'?' | b'_')
+            }
+            BasedRadix::Hex => {
+                c.is_ascii_hexdigit() || matches!(c, b'x' | b'X' | b'z' | b'Z' | b'?' | b'_')
+            }
+        };
+        if valid {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    i
 }
 
 fn is_attr_depth_reset(kind: SyntaxKind) -> bool {
@@ -403,7 +491,7 @@ fn lex_string(bytes: &[u8]) -> (SyntaxKind, usize) {
     }
 }
 
-// Lex tick-prefixed tokens: `'{`, unbased unsized literals, based literals.
+// Lex tick-prefixed tokens: `'{`, unbased unsized literals, based literal prefix.
 fn lex_tick(bytes: &[u8]) -> (SyntaxKind, usize) {
     match bytes.get(1) {
         Some(&b'{') => (SyntaxKind::TickBrace, 2),
@@ -414,9 +502,10 @@ fn lex_tick(bytes: &[u8]) -> (SyntaxKind, usize) {
                 (SyntaxKind::UnbasedUnsizedLiteral, 2)
             }
         }
-        Some(&c) if is_base_char(c) => lex_based_value(bytes, 2),
+        // Based literal prefix: tick + optional signed + base char (no digits)
+        Some(&c) if is_base_char(c) => (SyntaxKind::BasedLiteralPrefix, 2),
         Some(&(b's' | b'S')) => match bytes.get(2) {
-            Some(&c) if is_base_char(c) => lex_based_value(bytes, 3),
+            Some(&c) if is_base_char(c) => (SyntaxKind::BasedLiteralPrefix, 3),
             _ => (SyntaxKind::Tick, 1),
         },
         _ => (SyntaxKind::Tick, 1),
@@ -429,20 +518,6 @@ fn is_base_char(c: u8) -> bool {
 
 fn is_ident_continue(b: Option<&u8>) -> bool {
     matches!(b, Some(&c) if c.is_ascii_alphanumeric() || c == b'_')
-}
-
-// Consume based literal value digits after the base specifier.
-fn lex_based_value(bytes: &[u8], start: usize) -> (SyntaxKind, usize) {
-    let mut i = start;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c.is_ascii_hexdigit() || matches!(c, b'_' | b'x' | b'X' | b'z' | b'Z' | b'?') {
-            i += 1;
-        } else {
-            break;
-        }
-    }
-    (SyntaxKind::BasedLiteral, i)
 }
 
 // Check for a time unit suffix (s, ms, us, ns, ps, fs) at `pos` in `bytes`.

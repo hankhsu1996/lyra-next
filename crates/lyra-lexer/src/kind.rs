@@ -119,7 +119,9 @@ pub enum SyntaxKind {
     TickBrace,
     DotStar,
 
-    // Literal tokens (new)
+    // Legacy token kind -- kept for enum stability (append-only rule).
+    // The lexer no longer produces this; all consumers use
+    // BasedLiteralPrefix + BasedLiteralDigits instead.
     BasedLiteral,
     RealLiteral,
     UnbasedUnsizedLiteral,
@@ -376,6 +378,10 @@ pub enum SyntaxKind {
     MacroTripleStringify,
     MacroConcat,
     MacroEscapedQuote,
+
+    // Structural based literal tokens (prefix + digits split)
+    BasedLiteralPrefix,
+    BasedLiteralDigits,
 
     // Node boundary
     #[doc(hidden)]
