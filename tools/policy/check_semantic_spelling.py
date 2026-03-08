@@ -7,10 +7,7 @@ Semantic-name construction sites must use `semantic_spelling()` from
 This check greps for the raw pattern in semantic crates to prevent
 regression of the escaped-identifier normalization fix (LRM 5.6.1).
 
-Allowlisted exceptions:
-- Time literal text (SmolStr::new(tok.text()) on TimeLiteral tokens)
-- Diagnostic/source rendering that intentionally preserves source text
-- Test code
+Test code is excluded from the check.
 """
 
 import subprocess
@@ -22,19 +19,6 @@ CHECKED_DIRS = [
     "crates/lyra-semantic/src",
     "crates/lyra-db/src",
 ]
-
-# Files that are allowed to have raw token text for non-identifier uses
-ALLOWLIST = {
-    # Time scale literals use raw token text intentionally
-    "crates/lyra-semantic/src/builder_items.rs": [
-        "raw: SmolStr::new(",  # TimeLiteral raw text
-    ],
-    # Diagnostic display names intentionally use source spelling
-    "crates/lyra-semantic/src/type_check_expr.rs": [
-        "SmolStr::new(field_tok.text())",
-    ],
-}
-
 
 def main():
     # Accept common policy-check args; only --staged is meaningful here.
@@ -80,14 +64,7 @@ def main():
 
                     # Check for the raw pattern
                     if "SmolStr::new(" in stripped and ".text())" in stripped:
-                        # Check allowlist
-                        allowed = False
-                        for allow_pattern in ALLOWLIST.get(rel, []):
-                            if allow_pattern in stripped:
-                                allowed = True
-                                break
-                        if not allowed:
-                            violations.append(f"{rel}:{lineno}: {stripped}")
+                        violations.append(f"{rel}:{lineno}: {stripped}")
 
     if violations:
         print("ERROR: Raw token text used as semantic name.")
