@@ -25,19 +25,3 @@ This mismatch leaks into APIs (the reverse lookup `find_scope_by_owner` is a lin
 ## Layer and API shape gaps
 
 These are worth fixing but are not foundational limitations of the semantic data model.
-
-### Declaration header modifiers are not structurally modeled in typed AST
-
-The typed AST layer does not expose declaration header modifiers (e.g. `automatic`/`static` lifetime keywords) as structured accessors. Semantic code is forced to fall back to raw token scanning (`decl_lifetime_token` in `nodes_decl.rs` scans the token stream after a keyword). The long-term shape is typed header-modifier accessors in `lyra-ast` that parse declaration headers structurally, shared across container and callable declaration kinds. Exposed by: LRM 6.21 lifetime inheritance.
-
-## Test infrastructure gaps
-
-These are test helper limitations, not core architectural problems.
-
-### Scope lookup by kind is ambiguous with multiple same-kind scopes
-
-`find_scope_by_kind()` searches by `ScopeKind` and returns the first match. This is adequate when test inputs contain exactly one scope of each kind, but becomes ambiguous with multiple same-kind scopes (e.g. two modules in one file). A more robust approach would resolve the exact owner scope from the parsed file structure. Exposed by: timeunit/timeprecision builder tests.
-
-### Test owner lookup is name-based
-
-`find_owner_scope(name)` in lifetime tests resolves an owner declaration by name, then looks up its owning scope. This is ambiguous if a file contains two owners with the same name in different containers (e.g. two modules each with a function `f`). The long-term shape is structural resolution from AST/site, then querying the def index for the owning scope. Name-based lookup is acceptable for current single-container test inputs. Exposed by: owner-anchored lifetime test helpers.

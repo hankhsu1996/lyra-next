@@ -3,10 +3,10 @@ use lyra_source::FileId;
 use smol_str::SmolStr;
 
 use crate::builder::build_def_index;
-use crate::def_index::{ExpectedNs, ImportName, NamePath, QualifiedRoot};
+use crate::def_index::{ExpectedNs, ImportName, NamePath, QualifiedRoot, ScopeOwnerKind};
 use crate::diagnostic::SemanticDiagKind;
 use crate::name_graph::NameGraph;
-use crate::scopes::ScopeKind;
+use crate::scopes::ScopeId;
 use crate::symbols::SymbolKind;
 use crate::time_scale::TimeUnitsDecl;
 
@@ -538,10 +538,54 @@ fn type_site_none_for_task() {
     assert_eq!(task.expect("task").name_site, task.expect("task").decl_site);
 }
 
-fn find_scope_by_kind(def: &crate::def_index::DefIndex, kind: ScopeKind) -> crate::scopes::ScopeId {
-    def.scopes
-        .find_scope_by_kind(kind)
-        .unwrap_or_else(|| panic!("no scope with kind {kind:?} found"))
+/// Find all scopes owned by declarations matching a given name and owner kind.
+///
+/// Searches both definition-namespace entries and symbol-namespace entries,
+/// returns results in deterministic `ScopeId` order.
+fn find_owned_scopes(
+    def: &crate::def_index::DefIndex,
+    name: &str,
+    owner_kind: ScopeOwnerKind,
+) -> Vec<ScopeId> {
+    let mut results = Vec::new();
+    for entry in &*def.def_entries {
+        if entry.name == name
+            && ScopeOwnerKind::from_definition_kind(entry.kind) == owner_kind
+            && let Some(scope_id) = def.find_scope_by_owner(entry.decl_site)
+        {
+            results.push(scope_id);
+        }
+    }
+    for (_sym_id, sym) in def.symbols.iter() {
+        if sym.name == name
+            && ScopeOwnerKind::from_symbol_kind(sym.kind) == Some(owner_kind)
+            && let Some(scope_id) = def.find_scope_by_owner(sym.decl_site)
+        {
+            results.push(scope_id);
+        }
+    }
+    results.sort();
+    results.dedup();
+    results
+}
+
+/// Find the unique scope owned by a declaration with the given name and owner kind.
+///
+/// Asserts exactly one match. Panics on zero or multiple matches so tests
+/// fail loudly when uniqueness assumptions break.
+fn find_owner_scope(
+    def: &crate::def_index::DefIndex,
+    name: &str,
+    owner_kind: ScopeOwnerKind,
+) -> ScopeId {
+    let scopes = find_owned_scopes(def, name, owner_kind);
+    assert_eq!(
+        scopes.len(),
+        1,
+        "expected exactly 1 scope owned by {owner_kind:?} '{name}', found {}",
+        scopes.len()
+    );
+    scopes[0]
 }
 
 #[test]
@@ -550,7 +594,7 @@ fn timeunit_collected_in_module() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let scope_id = find_owner_scope(&def, "m", ScopeOwnerKind::Module);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 1);
     assert!(
@@ -565,7 +609,7 @@ fn timeprecision_collected_in_module() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let scope_id = find_owner_scope(&def, "m", ScopeOwnerKind::Module);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 1);
     assert!(
@@ -580,7 +624,7 @@ fn timeunit_with_precision_preserves_both() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let scope_id = find_owner_scope(&def, "m", ScopeOwnerKind::Module);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 1);
     assert!(
@@ -595,7 +639,7 @@ fn timeunit_then_timeprecision_preserves_order() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let scope_id = find_owner_scope(&def, "m", ScopeOwnerKind::Module);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 2);
     assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "100ps"));
@@ -610,7 +654,7 @@ fn timeprecision_then_timeunit_preserves_order() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let scope_id = find_scope_by_kind(&def, ScopeKind::Module);
+    let scope_id = find_owner_scope(&def, "m", ScopeOwnerKind::Module);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 2);
     assert!(
@@ -625,7 +669,7 @@ fn timeunit_in_package() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let scope_id = find_scope_by_kind(&def, ScopeKind::Package);
+    let scope_id = find_owner_scope(&def, "p", ScopeOwnerKind::Package);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 1);
     assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "1ns"));
@@ -637,7 +681,7 @@ fn timeunit_in_interface() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let scope_id = find_scope_by_kind(&def, ScopeKind::Interface);
+    let scope_id = find_owner_scope(&def, "i", ScopeOwnerKind::Interface);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 1);
     assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "10ns"));
@@ -649,8 +693,150 @@ fn timeunit_in_program() {
     let (parse, map) = parse_source(src);
     let def = build_def_index(FileId(0), &parse, &map);
 
-    let scope_id = find_scope_by_kind(&def, ScopeKind::Program);
+    let scope_id = find_owner_scope(&def, "p", ScopeOwnerKind::Program);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 1);
     assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "1us"));
+}
+
+#[test]
+fn two_modules_different_names_resolve_independently() {
+    let src = "module a; logic x; endmodule module b; logic y; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_a = find_owner_scope(&def, "a", ScopeOwnerKind::Module);
+    let scope_b = find_owner_scope(&def, "b", ScopeOwnerKind::Module);
+    assert_ne!(scope_a, scope_b);
+    assert!(
+        def.scopes
+            .resolve(&def.symbols, scope_a, crate::symbols::Namespace::Value, "x")
+            .is_some()
+    );
+    assert!(
+        def.scopes
+            .resolve(&def.symbols, scope_b, crate::symbols::Namespace::Value, "y")
+            .is_some()
+    );
+}
+
+#[test]
+fn two_callables_different_names_resolve_independently() {
+    let src = "module m; function void f(); endfunction task t(); endtask endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let scope_f = find_owner_scope(&def, "f", ScopeOwnerKind::Function);
+    let scope_t = find_owner_scope(&def, "t", ScopeOwnerKind::Task);
+    assert_ne!(scope_f, scope_t);
+}
+
+#[test]
+fn kind_qualification_disambiguates_same_name() {
+    let src = "package p; endpackage program p; endprogram";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let pkg_scopes = find_owned_scopes(&def, "p", ScopeOwnerKind::Package);
+    let prog_scopes = find_owned_scopes(&def, "p", ScopeOwnerKind::Program);
+    assert_eq!(pkg_scopes.len(), 1);
+    assert_eq!(prog_scopes.len(), 1);
+    assert_ne!(pkg_scopes[0], prog_scopes[0]);
+}
+
+#[test]
+fn owner_to_scope_reverse_index_container() {
+    let src = "module m; endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let entry = def
+        .def_entries
+        .iter()
+        .find(|e| e.name == "m")
+        .expect("module entry");
+    let scope = def.find_scope_by_owner(entry.decl_site);
+    assert!(scope.is_some());
+    let owner = def.scope_owners.get(&scope.expect("checked"));
+    assert_eq!(owner, Some(&entry.decl_site));
+}
+
+#[test]
+fn owner_to_scope_reverse_index_callable() {
+    let src = "module m; function void f(); endfunction endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let func_sym = def
+        .symbols
+        .iter()
+        .find(|(_, s)| s.kind == SymbolKind::Function && s.name == "f")
+        .map(|(_, s)| s)
+        .expect("function symbol");
+    let scope = def.find_scope_by_owner(func_sym.decl_site);
+    assert!(scope.is_some());
+    let owner = def.scope_owners.get(&scope.expect("checked"));
+    assert_eq!(owner, Some(&func_sym.decl_site));
+}
+
+#[test]
+fn duplicate_name_resolved_by_kind_then_owner() {
+    let src = "module top; function void f(); endfunction endmodule module top2; function void f(); endfunction endmodule";
+    let (parse, map) = parse_source(src);
+    let def = build_def_index(FileId(0), &parse, &map);
+
+    let fn_scopes = find_owned_scopes(&def, "f", ScopeOwnerKind::Function);
+    assert_eq!(fn_scopes.len(), 2, "should find both functions named 'f'");
+    assert_ne!(fn_scopes[0], fn_scopes[1]);
+}
+
+fn make_ctx() -> (lyra_parser::Parse, lyra_ast::AstIdMap) {
+    let (parse, map) = parse_source("");
+    (parse, map)
+}
+
+#[test]
+fn register_scope_owner_rejects_conflicting_scope() {
+    let (_parse, map) = make_ctx();
+    let mut ctx = crate::builder::DefContext::new(FileId(0), &map);
+    let scope_a = ctx.scopes.push(crate::scopes::ScopeKind::Module, None);
+    let scope_b = ctx.scopes.push(crate::scopes::ScopeKind::Module, None);
+    let owner = crate::Site::placeholder(FileId(0));
+    ctx.register_scope_owner(scope_a, owner);
+    ctx.register_scope_owner(scope_b, owner);
+    assert_eq!(
+        ctx.internal_errors.len(),
+        1,
+        "re-registering same owner to different scope should emit internal error"
+    );
+}
+
+#[test]
+fn register_scope_owner_rejects_conflicting_owner() {
+    let (_parse, map) = make_ctx();
+    let mut ctx = crate::builder::DefContext::new(FileId(0), &map);
+    let scope = ctx.scopes.push(crate::scopes::ScopeKind::Module, None);
+    let owner_a = crate::Site::placeholder(FileId(0));
+    let owner_b = crate::Site::placeholder(FileId(1));
+    ctx.register_scope_owner(scope, owner_a);
+    ctx.register_scope_owner(scope, owner_b);
+    assert_eq!(
+        ctx.internal_errors.len(),
+        1,
+        "re-registering same scope to different owner should emit internal error"
+    );
+}
+
+#[test]
+fn register_scope_owner_allows_idempotent() {
+    let (_parse, map) = make_ctx();
+    let mut ctx = crate::builder::DefContext::new(FileId(0), &map);
+    let scope = ctx.scopes.push(crate::scopes::ScopeKind::Module, None);
+    let owner = crate::Site::placeholder(FileId(0));
+    ctx.register_scope_owner(scope, owner);
+    ctx.register_scope_owner(scope, owner);
+    assert!(
+        ctx.internal_errors.is_empty(),
+        "re-registering same pair should not emit internal error"
+    );
 }

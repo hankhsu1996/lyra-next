@@ -212,7 +212,7 @@ fn collect_callable_inner(
     };
     let name = SmolStr::new(name_tok.text());
     let callable_scope = ctx.scopes.push(header.scope_kind, Some(scope));
-    ctx.scope_owners.insert(callable_scope, decl_site);
+    ctx.register_scope_owner(callable_scope, decl_site);
     let callable_type_site = header
         .type_spec
         .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));

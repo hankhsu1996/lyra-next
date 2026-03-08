@@ -119,6 +119,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         foreach_var_defs: ctx.foreach_var_defs,
         scope_time_units: ctx.scope_time_units,
         scope_owners: ctx.scope_owners,
+        owner_to_scope: ctx.owner_to_scope,
         diagnostics: diagnostics.into_boxed_slice(),
         internal_errors: ctx.internal_errors.into_boxed_slice(),
     };
@@ -214,6 +215,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) current_iface_def_id: Option<GlobalDefId>,
     pub(crate) modport_ordinal: u32,
     pub(crate) scope_owners: HashMap<ScopeId, crate::Site>,
+    pub(crate) owner_to_scope: HashMap<crate::Site, ScopeId>,
     pub(crate) diagnostics: Vec<SemanticDiag>,
     pub(crate) internal_errors: Vec<(Option<crate::Site>, SmolStr)>,
 }
@@ -246,6 +248,7 @@ impl<'a> DefContext<'a> {
             current_iface_def_id: None,
             modport_ordinal: 0,
             scope_owners: HashMap::new(),
+            owner_to_scope: HashMap::new(),
             diagnostics: Vec::new(),
             internal_errors: Vec::new(),
         }
@@ -271,6 +274,38 @@ impl<'a> DefContext<'a> {
         self.modport_ordinal = 0;
         f(self);
         self.current_iface_def_id = prev;
+    }
+
+    /// Register a bidirectional scope ownership relation.
+    ///
+    /// Inserts both `scope -> owner` and `owner -> scope` atomically.
+    /// Emits an internal error if either side was already registered to
+    /// a different counterpart.
+    pub(crate) fn register_scope_owner(&mut self, scope: ScopeId, owner: crate::Site) {
+        if let Some(&existing_owner) = self.scope_owners.get(&scope)
+            && existing_owner != owner
+        {
+            self.internal_errors.push((
+                Some(owner),
+                SmolStr::new(format!(
+                    "scope {scope:?} already owned by {existing_owner:?}, cannot re-register to {owner:?}"
+                )),
+            ));
+            return;
+        }
+        if let Some(&existing_scope) = self.owner_to_scope.get(&owner)
+            && existing_scope != scope
+        {
+            self.internal_errors.push((
+                Some(owner),
+                SmolStr::new(format!(
+                    "owner {owner:?} already owns {existing_scope:?}, cannot re-register to {scope:?}"
+                )),
+            ));
+            return;
+        }
+        self.scope_owners.insert(scope, owner);
+        self.owner_to_scope.insert(owner, scope);
     }
 
     pub(crate) fn emit_internal_error(&mut self, detail: &str, site: crate::Site) {
@@ -534,7 +569,7 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let module_scope = ctx.scopes.push(ScopeKind::Module, None);
-    ctx.scope_owners.insert(module_scope, decl_site);
+    ctx.register_scope_owner(module_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Module,
@@ -589,7 +624,7 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let package_scope = ctx.scopes.push(ScopeKind::Package, None);
-    ctx.scope_owners.insert(package_scope, decl_site);
+    ctx.register_scope_owner(package_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Package,
@@ -624,7 +659,7 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
-    ctx.scope_owners.insert(iface_scope, decl_site);
+    ctx.register_scope_owner(iface_scope, decl_site);
     let def_id = ctx.push_def_entry(
         decl_site,
         DefinitionKind::Interface,
@@ -677,7 +712,7 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
-    ctx.scope_owners.insert(prog_scope, decl_site);
+    ctx.register_scope_owner(prog_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Program,
@@ -727,7 +762,7 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let prim_scope = ctx.scopes.push(ScopeKind::Module, None);
-    ctx.scope_owners.insert(prim_scope, decl_site);
+    ctx.register_scope_owner(prim_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Primitive,
@@ -751,7 +786,7 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = SmolStr::new(name_tok.text());
     let name_span = NameSpan::new(name_tok.text_range());
     let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
-    ctx.scope_owners.insert(cfg_scope, decl_site);
+    ctx.register_scope_owner(cfg_scope, decl_site);
     ctx.push_def_entry(
         decl_site,
         DefinitionKind::Config,
