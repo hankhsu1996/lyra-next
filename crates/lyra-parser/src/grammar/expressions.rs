@@ -76,6 +76,23 @@ fn expr_bp(p: &mut Parser, min_bp: u8, mode: ExprMode) -> Option<CompletedMarker
     Some(lhs)
 }
 
+/// Parse a primary expression: an atom followed by postfix continuations
+/// (field access, indexing, calls).
+fn primary(p: &mut Parser) -> Option<CompletedMarker> {
+    let cm = atom(p)?;
+    Some(postfix(p, cm))
+}
+
+/// Parse a primary that excludes tagged expressions from the atom layer.
+///
+/// Used as the operand parser for tagged expression constructors (LRM 11.9)
+/// to avoid upward recursion: `atom()` contains `TaggedKw` which would
+/// otherwise call back through `primary()` -> `atom()`.
+fn tagged_operand_primary(p: &mut Parser) -> Option<CompletedMarker> {
+    let cm = atom_non_tagged(p)?;
+    Some(postfix(p, cm))
+}
+
 fn lhs(p: &mut Parser, mode: ExprMode) -> Option<CompletedMarker> {
     if let Some(bp) = prefix_bp(p.current()) {
         let m = p.start();
@@ -84,8 +101,7 @@ fn lhs(p: &mut Parser, mode: ExprMode) -> Option<CompletedMarker> {
         expr_bp(p, bp, mode);
         return Some(m.complete(p, SyntaxKind::PrefixExpr));
     }
-    let cm = atom(p)?;
-    Some(postfix(p, cm))
+    primary(p)
 }
 
 // type(...) in expression context: standalone TypeExpr or type(...)'(expr) cast.
@@ -139,7 +155,9 @@ fn literal(p: &mut Parser) -> CompletedMarker {
     m.complete(p, SyntaxKind::Literal)
 }
 
-fn atom(p: &mut Parser) -> Option<CompletedMarker> {
+/// Parse an atomic expression excluding `tagged` (used by tagged operand parsing
+/// to avoid upward recursion).
+fn atom_non_tagged(p: &mut Parser) -> Option<CompletedMarker> {
     if p.at(SyntaxKind::TypeKw) && p.nth(1) == SyntaxKind::LParen {
         return Some(type_expr_or_cast(p));
     }
@@ -232,6 +250,17 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
         }
         _ => None,
     }
+}
+
+fn atom(p: &mut Parser) -> Option<CompletedMarker> {
+    if p.at(SyntaxKind::TaggedKw) {
+        let m = p.start();
+        p.bump(); // tagged
+        p.expect(SyntaxKind::Ident); // member_identifier
+        tagged_operand_primary(p); // operand via non-tagged atom + postfix
+        return Some(m.complete(p, SyntaxKind::TaggedExpr));
+    }
+    atom_non_tagged(p)
 }
 
 /// Whether a token can appear as a method/member name after `.`.

@@ -106,6 +106,22 @@ impl RecordField {
     }
 }
 
+/// Result of looking up a member in a tagged union.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaggedVariantInfo {
+    /// Payload type, or `None` for void members.
+    pub payload_ty: Option<Ty>,
+}
+
+/// Failure modes for tagged-union variant lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaggedVariantError {
+    /// The record is not a tagged union (struct or untagged union).
+    NotATaggedUnion,
+    /// The record is a tagged union but has no member with this name.
+    UnknownMember,
+}
+
 /// A resolved record field with its semantic type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldSem {
@@ -121,6 +137,7 @@ pub struct FieldSem {
 /// suitable as a Salsa query return value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordSem {
+    pub kind: RecordKind,
     pub fields: Box<[FieldSem]>,
     pub field_lookup: Box<[(SmolStr, u32)]>,
     pub diags: Box<[crate::diagnostic::SemanticDiag]>,

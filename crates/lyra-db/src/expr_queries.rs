@@ -4,6 +4,7 @@ use lyra_semantic::member::{
     ArrayMethodKind, BuiltinMethodKind, EnumMethodKind, MemberInfo, MemberKind, MemberLookupError,
     ReceiverInfo, StringMethodKind, classify_array_receiver,
 };
+use lyra_semantic::record::{TaggedVariantError, TaggedVariantInfo};
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::type_infer::{
     CallableKind, CallablePort, CallableSigRef, ExprType, ExprTypeErrorKind, InferCtx,
@@ -17,7 +18,10 @@ use crate::enum_queries::{EnumRef, enum_sem};
 use crate::modport_queries::{ModportRef, modport_sem};
 use crate::module_sig::CallableKind as DbCallableKind;
 use crate::pipeline::{ast_id_map, parse_file};
-use crate::record_queries::{RecordRef, record_fields_raw, record_sem};
+use crate::record_queries::{
+    RecordRef, record_fields_raw, record_sem, tagged_union_variant_from_raw,
+    tagged_union_variant_from_sem,
+};
 use crate::semantic::{base_resolve_index, def_index_file, resolve_index_file};
 use crate::type_queries::{SymbolRef, type_of_symbol, type_of_symbol_raw};
 use crate::{CompilationUnit, source_file_by_id};
@@ -359,6 +363,16 @@ impl InferCtx for DbInferCtx<'_> {
             utr,
         )
     }
+
+    fn tagged_union_variant(
+        &self,
+        record: &lyra_semantic::record::RecordId,
+        member_name: &str,
+    ) -> Result<TaggedVariantInfo, TaggedVariantError> {
+        let rref = RecordRef::new(self.db, self.unit, *record);
+        let sem = record_sem(self.db, rref);
+        tagged_union_variant_from_sem(&sem, member_name)
+    }
 }
 
 /// Const-eval-safe implementation of `InferCtx`.
@@ -479,6 +493,16 @@ impl InferCtx for DbInferCtxRaw<'_> {
 
     fn resolve_type_arg(&self, utr: &lyra_semantic::UserTypeRef) -> Option<Ty> {
         resolve_type_arg_raw_impl(self.db, self.unit, self.source_file, self.ast_id_map, utr)
+    }
+
+    fn tagged_union_variant(
+        &self,
+        record: &lyra_semantic::record::RecordId,
+        member_name: &str,
+    ) -> Result<TaggedVariantInfo, TaggedVariantError> {
+        let rref = RecordRef::new(self.db, self.unit, *record);
+        let fields = record_fields_raw(self.db, rref);
+        tagged_union_variant_from_raw(self.db, self.unit, record, member_name, &fields)
     }
 }
 

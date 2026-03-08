@@ -12,9 +12,10 @@ pub use expr_type::{
     ExprTypeErrorKind, ExprView, InferCtx, ResolveCallableError, Signedness,
 };
 
-use lyra_ast::{Expr, ExprKind, NewExpr};
+use lyra_ast::{Expr, ExprKind, NewExpr, TaggedExpr};
 
 use crate::coerce::IntegralCtx;
+use crate::record::TaggedVariantError;
 use crate::types::{Ty, UnpackedDim};
 
 /// Infer the type of an expression, optionally in a context.
@@ -49,6 +50,7 @@ pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx
         ExprKind::CastExpr(c) => scalar::infer_cast(&c, ctx),
         ExprKind::NewExpr(ne) => infer_new_expr(&ne, None),
         ExprKind::TypeExpr(te) => scalar::infer_type_expr(&te, ctx),
+        ExprKind::TaggedExpr(_) => ExprType::error(ExprTypeErrorKind::TaggedExprNeedsContext),
     };
     reject_void_value(result)
 }
@@ -79,10 +81,56 @@ pub fn infer_expr_with_expected(
     let Some(peeled) = expr.peeled() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    if let Some(ExprKind::NewExpr(ne)) = peeled.classify() {
-        return infer_new_expr(&ne, expected);
+    match peeled.classify() {
+        Some(ExprKind::NewExpr(ne)) => return infer_new_expr(&ne, expected),
+        Some(ExprKind::TaggedExpr(te)) => return infer_tagged_expr(&te, expected, ctx),
+        _ => {}
     }
     infer_expr(expr, ctx, integral_ctx)
+}
+
+fn infer_tagged_expr(te: &TaggedExpr, expected: Option<&Ty>, ctx: &dyn InferCtx) -> ExprType {
+    let Some(Ty::Record(record_id)) = expected else {
+        return if expected.is_some() {
+            ExprType::error(ExprTypeErrorKind::TaggedExprExpectedTaggedUnion)
+        } else {
+            ExprType::error(ExprTypeErrorKind::TaggedExprNeedsContext)
+        };
+    };
+
+    let Some(member_tok) = te.member_name() else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
+    };
+
+    let variant = match ctx.tagged_union_variant(record_id, member_tok.text()) {
+        Ok(v) => v,
+        Err(TaggedVariantError::NotATaggedUnion) => {
+            return ExprType::error(ExprTypeErrorKind::TaggedExprExpectedTaggedUnion);
+        }
+        Err(TaggedVariantError::UnknownMember) => {
+            return ExprType::error(ExprTypeErrorKind::TaggedExprUnknownMember);
+        }
+    };
+
+    let operand = te.operand();
+
+    match (&variant.payload_ty, &operand) {
+        (None, Some(_)) => {
+            return ExprType::error(ExprTypeErrorKind::TaggedExprUnexpectedOperandForVoidMember);
+        }
+        (Some(_), None) => {
+            return ExprType::error(ExprTypeErrorKind::TaggedExprMissingOperandForPayloadMember);
+        }
+        (Some(payload_ty), Some(op)) => {
+            let op_result = infer_expr_with_expected(op, Some(payload_ty), ctx, None);
+            if matches!(op_result.ty, Ty::Error) {
+                return op_result;
+            }
+        }
+        (None, None) => {}
+    }
+
+    ExprType::from_ty(&Ty::Record(*record_id))
 }
 
 fn infer_new_expr(ne: &NewExpr, expected: Option<&Ty>) -> ExprType {

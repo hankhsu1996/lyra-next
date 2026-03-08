@@ -34,8 +34,8 @@ pub use nodes::{
     ParenExpr, Port, PortList, PrefixExpr, PrimitiveDecl, ProgramBody, ProgramDecl, QualifiedName,
     RangeExpr, RangeList, RepeatStmt, ReplicExpr, ReturnStmt, SourceFile, StreamExpr,
     StreamOperandItem, StreamOperands, StreamRange, StreamSliceSize, StreamWithClause,
-    StructMember, StructType, SystemTfArgList, SystemTfCall, TaskDecl, TaskPrototype, TfPortDecl,
-    TimeprecisionDecl, TimeunitDecl, TimingControl, TypeExpr, TypeSpec, TypedefDecl,
+    StructMember, StructType, SystemTfArgList, SystemTfCall, TaggedExpr, TaskDecl, TaskPrototype,
+    TfPortDecl, TimeprecisionDecl, TimeunitDecl, TimingControl, TypeExpr, TypeSpec, TypedefDecl,
     UnpackedDimension, ValueRange, VarDecl, WhileStmt,
 };
 pub use nodes_decl::{NetDeclKind, QualifiedSegment};

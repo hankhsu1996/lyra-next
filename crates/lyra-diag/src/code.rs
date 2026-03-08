@@ -83,6 +83,7 @@ pub const STREAM_SLICE_SIZE_NOT_CONST: DiagKey = "lyra.type.stream_slice_size_no
 pub const UNPACKED_RECORD_INTEGRAL_ASSIGN: DiagKey = "lyra.type.unpacked_record_integral_assign";
 pub const INDEX_KEY_NOT_INTEGRAL: DiagKey = "lyra.type.index_key_not_integral";
 pub const ASSOC_INDEX_KEY_MISMATCH: DiagKey = "lyra.type.assoc_index_key_mismatch";
+pub const TAGGED_EXPR_ERROR: DiagKey = "lyra.type.tagged_expr_error";
 pub const IMPLICIT_NET_FORBIDDEN: DiagKey = "lyra.semantic.implicit_net_forbidden";
 pub const AUTOMATIC_VAR_NON_PROCEDURAL: DiagKey = "lyra.decl.automatic_var_non_procedural";
 
@@ -189,6 +190,7 @@ pub const ALL_KEYS: &[DiagKey] = &[
     UNPACKED_RECORD_INTEGRAL_ASSIGN,
     INDEX_KEY_NOT_INTEGRAL,
     ASSOC_INDEX_KEY_MISMATCH,
+    TAGGED_EXPR_ERROR,
     AUTOMATIC_VAR_NON_PROCEDURAL,
     UNRESOLVED_MODULE_INST,
     NOT_INSTANTIABLE,

@@ -11,7 +11,7 @@ use crate::facts::modport::field_access_facts;
 use crate::modport_queries::ModportRef;
 use crate::pipeline::ast_id_map as query_ast_id_map;
 use crate::pipeline::{ast_id_map, parse_file, preprocess_file};
-use crate::record_queries::{RecordRef, record_diagnostics};
+use crate::record_queries::{RecordRef, record_diagnostics, record_sem};
 use crate::semantic::{
     def_index_file, global_def_index, import_conflicts_file, resolve_core_file, resolve_index_file,
 };
@@ -733,6 +733,17 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         } else {
             None
         }
+    }
+
+    fn tagged_union_variant(
+        &self,
+        id: lyra_semantic::record::RecordId,
+        member: &str,
+    ) -> Result<lyra_semantic::record::TaggedVariantInfo, lyra_semantic::record::TaggedVariantError>
+    {
+        let rref = RecordRef::new(self.db, self.unit, id);
+        let sem = record_sem(self.db, rref);
+        crate::record_queries::tagged_union_variant_from_sem(&sem, member)
     }
 }
 

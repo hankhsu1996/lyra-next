@@ -112,6 +112,7 @@ pub fn is_expression_kind(kind: lyra_lexer::SyntaxKind) -> bool {
             | SyntaxKind::NewExpr
             | SyntaxKind::TypeExpr
             | SyntaxKind::AssignmentPatternExpr
+            | SyntaxKind::TaggedExpr
     )
 }
 

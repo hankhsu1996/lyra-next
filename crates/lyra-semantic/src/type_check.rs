@@ -1,14 +1,15 @@
 use crate::Site;
 use crate::site;
 use lyra_ast::{
-    AssignStmt, AstIdMap, ContinuousAssign, Declarator, Expr, ExprKind, NewExpr, TfArg, VarDecl,
+    AssignStmt, AstIdMap, ContinuousAssign, Declarator, Expr, ExprKind, NewExpr, TaggedExpr, TfArg,
+    VarDecl,
 };
 use lyra_source::{DeclSpan, TextRange, TokenSpan};
 
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
 use crate::modport_def::PortDirection;
-use crate::record::{Packing, RecordId};
+use crate::record::{Packing, RecordId, TaggedVariantError, TaggedVariantInfo};
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView};
 use crate::types::{SymbolType, Ty, UnpackedDim};
 
@@ -236,6 +237,11 @@ pub enum TypeCheckItem {
         expected: Ty,
         actual: Ty,
     },
+    TaggedExprError {
+        expr_site: Site,
+        member_name: smol_str::SmolStr,
+        error_kind: crate::type_infer::ExprTypeErrorKind,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -293,6 +299,12 @@ pub trait TypeCheckCtx {
     /// Returns `Some(width)` only for packed/softpacked records where width
     /// is statically known; otherwise `None`.
     fn record_fixed_width_bits(&self, id: RecordId) -> Option<u32>;
+    /// Look up a tagged-union variant by record ID and member name.
+    fn tagged_union_variant(
+        &self,
+        id: RecordId,
+        member: &str,
+    ) -> Result<TaggedVariantInfo, TaggedVariantError>;
 }
 
 pub(crate) const MISSING_AST_ID: &str = "missing_ast_id in type checker";
@@ -436,6 +448,16 @@ pub fn check_var_decl(
             continue;
         }
 
+        check_tagged_expr(
+            &init_expr,
+            &rhs_type,
+            &lhs_type.ty,
+            ctx,
+            decl_site,
+            rhs_site,
+            items,
+        );
+
         if let Some(ne) = detect_new_expr(&init_expr) {
             check_new_expr(&ne, &lhs_type.ty, ctx, decl_site, lhs_site, rhs_site, items);
         }
@@ -489,6 +511,16 @@ fn check_assignment_pair(
                     expr_site: rhs_site,
                 });
             }
+
+            check_tagged_expr(
+                rhs,
+                &rhs_type,
+                &lhs_type.ty,
+                ctx,
+                stmt_site,
+                rhs_site,
+                items,
+            );
 
             if let Some(ne) = detect_new_expr(rhs) {
                 check_new_expr(&ne, &lhs_type.ty, ctx, stmt_site, lhs_site, rhs_site, items);
@@ -700,11 +732,109 @@ pub(crate) fn tf_arg_expr(arg: &TfArg) -> Option<&Expr> {
 }
 
 fn type_rhs_for_assignment(ctx: &dyn TypeCheckCtx, rhs: &Expr, lhs_ty: &Ty) -> ExprType {
-    if detect_new_expr(rhs).is_some() {
+    let result = ctx.expr_type(rhs);
+    if result_needs_expected_type(&result) {
         ctx.expr_type_with_expected(rhs, lhs_ty)
     } else {
-        ctx.expr_type(rhs)
+        result
     }
+}
+
+/// Whether a self-determined inference result indicates the expression
+/// needs an expected type from context to produce a meaningful type.
+///
+/// Classification stays in the inference layer (which returns these specific
+/// error kinds); `type_check` just reacts to the semantic result.
+fn result_needs_expected_type(result: &ExprType) -> bool {
+    matches!(
+        result.view,
+        ExprView::Error(
+            ExprTypeErrorKind::NewExprNeedsExpectedDynArray
+                | ExprTypeErrorKind::TaggedExprNeedsContext
+        )
+    )
+}
+
+fn detect_tagged_expr(expr: &Expr) -> Option<TaggedExpr> {
+    let peeled = expr.peeled()?;
+    match peeled.classify()? {
+        ExprKind::TaggedExpr(te) => Some(te),
+        _ => None,
+    }
+}
+
+fn tagged_member_name(te: &TaggedExpr) -> smol_str::SmolStr {
+    te.member_name().map_or_else(
+        || smol_str::SmolStr::new_static("?"),
+        |t| lyra_ast::semantic_spelling(&t),
+    )
+}
+
+/// Unified tagged-expression check: structural errors + payload compatibility.
+///
+/// Uses a single expected-type inference result (`rhs_type`) for error
+/// reporting. If the expression is a tagged expression and the expected
+/// type is a tagged union, also checks operand-vs-payload assignment
+/// compatibility via the central `check_assignment_compat` path.
+fn check_tagged_expr(
+    rhs: &Expr,
+    rhs_type: &ExprType,
+    lhs_ty: &Ty,
+    ctx: &dyn TypeCheckCtx,
+    assign_site: Site,
+    rhs_site: Site,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let Some(te) = detect_tagged_expr(rhs) else {
+        return;
+    };
+    let member_name = tagged_member_name(&te);
+
+    // Structural errors from inference
+    if let ExprView::Error(kind) = &rhs_type.view {
+        match kind {
+            ExprTypeErrorKind::TaggedExprExpectedTaggedUnion
+            | ExprTypeErrorKind::TaggedExprUnknownMember
+            | ExprTypeErrorKind::TaggedExprUnexpectedOperandForVoidMember
+            | ExprTypeErrorKind::TaggedExprMissingOperandForPayloadMember => {
+                items.push(TypeCheckItem::TaggedExprError {
+                    expr_site: rhs_site,
+                    member_name,
+                    error_kind: kind.clone(),
+                });
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // Payload assignment compatibility
+    let Ty::Record(record_id) = lhs_ty else {
+        return;
+    };
+    let Ok(variant) = ctx.tagged_union_variant(*record_id, member_name.as_str()) else {
+        return;
+    };
+    let Some(payload_ty) = variant.payload_ty else {
+        return;
+    };
+    let Some(operand) = te.operand() else {
+        return;
+    };
+    let payload_et = ExprType::from_ty(&payload_ty);
+    let operand_et = ctx.expr_type_with_expected(&operand, &payload_ty);
+    if matches!(operand_et.ty, Ty::Error) {
+        return;
+    }
+    check_assignment_compat(
+        &payload_et,
+        &operand_et,
+        assign_site,
+        rhs_site,
+        rhs_site,
+        ctx,
+        items,
+    );
 }
 
 fn detect_new_expr(expr: &Expr) -> Option<NewExpr> {

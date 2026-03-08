@@ -127,6 +127,11 @@ pub enum MessageId {
     // Index key legality
     IndexKeyNotIntegral,
     AssocIndexKeyMismatch,
+    // Tagged expression errors (LRM 11.9)
+    TaggedExprNotTaggedUnion,
+    TaggedExprUnknownMember,
+    TaggedExprVoidMemberHasOperand,
+    TaggedExprPayloadMemberMissingOperand,
     // Implicit net policy
     ImplicitNetForbidden,
     // Declaration legality
@@ -301,7 +306,11 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::RecordAssignWrongRecord
         | MessageId::RecordTypeHere
         | MessageId::UnpackedRecordIntegralAssign
-        | MessageId::AssocIndexKeyMismatch => render_type_message(msg),
+        | MessageId::AssocIndexKeyMismatch
+        | MessageId::TaggedExprNotTaggedUnion
+        | MessageId::TaggedExprUnknownMember
+        | MessageId::TaggedExprVoidMemberHasOperand
+        | MessageId::TaggedExprPayloadMemberMissingOperand => render_type_message(msg),
         MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
         | MessageId::StreamUnpackGreedyRemainder
@@ -611,12 +620,35 @@ fn render_type_message(msg: &Message) -> String {
         MessageId::QueueBoundNotPositive => {
             format!("queue bound must be a positive integer, got {}", name())
         }
-        MessageId::AssocIndexKeyMismatch => {
-            let expected = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
-            let actual = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            format!(
-                "associative array index type `{actual}` does not match declared key type `{expected}`"
-            )
+        MessageId::AssocIndexKeyMismatch => render_assoc_key_mismatch_message(msg),
+        MessageId::TaggedExprNotTaggedUnion
+        | MessageId::TaggedExprUnknownMember
+        | MessageId::TaggedExprVoidMemberHasOperand
+        | MessageId::TaggedExprPayloadMemberMissingOperand => render_tagged_expr_message(msg),
+        _ => String::new(),
+    }
+}
+
+fn render_assoc_key_mismatch_message(msg: &Message) -> String {
+    let expected = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    let actual = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+    format!("associative array index type `{actual}` does not match declared key type `{expected}`")
+}
+
+fn render_tagged_expr_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
+        MessageId::TaggedExprNotTaggedUnion => {
+            "tagged expression requires a tagged union type".into()
+        }
+        MessageId::TaggedExprUnknownMember => {
+            format!("unknown member `{}` in tagged union", name())
+        }
+        MessageId::TaggedExprVoidMemberHasOperand => {
+            format!("void member `{}` does not accept an operand", name())
+        }
+        MessageId::TaggedExprPayloadMemberMissingOperand => {
+            format!("member `{}` requires an operand", name())
         }
         _ => String::new(),
     }

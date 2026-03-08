@@ -6,6 +6,8 @@ use crate::symbols::GlobalSymbolId;
 use crate::type_extract::UserTypeRef;
 use crate::types::{ConstInt, Ty};
 
+use crate::record::{TaggedVariantError, TaggedVariantInfo};
+
 use super::expr_type::{BitVecType, CallableSigRef, ExprType, InferCtx, ResolveCallableError};
 
 /// Allocation-free decorator that injects local name bindings over an
@@ -81,5 +83,13 @@ impl<const N: usize> InferCtx for ScopedInferCtx<'_, N> {
             return Some(Ty::int());
         }
         None
+    }
+
+    fn tagged_union_variant(
+        &self,
+        record: &crate::record::RecordId,
+        member_name: &str,
+    ) -> Result<TaggedVariantInfo, TaggedVariantError> {
+        self.inner.tagged_union_variant(record, member_name)
     }
 }

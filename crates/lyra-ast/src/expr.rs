@@ -6,7 +6,7 @@ use crate::node::{AstNode, HasSyntax, is_expression_kind};
 use crate::nodes::{
     AssignmentPatternExpr, BinExpr, CallExpr, CastExpr, ConcatExpr, CondExpr, Expression,
     FieldExpr, IndexExpr, Literal, NameRef, NewExpr, ParenExpr, PrefixExpr, QualifiedName,
-    RangeExpr, ReplicExpr, StreamExpr, SystemTfCall, TypeExpr, TypeSpec,
+    RangeExpr, ReplicExpr, StreamExpr, SystemTfCall, TaggedExpr, TypeExpr, TypeSpec,
 };
 
 /// Typed handle for any expression-kind syntax node.
@@ -134,6 +134,7 @@ impl Expr {
             SyntaxKind::CastExpr => CastExpr::cast(node).map(ExprKind::CastExpr),
             SyntaxKind::NewExpr => NewExpr::cast(node).map(ExprKind::NewExpr),
             SyntaxKind::TypeExpr => TypeExpr::cast(node).map(ExprKind::TypeExpr),
+            SyntaxKind::TaggedExpr => TaggedExpr::cast(node).map(ExprKind::TaggedExpr),
             _ => None,
         }
     }
@@ -163,6 +164,7 @@ pub enum ExprKind {
     CastExpr(CastExpr),
     NewExpr(NewExpr),
     TypeExpr(TypeExpr),
+    TaggedExpr(TaggedExpr),
 }
 
 impl ExprKind {
@@ -209,6 +211,7 @@ impl ExprKind {
             Self::CastExpr(n) => n.syntax(),
             Self::NewExpr(n) => n.syntax(),
             Self::TypeExpr(n) => n.syntax(),
+            Self::TaggedExpr(n) => n.syntax(),
         }
     }
 }

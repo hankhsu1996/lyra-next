@@ -531,6 +531,9 @@ pub enum SyntaxKind {
     TimeunitDecl,
     TimeprecisionDecl,
 
+    // Tagged union expression (LRM 11.9)
+    TaggedExpr,
+
     #[doc(hidden)]
     __Last,
 }
