@@ -82,10 +82,6 @@ Type parameter declarations and default resolution are implemented (6.20.3). Rem
 
 Record-to-record identity mismatch is diagnosed. Packed/softpacked record to/from integral assignment is allowed with truncation warnings; unpacked record to/from integral is an error. Remaining gaps: pattern/aggregate assignment and fieldwise forms, coercion/cast diagnostics in record context, enum-to-record assignment compatibility. Blocked by: aggregate literal/pattern expression support, enum-record compat rules. Test: `lrm/ch07/7.2.2_assigning_to_structures`.
 
-### 7.3.1: Packed union layout and expression semantics
-
-Non-integral member validation is implemented for packed structs and unions (LRM 7.2.1 / 7.3.1). Width computation (`bit_width_total`) handles packed records internally (struct=sum, union=max). `$bits` const-eval exposes these widths at the SV level. Remaining: right-justified member placement and layout mapping, packed union value/expression semantics (packed union as vector, selection semantics). Test: `lrm/ch07/7.3.1_packed_unions/cases/soft_packed_union_layout`.
-
 ### 7.3.2: Tagged unions
 
 The `tagged` qualifier is parsed and diagnosed as unsupported; the type resolves to error. Full support requires tagged expressions (11.9), pattern matching (12.6), tag tracking, and void members. `RecordKind::TaggedUnion` exists but is never constructed. Test: `lrm/ch07/7.3.2_tagged_unions`.
