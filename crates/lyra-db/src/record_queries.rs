@@ -117,19 +117,21 @@ pub fn record_field_tys<'db>(
                     name,
                     ExpectedNs::TypeThenValue,
                 );
-                let path = Box::new([name.clone()]) as Box<[SmolStr]>;
-                let (ty, err) = classify_for_record_field(db, unit, file_id, &resolve_result, path);
+                let (ty, err) =
+                    classify_for_record_field(db, unit, file_id, &resolve_result, name.clone());
                 LoweredFieldTy { ty, err }
             }
-            TypeRef::Qualified { segments, .. } => {
-                let resolve_result = lyra_semantic::resolve_qualified_name(
-                    segments,
+            TypeRef::Qualified { path, .. } => {
+                let resolve_result = lyra_semantic::resolve_qualified_path(
+                    path,
                     resolve_env.global,
                     resolve_env.pkg_scope,
+                    resolve_env.cu_scope,
                     ExpectedNs::TypeThenValue,
                 );
-                let path = segments.clone();
-                let (ty, err) = classify_for_record_field(db, unit, file_id, &resolve_result, path);
+                let display = SmolStr::new(path.display_name());
+                let (ty, err) =
+                    classify_for_record_field(db, unit, file_id, &resolve_result, display);
                 LoweredFieldTy { ty, err }
             }
         };
@@ -186,12 +188,11 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
         // Convert field type errors to SemanticDiag using the def-anchored type site
         if let Some(err) = &lowered.err {
             let primary = DiagSpan::Site(field.best_type_site());
-            let display_name = err.path.join("::");
             match err.kind {
                 FieldTyErrorKind::UndeclaredType => {
                     diags.push(SemanticDiag {
                         kind: SemanticDiagKind::UndeclaredType {
-                            name: SmolStr::new(&display_name),
+                            name: err.path.clone(),
                         },
                         primary,
                         label: None,
@@ -200,7 +201,7 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
                 FieldTyErrorKind::NotAType => {
                     diags.push(SemanticDiag {
                         kind: SemanticDiagKind::NotAType {
-                            name: SmolStr::new(&display_name),
+                            name: err.path.clone(),
                         },
                         primary,
                         label: None,

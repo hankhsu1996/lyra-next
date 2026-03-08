@@ -11,6 +11,7 @@ use crate::builder::DefContext;
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::enum_def::{EnumBase, EnumDef, EnumDefIdx, EnumMemberDef, EnumMemberRangeKind};
+use crate::name_lowering::QualifiedNameLowerError;
 use crate::nettype_def::{NettypeDef, NettypeDefIdx, ResolveFnRef};
 use crate::record::{
     Packing, RecordDef, RecordDefIdx, RecordField, RecordKind, SymbolOrigin, TypeRef,
@@ -19,6 +20,42 @@ use crate::record::{
 use crate::scopes::ScopeId;
 use crate::symbols::{Constness, Lifetime, Namespace, Symbol, SymbolKind};
 use crate::types::Ty;
+
+/// Try to lower a `QualifiedName` and push it as a use site.
+///
+/// On success, pushes a `UseSite` with the given `expected_ns`.
+/// On unsupported (>2 segments) or malformed, emits a diagnostic instead.
+pub(crate) fn try_push_qualified_use_site(
+    ctx: &mut DefContext<'_>,
+    qn: &QualifiedName,
+    scope: ScopeId,
+    expected_ns: ExpectedNs,
+) {
+    let Some(ast_id) = ctx.ast_id_map.ast_id(qn) else {
+        return;
+    };
+    match crate::name_lowering::lower_qualified_name(qn) {
+        Ok(qp) => {
+            ctx.use_sites.push(UseSite {
+                path: NamePath::Qualified(qp),
+                expected_ns,
+                scope,
+                name_ref_site: ast_id.erase(),
+                order_key: 0,
+            });
+        }
+        Err(QualifiedNameLowerError::TooManySegments { count }) => {
+            ctx.diagnostics.push(SemanticDiag {
+                kind: SemanticDiagKind::UnsupportedQualifiedPath {
+                    path: SmolStr::new(format!("{count}-segment qualified name")),
+                },
+                primary: DiagSpan::Site(ast_id.erase()),
+                label: None,
+            });
+        }
+        Err(QualifiedNameLowerError::TooFewSegments) => {}
+    }
+}
 
 pub(crate) fn collect_type_spec_refs(ctx: &mut DefContext<'_>, ts: &TypeSpec, scope: ScopeId) {
     // type(...) operator: names inside can be types or values; collect
@@ -84,21 +121,7 @@ fn register_type_expr_use_site(
             }
         }
         crate::type_extract::UserTypeRef::Qualified(qn) => {
-            if let Some(ast_id) = ctx.ast_id_map.ast_id(qn) {
-                let segments: Box<[SmolStr]> = qn
-                    .segments()
-                    .map(|ident| SmolStr::new(ident.text()))
-                    .collect();
-                if !segments.is_empty() {
-                    ctx.use_sites.push(UseSite {
-                        path: NamePath::Qualified { segments },
-                        expected_ns: ExpectedNs::TypeOrValue,
-                        scope,
-                        name_ref_site: ast_id.erase(),
-                        order_key: 0,
-                    });
-                }
-            }
+            try_push_qualified_use_site(ctx, qn, scope, ExpectedNs::TypeOrValue);
         }
     }
 }
@@ -136,21 +159,7 @@ fn register_type_use_site(
             }
         }
         crate::type_extract::UserTypeRef::Qualified(qn) => {
-            if let Some(ast_id) = ctx.ast_id_map.ast_id(qn) {
-                let segments: Box<[SmolStr]> = qn
-                    .segments()
-                    .map(|ident| SmolStr::new(ident.text()))
-                    .collect();
-                if !segments.is_empty() {
-                    ctx.use_sites.push(UseSite {
-                        path: NamePath::Qualified { segments },
-                        expected_ns: ExpectedNs::TypeThenValue,
-                        scope,
-                        name_ref_site: ast_id.erase(),
-                        order_key: 0,
-                    });
-                }
-            }
+            try_push_qualified_use_site(ctx, qn, scope, ExpectedNs::TypeThenValue);
         }
     }
 }
@@ -524,21 +533,7 @@ fn collect_unpacked_dim_refs(
                 return;
             }
             crate::type_extract::UserTypeRef::Qualified(qn) => {
-                if let Some(ast_id) = ctx.ast_id_map.ast_id(qn) {
-                    let segments: Box<[SmolStr]> = qn
-                        .segments()
-                        .map(|ident| SmolStr::new(ident.text()))
-                        .collect();
-                    if !segments.is_empty() {
-                        ctx.use_sites.push(UseSite {
-                            path: NamePath::Qualified { segments },
-                            expected_ns: ExpectedNs::TypeOrValue,
-                            scope,
-                            name_ref_site: ast_id.erase(),
-                            order_key: 0,
-                        });
-                    }
-                }
+                try_push_qualified_use_site(ctx, qn, scope, ExpectedNs::TypeOrValue);
                 return;
             }
             crate::type_extract::UserTypeRef::DottedType { .. } => {}
@@ -572,22 +567,8 @@ fn collect_name_refs_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: S
                 });
             }
         } else if child.kind() == SyntaxKind::QualifiedName {
-            if let Some(qn) = QualifiedName::cast(child.clone())
-                && let Some(ast_id) = ctx.ast_id_map.ast_id(&qn)
-            {
-                let segments: Box<[SmolStr]> = qn
-                    .segments()
-                    .map(|ident| SmolStr::new(ident.text()))
-                    .collect();
-                if !segments.is_empty() {
-                    ctx.use_sites.push(UseSite {
-                        path: NamePath::Qualified { segments },
-                        expected_ns: ExpectedNs::Exact(Namespace::Value),
-                        scope,
-                        name_ref_site: ast_id.erase(),
-                        order_key: 0,
-                    });
-                }
+            if let Some(qn) = QualifiedName::cast(child.clone()) {
+                try_push_qualified_use_site(ctx, &qn, scope, ExpectedNs::Exact(Namespace::Value));
             }
         } else if child.kind() == SyntaxKind::CastExpr {
             // CastExpr contains a TypeSpec (the cast target type) and an

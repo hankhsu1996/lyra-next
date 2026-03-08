@@ -10,7 +10,24 @@ mod subprograms;
 
 use lyra_lexer::SyntaxKind;
 
-use crate::parser::Parser;
+use crate::parser::{CompletedMarker, Parser};
+
+/// True when the current token is `SystemIdent` with text `$unit`.
+pub(crate) fn is_unit_scope_prefix(p: &Parser) -> bool {
+    p.current() == SyntaxKind::SystemIdent && p.nth_text(0) == "$unit"
+}
+
+/// Parse a qualified name starting from the current token (already known to be
+/// `Ident` or `$unit`). Consumes the first segment and all `:: Ident` pairs.
+pub(crate) fn parse_qualified_name(p: &mut Parser) -> CompletedMarker {
+    let m = p.start();
+    p.bump(); // first segment (Ident or SystemIdent)
+    while p.at(SyntaxKind::ColonColon) && p.nth(1) == SyntaxKind::Ident {
+        p.bump(); // ::
+        p.bump(); // segment
+    }
+    m.complete(p, SyntaxKind::QualifiedName)
+}
 
 pub(crate) fn eat_attr_instances(p: &mut Parser) {
     while p.at(SyntaxKind::AttrOpen) {

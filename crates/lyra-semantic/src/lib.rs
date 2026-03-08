@@ -23,6 +23,7 @@ pub mod member_name;
 pub mod modport_def;
 pub mod modport_facts;
 pub mod name_graph;
+pub mod name_lowering;
 pub mod nettype_def;
 pub mod record;
 mod resolve;
@@ -47,9 +48,10 @@ pub use streaming::fixed_stream_width_bits_of_expr_type;
 
 pub use builder::build_def_index;
 pub use global_index::{build_cu_scope_index, build_file_scope_index};
+pub use name_lowering::{QualifiedPath, lower_qualified_name};
 pub use resolve::{
     ResolveEnv, build_resolve_core, build_resolve_index, detect_import_conflicts,
-    resolve_name_in_scope, resolve_qualified_name,
+    resolve_name_in_scope, resolve_qualified_path,
 };
 pub use type_extract::{
     UserTypeRef, extract_base_ty_from_type_ref, extract_base_ty_from_typespec,

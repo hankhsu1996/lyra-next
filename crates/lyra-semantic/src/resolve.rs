@@ -32,15 +32,10 @@ struct ResolveCtx<'a> {
 
 /// Resolve all use-sites using only offset-independent data.
 ///
-/// Returns `CoreResolveOutput` with reason codes for unresolved names.
-///
 /// Resolution precedence for `Value`/`Type` namespace (LRM 26.3):
 /// 1. Lexical scope (local declarations)
 /// 2. Explicit imports in scope chain
 /// 3. Wildcard imports in scope chain
-///
-/// `Definition` namespace: `GlobalDefIndex::resolve_definition`.
-/// `Qualified` paths: resolved via `GlobalDefIndex` + `PackageScopeIndex`.
 pub fn build_resolve_core(
     graph: &NameGraph,
     global: &GlobalDefIndex,
@@ -68,7 +63,7 @@ pub fn build_resolve_core(
             import_errors.push(ImportError {
                 import_idx: idx as u32,
                 reason: UnresolvedReason::MemberNotFound {
-                    package: imp.package.clone(),
+                    root: crate::def_index::QualifiedRoot::Package(imp.package.clone()),
                     member: member.clone(),
                 },
             });
@@ -91,9 +86,13 @@ pub fn build_resolve_core(
             NamePath::Simple(name) => {
                 resolve_simple(&ctx, entry.scope, name, entry.expected_ns, entry.order_key)
             }
-            NamePath::Qualified { segments } => {
-                resolve_qualified(segments, global, pkg_scope, entry.expected_ns)
-            }
+            NamePath::Qualified(qp) => resolve_qualified(
+                qp,
+                ctx.global,
+                ctx.pkg_scope,
+                ctx.cu_scope,
+                entry.expected_ns,
+            ),
         })
         .collect();
 
@@ -444,17 +443,15 @@ pub struct ResolveEnv<'a> {
     pub cu_scope: &'a CuScopeIndex,
 }
 
-/// Resolve a qualified name (e.g. `Pkg::member`).
-///
-/// Public API for ad-hoc resolution without going through the
-/// use-site / resolve-index pipeline.
-pub fn resolve_qualified_name(
-    segments: &[SmolStr],
+/// Resolve a qualified name (`Pkg::member` or `$unit::member`).
+pub fn resolve_qualified_path(
+    qp: &crate::name_lowering::QualifiedPath,
     global: &GlobalDefIndex,
     pkg_scope: &PackageScopeIndex,
+    cu_scope: &CuScopeIndex,
     expected: ExpectedNs,
 ) -> CoreResolveResult {
-    resolve_qualified(segments, global, pkg_scope, expected)
+    resolve_qualified(qp, global, pkg_scope, cu_scope, expected)
 }
 
 fn resolve_simple(
@@ -569,47 +566,71 @@ fn resolve_simple(
     CoreResolveResult::Unresolved(UnresolvedReason::NotFound)
 }
 
-/// Qualified names (`Pkg::member`) bypass positional import filtering
-/// because their visibility is determined solely by the package
-/// qualification, not by import declaration position.
 fn resolve_qualified(
-    segments: &[SmolStr],
+    qp: &crate::name_lowering::QualifiedPath,
     global: &GlobalDefIndex,
     pkg_scope: &PackageScopeIndex,
+    cu_scope: &CuScopeIndex,
     expected: ExpectedNs,
 ) -> CoreResolveResult {
-    if segments.len() != 2 {
-        return CoreResolveResult::Unresolved(UnresolvedReason::UnsupportedQualifiedPath {
-            len: segments.len(),
-        });
-    }
-    let pkg_name = &segments[0];
-    let member_name = &segments[1];
-
-    if global.resolve_package(pkg_name).is_none() {
-        return CoreResolveResult::Unresolved(UnresolvedReason::PackageNotFound {
-            package: pkg_name.clone(),
-        });
-    }
-
     let (nss, len) = ns_list(match expected {
         ExpectedNs::Exact(Namespace::Definition) => ExpectedNs::Exact(Namespace::Value),
         other => other,
     });
-    for &ns in &nss[..len] {
-        if let Some(ast_id) = pkg_scope.resolve(pkg_name, member_name, ns) {
-            return match CoreResolution::from_site(ast_id, ns) {
-                Ok(res) => CoreResolveResult::Resolved(res),
-                Err(detail) => {
-                    CoreResolveResult::Unresolved(UnresolvedReason::InternalError { detail })
+    let member = qp.member.as_str();
+    match &qp.root {
+        crate::def_index::QualifiedRoot::Package(pkg_name) => {
+            if global.resolve_package(pkg_name).is_none() {
+                return CoreResolveResult::Unresolved(UnresolvedReason::PackageNotFound {
+                    package: pkg_name.clone(),
+                });
+            }
+            for &ns in &nss[..len] {
+                if let Some(ast_id) = pkg_scope.resolve(pkg_name, member, ns) {
+                    return CoreResolution::from_site(ast_id, ns).map_or_else(
+                        |detail| {
+                            CoreResolveResult::Unresolved(UnresolvedReason::InternalError {
+                                detail,
+                            })
+                        },
+                        CoreResolveResult::Resolved,
+                    );
                 }
-            };
+            }
+            CoreResolveResult::Unresolved(UnresolvedReason::MemberNotFound {
+                root: crate::def_index::QualifiedRoot::Package(pkg_name.clone()),
+                member: qp.member.clone(),
+            })
+        }
+        crate::def_index::QualifiedRoot::Unit => {
+            for &ns in &nss[..len] {
+                match cu_scope.resolve(member, ns) {
+                    ScopeLookup::Unique(site) => {
+                        return CoreResolution::from_site(site, ns).map_or_else(
+                            |detail| {
+                                CoreResolveResult::Unresolved(UnresolvedReason::InternalError {
+                                    detail,
+                                })
+                            },
+                            CoreResolveResult::Resolved,
+                        );
+                    }
+                    ScopeLookup::Ambiguous(entries) => {
+                        let sites: Box<[crate::Site]> =
+                            entries.iter().map(|(_, site)| *site).collect();
+                        return CoreResolveResult::Unresolved(UnresolvedReason::AmbiguousCuScope {
+                            sites,
+                        });
+                    }
+                    ScopeLookup::Missing => {}
+                }
+            }
+            CoreResolveResult::Unresolved(UnresolvedReason::MemberNotFound {
+                root: crate::def_index::QualifiedRoot::Unit,
+                member: qp.member.clone(),
+            })
         }
     }
-    CoreResolveResult::Unresolved(UnresolvedReason::MemberNotFound {
-        package: pkg_name.clone(),
-        member: member_name.clone(),
-    })
 }
 
 fn resolve_via_explicit_import(
@@ -1128,9 +1149,12 @@ fn map_import_errors(
     for err in &core.import_errors {
         let imp = &def.imports[err.import_idx as usize];
         let path = match &imp.name {
-            ImportName::Explicit(member) => NamePath::Qualified {
-                segments: Box::new([imp.package.clone(), member.clone()]),
-            },
+            ImportName::Explicit(member) => {
+                NamePath::Qualified(crate::name_lowering::QualifiedPath {
+                    root: crate::def_index::QualifiedRoot::Package(imp.package.clone()),
+                    member: member.clone(),
+                })
+            }
             ImportName::Wildcard => NamePath::Simple(SmolStr::new(format!("{}::*", imp.package))),
         };
         let diag = resolve_index::reason_to_diagnostic(

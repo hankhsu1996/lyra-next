@@ -4,11 +4,11 @@ Known gaps between LRM requirements and current engine capabilities. This is the
 
 When you discover a gap during `/lrm-add`, add an entry here. When you fix the gap and add the passing test, remove the entry. Both changes land in the same PR.
 
-## Chapter 3 -- Design and Verification Building Blocks
+## Chapter 5 -- Lexical Conventions
 
-### 3.12.1: Compilation units -- `$unit::` scoped name prefix
+### 5.6.4: Compiler directives -- non-conditional directive semantics
 
-File-level declarative items are parsed, collected into file scope, aggregated into compilation-unit scope, and visible to design elements within the same compilation unit. Remaining gap: explicit `$unit::` scoped-name syntax is not yet parsed. That follow-up should resolve through the existing compilation-unit scope summary rather than introducing a separate semantic path.
+Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: triple-quote stringify (`` `""" ``) and `` `default_nettype `` directive semantics. Blocked by: `default_nettype` directive event consumer. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
 ## Chapter 6 -- Data Types
 

@@ -121,7 +121,7 @@ pub(crate) fn resolve_result_to_ty(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FieldTyError {
     pub kind: FieldTyErrorKind,
-    pub path: Box<[SmolStr]>,
+    pub path: SmolStr,
 }
 
 /// Why a record field's type reference could not be resolved.
@@ -209,13 +209,13 @@ pub(crate) fn resolve_interface_scope_symbol(
 }
 
 /// Classify a `CoreResolveResult` for a record field, returning a `Ty` and
-/// optional `FieldTyError` with structured path segments.
+/// optional `FieldTyError` with a display name for diagnostics.
 pub(crate) fn classify_for_record_field(
     db: &dyn salsa::Database,
     unit: CompilationUnit,
     defining_file: FileId,
     result: &CoreResolveResult,
-    path: Box<[SmolStr]>,
+    path: SmolStr,
 ) -> (Ty, Option<FieldTyError>) {
     match classify_resolve_result(db, unit, defining_file, result) {
         TypeResolveOutcome::Ok(ty) => (ty, None),

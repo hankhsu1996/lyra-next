@@ -4,7 +4,6 @@ use lyra_semantic::DataTyView;
 use lyra_semantic::resolve_index::{CoreResolution, CoreResolveResult};
 use lyra_semantic::symbols::{GlobalSymbolId, Namespace};
 use lyra_semantic::types::{ConstEvalError, ConstInt, SymbolType, Ty};
-use smol_str::SmolStr;
 
 use crate::expr_queries::{ExprRef, type_of_expr_raw};
 use crate::pipeline::{ast_id_map, parse_file};
@@ -322,11 +321,14 @@ fn resolve_name_as_type(
             lyra_semantic::resolve_name_in_scope(&env, scope, name, expected)
         }
         ExprKind::QualifiedName(qn) => {
-            let segments: Vec<SmolStr> = qn.segments().map(|t| SmolStr::new(t.text())).collect();
-            if segments.len() < 2 {
-                return None;
-            }
-            lyra_semantic::resolve_qualified_name(&segments, env.global, env.pkg_scope, expected)
+            let qp = lyra_semantic::lower_qualified_name(&qn).ok()?;
+            lyra_semantic::resolve_qualified_path(
+                &qp,
+                env.global,
+                env.pkg_scope,
+                env.cu_scope,
+                expected,
+            )
         }
         _ => return None,
     };

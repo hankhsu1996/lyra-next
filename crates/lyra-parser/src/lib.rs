@@ -58,7 +58,7 @@ impl Parse {
 
 /// Parse a list of tokens into a lossless green tree rooted at `SourceFile`.
 pub fn parse(tokens: &[Token], src: &str) -> Parse {
-    let mut p = parser::Parser::new(tokens);
+    let mut p = parser::Parser::new(tokens, src);
     grammar::source_file(&mut p);
     let (events, errors) = p.finish();
     let green = replay(&events, tokens, src);
@@ -186,7 +186,7 @@ mod tests {
     fn escaped_ident_normalized_in_lookahead() {
         let src = r"module m; int \foo ; endmodule";
         let tokens = lyra_lexer::lex(src);
-        let p = parser::Parser::new(&tokens);
+        let p = parser::Parser::new(&tokens, src);
         // Skip `module` and `m` and `;` (positions 0, 1, 2 after trivia skip)
         // Find the escaped ident in the token stream
         let mut found = false;

@@ -6,6 +6,7 @@ use smol_str::SmolStr;
 
 use crate::enum_def::EnumDefIdx;
 use crate::instance_decl::InstanceDeclIdx;
+use crate::name_lowering::QualifiedPath;
 use crate::nettype_def::NettypeDefIdx;
 use crate::scopes::ScopeId;
 use crate::type_extract::extract_base_ty_from_typespec;
@@ -67,7 +68,7 @@ pub enum TypeRef {
         type_site: Site,
     },
     Qualified {
-        segments: Box<[SmolStr]>,
+        path: QualifiedPath,
         type_site: Site,
     },
 }
@@ -170,15 +171,13 @@ pub(crate) fn extract_typeref_from_typespec(typespec: &TypeSpec, ast_id_map: &As
             }
         }
         Some(TypeNameRef::Qualified(qn)) => {
-            if let Some(ast_id) = ast_id_map.ast_id(&qn) {
-                let segments: Box<[SmolStr]> =
-                    qn.segments().map(|s| SmolStr::new(s.text())).collect();
-                if !segments.is_empty() {
-                    return TypeRef::Qualified {
-                        segments,
-                        type_site: ast_id.erase(),
-                    };
-                }
+            if let Some(ast_id) = ast_id_map.ast_id(&qn)
+                && let Ok(path) = crate::name_lowering::lower_qualified_name(&qn)
+            {
+                return TypeRef::Qualified {
+                    path,
+                    type_site: ast_id.erase(),
+                };
             }
         }
         Some(TypeNameRef::Dotted(_)) | None => {}

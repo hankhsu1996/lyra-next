@@ -77,7 +77,7 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - **No `.syntax()` in `lyra-semantic` (non-builder).** If a semantic change needs `.syntax()`, add or extend a typed accessor in `lyra-ast` or move the conversion glue into `lyra-db`. `.syntax()` is allowed in `lyra-db` (orchestration) and `lyra-ast` (typed accessor layer).
 - **Structure assumptions live in lyra-ast.** If a consumer assumes a node has a specific child structure, the accessor returns the typed result directly (e.g. `Option<BinExpr>`). Consumer layers never cast typed results into narrower types.
 
-Enforced by `tools/policy/check_cst_layering.py` (rules C001-C005).
+Enforced by `tools/policy/check_cst_layering.py` (rules C001-C006).
 
 ## Semantic API Discipline
 
