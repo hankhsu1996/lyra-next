@@ -1,4 +1,4 @@
-use lyra_source::NameSpan;
+use lyra_source::DeclSpan;
 use smol_str::SmolStr;
 
 use crate::Site;
@@ -26,7 +26,7 @@ pub struct DefEntry {
     pub name_site: Site,
 
     /// Precise identifier token span for diagnostics / highlights.
-    pub name_span: NameSpan,
+    pub name_span: DeclSpan,
 
     /// Scope owned by the definition, if any.
     pub scope: DefScope,

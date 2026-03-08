@@ -3,13 +3,13 @@ use lyra_semantic::type_check::TypeCheckItem;
 pub(super) fn lower_method_call_error(
     item: &TypeCheckItem,
     source_map: &lyra_preprocess::SourceMap,
+    expanded_text: &str,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
     use lyra_semantic::type_infer::ExprTypeErrorKind;
 
     let TypeCheckItem::MethodCallError {
         call_name_span,
-        method_name,
         error_kind,
     } = item
     else {
@@ -37,7 +37,8 @@ pub(super) fn lower_method_call_error(
         }
         _ => return,
     };
-    let msg_args = vec![lyra_diag::Arg::Name(method_name.clone())];
+    let method_name = call_name_span.text_from(expanded_text);
+    let msg_args = vec![lyra_diag::Arg::Name(smol_str::SmolStr::new(method_name))];
     diags.push(
         lyra_diag::Diagnostic::new(
             lyra_diag::Severity::Error,

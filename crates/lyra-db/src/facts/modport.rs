@@ -63,7 +63,7 @@ fn classify_field_access(
         ModportViewTarget::Empty => FieldAccessTarget::Empty,
     };
     Some(FieldAccessFact {
-        member_name_span: lyra_source::NameSpan::new(field_tok.text_range()),
+        member_name_span: lyra_source::TokenSpan::new(field_tok.text_range()),
         port_id: entry.port_id,
         direction: entry.direction,
         target,

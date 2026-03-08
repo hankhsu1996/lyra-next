@@ -1,5 +1,5 @@
 use crate::Site;
-use lyra_source::{FileId, NameSpan};
+use lyra_source::{DeclSpan, FileId};
 use smol_str::SmolStr;
 
 use crate::record::SymbolOrigin;
@@ -198,7 +198,7 @@ pub enum Lifetime {
 /// `type_site` is the `TypeSpec` node spelling the type, when present.
 ///
 /// `name_span` is the precise identifier token range captured at builder
-/// time. `NameSpan::INVALID` on parse error recovery (name token missing).
+/// time. `DeclSpan::INVALID` on parse error recovery (name token missing).
 /// Diagnostic lowering uses `name_span.text_range()` directly -- no CST
 /// traversal needed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,7 +210,7 @@ pub struct Symbol {
     pub decl_site: Site,
     pub name_site: Site,
     pub type_site: Option<Site>,
-    pub name_span: NameSpan,
+    pub name_span: DeclSpan,
     pub scope: ScopeId,
     pub origin: SymbolOrigin,
 }

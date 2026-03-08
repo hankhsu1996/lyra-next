@@ -6,7 +6,7 @@ pub use expansion::{ExpansionFrame, ExpansionKind, FileLoc};
 mod line_index;
 pub use line_index::{LineCol, LineIndex};
 
-/// Span of a name-introducing identifier token.
+/// Span of a declared-name identifier token.
 ///
 /// Captured at builder time from `SyntaxToken::text_range()`. Provides
 /// O(1) `text_range()` at diagnostic time without CST traversal.
@@ -14,12 +14,12 @@ pub use line_index::{LineCol, LineIndex};
 /// File context comes from the owning `DefIndex`, `SourceFile`, or
 /// `ErasedAstId` -- not stored here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct NameSpan {
+pub struct DeclSpan {
     start: u32,
     len: u32,
 }
 
-impl NameSpan {
+impl DeclSpan {
     /// Sentinel for missing name tokens (parse error recovery).
     ///
     /// Only the semantic builder (and tests) may produce this value.
@@ -62,6 +62,16 @@ impl NameSpan {
         }
     }
 
+    /// Extract the declared-name text from the expanded source.
+    pub fn text_from<'a>(&self, source: &'a str) -> &'a str {
+        if !self.is_valid() {
+            return "";
+        }
+        let start = self.start as usize;
+        let end = start + self.len as usize;
+        &source[start..end]
+    }
+
     /// Sentinel range that `map_span` will never resolve.
     ///
     /// Starts at `u32::MAX`, which is past any real file content,
@@ -72,10 +82,11 @@ impl NameSpan {
     }
 }
 
-/// Span of a non-identifier token (keyword, operator, punctuation).
+/// Span of a non-declaration token anchor (keyword, operator, punctuation,
+/// or identifier reference when only position matters).
 ///
-/// Same shape as `NameSpan` but semantically distinct: captures tokens
-/// that are not name-introducing identifiers.
+/// Same shape as `DeclSpan` but semantically distinct: captures tokens
+/// that are not declared-name identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TokenSpan {
     start: u32,
@@ -106,6 +117,16 @@ impl TokenSpan {
         }
         let start = TextSize::from(self.start);
         TextRange::at(start, TextSize::from(self.len))
+    }
+
+    /// Extract the token text from the expanded source.
+    pub fn text_from<'a>(&self, source: &'a str) -> &'a str {
+        if !self.is_valid() {
+            return "";
+        }
+        let start = self.start as usize;
+        let end = start + self.len as usize;
+        &source[start..end]
     }
 
     #[inline]

@@ -1,5 +1,5 @@
 use crate::Site;
-use lyra_source::NameSpan;
+use lyra_source::TokenSpan;
 use smol_str::SmolStr;
 
 /// Dense file-local index into `DefIndex.nettype_defs`.
@@ -24,5 +24,5 @@ pub struct NettypeDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveFnRef {
     pub name: SmolStr,
-    pub span: NameSpan,
+    pub span: TokenSpan,
 }

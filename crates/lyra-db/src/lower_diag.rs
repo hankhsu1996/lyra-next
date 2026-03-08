@@ -12,10 +12,10 @@ use lyra_source::{FileId, Span, TextRange, TextSize};
 use smol_str::SmolStr;
 
 /// Pick the best `DiagSpan` from primary+label.
-/// Uses `is_valid()` on `NameSpan`/`TokenSpan`, not `SourceMap`.
+/// Uses `is_valid()` on `DeclSpan`/`TokenSpan`, not `SourceMap`.
 pub(crate) fn choose_best_diag_span(primary: DiagSpan, label: Option<DiagSpan>) -> TextRange {
     let chosen = match label {
-        Some(DiagSpan::Name(ns)) if ns.is_valid() => DiagSpan::Name(ns),
+        Some(DiagSpan::Decl(ns)) if ns.is_valid() => DiagSpan::Decl(ns),
         Some(DiagSpan::Token(ts)) if ts.is_valid() => DiagSpan::Token(ts),
         Some(DiagSpan::Site(s)) => DiagSpan::Site(s),
         _ => primary,
@@ -27,7 +27,7 @@ pub(crate) fn choose_best_diag_span(primary: DiagSpan, label: Option<DiagSpan>) 
 fn diag_span_to_text_range(span: DiagSpan) -> TextRange {
     match span {
         DiagSpan::Site(s) => s.text_range(),
-        DiagSpan::Name(ns) => ns.text_range(),
+        DiagSpan::Decl(ns) => ns.text_range(),
         DiagSpan::Token(ts) => ts.text_range(),
     }
 }
@@ -657,44 +657,44 @@ pub(crate) fn lower_case_check_items(
 }
 
 /// Lower foreach-legality items (LRM 12.7.3) into diagnostics.
+///
+/// `expanded_text` is the preprocessed source text, used to recover
+/// token text from `TokenSpan` anchors.
 pub(crate) fn lower_foreach_check_items(
     file_id: FileId,
     source_map: &lyra_preprocess::SourceMap,
+    expanded_text: &str,
     items: &[lyra_semantic::foreach_check::ForeachCheckItem],
     diags: &mut Vec<Diagnostic>,
 ) {
     use lyra_semantic::foreach_check::ForeachCheckItem;
     for item in items {
         let (span_range, code, msg) = match item {
-            ForeachCheckItem::AssignToForeachVar {
-                lhs_name_span,
-                var_name,
-            } => {
+            ForeachCheckItem::AssignToForeachVar { lhs_name_span } => {
                 if !lhs_name_span.is_valid() {
                     continue;
                 }
+                let var_name = lhs_name_span.text_from(expanded_text);
                 (
                     lhs_name_span.text_range(),
                     code::ASSIGN_TO_FOREACH_VAR,
                     Message::new(
                         MessageId::AssignToForeachVar,
-                        vec![Arg::Name(var_name.clone())],
+                        vec![Arg::Name(SmolStr::new(var_name))],
                     ),
                 )
             }
-            ForeachCheckItem::VarSameNameAsArray {
-                var_name_span,
-                array_name,
-            } => {
+            ForeachCheckItem::VarSameNameAsArray { var_name_span } => {
                 if !var_name_span.is_valid() {
                     continue;
                 }
+                let array_name = var_name_span.text_from(expanded_text);
                 (
                     var_name_span.text_range(),
                     code::FOREACH_VAR_SAME_AS_ARRAY,
                     Message::new(
                         MessageId::ForeachVarSameAsArray,
-                        vec![Arg::Name(array_name.clone())],
+                        vec![Arg::Name(SmolStr::new(array_name))],
                     ),
                 )
             }

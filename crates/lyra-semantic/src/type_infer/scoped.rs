@@ -2,7 +2,6 @@ use lyra_ast::{AstIdMap, Expr, ExprKind};
 use smol_str::SmolStr;
 
 use crate::member::{MemberInfo, MemberLookupError};
-use crate::member_name::MemberNameToken;
 use crate::symbols::GlobalSymbolId;
 use crate::type_extract::UserTypeRef;
 use crate::types::{ConstInt, Ty};
@@ -58,12 +57,8 @@ impl<const N: usize> InferCtx for ScopedInferCtx<'_, N> {
         self.inner.callable_sig(sym)
     }
 
-    fn member_lookup(
-        &self,
-        ty: &Ty,
-        member: &MemberNameToken,
-    ) -> Result<MemberInfo, MemberLookupError> {
-        self.inner.member_lookup(ty, member)
+    fn member_lookup(&self, ty: &Ty, name: &str) -> Result<MemberInfo, MemberLookupError> {
+        self.inner.member_lookup(ty, name)
     }
 
     fn enum_integral_view(&self, id: &crate::enum_def::EnumId) -> Option<BitVecType> {

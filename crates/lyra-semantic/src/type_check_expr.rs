@@ -6,7 +6,7 @@ use crate::type_check::{AccessKind, AccessMode, TypeCheckCtx, TypeCheckItem, req
 use crate::type_infer::ExprView;
 use crate::types::Ty;
 use lyra_ast::{CallExpr, CastExpr, Expr, ExprKind, StreamExpr, StreamOperandItem};
-use lyra_source::NameSpan;
+use lyra_source::TokenSpan;
 
 /// Check a `CastExpr` for enum cast-out-of-range.
 pub fn check_cast_expr(
@@ -77,10 +77,9 @@ pub fn check_method_call(call: &CallExpr, ctx: &dyn TypeCheckCtx, items: &mut Ve
         | ExprTypeErrorKind::MethodNotValidOnReceiver(_)
         | ExprTypeErrorKind::WithClauseRequired
         | ExprTypeErrorKind::WithClauseNotAccepted => {
-            let call_name_span = NameSpan::new(field_tok.text_range());
+            let call_name_span = TokenSpan::new(field_tok.text_range());
             items.push(TypeCheckItem::MethodCallError {
                 call_name_span,
-                method_name: smol_str::SmolStr::new(field_tok.text()),
                 error_kind: error_kind.clone(),
             });
         }
@@ -205,8 +204,7 @@ pub fn check_field_modport_restriction(
         return;
     };
     items.push(TypeCheckItem::MemberNotInModport {
-        member_name_span: NameSpan::new(field_tok.text_range()),
-        member_name: smol_str::SmolStr::new(field_tok.text()),
+        member_name_span: TokenSpan::new(field_tok.text_range()),
     });
 }
 

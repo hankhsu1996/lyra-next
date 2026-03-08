@@ -3,7 +3,7 @@ use crate::site;
 use lyra_ast::{
     AssignStmt, AstIdMap, ContinuousAssign, Declarator, Expr, ExprKind, NewExpr, TfArg, VarDecl,
 };
-use lyra_source::{NameSpan, TextRange};
+use lyra_source::{DeclSpan, TextRange, TokenSpan};
 
 use crate::coerce::IntegralCtx;
 use crate::enum_def::EnumId;
@@ -84,12 +84,12 @@ pub enum TypeCheckItem {
         actual_width: u32,
     },
     ModportDirectionViolation {
-        member_name_span: NameSpan,
+        member_name_span: TokenSpan,
         direction: PortDirection,
         access: AccessKind,
     },
     ModportRefUnsupported {
-        member_name_span: NameSpan,
+        member_name_span: TokenSpan,
     },
     EnumCastOutOfRange {
         cast_site: Site,
@@ -100,18 +100,16 @@ pub enum TypeCheckItem {
         with_site: Site,
     },
     ModportEmptyPortAccess {
-        member_name_span: NameSpan,
+        member_name_span: TokenSpan,
     },
     ModportExprNotAssignable {
-        member_name_span: NameSpan,
+        member_name_span: TokenSpan,
     },
     MemberNotInModport {
-        member_name_span: NameSpan,
-        member_name: smol_str::SmolStr,
+        member_name_span: TokenSpan,
     },
     MethodCallError {
-        call_name_span: NameSpan,
-        method_name: smol_str::SmolStr,
+        call_name_span: TokenSpan,
         error_kind: crate::type_infer::ExprTypeErrorKind,
     },
     UnsupportedLhsForm {
@@ -178,16 +176,16 @@ pub enum TypeCheckItem {
     AssignToReadonly {
         kind: ReadonlyKind,
         assign_site: Site,
-        lhs_name_span: NameSpan,
+        lhs_name_span: TokenSpan,
         name: smol_str::SmolStr,
     },
     ConstMissingInit {
         decl_site: Site,
-        name_span: NameSpan,
+        name_span: DeclSpan,
     },
     VoidObjectType {
         decl_site: Site,
-        name_span: NameSpan,
+        name_span: DeclSpan,
     },
     VoidUsedAsValue {
         expr_site: Site,
@@ -396,7 +394,7 @@ pub fn check_var_decl(
         if is_const && decl.init_expr().is_none() {
             let name_span = decl
                 .ident_name_span()
-                .unwrap_or(NameSpan::new(decl_site.text_range()));
+                .unwrap_or(DeclSpan::new(decl_site.text_range()));
             items.push(TypeCheckItem::ConstMissingInit {
                 decl_site,
                 name_span,
@@ -409,7 +407,7 @@ pub fn check_var_decl(
         if matches!(sym_type, Some(SymbolType::Value(Ty::Void))) {
             let name_span = decl
                 .ident_name_span()
-                .unwrap_or(NameSpan::new(decl_site.text_range()));
+                .unwrap_or(DeclSpan::new(decl_site.text_range()));
             items.push(TypeCheckItem::VoidObjectType {
                 decl_site,
                 name_span,
@@ -474,7 +472,7 @@ fn check_assignment_pair(
             {
                 let lhs_name_span = lhs_expr
                     .ident_name_span()
-                    .unwrap_or(NameSpan::new(lhs_site.text_range()));
+                    .unwrap_or(TokenSpan::new(lhs_site.text_range()));
                 items.push(TypeCheckItem::AssignToReadonly {
                     kind,
                     assign_site: stmt_site,

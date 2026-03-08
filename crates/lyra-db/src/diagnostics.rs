@@ -131,6 +131,7 @@ fn collect_legality_diagnostics(
     crate::lower_diag::lower_foreach_check_items(
         file_id,
         &pp.source_map,
+        &pp.expanded_text,
         &foreach_index.items,
         diags,
     );
@@ -335,6 +336,7 @@ pub fn type_diagnostics(
             unit,
             item,
             &pp.source_map,
+            &pp.expanded_text,
             &mut seen,
             &mut diags,
         );

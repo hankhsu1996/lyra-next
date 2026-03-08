@@ -199,7 +199,7 @@ impl ScopeTree {
 #[cfg(test)]
 mod tests {
     use crate::Site;
-    use lyra_source::{FileId, NameSpan};
+    use lyra_source::{DeclSpan, FileId};
     use smol_str::SmolStr;
 
     use super::*;
@@ -221,7 +221,7 @@ mod tests {
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
-            name_span: NameSpan::INVALID,
+            name_span: DeclSpan::INVALID,
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -253,7 +253,7 @@ mod tests {
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
-            name_span: NameSpan::INVALID,
+            name_span: DeclSpan::INVALID,
             scope: parent,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -284,7 +284,7 @@ mod tests {
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
-            name_span: NameSpan::INVALID,
+            name_span: DeclSpan::INVALID,
             scope,
             origin: SymbolOrigin::TypeSpec,
         });
@@ -296,7 +296,7 @@ mod tests {
             decl_site: placeholder,
             name_site: placeholder,
             type_site: None,
-            name_span: NameSpan::INVALID,
+            name_span: DeclSpan::INVALID,
             scope,
             origin: SymbolOrigin::TypeSpec,
         });

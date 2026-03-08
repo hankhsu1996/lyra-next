@@ -486,9 +486,9 @@ impl Declarator {
     ///
     /// Returns the span of the `Ident`/`EscapedIdent` token without
     /// leading trivia. Returns `None` if the name token is missing.
-    pub fn ident_name_span(&self) -> Option<lyra_source::NameSpan> {
+    pub fn ident_name_span(&self) -> Option<lyra_source::DeclSpan> {
         self.name()
-            .map(|t| lyra_source::NameSpan::new(t.text_range()))
+            .map(|t| lyra_source::DeclSpan::new(t.text_range()))
     }
 
     /// The initializer expression after `=`, if present.

@@ -1,7 +1,9 @@
 mod keywords;
 mod kind;
+mod token_anchor;
 
 pub use kind::{NODE_START, SyntaxKind};
+pub use token_anchor::TokenAnchor;
 
 use lyra_source::TextSize;
 
