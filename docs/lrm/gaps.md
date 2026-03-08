@@ -32,10 +32,6 @@ Drive strength and charge strength syntax is parsed. Illegal both-highz drive st
 
 `interconnect` declarations parse, produce `Net` symbols with `NetKind::Interconnect`, reject strength specifications at parse time, and display honestly (no fabricated base type). Remaining: connection-determined type resolution at elaboration time, driver/receiver semantics. Blocked by: elaboration-time port binding model. Test: `lrm/ch06/6.6.8_generic_interconnect`.
 
-### 6.10: Implicit declarations
-
-Implicit nets are modeled as resolve-owned semantic entities with stable identity and deduplication by (scope, name). Continuous-assignment LHS creation is implemented: undeclared names at eligible sites create scalar nets of the active default_nettype, or emit `implicit_net_forbidden` when the policy is `none`. Expression-context type resolution goes through a canonical helper; other DB match sites (type-namespace resolution, callable lookup, const-eval) handle the variant directly with context-appropriate fallbacks. Remaining candidate sites: port connection lists (`PortConnection`), ANSI port expression declarations (`PortExprDecl`). Test: regression tests `implicit_net_wire_assign`, `implicit_net_tri_assign`, `implicit_net_declared_wins`, `default_nettype_none_assign`.
-
 ### 6.14: Chandle data type
 
 `Ty::Chandle` exists in the type system and `chandle` parses as a type specifier. Expressions of chandle type produce `UnsupportedExprKind`. Missing: chandle variable declarations with `null` initialization, `null` comparison, passing chandle to/from DPI-C functions, chandle as argument/return type in foreign function declarations. Blocked by: DPI-C support (Ch 35), null literal handling. Test: `lrm/ch06/6.14_chandle_data_type`.

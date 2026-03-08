@@ -326,7 +326,7 @@ pub enum ImplicitNetSiteKind {
     ContinuousAssignLhs,
     /// Port connection in a module/interface/program instance.
     PortConnection,
-    /// Port expression in an ANSI port declaration.
+    /// Port expression in a non-ANSI port declaration (LRM 23.2.2.1).
     PortExprDecl,
 }
 

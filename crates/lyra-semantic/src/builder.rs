@@ -878,6 +878,24 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 ));
                 continue;
             };
+            let is_non_ansi = port.direction_token().is_none() && port.type_spec().is_none();
+            if is_non_ansi {
+                // Non-ANSI port expression: register as a use-site so
+                // the resolver creates an implicit net if no explicit
+                // net/variable declaration exists in the module body
+                // (LRM 6.10).
+                ctx.use_sites.push(UseSite {
+                    path: crate::def_index::NamePath::Simple(semantic_spelling(&name_tok)),
+                    expected_ns: crate::def_index::ExpectedNs::Exact(
+                        crate::symbols::Namespace::Value,
+                    ),
+                    scope,
+                    name_ref_site: decl_site,
+                    order_key: 0,
+                    implicit_net_site: Some(ImplicitNetSiteKind::PortExprDecl),
+                });
+                continue;
+            }
             let name_span = DeclSpan::new(name_tok.text_range());
             let port_type_site = port
                 .type_spec()
@@ -908,6 +926,32 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
     }
 }
 
+/// Collect a non-ANSI port direction declaration (LRM 23.2.2.1).
+///
+/// Non-ANSI port declarations (`input a;`, `input [7:0] a;`,
+/// `input signed [7:0] a, b;`) annotate ports listed in the header.
+///
+/// Ownership split between header and body:
+/// - **Header** (`collect_port_list`): creates the port symbol or registers
+///   a `PortExprDecl` use-site for implicit-net creation (LRM 6.10).
+/// - **Body** (this function): collects name references inside the
+///   declaration's type-spec and unpacked dimensions (e.g. parameter
+///   refs in `input [W-1:0] a;`). Does not create symbols or register
+///   implicit-net use-sites -- those are header responsibilities.
+fn collect_non_ansi_port_decl(ctx: &mut DefContext<'_>, decl: &lyra_ast::VarDecl, scope: ScopeId) {
+    // Collect name refs from the implicit type-spec (packed dimension
+    // expressions may reference parameters, e.g. `input [W-1:0] a;`).
+    if let Some(ts) = decl.type_spec() {
+        collect_type_spec_refs(ctx, &ts, scope);
+    }
+    // Collect name refs from unpacked dimensions on individual declarators.
+    for declarator in decl.declarators() {
+        for udim in declarator.unpacked_dimensions() {
+            collect_name_refs(ctx, udim.syntax(), scope, None);
+        }
+    }
+}
+
 fn collect_module_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
         collect_module_item(ctx, &child, scope);
@@ -922,7 +966,11 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         }
         SyntaxKind::VarDecl => {
             let decl = expect_typed::<lyra_ast::VarDecl>(node);
-            collect_var_decl(ctx, &decl, scope, DeclaratorContext::ContainerItem);
+            if decl.is_non_ansi_port_decl() {
+                collect_non_ansi_port_decl(ctx, &decl, scope);
+            } else {
+                collect_var_decl(ctx, &decl, scope, DeclaratorContext::ContainerItem);
+            }
         }
         SyntaxKind::ParamDecl => {
             let decl = expect_typed::<lyra_ast::ParamDecl>(node);

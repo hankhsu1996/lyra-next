@@ -12,8 +12,8 @@ use smol_str::SmolStr;
 use crate::builder::DefContext;
 use crate::builder_types::{collect_name_refs, collect_type_spec_refs, detect_aggregate_type};
 use crate::def_index::{
-    ExpectedNs, ExportDeclId, ExportKey, ForeachVarDef, Import, ImportDeclId, ImportName, NamePath,
-    UseSite,
+    ExpectedNs, ExportDeclId, ExportKey, ForeachVarDef, ImplicitNetSiteKind, Import, ImportDeclId,
+    ImportName, NamePath, UseSite,
 };
 use crate::instance_decl::{InstanceDecl, InstanceDeclIdx};
 use crate::interface_id::InterfaceDefId;
@@ -89,8 +89,22 @@ pub(crate) fn collect_module_instantiation(
             });
         }
     }
-    // Still collect NameRefs in port connection expressions
-    collect_name_refs(ctx, node, scope, None);
+    // Parameter overrides are ordinary expression uses, not implicit-net sites.
+    if let Some(param_overrides) = inst.param_overrides() {
+        collect_name_refs(ctx, param_overrides.syntax(), scope, None);
+    }
+
+    // Instance port connections are implicit-net candidate sites (LRM 6.10).
+    for hier_inst in inst.instances() {
+        if let Some(port_list) = hier_inst.port_list() {
+            collect_name_refs(
+                ctx,
+                port_list.syntax(),
+                scope,
+                Some(ImplicitNetSiteKind::PortConnection),
+            );
+        }
+    }
 }
 
 pub(crate) fn collect_foreach_vars(

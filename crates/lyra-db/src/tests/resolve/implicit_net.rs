@@ -125,3 +125,295 @@ fn none_policy_no_implicit_net() {
     });
     assert!(has_forbidden, "should emit ImplicitNetForbidden diagnostic");
 }
+
+/// Named port connection with undeclared name creates an implicit net.
+#[test]
+fn port_connection_creates_implicit_net() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module sub(input a); endmodule\nmodule top; sub u(.a(w)); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert_eq!(
+        resolve.implicit_nets.len(),
+        1,
+        "one implicit net for undeclared port connection name"
+    );
+    let net = resolve
+        .implicit_nets
+        .get(ImplicitNetId(0))
+        .expect("net 0 exists");
+    assert_eq!(net.name.as_str(), "w");
+}
+
+/// Declared name in port connection resolves to the symbol, not an implicit net.
+#[test]
+fn port_connection_declared_symbol_wins() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module sub(input a); endmodule\nmodule top; wire w; sub u(.a(w)); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert!(
+        resolve.implicit_nets.is_empty(),
+        "no implicit nets when port connection name is declared"
+    );
+}
+
+/// Under `default_nettype none`, undeclared port connection name is forbidden.
+#[test]
+fn port_connection_default_nettype_none_forbidden() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "`default_nettype none\nmodule sub(input a); endmodule\n\
+         module top; sub u(.a(w)); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert!(
+        resolve.implicit_nets.is_empty(),
+        "no implicit nets under default_nettype none"
+    );
+    let has_forbidden = resolve.diagnostics.iter().any(|d| {
+        matches!(
+            &d.kind,
+            lyra_semantic::diagnostic::SemanticDiagKind::ImplicitNetForbidden { .. }
+        )
+    });
+    assert!(
+        has_forbidden,
+        "should emit ImplicitNetForbidden for port connection"
+    );
+}
+
+/// Parameter override with undeclared name is an ordinary unresolved name,
+/// not an implicit-net candidate.
+#[test]
+fn param_override_not_implicit_net_site() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module sub #(parameter W = 1) (input a); endmodule\n\
+         module top; wire x; sub #(.W(UNDEF)) u(.a(x)); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert!(
+        resolve.implicit_nets.is_empty(),
+        "no implicit nets: x is declared, UNDEF is in param override"
+    );
+
+    let has_unresolved = resolve.diagnostics.iter().any(|d| {
+        matches!(
+            &d.kind,
+            lyra_semantic::diagnostic::SemanticDiagKind::UnresolvedName { name, .. }
+            if name.as_str() == "UNDEF"
+        )
+    });
+    assert!(
+        has_unresolved,
+        "UNDEF should be unresolved, not implicit-net"
+    );
+
+    let has_forbidden = resolve.diagnostics.iter().any(|d| {
+        matches!(
+            &d.kind,
+            lyra_semantic::diagnostic::SemanticDiagKind::ImplicitNetForbidden { .. }
+        )
+    });
+    assert!(
+        !has_forbidden,
+        "no implicit-net-forbidden for param overrides"
+    );
+}
+
+/// Positional port connection with undeclared name creates an implicit net.
+#[test]
+fn positional_port_connection_creates_implicit_net() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module sub(input a); endmodule\nmodule top; sub u(w); endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert_eq!(
+        resolve.implicit_nets.len(),
+        1,
+        "one implicit net for positional port connection"
+    );
+    let net = resolve
+        .implicit_nets
+        .get(ImplicitNetId(0))
+        .expect("net 0 exists");
+    assert_eq!(net.name.as_str(), "w");
+}
+
+/// Non-ANSI port expression with no explicit net declaration creates an
+/// implicit net (LRM 6.10 first bullet).
+#[test]
+fn port_expr_decl_creates_implicit_net() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module top(a); input a; endmodule");
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert_eq!(
+        resolve.implicit_nets.len(),
+        1,
+        "one implicit net for non-ANSI port expression"
+    );
+    let net = resolve
+        .implicit_nets
+        .get(ImplicitNetId(0))
+        .expect("net 0 exists");
+    assert_eq!(net.name.as_str(), "a");
+}
+
+/// Non-ANSI port with implicit packed-dimension type creates an implicit net.
+#[test]
+fn port_expr_decl_implicit_range_creates_implicit_net() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module top(a); input [7:0] a; endmodule");
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert_eq!(
+        resolve.implicit_nets.len(),
+        1,
+        "one implicit net for non-ANSI port with implicit range type"
+    );
+    let net = resolve
+        .implicit_nets
+        .get(ImplicitNetId(0))
+        .expect("net 0 exists");
+    assert_eq!(net.name.as_str(), "a");
+}
+
+/// Non-ANSI port with signed packed-dimension type creates an implicit net.
+#[test]
+fn port_expr_decl_signed_range_creates_implicit_net() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module top(a); input signed [7:0] a; endmodule");
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert_eq!(
+        resolve.implicit_nets.len(),
+        1,
+        "one implicit net for non-ANSI port with signed range type"
+    );
+    let net = resolve
+        .implicit_nets
+        .get(ImplicitNetId(0))
+        .expect("net 0 exists");
+    assert_eq!(net.name.as_str(), "a");
+}
+
+/// Non-ANSI port declaration with multiple names creates implicit nets
+/// for each undeclared port.
+#[test]
+fn port_expr_decl_multiple_names_create_implicit_nets() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module top(a, b); input a, b; endmodule");
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert_eq!(
+        resolve.implicit_nets.len(),
+        2,
+        "two implicit nets for two non-ANSI port names"
+    );
+}
+
+/// Under `default_nettype none`, multiple non-ANSI port names all emit
+/// `ImplicitNetForbidden`.
+#[test]
+fn port_expr_decl_multiple_names_default_nettype_none_forbidden() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "`default_nettype none\nmodule top(a, b); input a, b; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert!(
+        resolve.implicit_nets.is_empty(),
+        "no implicit nets under default_nettype none"
+    );
+    let forbidden_count = resolve
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                &d.kind,
+                lyra_semantic::diagnostic::SemanticDiagKind::ImplicitNetForbidden { .. }
+            )
+        })
+        .count();
+    assert_eq!(
+        forbidden_count, 2,
+        "two ImplicitNetForbidden diagnostics for two port names"
+    );
+}
+
+/// Non-ANSI port with explicit wire declaration resolves to the declared
+/// symbol and does not create an implicit net.
+#[test]
+fn port_expr_decl_declared_symbol_wins() {
+    let db = LyraDatabase::default();
+    let file = new_file(&db, 0, "module top(a); input a; wire a; endmodule");
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert!(
+        resolve.implicit_nets.is_empty(),
+        "no implicit nets when port name has explicit net declaration"
+    );
+}
+
+/// Under `default_nettype none`, non-ANSI port expression with no explicit
+/// declaration emits `ImplicitNetForbidden`.
+#[test]
+fn port_expr_decl_default_nettype_none_forbidden() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "`default_nettype none\nmodule top(a); input a; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    let resolve = resolve_index_file(&db, file, unit);
+
+    assert!(
+        resolve.implicit_nets.is_empty(),
+        "no implicit nets under default_nettype none"
+    );
+    let has_forbidden = resolve.diagnostics.iter().any(|d| {
+        matches!(
+            &d.kind,
+            lyra_semantic::diagnostic::SemanticDiagKind::ImplicitNetForbidden { .. }
+        )
+    });
+    assert!(
+        has_forbidden,
+        "should emit ImplicitNetForbidden for non-ANSI port expression"
+    );
+}
