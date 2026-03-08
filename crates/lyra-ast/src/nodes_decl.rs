@@ -177,7 +177,10 @@ pub enum QualifiedSegment {
     /// `$unit` -- compilation-unit scope prefix.
     UnitScope,
     /// An ordinary identifier segment (package name or member name).
-    Named(String),
+    ///
+    /// Carries the semantic spelling (backslash stripped for escaped
+    /// identifiers per LRM 5.6.1).
+    Named(smol_str::SmolStr),
 }
 
 impl QualifiedName {
@@ -197,13 +200,14 @@ impl QualifiedName {
     ///
     /// A `SystemIdent` token with text `$unit` becomes
     /// `QualifiedSegment::UnitScope`; all other identifier tokens
-    /// become `QualifiedSegment::Named`.
+    /// become `QualifiedSegment::Named` with semantic spelling
+    /// (backslash stripped for escaped identifiers per LRM 5.6.1).
     pub fn classified_segments(&self) -> impl Iterator<Item = QualifiedSegment> + '_ {
         self.segments().map(|tok| {
             if tok.kind() == SyntaxKind::SystemIdent {
                 QualifiedSegment::UnitScope
             } else {
-                QualifiedSegment::Named(tok.text().to_string())
+                QualifiedSegment::Named(crate::ident::semantic_spelling(&tok))
             }
         })
     }

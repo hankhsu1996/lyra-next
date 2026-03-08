@@ -86,7 +86,7 @@ fn check_call_args(call: &CallExpr, sig: &CallableSigRef, ctx: &dyn InferCtx) {
 }
 
 fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx) -> ExprType {
-    let Some(field_tok) = field_expr.field_name() else {
+    let Some((_kind, field_semantic)) = field_expr.member_lookup_name() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
     let Some(lhs_node) = field_expr.base_expr() else {
@@ -94,7 +94,7 @@ fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx
     };
 
     // Iterator pseudo-methods (e.g. item.index()) -- LRM 7.12.4
-    if let Some(ret_ty) = ctx.iter_method_return(&lhs_node, field_tok.text()) {
+    if let Some(ret_ty) = ctx.iter_method_return(&lhs_node, &field_semantic) {
         return infer_iter_method_call(call, &ret_ty, ctx);
     }
 
@@ -103,7 +103,7 @@ fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx
         return lhs_type;
     }
 
-    match ctx.member_lookup(&lhs_type.ty, field_tok.text()) {
+    match ctx.member_lookup(&lhs_type.ty, &field_semantic) {
         Ok(MemberInfo {
             kind: MemberKind::BuiltinMethod(bm),
             ty,

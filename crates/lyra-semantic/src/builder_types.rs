@@ -1,6 +1,6 @@
 use lyra_ast::{
     AstIdMap, AstNode, EnumMember, EnumType, HasSyntax, NameRef, NettypeDecl, QualifiedName,
-    StructType, TypeSpec, TypedefDecl,
+    StructType, TypeSpec, TypedefDecl, semantic_spelling,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -112,7 +112,7 @@ fn register_type_expr_use_site(
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
             {
                 ctx.use_sites.push(UseSite {
-                    path: NamePath::Simple(SmolStr::new(ident.text())),
+                    path: NamePath::Simple(semantic_spelling(&ident)),
                     expected_ns: ExpectedNs::TypeOrValue,
                     scope,
                     name_ref_site: ast_id.erase(),
@@ -137,7 +137,7 @@ fn register_type_use_site(
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
             {
                 ctx.use_sites.push(UseSite {
-                    path: NamePath::Simple(SmolStr::new(ident.text())),
+                    path: NamePath::Simple(semantic_spelling(&ident)),
                     expected_ns: ExpectedNs::TypeThenValue,
                     scope,
                     name_ref_site: ast_id.erase(),
@@ -150,7 +150,7 @@ fn register_type_use_site(
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
             {
                 ctx.use_sites.push(UseSite {
-                    path: NamePath::Simple(SmolStr::new(ident.text())),
+                    path: NamePath::Simple(semantic_spelling(&ident)),
                     expected_ns: ExpectedNs::TypeOrValue,
                     scope,
                     name_ref_site: ast_id.erase(),
@@ -183,7 +183,7 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, td: &TypedefDecl, scope:
         }
     }
     if let Some(name_tok) = td.name() {
-        let typedef_name = SmolStr::new(name_tok.text());
+        let typedef_name = semantic_spelling(&name_tok);
         // Update the def name if we collected an aggregate
         match origin {
             SymbolOrigin::Enum(idx) => {
@@ -231,7 +231,7 @@ pub(crate) fn collect_nettype_decl(ctx: &mut DefContext<'_>, nd: &NettypeDecl, s
     let Some(name_tok) = nd.name() else {
         return;
     };
-    let nettype_name = SmolStr::new(name_tok.text());
+    let nettype_name = semantic_spelling(&name_tok);
     let Some(first_type_site) = nd
         .type_spec()
         .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()))
@@ -240,7 +240,7 @@ pub(crate) fn collect_nettype_decl(ctx: &mut DefContext<'_>, nd: &NettypeDecl, s
         return;
     };
     let resolve_fn = nd.resolve_fn_token().map(|tok| ResolveFnRef {
-        name: SmolStr::new(tok.text()),
+        name: semantic_spelling(&tok),
         span: TokenSpan::new(tok.text_range()),
     });
     let idx = NettypeDefIdx(ctx.nettype_defs.len() as u32);
@@ -328,7 +328,7 @@ fn collect_enum_def(
         let Some(name_tok) = member.name() else {
             continue;
         };
-        let name = SmolStr::new(name_tok.text());
+        let name = semantic_spelling(&name_tok);
 
         // Capture ast_id for every member (used by value diagnostics)
         let member_ast_id = ctx.ast_id_map.ast_id(&member);
@@ -482,7 +482,7 @@ fn collect_record_def(
                     continue;
                 };
                 fields.push(RecordField {
-                    name: SmolStr::new(name_tok.text()),
+                    name: semantic_spelling(&name_tok),
                     name_site: decl_site,
                     name_span: DeclSpan::new(name_tok.text_range()),
                     ty: ty.clone(),
@@ -519,7 +519,7 @@ fn collect_unpacked_dim_refs(
                     && let Some(ast_id) = ctx.ast_id_map.ast_id(nr)
                 {
                     ctx.use_sites.push(UseSite {
-                        path: NamePath::Simple(SmolStr::new(ident.text())),
+                        path: NamePath::Simple(semantic_spelling(&ident)),
                         expected_ns: ExpectedNs::TypeOrValue,
                         scope,
                         name_ref_site: ast_id.erase(),
@@ -555,7 +555,7 @@ fn collect_name_refs_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: S
                 && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
             {
                 ctx.use_sites.push(UseSite {
-                    path: NamePath::Simple(SmolStr::new(ident.text())),
+                    path: NamePath::Simple(semantic_spelling(&ident)),
                     expected_ns: ExpectedNs::Exact(Namespace::Value),
                     scope,
                     name_ref_site: ast_id.erase(),

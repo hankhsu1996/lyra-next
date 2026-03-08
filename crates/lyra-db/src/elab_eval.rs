@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use lyra_ast::{ErasedAstId, Expr, ExprKind, HasSyntax};
+use lyra_ast::{ErasedAstId, Expr, ExprKind, HasSyntax, semantic_spelling};
 use lyra_semantic::const_eval::{ConstLookup, eval_const_expr};
 use lyra_semantic::types::{ConstEvalError, ConstInt};
 use lyra_source::{FileId, Span, TextRange};
@@ -235,7 +235,7 @@ pub(crate) fn extract_param_overrides(
     let mut overrides = Vec::new();
 
     for ip in inst_node.param_override_ports() {
-        let name = ip.port_name().map(|t| SmolStr::new(t.text()));
+        let name = ip.port_name().map(|t| semantic_spelling(&t));
         let span = ip.syntax().text_range();
 
         let value = if let Some(expr_node) = ip.actual_expr()

@@ -143,7 +143,7 @@ pub(super) fn infer_field_access(field_expr: &FieldExpr, ctx: &dyn InferCtx) -> 
     let Some(lhs) = field_expr.base_expr() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
-    let Some(field_tok) = field_expr.field_name() else {
+    let Some((_kind, text)) = field_expr.member_lookup_name() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
@@ -152,7 +152,7 @@ pub(super) fn infer_field_access(field_expr: &FieldExpr, ctx: &dyn InferCtx) -> 
         return lhs_type;
     }
 
-    match ctx.member_lookup(&lhs_type.ty, field_tok.text()) {
+    match ctx.member_lookup(&lhs_type.ty, &text) {
         Ok(info) => match info.kind {
             MemberKind::BuiltinMethod(_) | MemberKind::InterfaceCallable { .. } => {
                 ExprType::error(ExprTypeErrorKind::MethodRequiresCall)

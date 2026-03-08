@@ -1,4 +1,4 @@
-use lyra_ast::{CallExpr, Expr, ExprKind};
+use lyra_ast::{CallExpr, Expr, ExprKind, semantic_spelling};
 use smol_str::SmolStr;
 
 use crate::member::{
@@ -129,7 +129,7 @@ fn extract_iter_name(call: &CallExpr) -> SmolStr {
         && let Some(ExprKind::NameRef(nr)) = first_arg.classify()
         && let Some(ident_tok) = nr.ident()
     {
-        return SmolStr::new(ident_tok.text());
+        return semantic_spelling(&ident_tok);
     }
     SmolStr::new_static("item")
 }

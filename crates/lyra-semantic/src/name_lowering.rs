@@ -53,10 +53,10 @@ pub fn lower_qualified_name(
     }
     let root = match first {
         QualifiedSegment::UnitScope => QualifiedRoot::Unit,
-        QualifiedSegment::Named(name) => QualifiedRoot::Package(SmolStr::new(&name)),
+        QualifiedSegment::Named(name) => QualifiedRoot::Package(name),
     };
     let member = match second {
-        QualifiedSegment::Named(name) => SmolStr::new(&name),
+        QualifiedSegment::Named(name) => name,
         QualifiedSegment::UnitScope => return Err(QualifiedNameLowerError::TooFewSegments),
     };
     Ok(QualifiedPath { root, member })

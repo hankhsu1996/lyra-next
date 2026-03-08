@@ -1,4 +1,4 @@
-use lyra_ast::{AstIdMap, TypeNameRef, TypeSpec};
+use lyra_ast::{AstIdMap, TypeNameRef, TypeSpec, semantic_spelling};
 
 use crate::Site;
 use lyra_source::{DeclSpan, FileId};
@@ -165,7 +165,7 @@ pub(crate) fn extract_typeref_from_typespec(typespec: &TypeSpec, ast_id_map: &As
                 && let Some(ast_id) = ast_id_map.ast_id(&name_ref)
             {
                 return TypeRef::Named {
-                    name: SmolStr::new(ident.text()),
+                    name: semantic_spelling(&ident),
                     type_site: ast_id.erase(),
                 };
             }
