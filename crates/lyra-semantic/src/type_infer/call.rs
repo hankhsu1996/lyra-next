@@ -2,7 +2,7 @@ use super::expr_type::{
     CallableKind, CallableSigRef, CalleeFormKind, ExprType, ExprTypeErrorKind, ExprView, InferCtx,
     ResolveCallableError,
 };
-use super::infer_expr;
+use super::{infer_expr, infer_expr_with_expected};
 use crate::coerce::IntegralCtx;
 use crate::member::{MemberInfo, MemberKind, MemberLookupError};
 use crate::symbols::GlobalSymbolId;
@@ -68,20 +68,27 @@ fn check_call_args(call: &CallExpr, sig: &CallableSigRef, ctx: &dyn InferCtx) {
         .map(|al| al.args().collect())
         .unwrap_or_default();
 
-    // Infer each argument with expected type from the port signature
+    // Infer each argument with expected type from the port signature.
+    // Passes both the full port type (for context-determined expressions
+    // like tagged unions and `new[]`) and integral context (for width/
+    // signedness propagation per LRM 11.6).
     for (i, arg) in args.iter().enumerate() {
-        let expected_ctx = sig.ports.get(i).and_then(|p| {
-            let ety = ExprType::from_ty(&p.ty);
-            match ety.view {
-                ExprView::BitVec(bv) => Some(IntegralCtx {
-                    width: bv.width.self_determined(),
-                    signed: bv.signed,
-                    four_state: bv.four_state,
-                }),
-                _ => None,
-            }
-        });
-        infer_expr(arg, ctx, expected_ctx.as_ref());
+        if let Some(port) = sig.ports.get(i) {
+            let integral_ctx = {
+                let ety = ExprType::from_ty(&port.ty);
+                match ety.view {
+                    ExprView::BitVec(bv) => Some(IntegralCtx {
+                        width: bv.width.self_determined(),
+                        signed: bv.signed,
+                        four_state: bv.four_state,
+                    }),
+                    _ => None,
+                }
+            };
+            infer_expr_with_expected(arg, Some(&port.ty), ctx, integral_ctx.as_ref());
+        } else {
+            infer_expr(arg, ctx, None);
+        }
     }
 }
 

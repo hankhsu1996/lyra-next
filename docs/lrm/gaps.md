@@ -84,7 +84,7 @@ Record-to-record identity mismatch is diagnosed. Packed/softpacked record to/fro
 
 ### 7.3.2: Tagged unions
 
-The `tagged` qualifier is parsed and diagnosed as unsupported; the type resolves to error. Full support requires tagged expressions (11.9), pattern matching (12.6), tag tracking, and void members. `RecordKind::TaggedUnion` exists but is never constructed. Test: `lrm/ch07/7.3.2_tagged_unions`.
+Tagged union declarations are parsed with void and typed members. Tagged expression constructors (LRM 11.9) are context-typed in assignment and variable-initialization positions: the expected type determines the record, void-vs-payload arity is validated, and operand type compatibility is checked via the central assignment compatibility path. Constructor structural errors (unknown member, void member with operand, payload member without operand, non-tagged-union target) produce user-visible diagnostics. Remaining gaps: function-argument tagged-expression diagnostics (inference handles expected typing but diagnostic emission is not yet wired through call-argument type checking), pattern matching (12.6), runtime tag-safety work, `matches` operator. Blocked by: call-argument diagnostic integration, pattern expression parsing. Test: `lrm/ch07/7.3.2_tagged_unions`.
 
 ### 7.4: Dynamic arrays, queues, and associative arrays -- foreach iteration
 
@@ -124,15 +124,15 @@ Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Suppo
 
 ### 12.6.1: Pattern matching in case statements
 
-`case` with `tagged union` patterns and wildcard patterns. Requires tagged union support (7.3.2) which is not implemented. Blocked by: tagged union construction, pattern expression parsing. Test: `lrm/ch12/12.6.1_pattern_matching_case`.
+`case` with `tagged union` patterns and wildcard patterns. Tagged union types and constructor expressions exist. Blocked by: pattern expression parsing, `case tagged` syntax. Test: `lrm/ch12/12.6.1_pattern_matching_case`.
 
 ### 12.6.2: Pattern matching in if statements
 
-`if` with `matches` pattern-matching operator. Requires tagged union support and `matches` keyword parsing. Blocked by: tagged union construction, `matches` operator parsing. Test: `lrm/ch12/12.6.2_pattern_matching_if`.
+`if` with `matches` pattern-matching operator. Tagged union types and constructor expressions exist. Blocked by: `matches` operator parsing. Test: `lrm/ch12/12.6.2_pattern_matching_if`.
 
 ### 12.6.3: Pattern matching in conditional expressions
 
-Ternary `?:` with `matches` pattern-matching operator. Requires same infrastructure as 12.6.2. Blocked by: tagged union construction, `matches` operator parsing. Test: `lrm/ch12/12.6.3_pattern_matching_conditional`.
+Ternary `?:` with `matches` pattern-matching operator. Requires same infrastructure as 12.6.2. Blocked by: `matches` operator parsing. Test: `lrm/ch12/12.6.3_pattern_matching_conditional`.
 
 ## Chapter 20 -- System Functions
 

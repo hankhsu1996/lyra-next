@@ -116,6 +116,9 @@ pub(crate) fn lower_type_check_item(
         } => {
             misc::lower_assoc_key_mismatch(*index_site, expected, actual, source_map, diags);
         }
+        TypeCheckItem::TaggedExprError { .. } => {
+            call::lower_tagged_expr_error(item, source_map, diags);
+        }
     }
 }
 

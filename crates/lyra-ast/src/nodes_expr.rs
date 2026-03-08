@@ -9,7 +9,7 @@ use crate::nodes::{
     ArgList, BinExpr, CallExpr, CastExpr, ConcatExpr, CondExpr, EnumMember, EnumMemberRange,
     Expression, FieldExpr, IndexExpr, Literal, NewExpr, ParenExpr, PrefixExpr, RangeExpr,
     ReplicExpr, StreamExpr, StreamOperandItem, StreamOperands, StreamRange, StreamSliceSize,
-    StreamWithClause, TypeSpec,
+    StreamWithClause, TaggedExpr, TypeSpec,
 };
 use crate::support;
 
@@ -623,6 +623,22 @@ impl NewExpr {
             Some(al) => support::expr_children(&al.syntax).count(),
             None => 0,
         }
+    }
+}
+
+impl TaggedExpr {
+    /// The member name identifier token (direct child of `TaggedExpr`).
+    ///
+    /// The grammar is `tagged Ident [expr]`. The operand expression, even
+    /// if it is a bare name, is wrapped in a child node (e.g. `NameRef`),
+    /// so the only direct `Ident` token child is the member name.
+    pub fn member_name(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Ident)
+    }
+
+    /// The optional operand expression (LRM 11.9).
+    pub fn operand(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
     }
 }
 

@@ -115,6 +115,7 @@ ast_nodes! {
     StreamOperands(SyntaxKind::StreamOperands) { @custom }
     CastExpr(SyntaxKind::CastExpr) { @custom }
     NewExpr(SyntaxKind::NewExpr) { @custom }
+    TaggedExpr(SyntaxKind::TaggedExpr) { @custom }
     IndexExpr(SyntaxKind::IndexExpr) { @custom }
     RangeExpr(SyntaxKind::RangeExpr) {}
     FieldExpr(SyntaxKind::FieldExpr) { @custom }

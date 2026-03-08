@@ -3,6 +3,7 @@ use smol_str::SmolStr;
 
 use crate::enum_def::EnumId;
 use crate::member::{MemberInfo, MemberLookupError, MethodInvalidReason};
+use crate::record::{TaggedVariantError, TaggedVariantInfo};
 use crate::symbols::{GlobalSymbolId, SymbolKind};
 use crate::type_extract::UserTypeRef;
 use crate::types::{
@@ -124,6 +125,11 @@ pub enum ExprTypeErrorKind {
         expected: Box<crate::types::Ty>,
         actual: Box<crate::types::Ty>,
     },
+    TaggedExprNeedsContext,
+    TaggedExprExpectedTaggedUnion,
+    TaggedExprUnknownMember,
+    TaggedExprUnexpectedOperandForVoidMember,
+    TaggedExprMissingOperandForPayloadMember,
 }
 
 /// How an expression's type is viewed for operations.
@@ -335,6 +341,13 @@ pub trait InferCtx {
     fn iter_method_return(&self, _base_expr: &Expr, _method_name: &str) -> Option<Ty> {
         None
     }
+
+    /// Look up a tagged-union variant by record ID and member name.
+    fn tagged_union_variant(
+        &self,
+        record: &crate::record::RecordId,
+        member_name: &str,
+    ) -> Result<TaggedVariantInfo, TaggedVariantError>;
 }
 
 /// Extract an integral view from an `ExprType`, auto-casting enums to

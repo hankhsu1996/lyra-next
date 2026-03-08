@@ -216,6 +216,56 @@ pub(super) fn lower_new_expr_init_incompat(
     );
 }
 
+pub(super) fn lower_tagged_expr_error(
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    use lyra_semantic::type_infer::ExprTypeErrorKind;
+
+    let TypeCheckItem::TaggedExprError {
+        expr_site,
+        member_name,
+        error_kind,
+    } = item
+    else {
+        return;
+    };
+    let Some(span) = source_map.map_span(expr_site.text_range()) else {
+        return;
+    };
+    let (msg_id, msg_args) = match error_kind {
+        ExprTypeErrorKind::TaggedExprExpectedTaggedUnion => {
+            (lyra_diag::MessageId::TaggedExprNotTaggedUnion, vec![])
+        }
+        ExprTypeErrorKind::TaggedExprUnknownMember => (
+            lyra_diag::MessageId::TaggedExprUnknownMember,
+            vec![lyra_diag::Arg::Name(member_name.clone())],
+        ),
+        ExprTypeErrorKind::TaggedExprUnexpectedOperandForVoidMember => (
+            lyra_diag::MessageId::TaggedExprVoidMemberHasOperand,
+            vec![lyra_diag::Arg::Name(member_name.clone())],
+        ),
+        ExprTypeErrorKind::TaggedExprMissingOperandForPayloadMember => (
+            lyra_diag::MessageId::TaggedExprPayloadMemberMissingOperand,
+            vec![lyra_diag::Arg::Name(member_name.clone())],
+        ),
+        _ => return,
+    };
+    diags.push(
+        lyra_diag::Diagnostic::new(
+            lyra_diag::Severity::Error,
+            lyra_diag::code::TAGGED_EXPR_ERROR,
+            lyra_diag::Message::new(msg_id, msg_args.clone()),
+        )
+        .with_label(lyra_diag::Label {
+            kind: lyra_diag::LabelKind::Primary,
+            span,
+            message: lyra_diag::Message::new(msg_id, msg_args),
+        }),
+    );
+}
+
 fn conversion_diag(
     msg_id: lyra_diag::MessageId,
     msg_args: Vec<lyra_diag::Arg>,

@@ -1,7 +1,10 @@
 use lyra_ast::UnpackedDimSource;
 use lyra_semantic::def_index::ExpectedNs;
 use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
-use lyra_semantic::record::{FieldSem, Packing, RecordId, RecordKind, RecordSem, TypeRef};
+use lyra_semantic::record::{
+    FieldSem, Packing, RecordId, RecordKind, RecordSem, TaggedVariantError, TaggedVariantInfo,
+    TypeRef,
+};
 use lyra_semantic::types::{ConstInt, Ty};
 use smol_str::SmolStr;
 
@@ -228,6 +231,7 @@ pub fn record_sem<'db>(db: &'db dyn salsa::Database, rref: RecordRef<'db>) -> Re
     lookup.sort_by(|(a, _), (b, _)| a.cmp(b));
 
     RecordSem {
+        kind: record_def.kind,
         fields: fields.into_boxed_slice(),
         field_lookup: lookup.into_boxed_slice(),
         diags: diags.into_boxed_slice(),
@@ -307,9 +311,66 @@ fn packing_str(packing: Packing) -> &'static str {
 
 fn empty_record_sem() -> RecordSem {
     RecordSem {
+        kind: RecordKind::Struct,
         fields: Box::new([]),
         field_lookup: Box::new([]),
         diags: Box::new([]),
+    }
+}
+
+/// Look up a tagged-union variant from a fully resolved `RecordSem`.
+pub(crate) fn tagged_union_variant_from_sem(
+    sem: &RecordSem,
+    member_name: &str,
+) -> Result<TaggedVariantInfo, TaggedVariantError> {
+    if sem.kind != RecordKind::TaggedUnion {
+        return Err(TaggedVariantError::NotATaggedUnion);
+    }
+    match sem.field_by_name(member_name) {
+        Some((_, field)) => Ok(TaggedVariantInfo {
+            payload_ty: payload_ty_from_field_ty(&field.ty),
+        }),
+        None => Err(TaggedVariantError::UnknownMember),
+    }
+}
+
+/// Look up a tagged-union variant from raw (pre-const-eval) fields.
+pub(crate) fn tagged_union_variant_from_raw(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    record: &RecordId,
+    member_name: &str,
+    fields: &[RawField],
+) -> Result<TaggedVariantInfo, TaggedVariantError> {
+    let kind = record_kind_raw(db, unit, record).ok_or(TaggedVariantError::NotATaggedUnion)?;
+    if kind != RecordKind::TaggedUnion {
+        return Err(TaggedVariantError::NotATaggedUnion);
+    }
+    match fields.iter().find(|f| f.name == member_name) {
+        Some(field) => Ok(TaggedVariantInfo {
+            payload_ty: payload_ty_from_field_ty(&field.ty),
+        }),
+        None => Err(TaggedVariantError::UnknownMember),
+    }
+}
+
+fn record_kind_raw(
+    db: &dyn salsa::Database,
+    unit: CompilationUnit,
+    record: &RecordId,
+) -> Option<RecordKind> {
+    let file_id = record.file();
+    let source_file = source_file_by_id(db, unit, file_id)?;
+    let def = def_index_file(db, source_file);
+    let record_def = def.record_def_by_id(*record)?;
+    Some(record_def.kind)
+}
+
+fn payload_ty_from_field_ty(ty: &Ty) -> Option<Ty> {
+    if *ty == Ty::Void {
+        None
+    } else {
+        Some(ty.clone())
     }
 }
 
