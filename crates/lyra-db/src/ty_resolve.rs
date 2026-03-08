@@ -146,7 +146,7 @@ pub(crate) fn def_target_sem(
     unit: CompilationUnit,
     def_id: GlobalDefId,
 ) -> Option<DefTargetSem> {
-    let target_file_id = def_id.ast_id().file();
+    let target_file_id = def_id.file();
     let target_file = source_file_by_id(db, unit, target_file_id)?;
     let target_def = def_index_file(db, target_file);
     let entry = target_def.def_entry(def_id)?;
@@ -192,7 +192,7 @@ pub(crate) fn resolve_interface_scope_symbol(
     member_name: &str,
 ) -> Option<GlobalSymbolId> {
     let def_id = iface.global_def();
-    let file_id = def_id.ast_id().file();
+    let file_id = def_id.file();
     let src = source_file_by_id(db, unit, file_id)?;
     let def = def_index_file(db, src);
     let entry = def.def_entry(def_id)?;

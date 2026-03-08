@@ -53,17 +53,17 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
     let scopes = ctx.scopes.freeze(&symbols);
 
     let def_entries = ctx.def_entries.freeze();
-    let name_site_to_def = ctx.name_site_to_def;
-    let mut defs_by_name: Vec<GlobalDefId> = name_site_to_def.values().copied().collect();
+    let decl_site_to_def = ctx.decl_site_to_def;
+    let mut defs_by_name: Vec<GlobalDefId> = (0..def_entries.len())
+        .map(|i| GlobalDefId::new(file, i as u32))
+        .collect();
     defs_by_name.sort_by(|a, b| {
         let ea = def_entries
-            .iter()
-            .find(|e| e.decl_site == a.ast_id())
-            .map(|e| (&e.name, e.kind as u8, e.decl_site));
+            .get(a.ordinal() as usize)
+            .map(|e| (&e.name, e.kind as u8, a.ordinal()));
         let eb = def_entries
-            .iter()
-            .find(|e| e.decl_site == b.ast_id())
-            .map(|e| (&e.name, e.kind as u8, e.decl_site));
+            .get(b.ordinal() as usize)
+            .map(|e| (&e.name, e.kind as u8, b.ordinal()));
         ea.cmp(&eb)
     });
 
@@ -101,7 +101,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         symbols,
         scopes,
         def_entries,
-        name_site_to_def,
+        decl_site_to_def,
         defs_by_name: defs_by_name.into_boxed_slice(),
         use_sites: ctx.use_sites.into_boxed_slice(),
         imports: ctx.imports.into_boxed_slice(),
@@ -195,7 +195,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) symbols: SymbolTableBuilder,
     pub(crate) scopes: ScopeTreeBuilder,
     pub(crate) def_entries: DefEntryBuilder,
-    pub(crate) name_site_to_def: HashMap<crate::Site, GlobalDefId>,
+    pub(crate) decl_site_to_def: HashMap<crate::Site, GlobalDefId>,
     pub(crate) name_site_to_symbol: HashMap<crate::Site, SymbolId>,
     pub(crate) name_site_to_init_expr: HashMap<crate::Site, Option<crate::Site>>,
     pub(crate) use_sites: Vec<UseSite>,
@@ -221,14 +221,14 @@ pub(crate) struct DefContext<'a> {
 }
 
 impl<'a> DefContext<'a> {
-    pub(crate) fn new(_file: FileId, ast_id_map: &'a AstIdMap) -> Self {
+    pub(crate) fn new(file: FileId, ast_id_map: &'a AstIdMap) -> Self {
         Self {
             ast_id_map,
             lifetime_env: LifetimeEnv::default(),
             symbols: SymbolTableBuilder::new(),
             scopes: ScopeTreeBuilder::new(),
-            def_entries: DefEntryBuilder::new(),
-            name_site_to_def: HashMap::new(),
+            def_entries: DefEntryBuilder::new(file),
+            decl_site_to_def: HashMap::new(),
             name_site_to_symbol: HashMap::new(),
             name_site_to_init_expr: HashMap::new(),
             use_sites: Vec::new(),
@@ -403,8 +403,8 @@ impl<'a> DefContext<'a> {
             name_span,
             scope,
         };
-        let def_id = self.def_entries.push(decl_site, entry);
-        self.name_site_to_def.insert(decl_site, def_id);
+        let def_id = self.def_entries.push(entry);
+        self.decl_site_to_def.insert(decl_site, def_id);
         def_id
     }
 

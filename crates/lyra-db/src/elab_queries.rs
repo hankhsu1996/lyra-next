@@ -99,7 +99,10 @@ pub fn design_unit_signature<'db>(
     let id_map = ast_id_map(db, source_file);
     let def = def_index_file(db, source_file);
 
-    let Some(node) = id_map.get_node(&parse.syntax(), def_id.ast_id()) else {
+    let Some(entry) = def.def_entry(def_id) else {
+        return DesignUnitSig::new(SmolStr::default(), Vec::new(), Vec::new());
+    };
+    let Some(node) = id_map.get_node(&parse.syntax(), entry.decl_site) else {
         return DesignUnitSig::new(SmolStr::default(), Vec::new(), Vec::new());
     };
 
@@ -378,7 +381,11 @@ fn unit_name_range(
     };
     let parse = parse_file(db, source_file);
     let id_map = ast_id_map(db, source_file);
-    let Some(node) = id_map.get_node(&parse.syntax(), def_id.ast_id()) else {
+    let def = def_index_file(db, source_file);
+    let Some(entry) = def.def_entry(def_id) else {
+        return TextRange::default();
+    };
+    let Some(node) = id_map.get_node(&parse.syntax(), entry.decl_site) else {
         return TextRange::default();
     };
     let Some(decl) = DesignUnitDeclNode::cast(&node) else {
@@ -423,8 +430,12 @@ fn elaborate_unit_body(
     let parse = parse_file(ctx.db, source_file);
     let id_map = ast_id_map(ctx.db, source_file);
     let global = global_def_index(ctx.db, ctx.unit);
+    let def = def_index_file(ctx.db, source_file);
 
-    let Some(node) = id_map.get_node(&parse.syntax(), module_def.ast_id()) else {
+    let Some(entry) = def.def_entry(module_def) else {
+        return;
+    };
+    let Some(node) = id_map.get_node(&parse.syntax(), entry.decl_site) else {
         return;
     };
     let Some(decl) = DesignUnitDeclNode::cast(&node) else {

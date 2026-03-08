@@ -89,10 +89,12 @@ pub struct DefIndex {
     /// Definition-namespace entries keyed by insertion order.
     /// Use `def_entry()` to look up by `GlobalDefId`.
     pub def_entries: Box<[DefEntry]>,
-    /// Lookup-only: reverse map from definition name-site to `GlobalDefId`.
-    /// Keyed point lookup; do not iterate.
-    pub name_site_to_def: HashMap<Site, GlobalDefId>,
-    /// All `GlobalDefId`s in this file, sorted by `(name, kind, name_site)` for
+    /// Reverse map from definition `decl_site` to `GlobalDefId`.
+    /// Retained for source-anchor-based recovery paths (e.g. `resolve_at`
+    /// package name lookup). Not the primary semantic lookup path -- use
+    /// `def_entry(id)` for canonical `GlobalDefId -> DefEntry` resolution.
+    pub decl_site_to_def: HashMap<Site, GlobalDefId>,
+    /// All `GlobalDefId`s in this file, sorted by `(name, kind, ordinal)` for
     /// deterministic iteration. Used by `global_def_index` and `package_scope_index`.
     pub defs_by_name: Box<[GlobalDefId]>,
     pub use_sites: Box<[UseSite]>,
@@ -172,10 +174,14 @@ impl ModportStorage {
 
 impl DefIndex {
     /// Look up a definition entry by `GlobalDefId`.
+    ///
+    /// Direct O(1) ordinal indexing into `def_entries`. Returns `None`
+    /// if the ID belongs to a different file or the ordinal is out of range.
     pub fn def_entry(&self, id: GlobalDefId) -> Option<&DefEntry> {
-        let def_id = self.name_site_to_def.get(&id.ast_id())?;
-        debug_assert_eq!(*def_id, id);
-        self.def_entries.iter().find(|e| e.decl_site == id.ast_id())
+        if id.file() != self.file {
+            return None;
+        }
+        self.def_entries.get(id.ordinal() as usize)
     }
 
     /// Find the scope owned by a specific declaration site.

@@ -83,25 +83,38 @@ pub struct GlobalSymbolId {
 
 /// Cross-file definition identity.
 ///
-/// Cross-file identity for definition-namespace constructs (module, package,
-/// interface, program, primitive, config). Wraps `Site` with
-/// `decl_site` semantics. `symbol_global_def()` enforces the restriction.
-/// `PackageScope` uses `Site` directly for value/type-namespace
-/// member anchors.
+/// Semantic identity for definition-namespace constructs (module, package,
+/// interface, program, primitive, config). A compact handle in its own
+/// identity space, independent of source offsets.
+///
+/// `GlobalDefId.ordinal()` indexes the canonical `DefEntry` sequence
+/// for the owning file. Source anchors (`decl_site`, `name_site`) live
+/// on `DefEntry`, not on the identity itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct GlobalDefId(Site);
+pub struct GlobalDefId {
+    file: FileId,
+    ordinal: u32,
+}
 
 impl GlobalDefId {
-    pub fn new(ast_id: Site) -> Self {
-        Self(ast_id)
+    /// Sentinel value for builder-internal placeholders that are always
+    /// replaced before the definition escapes the builder. Not a valid
+    /// semantic identity.
+    pub(crate) const PLACEHOLDER: Self = Self {
+        file: FileId(u32::MAX),
+        ordinal: u32::MAX,
+    };
+
+    pub fn new(file: FileId, ordinal: u32) -> Self {
+        Self { file, ordinal }
     }
 
     pub fn file(self) -> FileId {
-        self.0.file()
+        self.file
     }
 
-    pub fn ast_id(self) -> Site {
-        self.0
+    pub fn ordinal(self) -> u32 {
+        self.ordinal
     }
 }
 

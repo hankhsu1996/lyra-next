@@ -8,13 +8,11 @@ When work on a feature exposes a broader architectural limitation, record it her
 
 These are long-term limitations of the semantic data model itself.
 
-### Global definition identity is still site-shaped
+### Semantic identity model lacks token-granular stable identity
 
-`GlobalDefId` is currently a wrapper over `Site`, so cross-file definition identity is still tied to source offsets. Adding or removing text before a definition changes its identity even when the semantic entity is unchanged.
+The stable identity model currently covers AST nodes only (`Site` / `ErasedAstId`), not individual tokens. Any semantic product that needs to anchor a specific token -- a keyword, an operator, a time literal -- is forced into a weaker representation: raw text (`SmolStr`) without source identity, or ad hoc token rescans at consumption time.
 
-This is broader than any single feature. Any cross-file join keyed by `GlobalDefId` inherits source-position sensitivity instead of using a true semantic identity. As more semantic products want to refer to definitions structurally rather than by source anchor, this becomes a limiting shape.
-
-The long-term fix is to give global definitions their own stable semantic identity rather than reusing `Site` as the definition ID. Exposed by: any cross-file semantic relation that wants to treat definitions as durable semantic entities rather than syntax anchors.
+This is not a local feature issue. It is a limitation of the identity model itself. Token-granular semantic products (operator anchoring, keyword-level diagnostics, time literal identity) cannot be represented with the same precision and stability as node-level products until the identity model is extended. Exposed by: timeunit/timeprecision collection (LRM 3.14.2.2), operator tokens in expressions.
 
 ## Layer and API shape gaps
 
