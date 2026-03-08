@@ -326,6 +326,22 @@ impl FieldExpr {
             })
             .last()
     }
+
+    /// Member lookup name and token kind for this field access.
+    ///
+    /// Returns the payload used for member resolution: identifier tokens
+    /// are normalized per LRM 5.6.1 (backslash stripped), while keyword
+    /// method names (`and`, `or`, `xor`, `unique`) return their raw text.
+    /// The `SyntaxKind` allows callers to distinguish keyword-based
+    /// method dispatch from identifier-based member lookup.
+    pub fn member_lookup_name(&self) -> Option<(SyntaxKind, smol_str::SmolStr)> {
+        let tok = self.field_name()?;
+        let text = match tok.kind() {
+            SyntaxKind::Ident | SyntaxKind::EscapedIdent => crate::ident::semantic_spelling(&tok),
+            _ => smol_str::SmolStr::new(tok.text()),
+        };
+        Some((tok.kind(), text))
+    }
 }
 
 impl CondExpr {

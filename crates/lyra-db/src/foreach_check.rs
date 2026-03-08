@@ -9,6 +9,7 @@
 
 use std::collections::HashSet;
 
+use lyra_ast::semantic_spelling;
 use lyra_ast::{
     AssignStmt, AstIdMap, AstNode, Expr, ExprKind, ForeachStmt, HasSyntax, SourceFile,
     foreach_stmts,
@@ -96,7 +97,7 @@ fn check_foreach_stmt(
         let Some(name_tok) = decl.name() else {
             continue;
         };
-        let var_name = name_tok.text();
+        let var_name: SmolStr = semantic_spelling(&name_tok);
         let var_span = TokenSpan::new(name_tok.text_range());
 
         if let Some(ref arr_name) = array_root_name
@@ -168,8 +169,8 @@ fn foreach_array_dim_count(et: &lyra_semantic::type_infer::ExprType) -> u32 {
 /// - `pkg::name` -> last segment
 fn extract_root_name(expr: &Expr) -> Option<SmolStr> {
     match expr.classify()? {
-        ExprKind::NameRef(nr) => nr.ident().map(|t| SmolStr::new(t.text())),
-        ExprKind::QualifiedName(qn) => qn.segments().last().map(|t| SmolStr::new(t.text())),
+        ExprKind::NameRef(nr) => nr.ident().map(|t| semantic_spelling(&t)),
+        ExprKind::QualifiedName(qn) => qn.segments().last().map(|t| semantic_spelling(&t)),
         ExprKind::FieldExpr(fe) => extract_root_name_from_base(&fe.base_expr()?),
         ExprKind::IndexExpr(ie) => extract_root_name_from_base(&ie.base_expr()?),
         _ => None,
@@ -178,8 +179,8 @@ fn extract_root_name(expr: &Expr) -> Option<SmolStr> {
 
 fn extract_root_name_from_base(expr: &Expr) -> Option<SmolStr> {
     match expr.classify()? {
-        ExprKind::NameRef(nr) => nr.ident().map(|t| SmolStr::new(t.text())),
-        ExprKind::QualifiedName(qn) => qn.segments().last().map(|t| SmolStr::new(t.text())),
+        ExprKind::NameRef(nr) => nr.ident().map(|t| semantic_spelling(&t)),
+        ExprKind::QualifiedName(qn) => qn.segments().last().map(|t| semantic_spelling(&t)),
         ExprKind::FieldExpr(fe) => extract_root_name_from_base(&fe.base_expr()?),
         ExprKind::IndexExpr(ie) => extract_root_name_from_base(&ie.base_expr()?),
         _ => None,

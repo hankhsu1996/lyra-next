@@ -2,6 +2,7 @@ use lyra_ast::{
     AstNode, DeclLifetimeSyntax, Declarator, ExportDecl, ExportItem, ForeachStmt, FunctionDecl,
     HasSyntax, ImportDecl, ImportItem, ModportDecl, ModportPortKind, ModportTfPortsGroup,
     ModuleInstantiation, TaskDecl, TfPortDecl, TimeprecisionDecl, TimeunitDecl, TypeSpec,
+    semantic_spelling,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -39,7 +40,7 @@ pub(crate) fn collect_module_instantiation(
     {
         let type_use_site_idx = ctx.use_sites.len() as u32;
         ctx.use_sites.push(UseSite {
-            path: NamePath::Simple(SmolStr::new(name_tok.text())),
+            path: NamePath::Simple(semantic_spelling(&name_tok)),
             expected_ns: ExpectedNs::Exact(Namespace::Definition),
             scope,
             name_ref_site: ast_id.erase(),
@@ -66,8 +67,9 @@ pub(crate) fn collect_module_instantiation(
                 continue;
             };
             let idx = InstanceDeclIdx(ctx.instance_decls.len() as u32);
+            let inst_name = semantic_spelling(&inst_name_tok);
             let sym_id = ctx.push_symbol(Symbol {
-                name: SmolStr::new(inst_name_tok.text()),
+                name: inst_name.clone(),
                 kind: SymbolKind::Instance,
                 constness: Constness::Mutable,
                 lifetime: Lifetime::Static,
@@ -81,7 +83,7 @@ pub(crate) fn collect_module_instantiation(
             ctx.instance_decls.push(InstanceDecl {
                 type_use_site_idx,
                 sym_id,
-                name: SmolStr::new(inst_name_tok.text()),
+                name: inst_name,
                 scope,
             });
         }
@@ -121,7 +123,7 @@ pub(crate) fn collect_foreach_vars(
             continue;
         };
         let sym_id = ctx.push_symbol(Symbol {
-            name: SmolStr::new(name_tok.text()),
+            name: semantic_spelling(&name_tok),
             kind: SymbolKind::Variable,
             constness: Constness::Mutable,
             lifetime: Lifetime::Automatic,
@@ -210,7 +212,7 @@ fn collect_callable_inner(
         ));
         return;
     };
-    let name = SmolStr::new(name_tok.text());
+    let name = semantic_spelling(name_tok);
     let callable_scope = ctx.scopes.push(header.scope_kind, Some(scope));
     ctx.register_scope_owner(callable_scope, decl_site);
     let callable_type_site = header
@@ -290,7 +292,7 @@ fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: 
                     continue;
                 };
                 let port_sym = ctx.push_symbol(Symbol {
-                    name: SmolStr::new(name_tok.text()),
+                    name: semantic_spelling(&name_tok),
                     kind: SymbolKind::PortTf,
                     constness: Constness::Mutable,
                     lifetime: Lifetime::Static,
@@ -322,7 +324,7 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, decl: &ModportDecl,
         let Some(name_tok) = item.name() else {
             continue;
         };
-        let name = SmolStr::new(name_tok.text());
+        let name = semantic_spelling(&name_tok);
 
         // Placeholder ModportDefId with a dummy owner; finalization replaces it.
         let placeholder_id = ModportDefId {
@@ -356,10 +358,10 @@ pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, decl: &ModportDecl,
         ctx.raw_modport_defs.push(RawModportEntry {
             owner,
             ordinal,
-            name,
+            name: name.clone(),
             def: ModportDef {
                 id: placeholder_id,
-                name: SmolStr::new(name_tok.text()),
+                name,
                 entries: collected.signal_entries.into_boxed_slice(),
                 tf_entries: collected.tf_entries.into_boxed_slice(),
             },
@@ -389,7 +391,7 @@ fn collect_modport_entries(
                     && let Some(port_name_tok) = port.name()
                     && let Some(port_id) = ctx.ast_id_map.erased_ast_id(port.syntax())
                 {
-                    let name = SmolStr::new(port_name_tok.text());
+                    let name = semantic_spelling(&port_name_tok);
                     signal_entries.push(ModportEntry {
                         port_name: name.clone(),
                         direction: dir,
@@ -416,7 +418,7 @@ fn collect_modport_entries(
                         ModportTarget::Empty
                     };
                     signal_entries.push(ModportEntry {
-                        port_name: SmolStr::new(port_name_tok.text()),
+                        port_name: semantic_spelling(&port_name_tok),
                         direction: dir,
                         target,
                         port_id,
@@ -458,7 +460,7 @@ fn collect_tf_group_entries(
         };
         tf_entries.push(ModportTfEntry {
             kind: tf_kind,
-            name: SmolStr::new(name_tok.text()),
+            name: semantic_spelling(&name_tok),
             form,
             port_site,
             name_span: DeclSpan::new(name_tok.text_range()),
@@ -503,7 +505,7 @@ fn collect_import_item(ctx: &mut DefContext<'_>, item: &ImportItem, scope: Scope
         if let Some(pkg_tok) = item.package_name() {
             ctx.imports.push(Import {
                 id,
-                package: SmolStr::new(pkg_tok.text()),
+                package: semantic_spelling(&pkg_tok),
                 name: ImportName::Wildcard,
                 scope,
                 import_stmt_site: ast_id,
@@ -515,8 +517,8 @@ fn collect_import_item(ctx: &mut DefContext<'_>, item: &ImportItem, scope: Scope
         if segments.len() >= 2 {
             ctx.imports.push(Import {
                 id,
-                package: SmolStr::new(segments[0].text()),
-                name: ImportName::Explicit(SmolStr::new(segments[1].text())),
+                package: semantic_spelling(&segments[0]),
+                name: ImportName::Explicit(semantic_spelling(&segments[1])),
                 scope,
                 import_stmt_site: ast_id,
                 order_key: 0,
@@ -535,13 +537,13 @@ fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem, scope: Scope
     let key = if item.is_all_wildcard() {
         ExportKey::AllWildcard
     } else if let Some(pkg_tok) = item.package_name() {
-        let package = SmolStr::new(pkg_tok.text());
+        let package = semantic_spelling(&pkg_tok);
         if item.is_wildcard() {
             ExportKey::PackageWildcard { package }
         } else if let Some(member_tok) = item.member_name() {
             ExportKey::Explicit {
                 package,
-                name: SmolStr::new(member_tok.text()),
+                name: semantic_spelling(&member_tok),
             }
         } else {
             return;
@@ -605,7 +607,7 @@ pub(crate) fn collect_param_decl(
                     continue;
                 };
                 let sym_id = ctx.push_symbol(Symbol {
-                    name: SmolStr::new(name_tok.text()),
+                    name: semantic_spelling(&name_tok),
                     kind: SymbolKind::Parameter,
                     constness: Constness::Mutable,
                     lifetime: Lifetime::Static,
@@ -659,7 +661,7 @@ fn collect_type_param_decl(
             .default_type_spec()
             .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
         let sym_id = ctx.push_symbol(Symbol {
-            name: SmolStr::new(name_tok.text()),
+            name: semantic_spelling(&name_tok),
             kind: SymbolKind::TypeParam,
             constness: Constness::Mutable,
             lifetime: Lifetime::Static,
@@ -796,7 +798,7 @@ fn collect_declarators_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, facts:
                     continue;
                 };
                 let sym_id = ctx.push_symbol(Symbol {
-                    name: SmolStr::new(name_tok.text()),
+                    name: semantic_spelling(&name_tok),
                     kind: facts.kind,
                     constness: facts.constness,
                     lifetime: facts.lifetime,

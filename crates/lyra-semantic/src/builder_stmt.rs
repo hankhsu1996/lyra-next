@@ -1,8 +1,8 @@
-use lyra_ast::{AstNode, ForStmt, ForeachStmt, HasSyntax, NameRef, QualifiedName};
+use lyra_ast::{
+    AstNode, ForStmt, ForeachStmt, HasSyntax, NameRef, QualifiedName, semantic_spelling,
+};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
-
-use smol_str::SmolStr;
 
 use crate::builder::{DeclaratorContext, DefContext, expect_typed, is_expression_kind};
 use crate::builder_items::{collect_foreach_vars, collect_var_decl};
@@ -132,7 +132,7 @@ fn collect_name_refs_from_expr(
             && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
         {
             ctx.use_sites.push(UseSite {
-                path: NamePath::Simple(SmolStr::new(ident.text())),
+                path: NamePath::Simple(semantic_spelling(&ident)),
                 expected_ns: ExpectedNs::Exact(Namespace::Value),
                 scope,
                 name_ref_site: ast_id.erase(),

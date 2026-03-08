@@ -1,7 +1,7 @@
 use lyra_ast::{
     AstIdMap, Declarator, Expr, ExprKind, NameRef, NetDecl, NetDeclKind, NettypeDecl,
     PackedDimension, ParamDecl, Port, QualifiedName, Signing, TypeDeclSite, TypeNameRef, TypeSpec,
-    TypeSpecKeyword, TypedefDecl, UnpackedDimKind, UnpackedDimension, VarDecl,
+    TypeSpecKeyword, TypedefDecl, UnpackedDimKind, UnpackedDimension, VarDecl, semantic_spelling,
 };
 use smol_str::SmolStr;
 
@@ -73,7 +73,7 @@ pub fn user_type_ref(typespec: &TypeSpec) -> Option<UserTypeRef> {
             let member_token = dn.member_ident()?;
             Some(UserTypeRef::DottedType {
                 base: nr,
-                member: SmolStr::new(member_token.text()),
+                member: semantic_spelling(&member_token),
             })
         }
     }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lyra_ast::{AstNode, ErasedAstId, HasSyntax};
+use lyra_ast::{AstNode, ErasedAstId, HasSyntax, semantic_spelling};
 use lyra_parser::{SyntaxNode, SyntaxToken};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::symbols::GlobalDefId;
@@ -109,7 +109,7 @@ pub fn design_unit_signature<'db>(
 
     let name = decl
         .name()
-        .map(|t| SmolStr::new(t.text()))
+        .map(|t| semantic_spelling(&t))
         .unwrap_or_default();
 
     let ports = extract_port_sigs(db, unit, file_id, decl.port_list(), id_map, def);
@@ -134,7 +134,7 @@ fn extract_port_sigs(
     for port in port_list.ports() {
         let port_name = port
             .name()
-            .map(|t| SmolStr::new(t.text()))
+            .map(|t| semantic_spelling(&t))
             .unwrap_or_default();
 
         let direction = port.direction();
@@ -185,7 +185,7 @@ fn extract_param_sigs(
         for declarator in param_decl.declarators() {
             let param_name = declarator
                 .name()
-                .map(|t| SmolStr::new(t.text()))
+                .map(|t| semantic_spelling(&t))
                 .unwrap_or_default();
             let name_range = declarator
                 .name()
@@ -494,7 +494,7 @@ fn process_instantiation(
     let Some(name_tok) = inst.module_name() else {
         return;
     };
-    let inst_module_name = SmolStr::new(name_tok.text());
+    let inst_module_name = semantic_spelling(&name_tok);
     let name_span = Span {
         file: env.file_id,
         range: name_tok.text_range(),
@@ -576,7 +576,7 @@ fn process_instantiation(
             origin,
             parent: Some(env.parent_scope),
             module_def: target_def_id,
-            instance_name: SmolStr::new(inst_name_tok.text()),
+            instance_name: semantic_spelling(&inst_name_tok),
             param_env: child_param_env,
             children: Vec::new(),
             source_file: env.file_id,
@@ -747,7 +747,7 @@ fn process_generate_if(ctx: &mut ElabCtx<'_>, if_stmt: &lyra_ast::IfStmt, env: &
         iter: None,
     };
 
-    let block_name = body.block_name().map(|t| SmolStr::new(t.text()));
+    let block_name = body.block_name().map(|t| semantic_spelling(&t));
 
     let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
         origin,
@@ -829,7 +829,7 @@ fn process_generate_for(ctx: &mut ElabCtx<'_>, for_stmt: &lyra_ast::ForStmt, env
             iter: Some(iter_value.clone()),
         };
 
-        let block_name = body.block_name().map(|t| SmolStr::new(t.text()));
+        let block_name = body.block_name().map(|t| semantic_spelling(&t));
 
         let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
             origin,
@@ -998,7 +998,7 @@ fn process_generate_case(
         iter: None,
     };
 
-    let block_name = body.block_name().map(|t| SmolStr::new(t.text()));
+    let block_name = body.block_name().map(|t| semantic_spelling(&t));
 
     let scope_id = ctx.tree.push_gen_scope(GenScopeNode {
         origin,

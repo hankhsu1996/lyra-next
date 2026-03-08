@@ -23,6 +23,7 @@ CHECKS = [
     "check_cst_layering.py",
     "check_lines.py",
     "check_diag_textrange.py",
+    "check_semantic_spelling.py",
 ]
 
 

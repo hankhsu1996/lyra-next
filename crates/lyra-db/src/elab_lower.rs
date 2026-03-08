@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use lyra_ast::{AstNode, ErasedAstId, Expr, HasSyntax, SyntaxBinaryOp};
+use lyra_ast::{AstNode, ErasedAstId, Expr, HasSyntax, SyntaxBinaryOp, semantic_spelling};
 use lyra_semantic::symbols::GlobalDefId;
 use lyra_semantic::types::{InterfaceIdentity, InterfaceType, Ty};
 use lyra_source::{FileId, Span, TextRange};
@@ -408,7 +408,7 @@ fn map_elab_span(db: &dyn salsa::Database, unit: CompilationUnit, raw: Span) -> 
 }
 
 pub(crate) fn extract_block_name(block: &lyra_ast::BlockStmt) -> Option<SmolStr> {
-    block.block_name().map(|tok| SmolStr::new(tok.text()))
+    block.block_name().map(|tok| semantic_spelling(&tok))
 }
 
 pub(crate) enum ForLimit {
@@ -431,7 +431,7 @@ pub(crate) fn extract_for_parts(
     eval_expr: &dyn Fn(&Expr) -> Option<i64>,
 ) -> Option<ForParts> {
     let init_name_ref = for_stmt.init_name()?;
-    let genvar_name = SmolStr::new(init_name_ref.ident()?.text());
+    let genvar_name = semantic_spelling(&init_name_ref.ident()?);
 
     let init_expr = for_stmt.init_value()?;
     let init = eval_expr(&init_expr)?;

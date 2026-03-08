@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use lyra_ast::{AstNode, FunctionDecl, HasSyntax, TaskDecl, TypeSpec};
+use lyra_ast::{AstNode, FunctionDecl, HasSyntax, TaskDecl, TypeSpec, semantic_spelling};
 use lyra_semantic::UserTypeRef;
 use lyra_semantic::symbols::{GlobalSymbolId, SymbolKind};
 use lyra_semantic::types::{InterfaceIdentity, InterfaceType, SymbolType, Ty};
@@ -248,7 +248,7 @@ pub(crate) fn extract_tf_ports(
             let has_default = declarator.init_expr().is_some();
 
             ports.push(TfPortSig {
-                name: SmolStr::new(name_tok.text()),
+                name: semantic_spelling(&name_tok),
                 direction: current_dir,
                 ty: base_ty.clone(),
                 has_default,

@@ -2,6 +2,7 @@ mod ast_id;
 mod dims;
 mod expr;
 mod generate_item;
+mod ident;
 mod node;
 mod nodes;
 mod nodes_decl;
@@ -17,6 +18,7 @@ pub use ast_id::{AstId, AstIdMap, ErasedAstId};
 pub use dims::UnpackedDimSource;
 pub use expr::{Expr, ExprKind, LiteralKind, TfArg, TypeRef};
 pub use generate_item::{GenerateBody, GenerateItem, GenerateScope};
+pub use ident::semantic_spelling;
 pub use node::{AstNode, HasSyntax, StmtNode, is_expression_kind, is_statement_kind};
 pub use nodes::{
     AlwaysBlock, ArgList, ArrayManipWithClause, AssignStmt, BinExpr, BlockStmt, BreakStmt,

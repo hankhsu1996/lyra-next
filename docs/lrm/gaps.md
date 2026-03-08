@@ -6,9 +6,9 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 5 -- Lexical Conventions
 
-### 5.6.1: Escaped identifiers -- unescaped access
+### 5.6.1: Escaped identifiers -- remaining semantic equivalence coverage
 
-Escaped identifiers (e.g. `\cpu3 `) should be referenceable by their unescaped name (`cpu3`). Name resolution does not strip the leading backslash for matching, so `\cpu3` and `cpu3` are treated as distinct names. Blocked by: name resolution escaped-identifier normalization. Test: sv-tests `nonescaped-access`.
+Escaped and plain identifiers resolve to the same semantic name via `semantic_spelling` normalization (LRM 5.6.1). Lexical acceptance (special-character escaped identifiers), declaration/reference equivalence (both directions), escaped keyword identifiers, struct field access, and package-qualified names are tested. Remaining: escaped identifiers in port, instance, modport, and import/export contexts; diagnostic display source-spelling preservation. Blocked by: broader test coverage across semantic surfaces. Test: `lrm/ch05/5.6.1_escaped_identifiers/cases/`.
 
 ### 5.6.4: Compiler directives -- non-conditional directive semantics
 
