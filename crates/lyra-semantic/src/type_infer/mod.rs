@@ -51,6 +51,10 @@ pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx
         ExprKind::NewExpr(ne) => infer_new_expr(&ne, None),
         ExprKind::TypeExpr(te) => scalar::infer_type_expr(&te, ctx),
         ExprKind::TaggedExpr(_) => ExprType::error(ExprTypeErrorKind::TaggedExprNeedsContext),
+        ExprKind::DollarExpr(_) => ExprType {
+            ty: Ty::int(),
+            view: ExprView::QueueDollar,
+        },
     };
     reject_void_value(result)
 }

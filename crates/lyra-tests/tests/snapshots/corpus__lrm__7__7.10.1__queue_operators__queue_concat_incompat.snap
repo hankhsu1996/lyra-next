@@ -1,0 +1,11 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: test.sv (4 diagnostics)
+  error[lyra.type.queue_concat_incompat] 7:13..7:13: queue concatenation operand has incompatible element type
+  error[lyra.type.queue_concat_incompat] 11:13..11:13: queue concatenation operand has incompatible element type
+  error[lyra.type.queue_concat_incompat] 16:13..16:13: queue concatenation operand has incompatible element type
+  error[lyra.type.queue_concat_incompat] 20:13..20:13: queue concatenation operand has incompatible element type
+---
+unit (0 diagnostics)

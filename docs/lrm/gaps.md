@@ -98,9 +98,6 @@ Associative arrays with class-type keys (`int aa[SomeClass]`) cannot be declared
 
 Associative array literal syntax (`'{key1: val1, key2: val2}`) is not supported. Aggregate literal/pattern expressions are not parsed. Blocked by: aggregate literal expression parsing and type checking. Test: `lrm/ch07/7.9.11_associative_array_literals`.
 
-### 7.10.1: Queue operators
-
-Queue concatenation (`{q1, q2}`, `{q, item}`) and queue slicing are not supported. The concatenation operator currently requires integral operands only. Queue-specific concatenation and assignment patterns (e.g., `q = {q[0:1], item, q[3:$]}`) are not type-checked. Blocked by: non-integral concatenation support, queue slice semantics. Test: `lrm/ch07/7.10.1_queue_operators`.
 
 ## Chapter 11 -- Operators and Expressions
 

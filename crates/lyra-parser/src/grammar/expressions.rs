@@ -233,6 +233,11 @@ fn atom_non_tagged(p: &mut Parser) -> Option<CompletedMarker> {
             p.expect(SyntaxKind::RBrace);
             Some(m.complete(p, SyntaxKind::AssignmentPatternExpr))
         }
+        SyntaxKind::Dollar => {
+            let m = p.start();
+            p.bump(); // $
+            Some(m.complete(p, SyntaxKind::DollarExpr))
+        }
         SyntaxKind::NewKw => {
             let m = p.start();
             p.bump(); // new

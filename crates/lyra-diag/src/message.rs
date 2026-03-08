@@ -132,6 +132,11 @@ pub enum MessageId {
     TaggedExprUnknownMember,
     TaggedExprVoidMemberHasOperand,
     TaggedExprPayloadMemberMissingOperand,
+    // Queue operator diagnostics
+    DollarOutsideQueueContext,
+    QueuePartSelectNotAllowed,
+    EmptyConcatRequiresContext,
+    QueueConcatIncompatible,
     // Implicit net policy
     ImplicitNetForbidden,
     // Declaration legality
@@ -311,6 +316,10 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::TaggedExprUnknownMember
         | MessageId::TaggedExprVoidMemberHasOperand
         | MessageId::TaggedExprPayloadMemberMissingOperand => render_type_message(msg),
+        MessageId::DollarOutsideQueueContext
+        | MessageId::QueuePartSelectNotAllowed
+        | MessageId::EmptyConcatRequiresContext
+        | MessageId::QueueConcatIncompatible => render_queue_operator_message(msg),
         MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
         | MessageId::StreamUnpackGreedyRemainder
@@ -649,6 +658,24 @@ fn render_tagged_expr_message(msg: &Message) -> String {
         }
         MessageId::TaggedExprPayloadMemberMissingOperand => {
             format!("member `{}` requires an operand", name())
+        }
+        _ => String::new(),
+    }
+}
+
+fn render_queue_operator_message(msg: &Message) -> String {
+    match msg.id {
+        MessageId::DollarOutsideQueueContext => {
+            "`$` can only be used as a queue index or slice bound".into()
+        }
+        MessageId::QueuePartSelectNotAllowed => {
+            "indexed part-select (`+:` / `-:`) is not allowed on queues".into()
+        }
+        MessageId::EmptyConcatRequiresContext => {
+            "empty concatenation `{}` requires a queue or dynamic array target".into()
+        }
+        MessageId::QueueConcatIncompatible => {
+            "queue concatenation operand has incompatible element type".into()
         }
         _ => String::new(),
     }

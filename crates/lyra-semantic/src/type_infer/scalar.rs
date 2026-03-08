@@ -71,7 +71,10 @@ pub(super) fn infer_prefix(
 
     if op == SyntaxPrefixOp::LogNot || op.is_reduction() {
         // Logical negation / reduction: always 1-bit unsigned, operand self-determined
-        let _operand = infer_expr(&operand_expr, ctx, None);
+        let operand = infer_expr(&operand_expr, ctx, None);
+        if matches!(operand.view, ExprView::QueueDollar) {
+            return ExprType::error(ExprTypeErrorKind::DollarOutsideQueueContext);
+        }
         ExprType::one_bit()
     } else if matches!(
         op,
@@ -81,6 +84,8 @@ pub(super) fn infer_prefix(
         let operand = infer_expr(&operand_expr, ctx, expected);
         match &operand.view {
             ExprView::BitVec(_) | ExprView::Error(_) => operand,
+            ExprView::QueueDollar => ExprType::error(ExprTypeErrorKind::DollarOutsideQueueContext),
+            ExprView::EmptyConcat => ExprType::error(ExprTypeErrorKind::NonBitOperand),
             ExprView::Plain | ExprView::AssignmentPattern => {
                 if let Some(bv) = try_integral_view(&operand, ctx) {
                     ExprType::bitvec(bv)
@@ -124,6 +129,11 @@ pub(super) fn infer_binary(
     }
     if matches!(rhs_self.view, ExprView::Error(_)) {
         return rhs_self;
+    }
+    if matches!(lhs_self.view, ExprView::QueueDollar)
+        || matches!(rhs_self.view, ExprView::QueueDollar)
+    {
+        return ExprType::error(ExprTypeErrorKind::DollarOutsideQueueContext);
     }
     let Some(lhs_bv) = try_integral_view(&lhs_self, ctx) else {
         return ExprType::error(ExprTypeErrorKind::NonBitOperand);
@@ -178,11 +188,21 @@ pub(super) fn infer_cond(
     };
 
     // Condition is always self-determined
-    let _cond = infer_expr(&cond_node, ctx, None);
+    let cond = infer_expr(&cond_node, ctx, None);
+    if matches!(cond.view, ExprView::QueueDollar) {
+        return ExprType::error(ExprTypeErrorKind::DollarOutsideQueueContext);
+    }
 
     // Self-determined types of both arms
     let then_ty = infer_expr(&then_node, ctx, None);
     let else_ty = infer_expr(&else_node, ctx, None);
+
+    // Reject `$` in conditional arms
+    if matches!(then_ty.view, ExprView::QueueDollar)
+        || matches!(else_ty.view, ExprView::QueueDollar)
+    {
+        return ExprType::error(ExprTypeErrorKind::DollarOutsideQueueContext);
+    }
 
     match (&then_ty.view, &else_ty.view) {
         (ExprView::BitVec(a), ExprView::BitVec(b)) => {

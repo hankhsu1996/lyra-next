@@ -534,6 +534,9 @@ pub enum SyntaxKind {
     // Tagged union expression (LRM 11.9)
     TaggedExpr,
 
+    // Queue dollar expression (LRM 7.10.1)
+    DollarExpr,
+
     #[doc(hidden)]
     __Last,
 }

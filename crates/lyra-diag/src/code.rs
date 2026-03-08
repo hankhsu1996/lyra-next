@@ -84,6 +84,10 @@ pub const UNPACKED_RECORD_INTEGRAL_ASSIGN: DiagKey = "lyra.type.unpacked_record_
 pub const INDEX_KEY_NOT_INTEGRAL: DiagKey = "lyra.type.index_key_not_integral";
 pub const ASSOC_INDEX_KEY_MISMATCH: DiagKey = "lyra.type.assoc_index_key_mismatch";
 pub const TAGGED_EXPR_ERROR: DiagKey = "lyra.type.tagged_expr_error";
+pub const DOLLAR_OUTSIDE_QUEUE_CONTEXT: DiagKey = "lyra.type.dollar_outside_queue_context";
+pub const QUEUE_PART_SELECT_NOT_ALLOWED: DiagKey = "lyra.type.queue_part_select_not_allowed";
+pub const EMPTY_CONCAT_REQUIRES_CONTEXT: DiagKey = "lyra.type.empty_concat_requires_context";
+pub const QUEUE_CONCAT_INCOMPAT: DiagKey = "lyra.type.queue_concat_incompat";
 pub const IMPLICIT_NET_FORBIDDEN: DiagKey = "lyra.semantic.implicit_net_forbidden";
 pub const AUTOMATIC_VAR_NON_PROCEDURAL: DiagKey = "lyra.decl.automatic_var_non_procedural";
 
@@ -191,6 +195,10 @@ pub const ALL_KEYS: &[DiagKey] = &[
     INDEX_KEY_NOT_INTEGRAL,
     ASSOC_INDEX_KEY_MISMATCH,
     TAGGED_EXPR_ERROR,
+    DOLLAR_OUTSIDE_QUEUE_CONTEXT,
+    QUEUE_PART_SELECT_NOT_ALLOWED,
+    EMPTY_CONCAT_REQUIRES_CONTEXT,
+    QUEUE_CONCAT_INCOMPAT,
     AUTOMATIC_VAR_NON_PROCEDURAL,
     UNRESOLVED_MODULE_INST,
     NOT_INSTANTIABLE,

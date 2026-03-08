@@ -242,6 +242,18 @@ pub enum TypeCheckItem {
         member_name: smol_str::SmolStr,
         error_kind: crate::type_infer::ExprTypeErrorKind,
     },
+    DollarOutsideQueueContext {
+        expr_site: Site,
+    },
+    QueuePartSelectNotAllowed {
+        expr_site: Site,
+    },
+    EmptyConcatRequiresContext {
+        expr_site: Site,
+    },
+    QueueConcatIncompatible {
+        expr_site: Site,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -439,7 +451,7 @@ pub fn check_var_decl(
         let rhs_site = require_site(site::opt_site_of(map, &init_expr), decl_site, items);
 
         let lhs_type = ExprType::from_symbol_type(&sym_type);
-        let rhs_type = type_rhs_for_assignment(ctx, &init_expr, &lhs_type.ty);
+        let rhs_type = type_rhs_for_assignment(ctx, &init_expr, &lhs_type.ty, rhs_site, items);
 
         if is_void_used_as_expr(&rhs_type) {
             items.push(TypeCheckItem::VoidUsedAsValue {
@@ -504,7 +516,7 @@ fn check_assignment_pair(
             }
 
             let lhs_type = ctx.expr_type(&lhs_expr);
-            let rhs_type = type_rhs_for_assignment(ctx, rhs, &lhs_type.ty);
+            let rhs_type = type_rhs_for_assignment(ctx, rhs, &lhs_type.ty, rhs_site, items);
 
             if is_void_used_as_expr(&rhs_type) {
                 items.push(TypeCheckItem::VoidUsedAsValue {
@@ -731,12 +743,54 @@ pub(crate) fn tf_arg_expr(arg: &TfArg) -> Option<&Expr> {
     }
 }
 
-fn type_rhs_for_assignment(ctx: &dyn TypeCheckCtx, rhs: &Expr, lhs_ty: &Ty) -> ExprType {
-    let result = ctx.expr_type(rhs);
-    if result_needs_expected_type(&result) {
-        ctx.expr_type_with_expected(rhs, lhs_ty)
-    } else {
-        result
+fn type_rhs_for_assignment(
+    ctx: &dyn TypeCheckCtx,
+    rhs: &Expr,
+    lhs_ty: &Ty,
+    rhs_site: Site,
+    items: &mut Vec<TypeCheckItem>,
+) -> ExprType {
+    if detect_new_expr(rhs).is_some() {
+        return ctx.expr_type_with_expected(rhs, lhs_ty);
+    }
+    let rhs_type = ctx.expr_type(rhs);
+    if result_needs_expected_type(&rhs_type) {
+        return ctx.expr_type_with_expected(rhs, lhs_ty);
+    }
+    // `$` is only valid in queue index/slice context, not as an assignment RHS
+    if matches!(rhs_type.view, ExprView::QueueDollar) {
+        items.push(TypeCheckItem::DollarOutsideQueueContext {
+            expr_site: rhs_site,
+        });
+        return ExprType::error(ExprTypeErrorKind::DollarOutsideQueueContext);
+    }
+    // Resolve empty concat (`{}`) in assignment context
+    if matches!(rhs_type.view, ExprView::EmptyConcat) {
+        let resolved = resolve_empty_concat(lhs_ty);
+        if matches!(
+            resolved.view,
+            ExprView::Error(ExprTypeErrorKind::EmptyConcatRequiresContext)
+        ) {
+            items.push(TypeCheckItem::EmptyConcatRequiresContext {
+                expr_site: rhs_site,
+            });
+        }
+        return resolved;
+    }
+    rhs_type
+}
+
+/// Resolve an empty concatenation (`{}`) based on the LHS type.
+///
+/// When the LHS is a queue or dynamic array, `{}` is a valid empty
+/// array/queue literal. Otherwise it remains an error.
+fn resolve_empty_concat(lhs_ty: &Ty) -> ExprType {
+    match lhs_ty {
+        Ty::Array {
+            dim: UnpackedDim::Queue { .. } | UnpackedDim::Unsized,
+            ..
+        } => ExprType::from_ty(lhs_ty),
+        _ => ExprType::error(ExprTypeErrorKind::EmptyConcatRequiresContext),
     }
 }
 
@@ -968,10 +1022,9 @@ fn array_assignment_compat(lhs: &Ty, rhs: &Ty) -> ArrayCompat {
     }
 }
 
-/// Whether two array element types are assignment-compatible.
-///
-/// Integral types are compatible if they have the same packed width and
-/// signedness, regardless of the underlying keyword (`int` vs `bit signed`).
+/// Whether two array element types are equivalent for array assignment
+/// (LRM 6.22.2). Integral types are equivalent if they have the same
+/// packed width and signedness.
 fn array_elem_compatible(lhs: &Ty, rhs: &Ty) -> bool {
     if lhs == rhs {
         return true;
