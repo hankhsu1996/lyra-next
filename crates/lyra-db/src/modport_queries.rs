@@ -38,7 +38,7 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
     };
     let def = def_index_file(db, src);
 
-    let Some(modport_def) = def.modport_defs.get(&modport_id) else {
+    let Some(modport_def) = def.modport_def(modport_id) else {
         return empty_modport_sem();
     };
 

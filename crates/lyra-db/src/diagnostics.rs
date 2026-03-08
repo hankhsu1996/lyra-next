@@ -206,7 +206,7 @@ fn collect_modport_diagnostics(
     pp: &lyra_preprocess::PreprocOutput,
     diags: &mut Vec<lyra_diag::Diagnostic>,
 ) {
-    for modport_def in def.modport_defs.values() {
+    for modport_def in def.modport_defs_in_order() {
         let mref = ModportRef::new(db, unit, modport_def.id);
 
         let sem = crate::modport_queries::modport_sem(db, mref);

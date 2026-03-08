@@ -80,10 +80,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         record_by_site.insert(def.record_type_site, crate::record::RecordDefIdx(i as u32));
     }
 
-    // Finalize modport defs: convert raw GlobalDefId owners to InterfaceDefId
-    let mut modport_defs = HashMap::new();
-    let mut modport_name_map = HashMap::new();
-    let def_index_partial = DefIndex {
+    let mut def_index = DefIndex {
         file,
         symbols,
         scopes,
@@ -101,8 +98,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         record_by_site,
         instance_decls: ctx.instance_decls.into_boxed_slice(),
         nettype_defs: ctx.nettype_defs.into_boxed_slice(),
-        modport_defs: HashMap::new(),
-        modport_name_map: HashMap::new(),
+        modports: crate::def_index::ModportStorage::empty(),
         export_decls: ctx.export_decls.into_boxed_slice(),
         foreach_var_defs: ctx.foreach_var_defs,
         scope_time_units: ctx.scope_time_units,
@@ -110,25 +106,32 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         diagnostics: diagnostics.into_boxed_slice(),
         internal_errors: ctx.internal_errors.into_boxed_slice(),
     };
-    for raw in ctx.raw_modport_defs {
-        if let Some(iface_id) = InterfaceDefId::try_from_def_index(&def_index_partial, raw.owner) {
+    finalize_modport_defs(&mut def_index, ctx.raw_modport_defs);
+    def_index
+}
+
+/// Convert raw modport entries to typed `ModportDefId`s and build
+/// declaration-order storage with a position index for keyed lookup.
+fn finalize_modport_defs(def_index: &mut DefIndex, raw_entries: Vec<RawModportEntry>) {
+    let mut defs_ordered = Vec::new();
+    let mut index = HashMap::new();
+    let mut name_map = HashMap::new();
+    for raw in raw_entries {
+        if let Some(iface_id) = InterfaceDefId::try_from_def_index(def_index, raw.owner) {
             let typed_id = ModportDefId {
                 owner: iface_id,
                 ordinal: raw.ordinal,
             };
             let mut def = raw.def;
             def.id = typed_id;
-            modport_name_map
-                .entry((iface_id, raw.name))
-                .or_insert(typed_id);
-            modport_defs.insert(typed_id, def);
+            name_map.entry((iface_id, raw.name)).or_insert(typed_id);
+            let pos = defs_ordered.len() as u32;
+            defs_ordered.push(def);
+            index.insert(typed_id, pos);
         }
     }
-    DefIndex {
-        modport_defs,
-        modport_name_map,
-        ..def_index_partial
-    }
+    def_index.modports =
+        crate::def_index::ModportStorage::new(defs_ordered.into_boxed_slice(), index, name_map);
 }
 
 /// Mutable context accumulated during a single `build_def_index` pass.

@@ -67,6 +67,7 @@ Design docs live in `docs/`. Read these before making architectural changes:
 - **Design docs use semantic terms, not tool terms** --the core provides queries (`resolve`, `type_of`); tools (LSP, linter) consume them. Say "resolve a name to its declaration," not "go-to-definition."
 - **Lowering depends only on anchor data, not producer-layer services** --semantic anchors are self-describing; lowering extracts presentation data (ranges, spans) from the anchor's own stored fields. Injecting producer-layer services (AST maps, syntax trees) into lowering breaks layering and hides producer bugs.
 - **Producers must not silently drop findings** --when a producer encounters an unexpected state (failed lookup, missing data), it must emit an internal diagnostic with a deterministic fallback and continue. Never `return`/`continue` to skip producing a finding. Thread required (non-optional) fallbacks through the call stack so no code path can silently bail.
+- **No observable traversal from raw hash-based storage** --durable semantic products may use `HashMap` for private keyed lookup, but any traversal that escapes through diagnostics, tests, or APIs must come from an explicit ordered projection (e.g., source-order ID slices). Store semantic order explicitly; do not rely on downstream sorting as a substitute. Tests must consume semantic APIs and ordered projections, not raw container iteration.
 
 ## Typed AST Boundary
 

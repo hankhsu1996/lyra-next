@@ -248,9 +248,13 @@ Cross-file relationships are expressed exclusively via IDs stored in summary str
 
 ## Determinism
 
-- Iteration over symbols and scopes uses stable ordering (insertion order or sorted).
+- Lookup tables and ordered semantic collections serve different roles and must be represented differently.
+- Durable lookup tables may use `HashMap` when iteration is not observable (e.g., `ResolveIndex.resolutions`, `DefIndex.enum_by_site`).
+- Observable traversal must come from explicit ordered projections owned by the semantic product (e.g., `DefIndex.modport_def_order`, sorted `Box<[T]>` slices).
+- Semantic order is usually stored as source-order ID slices built during construction. Downstream sorting is not a substitute for correct semantic product shape.
+- Tests must consume semantic APIs and ordered projections, not raw container iteration.
+- Iteration over symbols and scopes uses explicit ordered projections (declaration-order slices or sorted sequences).
 - Diagnostics are deterministic within a file.
-- `HashMap` is used for point lookups (e.g., `ResolveIndex.resolutions`). When ordering matters, results are sorted before output.
 - Same inputs produce identical IDs, types, and diagnostics across runs.
 
 ## Data ownership

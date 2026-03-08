@@ -539,12 +539,9 @@ fn type_site_none_for_task() {
 }
 
 fn find_scope_by_kind(def: &crate::def_index::DefIndex, kind: ScopeKind) -> crate::scopes::ScopeId {
-    for &scope_id in def.scope_time_units.keys() {
-        if def.scopes.get(scope_id).kind == kind {
-            return scope_id;
-        }
-    }
-    panic!("no scope with kind {kind:?} found in scope_time_units");
+    def.scopes
+        .find_scope_by_kind(kind)
+        .unwrap_or_else(|| panic!("no scope with kind {kind:?} found"))
 }
 
 #[test]

@@ -140,6 +140,9 @@ pub struct EnumVariantTarget {
 ///
 /// Plain enum members are NOT in this index -- they are resolved via
 /// normal scope lookup. Only range-expanded names appear here.
+///
+/// `by_scope` is a lookup-only table: keyed point lookup by `ScopeId`
+/// then by name; do not iterate for observable output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumVariantIndex {
     pub by_scope: HashMap<ScopeId, HashMap<SmolStr, EnumVariantTarget>>,
@@ -148,4 +151,5 @@ pub struct EnumVariantIndex {
 
 /// Per-package enum variant index for wildcard imports.
 /// Keyed by package name, then by variant name.
+/// Lookup-only: keyed point lookup; do not iterate for observable output.
 pub type PkgEnumVariantIndex = HashMap<SmolStr, HashMap<SmolStr, EnumVariantTarget>>;
