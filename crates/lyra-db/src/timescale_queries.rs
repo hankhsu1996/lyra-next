@@ -1,5 +1,4 @@
 use lyra_preprocess::DirectiveEventKind;
-use lyra_semantic::def_entry::DefScope;
 use lyra_semantic::scopes::ScopeId;
 use lyra_semantic::time_scale::{
     EffectiveTimeParams, FileTimescaleEntry, FileTimescaleSummary, TimeScaleValue, TimescaleDiag,
@@ -91,8 +90,8 @@ pub fn effective_time_params(
 
     let mut result = Vec::new();
 
-    for def_entry in &*def.def_entries {
-        let DefScope::Owned(scope_id) = def_entry.scope else {
+    for (def_id, def_entry) in def.iter_defs() {
+        let Some(scope_id) = def.scope_of_def(def_id) else {
             continue;
         };
 

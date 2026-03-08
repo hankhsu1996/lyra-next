@@ -5,13 +5,15 @@ use lyra_source::FileId;
 
 use crate::Site;
 use crate::global_index::DefinitionKind;
-use crate::scopes::ScopeId;
 use crate::symbols::GlobalDefId;
 
 /// A definition-namespace entry (module, package, interface, program, primitive, config).
 ///
 /// First-class storage keyed by `GlobalDefId`. Definition-namespace items do NOT
 /// live in the `SymbolTable` -- they are stored in `DefIndex.def_entries` instead.
+///
+/// Scope ownership is not stored here. Use `DefIndex::scope_of_def(def_id)`
+/// to query the scope owned by a definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefEntry {
     pub kind: DefinitionKind,
@@ -29,16 +31,6 @@ pub struct DefEntry {
 
     /// Precise identifier token span for diagnostics / highlights.
     pub name_span: DeclSpan,
-
-    /// Scope owned by the definition, if any.
-    pub scope: DefScope,
-}
-
-/// Whether a definition owns a scope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DefScope {
-    Owned(ScopeId),
-    None,
 }
 
 /// Builder for accumulating `DefEntry` items before freezing.

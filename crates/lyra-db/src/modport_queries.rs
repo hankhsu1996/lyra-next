@@ -1,5 +1,4 @@
 use lyra_semantic::Site;
-use lyra_semantic::def_entry;
 use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use lyra_semantic::modport_def::ModportDefId;
 use lyra_semantic::modport_def::ModportTarget;
@@ -42,10 +41,7 @@ pub fn modport_sem<'db>(db: &'db dyn salsa::Database, mref: ModportRef<'db>) -> 
         return empty_modport_sem();
     };
 
-    let Some(entry) = def.def_entry(iface_def_id) else {
-        return empty_modport_sem();
-    };
-    let def_entry::DefScope::Owned(iface_scope) = entry.scope else {
+    let Some(iface_scope) = def.scope_of_def(iface_def_id) else {
         return empty_modport_sem();
     };
 

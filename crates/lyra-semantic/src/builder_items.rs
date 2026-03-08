@@ -229,7 +229,6 @@ fn collect_callable_inner(
     };
     let name = semantic_spelling(name_tok);
     let callable_scope = ctx.scopes.push(header.scope_kind, Some(scope));
-    ctx.register_scope_owner(callable_scope, decl_site);
     let callable_type_site = header
         .type_spec
         .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
@@ -252,6 +251,11 @@ fn collect_callable_inner(
     });
 
     ctx.register_binding(sym_id);
+    ctx.register_scope_owner(
+        callable_scope,
+        crate::def_index::ScopeOwner::Symbol(sym_id),
+        decl_site,
+    );
 
     if let Some(ts) = header.type_spec {
         collect_type_spec_refs(ctx, ts, scope);

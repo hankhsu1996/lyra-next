@@ -13,24 +13,25 @@ fn find_symbol_lifetime(db: &LyraDatabase, file: SourceFile, name: &str) -> Life
 }
 
 /// Find the scope owned by a named declaration. For symbol-namespace owners
-/// (functions, tasks), finds the symbol's `decl_site` and looks up the scope
-/// owned by that site. For definition-namespace owners (modules, packages),
-/// finds the def entry's `decl_site`. Panics if no match found.
+/// (functions, tasks), uses `scope_of_symbol`. For definition-namespace owners
+/// (modules, packages), uses `scope_of_def`. Panics if no match found.
 fn find_owner_scope(
     db: &LyraDatabase,
     file: SourceFile,
     name: &str,
 ) -> lyra_semantic::scopes::ScopeId {
     let def = def_index_file(db, file);
-    if let Some((_id, sym)) = def.symbols.iter().find(|(_, s)| s.name == name)
-        && let Some(sid) = def.find_scope_by_owner(sym.decl_site)
+    if let Some((sym_id, _sym)) = def.symbols.iter().find(|(_, s)| s.name == name)
+        && let Some(sid) = def.scope_of_symbol(sym_id)
     {
         return sid;
     }
-    if let Some(entry) = def.def_entries.iter().find(|e| e.name == name)
-        && let Some(sid) = def.find_scope_by_owner(entry.decl_site)
-    {
-        return sid;
+    for (def_id, entry) in def.iter_defs() {
+        if entry.name == name
+            && let Some(sid) = def.scope_of_def(def_id)
+        {
+            return sid;
+        }
     }
     panic!("no scope owned by declaration '{name}'");
 }

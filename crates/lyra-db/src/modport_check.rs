@@ -37,10 +37,7 @@ pub fn modport_prototype_diagnostics<'db>(
         return Box::new([]);
     };
 
-    let Some(entry) = def.def_entry(iface_def_id) else {
-        return Box::new([]);
-    };
-    let lyra_semantic::def_entry::DefScope::Owned(iface_scope) = entry.scope else {
+    let Some(iface_scope) = def.scope_of_def(iface_def_id) else {
         return Box::new([]);
     };
 
