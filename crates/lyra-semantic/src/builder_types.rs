@@ -164,7 +164,8 @@ fn register_type_use_site(
     }
 }
 
-pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, td: &TypedefDecl, scope: ScopeId) {
+    let node = td.syntax();
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error_unanchored(&format!(
             "erased_ast_id returned None for {:?} in collect_typedef",
@@ -181,9 +182,7 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
             collect_name_refs(ctx, &child, scope);
         }
     }
-    if let Some(td) = TypedefDecl::cast(node.clone())
-        && let Some(name_tok) = td.name()
-    {
+    if let Some(name_tok) = td.name() {
         let typedef_name = SmolStr::new(name_tok.text());
         // Update the def name if we collected an aggregate
         match origin {
@@ -218,15 +217,12 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope
     }
 }
 
-pub(crate) fn collect_nettype_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
+pub(crate) fn collect_nettype_decl(ctx: &mut DefContext<'_>, nd: &NettypeDecl, scope: ScopeId) {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(nd.syntax()) else {
         ctx.emit_internal_error_unanchored(&format!(
             "erased_ast_id returned None for {:?} in collect_nettype_decl",
-            node.kind()
+            nd.syntax().kind()
         ));
-        return;
-    };
-    let Some(nd) = NettypeDecl::cast(node.clone()) else {
         return;
     };
     if let Some(ts) = nd.type_spec() {
