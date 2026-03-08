@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::expr_type::{
     CallableKind, CallableSigRef, CalleeFormKind, ExprType, ExprTypeErrorKind, ExprView, InferCtx,
     ResolveCallableError,
@@ -61,75 +63,186 @@ pub(super) fn infer_system_call(stf: &SystemTfCall, ctx: &dyn InferCtx) -> ExprT
     crate::system_functions::infer_system_call(stf, ctx)
 }
 
-/// Check call arguments against the callable signature.
+/// Per-argument contextual checking result for a call expression.
+///
+/// One entry per supplied positional argument in source order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallArgCheck {
+    pub expected_ty: Option<Ty>,
+    pub inferred: ExprType,
+}
+
+/// Infer a single call argument against its port type.
+///
+/// Passes both the full port type (for context-determined expressions
+/// like tagged unions and `new[]`) and integral context (for width/
+/// signedness propagation per LRM 11.6).
+fn infer_call_arg(arg: &Expr, port: Option<&super::CallablePort>, ctx: &dyn InferCtx) -> ExprType {
+    if let Some(port) = port {
+        let integral_ctx = {
+            let ety = ExprType::from_ty(&port.ty);
+            match ety.view {
+                ExprView::BitVec(bv) => Some(IntegralCtx {
+                    width: bv.width.self_determined(),
+                    signed: bv.signed,
+                    four_state: bv.four_state,
+                }),
+                _ => None,
+            }
+        };
+        infer_expr_with_expected(arg, Some(&port.ty), ctx, integral_ctx.as_ref())
+    } else {
+        infer_expr(arg, ctx, None)
+    }
+}
+
+/// Check call arguments against the callable signature (non-allocating).
 fn check_call_args(call: &CallExpr, sig: &CallableSigRef, ctx: &dyn InferCtx) {
     let args: Vec<Expr> = call
         .arg_list()
         .map(|al| al.args().collect())
         .unwrap_or_default();
-
-    // Infer each argument with expected type from the port signature.
-    // Passes both the full port type (for context-determined expressions
-    // like tagged unions and `new[]`) and integral context (for width/
-    // signedness propagation per LRM 11.6).
     for (i, arg) in args.iter().enumerate() {
-        if let Some(port) = sig.ports.get(i) {
-            let integral_ctx = {
-                let ety = ExprType::from_ty(&port.ty);
-                match ety.view {
-                    ExprView::BitVec(bv) => Some(IntegralCtx {
-                        width: bv.width.self_determined(),
-                        signed: bv.signed,
-                        four_state: bv.four_state,
-                    }),
-                    _ => None,
-                }
+        infer_call_arg(arg, sig.ports.get(i), ctx);
+    }
+}
+
+/// Collect per-argument contextual checking results for a call with a known signature.
+fn collect_call_arg_checks(
+    call: &CallExpr,
+    sig: &CallableSigRef,
+    ctx: &dyn InferCtx,
+) -> Arc<[CallArgCheck]> {
+    let args: Vec<Expr> = call
+        .arg_list()
+        .map(|al| al.args().collect())
+        .unwrap_or_default();
+    let mut checks = Vec::with_capacity(args.len());
+    for (i, arg) in args.iter().enumerate() {
+        let port = sig.ports.get(i);
+        let inferred = infer_call_arg(arg, port, ctx);
+        checks.push(CallArgCheck {
+            expected_ty: port.map(|p| p.ty.clone()),
+            inferred,
+        });
+    }
+    checks.into()
+}
+
+/// Compute per-argument contextual checking results for a call expression.
+///
+/// Resolves the callee, obtains its signature, and infers each supplied
+/// argument with the appropriate expected type context. Returns one
+/// `CallArgCheck` per supplied positional argument. Handles both
+/// direct calls and interface callable method calls.
+pub fn infer_call_arg_checks(call: &CallExpr, ctx: &dyn InferCtx) -> Arc<[CallArgCheck]> {
+    let Some(callee_expr) = call.callee() else {
+        return Arc::from([]);
+    };
+    let Some(callee_kind) = callee_expr.classify() else {
+        return Arc::from([]);
+    };
+
+    match callee_kind {
+        ExprKind::NameRef(_) | ExprKind::QualifiedName(_) => {}
+        ExprKind::FieldExpr(field_expr) => {
+            let Some(sig) = resolve_method_callable_sig(&field_expr, ctx) else {
+                return Arc::from([]);
             };
-            infer_expr_with_expected(arg, Some(&port.ty), ctx, integral_ctx.as_ref());
-        } else {
-            infer_expr(arg, ctx, None);
+            return collect_call_arg_checks(call, &sig, ctx);
         }
+        _ => return Arc::from([]),
+    }
+
+    let Ok(sym_id) = ctx.resolve_callable(&callee_expr) else {
+        return Arc::from([]);
+    };
+    let Some(sig) = ctx.callable_sig(sym_id) else {
+        return Arc::from([]);
+    };
+
+    collect_call_arg_checks(call, &sig, ctx)
+}
+
+/// Result of resolving a method-call callee's member.
+enum MethodCallee {
+    /// Iterator pseudo-method with known return type (LRM 7.12.4).
+    IteratorMethod(Ty),
+    /// Successfully resolved member or lookup error.
+    Member(Result<MemberInfo, MemberLookupError>),
+    /// LHS type inference produced an error.
+    LhsError(ExprType),
+    /// Field expression is missing required syntactic parts.
+    MissingParts,
+}
+
+/// Shared method-call resolution: extract field parts, check iterator
+/// methods, infer LHS type, and perform member lookup.
+///
+/// Both `infer_method_call` (full inference) and
+/// `resolve_method_callable_sig` (signature-only query) use this to
+/// avoid duplicating the resolution logic.
+fn resolve_method_callee(field_expr: &FieldExpr, ctx: &dyn InferCtx) -> MethodCallee {
+    let Some((_kind, field_semantic)) = field_expr.member_lookup_name() else {
+        return MethodCallee::MissingParts;
+    };
+    let Some(lhs_node) = field_expr.base_expr() else {
+        return MethodCallee::MissingParts;
+    };
+    if let Some(ret_ty) = ctx.iter_method_return(&lhs_node, &field_semantic) {
+        return MethodCallee::IteratorMethod(ret_ty);
+    }
+    let lhs_type = infer_expr(&lhs_node, ctx, None);
+    if matches!(lhs_type.view, ExprView::Error(_)) {
+        return MethodCallee::LhsError(lhs_type);
+    }
+    MethodCallee::Member(ctx.member_lookup(&lhs_type.ty, &field_semantic))
+}
+
+/// Resolve a method-call callee to a callable signature, if possible.
+///
+/// Returns `Some` for interface callable methods (LRM 25.5, 25.7) that
+/// have a standard callable signature. Returns `None` for builtin methods
+/// (which have custom argument checking) and error cases.
+fn resolve_method_callable_sig(
+    field_expr: &FieldExpr,
+    ctx: &dyn InferCtx,
+) -> Option<CallableSigRef> {
+    match resolve_method_callee(field_expr, ctx) {
+        MethodCallee::Member(Ok(MemberInfo {
+            kind: MemberKind::InterfaceCallable { global_sym },
+            ..
+        })) => ctx.callable_sig(global_sym),
+        _ => None,
     }
 }
 
 fn infer_method_call(call: &CallExpr, field_expr: &FieldExpr, ctx: &dyn InferCtx) -> ExprType {
-    let Some((_kind, field_semantic)) = field_expr.member_lookup_name() else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
-    let Some(lhs_node) = field_expr.base_expr() else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
-
-    // Iterator pseudo-methods (e.g. item.index()) -- LRM 7.12.4
-    if let Some(ret_ty) = ctx.iter_method_return(&lhs_node, &field_semantic) {
-        return infer_iter_method_call(call, &ret_ty, ctx);
-    }
-
-    let lhs_type = infer_expr(&lhs_node, ctx, None);
-    if let ExprView::Error(_) = &lhs_type.view {
-        return lhs_type;
-    }
-
-    match ctx.member_lookup(&lhs_type.ty, &field_semantic) {
-        Ok(MemberInfo {
+    match resolve_method_callee(field_expr, ctx) {
+        MethodCallee::MissingParts => ExprType::error(ExprTypeErrorKind::UnsupportedExprKind),
+        MethodCallee::IteratorMethod(ret_ty) => infer_iter_method_call(call, &ret_ty, ctx),
+        MethodCallee::LhsError(e) => e,
+        MethodCallee::Member(Ok(MemberInfo {
             kind: MemberKind::BuiltinMethod(bm),
             ty,
             receiver,
-        }) => {
+        })) => {
             crate::builtin_methods::infer_builtin_method_call(call, bm, &ty, receiver.as_ref(), ctx)
         }
-        Ok(MemberInfo {
+        MethodCallee::Member(Ok(MemberInfo {
             kind: MemberKind::InterfaceCallable { global_sym },
             ..
-        }) => infer_interface_callable(call, global_sym, ctx),
-        Ok(_) | Err(MemberLookupError::NoMembersOnType) => ExprType::error(
+        })) => infer_interface_callable(call, global_sym, ctx),
+        MethodCallee::Member(Ok(_) | Err(MemberLookupError::NoMembersOnType)) => ExprType::error(
             ExprTypeErrorKind::UnsupportedCalleeForm(CalleeFormKind::MethodCall),
         ),
-        Err(MemberLookupError::UnknownMember) => ExprType::error(ExprTypeErrorKind::UnknownMember),
-        Err(MemberLookupError::NotInModport) => {
+        MethodCallee::Member(Err(MemberLookupError::UnknownMember)) => {
+            ExprType::error(ExprTypeErrorKind::UnknownMember)
+        }
+        MethodCallee::Member(Err(MemberLookupError::NotInModport)) => {
             ExprType::error(ExprTypeErrorKind::MemberNotInModport)
         }
-        Err(MemberLookupError::MethodNotValidOnReceiver(reason)) => {
+        MethodCallee::Member(Err(MemberLookupError::MethodNotValidOnReceiver(reason))) => {
             ExprType::error(ExprTypeErrorKind::MethodNotValidOnReceiver(reason))
         }
     }

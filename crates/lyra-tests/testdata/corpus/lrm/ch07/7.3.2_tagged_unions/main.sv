@@ -66,6 +66,36 @@ module tagged_unions;
     // @tagged error[lyra.type.tagged_expr_error]
   end
 
+  // Tagged expression in call-argument context (LRM 11.9)
+  function void accept_mi(maybe_int_t x);
+  endfunction
+
+  function void accept_payload(payload_t x);
+  endfunction
+
+  initial begin
+    // Valid: tagged expression as call argument
+    accept_mi(tagged Valid 42);
+    accept_mi(tagged Invalid);
+    accept_payload(tagged None);
+    accept_payload(tagged ByteVal 8);
+  end
+
+  // Call-argument negative cases
+  initial begin
+    // Unknown member in call argument
+    accept_mi(tagged Foo 1);
+    // @tagged error[lyra.type.tagged_expr_error]
+
+    // Void member with operand in call argument
+    accept_mi(tagged Invalid 1);
+    // @tagged error[lyra.type.tagged_expr_error]
+
+    // Payload member without operand in call argument
+    accept_mi(tagged Valid);
+    // @tagged error[lyra.type.tagged_expr_error]
+  end
+
   // Invalid: void member in a struct
   typedef struct packed {
     void bad_field;

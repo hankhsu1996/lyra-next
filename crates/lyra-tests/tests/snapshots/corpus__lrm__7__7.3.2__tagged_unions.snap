@@ -2,12 +2,15 @@
 source: crates/lyra-tests/tests/corpus.rs
 expression: ws.dump_diagnostics()
 ---
-// file: main.sv (6 diagnostics)
+// file: main.sv (9 diagnostics)
   error[lyra.type.tagged_expr_error] 52:8..52:8: unknown member `Foo` in tagged union
   error[lyra.type.tagged_expr_error] 56:8..56:8: void member `Invalid` does not accept an operand
   error[lyra.type.tagged_expr_error] 60:8..60:8: member `Valid` requires an operand
   error[lyra.type.tagged_expr_error] 64:7..64:7: tagged expression requires a tagged union type
-  error[lyra.semantic.void_member_non_tagged] 70:8..70:8: void member `bad_field` is only allowed in tagged unions
-  error[lyra.semantic.void_member_non_tagged] 77:8..77:8: void member `bad_field` is only allowed in tagged unions
+  error[lyra.type.tagged_expr_error] 86:14..86:14: unknown member `Foo` in tagged union
+  error[lyra.type.tagged_expr_error] 90:14..90:14: void member `Invalid` does not accept an operand
+  error[lyra.type.tagged_expr_error] 94:14..94:14: member `Valid` requires an operand
+  error[lyra.semantic.void_member_non_tagged] 100:8..100:8: void member `bad_field` is only allowed in tagged unions
+  error[lyra.semantic.void_member_non_tagged] 107:8..107:8: void member `bad_field` is only allowed in tagged unions
 ---
 unit (0 diagnostics)

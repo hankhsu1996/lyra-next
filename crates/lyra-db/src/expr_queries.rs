@@ -1,4 +1,4 @@
-use lyra_ast::{AstIdMap, Expr, HasSyntax};
+use lyra_ast::{AstIdMap, AstNode, Expr, HasSyntax};
 use lyra_semantic::coerce::IntegralCtx;
 use lyra_semantic::member::{
     ArrayMethodKind, BuiltinMethodKind, EnumMethodKind, MemberInfo, MemberKind, MemberLookupError,
@@ -246,6 +246,42 @@ struct DbInferCtx<'a> {
     unit: CompilationUnit,
     source_file: crate::SourceFile,
     ast_id_map: &'a lyra_ast::AstIdMap,
+}
+
+/// Per-argument contextual checking results for a call expression (Salsa-tracked).
+///
+/// Keyed by `ExprRef` so the result is cached and shared across consumers.
+#[salsa::tracked(return_ref)]
+pub fn call_arg_checks<'db>(
+    db: &'db dyn salsa::Database,
+    expr_ref: ExprRef<'db>,
+) -> std::sync::Arc<[lyra_semantic::type_infer::CallArgCheck]> {
+    let unit = expr_ref.unit(db);
+    let expr_ast_id = expr_ref.expr_ast_id(db);
+    let file_id = expr_ast_id.file();
+
+    let Some(source_file) = source_file_by_id(db, unit, file_id) else {
+        return std::sync::Arc::from([]);
+    };
+
+    let parse = parse_file(db, source_file);
+    let map = ast_id_map(db, source_file);
+
+    let Some(node) = map.get_node(&parse.syntax(), expr_ast_id) else {
+        return std::sync::Arc::from([]);
+    };
+
+    let ctx = DbInferCtx {
+        db,
+        unit,
+        source_file,
+        ast_id_map: map,
+    };
+
+    let Some(call) = lyra_ast::CallExpr::cast(node) else {
+        return std::sync::Arc::from([]);
+    };
+    lyra_semantic::type_infer::infer_call_arg_checks(&call, &ctx)
 }
 
 impl InferCtx for DbInferCtx<'_> {
