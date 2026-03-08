@@ -7,6 +7,7 @@ use smol_str::SmolStr;
 
 use crate::engine::{Preprocessor, token_carries_newline};
 use crate::env::{MacroTemplate, MacroTok, MacroTokenSeq, MacroValue};
+use crate::predefined::classify_predefined;
 
 enum DefineParamsResult {
     Ok {
@@ -58,6 +59,20 @@ impl Preprocessor<'_> {
         let name = SmolStr::from(self.tok_text_at(j, cursor));
         cursor += usize::from(self.tokens[j].len);
         j += 1;
+
+        if classify_predefined(&name).is_some() {
+            let consumed = self.strip_directive_line(idx);
+            if self.cond.currently_emitting() {
+                self.push_error(
+                    TextRange::new(
+                        TextSize::new(dir_start as u32),
+                        TextSize::new(cursor as u32),
+                    ),
+                    SmolStr::from(format!("cannot redefine predefined macro `{name}`")),
+                );
+            }
+            return consumed;
+        }
 
         // Adjacency: immediate LParen (no trivia skip) means function-like.
         let mut params: Option<Vec<SmolStr>> = None;
@@ -154,6 +169,20 @@ impl Preprocessor<'_> {
 
         let name_len: usize = self.tokens[j].len.into();
         let name = &self.text[cursor..cursor + name_len];
+
+        if classify_predefined(name).is_some() {
+            let consumed = self.strip_directive_line(idx);
+            if self.cond.currently_emitting() {
+                self.push_error(
+                    TextRange::new(
+                        TextSize::new(dir_start as u32),
+                        TextSize::new((cursor + name_len) as u32),
+                    ),
+                    SmolStr::from(format!("cannot undefine predefined macro `{name}`")),
+                );
+            }
+            return consumed;
+        }
 
         // Consume directive before modifying env (src_cursor must be current for flush)
         let name_owned = SmolStr::from(name);

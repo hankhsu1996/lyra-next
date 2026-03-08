@@ -5,6 +5,7 @@ use smol_str::SmolStr;
 use crate::directive::{DirectiveClass, DirectiveKeyword, classify_directive};
 use crate::engine_cond::{CondState, ElseError, ElsifError};
 use crate::env::MacroEnv;
+use crate::predefined::{LineMap, classify_predefined};
 use crate::source_map::{Segment, SegmentKind, SourceMap};
 use crate::{
     DefaultNettypeDirective, DirectiveEvent, DirectiveEventKind, DirectiveEventOrigin,
@@ -16,6 +17,8 @@ pub(crate) struct Preprocessor<'a> {
     pub(crate) file: FileId,
     pub(crate) tokens: &'a [Token],
     pub(crate) text: &'a str,
+    pub(crate) file_path: &'a str,
+    pub(crate) line_map: LineMap,
     pub(crate) provider: &'a dyn IncludeProvider,
     pub(crate) macro_recursion_limit: usize,
 
@@ -40,6 +43,8 @@ impl<'a> Preprocessor<'a> {
             file: inputs.file,
             tokens: inputs.tokens,
             text: inputs.text,
+            file_path: inputs.file_path,
+            line_map: LineMap::build(inputs.text),
             provider: inputs.provider,
             macro_recursion_limit: inputs.macro_recursion_limit,
             env: inputs.starting_env.clone(),
@@ -125,6 +130,12 @@ impl<'a> Preprocessor<'a> {
         });
     }
 
+    /// Whether a macro name is defined: built-in predefined macros
+    /// are always defined, then user macros from `MacroEnv`.
+    pub(crate) fn is_name_defined(&self, name: &str) -> bool {
+        classify_predefined(name).is_some() || self.env.is_defined(name)
+    }
+
     fn handle_directive(&mut self, idx: usize, directive_text: &str) -> usize {
         match directive_text {
             "`ifdef" => self.handle_ifdef(idx, false),
@@ -165,7 +176,7 @@ impl<'a> Preprocessor<'a> {
         let name = self.extract_directive_name(idx, self.src_cursor, dir_len);
         let consumed = self.strip_directive_line(idx);
         let predicate = if let Some(n) = &name {
-            let d = self.env.is_defined(n);
+            let d = self.is_name_defined(n);
             if invert { !d } else { d }
         } else {
             let label = if invert { "`ifndef" } else { "`ifdef" };
@@ -183,7 +194,7 @@ impl<'a> Preprocessor<'a> {
         let (dir_range, dir_len) = self.directive_range_and_len(idx);
         let name = self.extract_directive_name(idx, self.src_cursor, dir_len);
         let consumed = self.strip_directive_line(idx);
-        let predicate = name.as_deref().map(|n| self.env.is_defined(n));
+        let predicate = name.as_deref().map(|n| self.is_name_defined(n));
         match self.cond.apply_elsif(predicate) {
             Ok(()) => {
                 if name.is_none() {

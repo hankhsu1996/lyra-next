@@ -7,6 +7,7 @@ use crate::engine::Preprocessor;
 use crate::env::{MacroTemplate, MacroTok, MacroTokenSeq, MacroValue};
 use crate::expand::{ExpansionCtx, ExpansionSink, expand_seq_into};
 use crate::operators;
+use crate::predefined::{classify_predefined, emit_predefined};
 use crate::source_map::{Segment, SegmentKind};
 use crate::{DirectiveEvent, DirectiveEventKind, DirectiveEventOrigin, PreprocError};
 
@@ -20,6 +21,10 @@ impl Preprocessor<'_> {
                 TextSize::new((self.src_cursor + dir_len) as u32),
             ),
         };
+
+        if let Some(kind) = classify_predefined(name) {
+            return self.expand_predefined_top_level(call_site, dir_len, kind);
+        }
 
         let value = self.env.get(name).map(|d| d.value.clone());
 
@@ -164,6 +169,33 @@ impl Preprocessor<'_> {
         self.expand_macro_tokens(call_site, &instantiated, end_j - idx)
     }
 
+    fn expand_predefined_top_level(
+        &mut self,
+        call_site: Span,
+        dir_len: usize,
+        kind: crate::predefined::PredefinedMacro,
+    ) -> usize {
+        self.flush_identity();
+        let line = self.line_map.line_at(usize::from(call_site.range.start()));
+        let exp_start = TextSize::new(self.expanded_text.len() as u32);
+        emit_predefined(
+            kind,
+            self.file_path,
+            line,
+            &mut self.out_tokens,
+            &mut self.expanded_text,
+        );
+        let exp_end = TextSize::new(self.expanded_text.len() as u32);
+        self.segments.push(Segment {
+            expanded_range: TextRange::new(exp_start, exp_end),
+            origin: call_site,
+            kind: SegmentKind::Macro,
+        });
+        self.src_cursor += dir_len;
+        self.flush_start = self.src_cursor;
+        1
+    }
+
     fn expand_macro_tokens(
         &mut self,
         call_site: Span,
@@ -184,6 +216,8 @@ impl Preprocessor<'_> {
             call_site,
             recursion_limit: self.macro_recursion_limit,
             base_offset,
+            file_path: self.file_path,
+            line_map: &self.line_map,
         };
         let mut sink = ExpansionSink {
             out_tokens: &mut tmp_tokens,

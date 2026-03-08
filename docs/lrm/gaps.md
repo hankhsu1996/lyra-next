@@ -12,7 +12,7 @@ Escaped identifiers (e.g. `\cpu3 `) should be referenceable by their unescaped n
 
 ### 5.6.4: Compiler directives -- non-conditional directive semantics
 
-Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: triple-quote stringify (`` `""" ``), `` `default_nettype `` directive semantics, `` `begin_keywords ``/`` `end_keywords `` (keyword set selection), `` `__FILE__ ``/`` `__LINE__ `` predefined text macros, `` `timescale `` with space between value and unit (e.g. `1 ns` rejected, only `1ns` accepted), and include path resolution (no `-I`/`--incdir` CLI support). Blocked by: `default_nettype` directive event consumer, keyword set infrastructure, include search path model. Test: `lrm/ch05/5.6.4_compiler_directives`.
+Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: triple-quote stringify (`` `""" ``), `` `default_nettype `` directive semantics, `` `begin_keywords ``/`` `end_keywords `` (keyword set selection), `` `timescale `` with space between value and unit (e.g. `1 ns` rejected, only `1ns` accepted), and include path resolution (no `-I`/`--incdir` CLI support). Blocked by: `default_nettype` directive event consumer, keyword set infrastructure, include search path model. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
 ### 5.7.1: Integer literals -- spaces in sized literals
 

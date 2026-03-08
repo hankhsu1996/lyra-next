@@ -49,6 +49,7 @@ fn run_preprocess(
         provider,
         starting_env: &env,
         macro_recursion_limit: PreprocessInputs::DEFAULT_RECURSION_LIMIT,
+        file_path: "",
     })
 }
 

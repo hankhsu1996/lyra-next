@@ -6,6 +6,7 @@ mod preprocess {
     mod fn_macro;
     mod identity;
     mod include;
+    mod predefined;
     mod stringify_concat;
     mod timescale;
 }

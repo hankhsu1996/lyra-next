@@ -7,6 +7,7 @@ mod engine_expand;
 mod env;
 mod expand;
 mod operators;
+mod predefined;
 mod source_map;
 
 use lyra_lexer::{SyntaxKind, Token};
@@ -213,6 +214,8 @@ pub struct PreprocessInputs<'a> {
     /// Maximum nesting depth for recursive macro expansion.
     /// Defaults to 64.
     pub macro_recursion_limit: usize,
+    /// Display path for this file, used by `` `__FILE__ `` expansion.
+    pub file_path: &'a str,
 }
 
 impl PreprocessInputs<'_> {
@@ -289,6 +292,7 @@ pub fn preprocess_identity(file: FileId, tokens: &[Token], text: &str) -> Prepro
         provider: &NoOpProvider,
         starting_env: &env,
         macro_recursion_limit: DEFAULT_MACRO_RECURSION_LIMIT,
+        file_path: "",
     })
 }
 
