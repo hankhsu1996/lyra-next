@@ -5,6 +5,7 @@ use smol_str::SmolStr;
 use crate::args::{ArgParseError, parse_args_from_seq};
 use crate::directive::{DirectiveClass, classify_directive};
 use crate::env::{MacroEnv, MacroTok, MacroTokenSeq, MacroValue};
+use crate::predefined::{LineMap, classify_predefined, emit_predefined};
 use crate::{DirectiveEvent, DirectiveEventKind, DirectiveEventOrigin};
 
 /// Immutable context shared across recursive macro expansion calls.
@@ -13,6 +14,8 @@ pub(crate) struct ExpansionCtx<'a> {
     pub call_site: Span,
     pub recursion_limit: usize,
     pub base_offset: TextSize,
+    pub file_path: &'a str,
+    pub line_map: &'a LineMap,
 }
 
 /// Mutable accumulators for recursive macro expansion, bundled to
@@ -47,6 +50,15 @@ pub(crate) fn expand_seq_into(
     while i < toks.len() {
         let tok = &toks[i];
         if tok.token.kind == SyntaxKind::Directive {
+            let name = tok.text.strip_prefix('`').unwrap_or("");
+            if let Some(kind) = classify_predefined(name) {
+                let line = ctx
+                    .line_map
+                    .line_at(usize::from(ctx.call_site.range.start()));
+                emit_predefined(kind, ctx.file_path, line, sink.out_tokens, sink.out_text);
+                i += 1;
+                continue;
+            }
             let offset = ctx.base_offset + TextSize::new(sink.out_text.len() as u32);
             match classify_directive(&tok.text) {
                 DirectiveClass::MacroInvoke { name } => {

@@ -21,6 +21,7 @@ fn pp(text: &str) -> lyra_preprocess::PreprocOutput {
         provider: &NoIncludes,
         starting_env: &MacroEnv::empty(),
         macro_recursion_limit: PreprocessInputs::DEFAULT_RECURSION_LIMIT,
+        file_path: "",
     })
 }
 
