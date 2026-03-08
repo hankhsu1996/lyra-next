@@ -6,8 +6,7 @@ use lyra_ast::{
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
-use lyra_source::DeclSpan;
-use smol_str::SmolStr;
+use lyra_source::{DeclSpan, TokenSpan};
 
 use crate::builder::DefContext;
 use crate::builder_types::{collect_name_refs, collect_type_spec_refs, detect_aggregate_type};
@@ -848,12 +847,12 @@ pub(crate) fn collect_timeunit_decl(ctx: &mut DefContext<'_>, decl: &TimeunitDec
         return;
     };
     let precision = decl.precision_literal_token().map(|tok| TimeLiteral {
-        raw: SmolStr::new(tok.text()),
+        span: TokenSpan::new(tok.text_range()),
     });
     let entry = TimeUnitsDecl::Timeunit {
         decl_site,
         unit: TimeLiteral {
-            raw: SmolStr::new(unit_tok.text()),
+            span: TokenSpan::new(unit_tok.text_range()),
         },
         precision,
     };
@@ -886,7 +885,7 @@ pub(crate) fn collect_timeprecision_decl(
     let entry = TimeUnitsDecl::Timeprecision {
         decl_site,
         precision: TimeLiteral {
-            raw: SmolStr::new(prec_tok.text()),
+            span: TokenSpan::new(prec_tok.text_range()),
         },
     };
     ctx.scope_time_units

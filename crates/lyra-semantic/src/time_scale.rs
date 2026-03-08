@@ -1,18 +1,18 @@
 use std::fmt;
 
-use lyra_source::{Span, TextSize};
+use lyra_source::{Span, TextSize, TokenSpan};
 use smol_str::SmolStr;
 
 use crate::Site;
 
 /// An owned representation of a single time literal (e.g. `100ps`, `1ns`).
 ///
-/// Stores the canonical raw text as written in source. Future PRs may add
-/// parsed numeric value, exponent, or token-level site identity when the
-/// architecture supports token-level `Site`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Stores a `TokenSpan` anchoring the literal token in expanded source.
+/// Consumers recover text via `span.text_from(&expanded_text)` at query
+/// time rather than storing redundant `SmolStr` copies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimeLiteral {
-    pub raw: SmolStr,
+    pub span: TokenSpan,
 }
 
 /// A single `timeunit` or `timeprecision` declaration as written in source.

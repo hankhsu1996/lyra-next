@@ -86,6 +86,8 @@ pub fn effective_time_params(
 ) -> Box<[(ScopeId, EffectiveTimeParams)]> {
     let summary = file_timescale_summary(db, file);
     let def = def_index_file(db, file);
+    let pp = preprocess_file(db, file);
+    let expanded = &pp.expanded_text;
     let _ = unit;
 
     let mut result = Vec::new();
@@ -107,11 +109,11 @@ pub fn effective_time_params(
                     lyra_semantic::time_scale::TimeUnitsDecl::Timeunit {
                         unit, precision, ..
                     } => {
-                        if let Some(v) = TimeScaleValue::parse(&unit.raw) {
+                        if let Some(v) = TimeScaleValue::parse(unit.span.text_from(expanded)) {
                             params.unit = Some(v);
                         }
                         if let Some(prec) = precision
-                            && let Some(v) = TimeScaleValue::parse(&prec.raw)
+                            && let Some(v) = TimeScaleValue::parse(prec.span.text_from(expanded))
                         {
                             params.precision = Some(v);
                         }
@@ -119,7 +121,7 @@ pub fn effective_time_params(
                     lyra_semantic::time_scale::TimeUnitsDecl::Timeprecision {
                         precision, ..
                     } => {
-                        if let Some(v) = TimeScaleValue::parse(&precision.raw) {
+                        if let Some(v) = TimeScaleValue::parse(precision.span.text_from(expanded)) {
                             params.precision = Some(v);
                         }
                     }

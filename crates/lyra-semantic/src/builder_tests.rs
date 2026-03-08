@@ -595,7 +595,7 @@ fn timeunit_collected_in_module() {
     assert_eq!(tu.decls.len(), 1);
     assert!(
         matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, precision, .. }
-        if unit.raw == "100ps" && precision.is_none())
+        if unit.span.text_from(src) == "100ps" && precision.is_none())
     );
 }
 
@@ -610,7 +610,7 @@ fn timeprecision_collected_in_module() {
     assert_eq!(tu.decls.len(), 1);
     assert!(
         matches!(&tu.decls[0], TimeUnitsDecl::Timeprecision { precision, .. }
-        if precision.raw == "1ns")
+        if precision.span.text_from(src) == "1ns")
     );
 }
 
@@ -625,7 +625,7 @@ fn timeunit_with_precision_preserves_both() {
     assert_eq!(tu.decls.len(), 1);
     assert!(
         matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, precision: Some(prec), .. }
-        if unit.raw == "100ps" && prec.raw == "10fs")
+        if unit.span.text_from(src) == "100ps" && prec.span.text_from(src) == "10fs")
     );
 }
 
@@ -638,9 +638,11 @@ fn timeunit_then_timeprecision_preserves_order() {
     let scope_id = find_owner_scope(&def, "m", ScopeOwnerRole::Module);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 2);
-    assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "100ps"));
     assert!(
-        matches!(&tu.decls[1], TimeUnitsDecl::Timeprecision { precision, .. } if precision.raw == "10fs")
+        matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.span.text_from(src) == "100ps")
+    );
+    assert!(
+        matches!(&tu.decls[1], TimeUnitsDecl::Timeprecision { precision, .. } if precision.span.text_from(src) == "10fs")
     );
 }
 
@@ -654,9 +656,11 @@ fn timeprecision_then_timeunit_preserves_order() {
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 2);
     assert!(
-        matches!(&tu.decls[0], TimeUnitsDecl::Timeprecision { precision, .. } if precision.raw == "10fs")
+        matches!(&tu.decls[0], TimeUnitsDecl::Timeprecision { precision, .. } if precision.span.text_from(src) == "10fs")
     );
-    assert!(matches!(&tu.decls[1], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "100ps"));
+    assert!(
+        matches!(&tu.decls[1], TimeUnitsDecl::Timeunit { unit, .. } if unit.span.text_from(src) == "100ps")
+    );
 }
 
 #[test]
@@ -668,7 +672,9 @@ fn timeunit_in_package() {
     let scope_id = find_owner_scope(&def, "p", ScopeOwnerRole::Package);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 1);
-    assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "1ns"));
+    assert!(
+        matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.span.text_from(src) == "1ns")
+    );
 }
 
 #[test]
@@ -680,7 +686,9 @@ fn timeunit_in_interface() {
     let scope_id = find_owner_scope(&def, "i", ScopeOwnerRole::Interface);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 1);
-    assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "10ns"));
+    assert!(
+        matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.span.text_from(src) == "10ns")
+    );
 }
 
 #[test]
@@ -692,7 +700,9 @@ fn timeunit_in_program() {
     let scope_id = find_owner_scope(&def, "p", ScopeOwnerRole::Program);
     let tu = &def.scope_time_units[&scope_id];
     assert_eq!(tu.decls.len(), 1);
-    assert!(matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.raw == "1us"));
+    assert!(
+        matches!(&tu.decls[0], TimeUnitsDecl::Timeunit { unit, .. } if unit.span.text_from(src) == "1us")
+    );
 }
 
 #[test]
