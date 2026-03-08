@@ -4,12 +4,12 @@ use lyra_parser::SyntaxNode;
 
 use smol_str::SmolStr;
 
-use crate::builder::{DeclaratorContext, DefContext, collect_declarators, is_expression_kind};
-use crate::builder_items::collect_foreach_vars;
+use crate::builder::{DeclaratorContext, DefContext, expect_typed, is_expression_kind};
+use crate::builder_items::{collect_foreach_vars, collect_var_decl};
 use crate::builder_types::{collect_name_refs, try_push_qualified_use_site};
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::scopes::ScopeKind;
-use crate::symbols::{Namespace, SymbolKind};
+use crate::symbols::Namespace;
 
 pub(crate) fn collect_procedural_block(
     ctx: &mut DefContext<'_>,
@@ -34,13 +34,8 @@ pub(crate) fn collect_statement(
             for child in node.children() {
                 match child.kind() {
                     SyntaxKind::VarDecl => {
-                        collect_declarators(
-                            ctx,
-                            &child,
-                            SymbolKind::Variable,
-                            block_scope,
-                            DeclaratorContext::ProceduralLocal,
-                        );
+                        let vd = expect_typed::<lyra_ast::VarDecl>(&child);
+                        collect_var_decl(ctx, &vd, block_scope, DeclaratorContext::ProceduralLocal);
                     }
                     _ => {
                         collect_statement(ctx, &child, block_scope);
@@ -49,28 +44,22 @@ pub(crate) fn collect_statement(
             }
         }
         SyntaxKind::VarDecl => {
-            collect_declarators(
-                ctx,
-                node,
-                SymbolKind::Variable,
-                scope,
-                DeclaratorContext::ProceduralLocal,
-            );
+            let vd = expect_typed::<lyra_ast::VarDecl>(node);
+            collect_var_decl(ctx, &vd, scope, DeclaratorContext::ProceduralLocal);
         }
         SyntaxKind::ForeachStmt => {
             // Name refs in the array expression resolve in the parent scope.
             collect_direct_name_refs(ctx, node, scope);
             // Create foreach body scope + define foreach vars in the index.
-            let foreach_scope = collect_foreach_vars(ctx, node, scope);
-            // Recurse into body (statement walker owns recursion).
-            if let Some(fs) = ForeachStmt::cast(node.clone())
-                && let Some(body) = fs.body()
-            {
+            let fs = expect_typed::<ForeachStmt>(node);
+            let foreach_scope = collect_foreach_vars(ctx, &fs, scope);
+            if let Some(body) = fs.body() {
                 collect_statement(ctx, body.syntax(), foreach_scope);
             }
         }
         SyntaxKind::ForStmt => {
-            collect_for_stmt(ctx, node, scope);
+            let for_stmt = expect_typed::<ForStmt>(node);
+            collect_for_stmt(ctx, &for_stmt, scope);
         }
         SyntaxKind::IfStmt
         | SyntaxKind::CaseStmt
@@ -104,22 +93,13 @@ pub(crate) fn collect_statement(
     }
 }
 
-fn collect_for_stmt(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: crate::scopes::ScopeId) {
-    let Some(for_stmt) = ForStmt::cast(node.clone()) else {
-        return;
-    };
+fn collect_for_stmt(ctx: &mut DefContext<'_>, for_stmt: &ForStmt, scope: crate::scopes::ScopeId) {
     // Init: variable declaration with forced automatic lifetime (LRM 6.21)
     if let Some(var_decl) = for_stmt.init_var_decl() {
-        collect_declarators(
-            ctx,
-            var_decl.syntax(),
-            SymbolKind::Variable,
-            scope,
-            DeclaratorContext::ForInit,
-        );
+        collect_var_decl(ctx, &var_decl, scope, DeclaratorContext::ForInit);
     }
     // Init/condition/step expressions: collect name refs
-    collect_direct_name_refs(ctx, node, scope);
+    collect_direct_name_refs(ctx, for_stmt.syntax(), scope);
     // Body
     if let Some(body) = for_stmt.body() {
         collect_statement(ctx, body.syntax(), scope);

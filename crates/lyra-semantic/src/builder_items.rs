@@ -1,7 +1,7 @@
 use lyra_ast::{
     AstNode, DeclLifetimeSyntax, Declarator, ExportDecl, ExportItem, ForeachStmt, FunctionDecl,
-    HasSyntax, ImportItem, ModportDecl, ModportPortKind, ModportTfPortsGroup, ModuleInstantiation,
-    TaskDecl, TfPortDecl, TimeprecisionDecl, TimeunitDecl, TypeSpec,
+    HasSyntax, ImportDecl, ImportItem, ModportDecl, ModportPortKind, ModportTfPortsGroup,
+    ModuleInstantiation, TaskDecl, TfPortDecl, TimeprecisionDecl, TimeunitDecl, TypeSpec,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
@@ -29,13 +29,13 @@ use crate::builder::RawModportEntry;
 
 pub(crate) fn collect_module_instantiation(
     ctx: &mut DefContext<'_>,
-    node: &SyntaxNode,
+    inst: &ModuleInstantiation,
     scope: ScopeId,
 ) {
+    let node = inst.syntax();
     // Record the module type name as a Definition-namespace use-site
-    if let Some(inst) = ModuleInstantiation::cast(node.clone())
-        && let Some(name_tok) = inst.module_name()
-        && let Some(ast_id) = ctx.ast_id_map.ast_id(&inst)
+    if let Some(name_tok) = inst.module_name()
+        && let Some(ast_id) = ctx.ast_id_map.ast_id(inst)
     {
         let type_use_site_idx = ctx.use_sites.len() as u32;
         ctx.use_sites.push(UseSite {
@@ -92,17 +92,14 @@ pub(crate) fn collect_module_instantiation(
 
 pub(crate) fn collect_foreach_vars(
     ctx: &mut DefContext<'_>,
-    node: &SyntaxNode,
+    fs: &ForeachStmt,
     parent_scope: ScopeId,
 ) -> ScopeId {
     let foreach_scope = ctx.scopes.push(ScopeKind::Block, Some(parent_scope));
-    let Some(fs) = ForeachStmt::cast(node.clone()) else {
-        return foreach_scope;
-    };
-    let Some(foreach_stmt_site) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(foreach_stmt_site) = ctx.ast_id_map.erased_ast_id(fs.syntax()) else {
         ctx.emit_internal_error_unanchored(&format!(
             "erased_ast_id returned None for {:?} in collect_foreach_vars",
-            node.kind()
+            fs.syntax().kind()
         ));
         return foreach_scope;
     };
@@ -147,53 +144,86 @@ pub(crate) fn collect_foreach_vars(
     foreach_scope
 }
 
-pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    // Cast once; extract all header data from the typed node.
-    let (kind, scope_kind, name_tok, lifetime_tok, type_spec, tf_port_decls) =
-        if let Some(f) = FunctionDecl::cast(node.clone()) {
-            (
-                SymbolKind::Function,
-                ScopeKind::Function,
-                f.name(),
-                f.lifetime_token(),
-                f.type_spec(),
-                f.tf_port_decls().collect::<Box<[_]>>(),
-            )
-        } else if let Some(t) = TaskDecl::cast(node.clone()) {
-            (
-                SymbolKind::Task,
-                ScopeKind::Task,
-                t.name(),
-                t.lifetime_token(),
-                None,
-                t.tf_port_decls().collect::<Box<[_]>>(),
-            )
-        } else {
-            return;
-        };
+pub(crate) fn collect_function_decl(ctx: &mut DefContext<'_>, decl: &FunctionDecl, scope: ScopeId) {
+    let name_tok = decl.name();
+    let lifetime_tok = decl.lifetime_token();
+    let type_spec = decl.type_spec();
+    let tf_port_decls = decl.tf_port_decls().collect::<Box<[_]>>();
 
-    let Some(name_tok) = name_tok else { return };
+    collect_callable_inner(
+        ctx,
+        decl.syntax(),
+        &CallableHeader {
+            kind: SymbolKind::Function,
+            scope_kind: ScopeKind::Function,
+            name_tok: name_tok.as_ref(),
+            lifetime_tok: lifetime_tok.as_ref(),
+            type_spec: type_spec.as_ref(),
+            tf_port_decls: &tf_port_decls,
+        },
+        scope,
+    );
+}
+
+pub(crate) fn collect_task_decl(ctx: &mut DefContext<'_>, decl: &TaskDecl, scope: ScopeId) {
+    let name_tok = decl.name();
+    let lifetime_tok = decl.lifetime_token();
+    let tf_port_decls = decl.tf_port_decls().collect::<Box<[_]>>();
+
+    collect_callable_inner(
+        ctx,
+        decl.syntax(),
+        &CallableHeader {
+            kind: SymbolKind::Task,
+            scope_kind: ScopeKind::Task,
+            name_tok: name_tok.as_ref(),
+            lifetime_tok: lifetime_tok.as_ref(),
+            type_spec: None,
+            tf_port_decls: &tf_port_decls,
+        },
+        scope,
+    );
+}
+
+struct CallableHeader<'a> {
+    kind: SymbolKind,
+    scope_kind: ScopeKind,
+    name_tok: Option<&'a lyra_parser::SyntaxToken>,
+    lifetime_tok: Option<&'a lyra_parser::SyntaxToken>,
+    type_spec: Option<&'a TypeSpec>,
+    tf_port_decls: &'a [TfPortDecl],
+}
+
+fn collect_callable_inner(
+    ctx: &mut DefContext<'_>,
+    node: &SyntaxNode,
+    header: &CallableHeader<'_>,
+    scope: ScopeId,
+) {
+    let Some(name_tok) = header.name_tok else {
+        return;
+    };
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error_unanchored(&format!(
-            "erased_ast_id returned None for {:?} in collect_callable_decl",
+            "erased_ast_id returned None for {:?} in collect_callable_inner",
             node.kind()
         ));
         return;
     };
     let name = SmolStr::new(name_tok.text());
-    let callable_scope = ctx.scopes.push(scope_kind, Some(scope));
+    let callable_scope = ctx.scopes.push(header.scope_kind, Some(scope));
     ctx.scope_owners.insert(callable_scope, decl_site);
-    let callable_type_site = type_spec
-        .as_ref()
+    let callable_type_site = header
+        .type_spec
         .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
-    let lifetime = match lifetime_tok.as_ref().map(|t| t.kind()) {
+    let lifetime = match header.lifetime_tok.map(|t| t.kind()) {
         Some(SyntaxKind::AutomaticKw) => Lifetime::Automatic,
         Some(SyntaxKind::StaticKw) => Lifetime::Static,
         _ => ctx.lifetime_env.callable_default,
     };
     let sym_id = ctx.push_symbol(Symbol {
         name: name.clone(),
-        kind,
+        kind: header.kind,
         constness: Constness::Mutable,
         lifetime,
         decl_site,
@@ -206,42 +236,30 @@ pub(crate) fn collect_callable_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
 
     ctx.register_binding(sym_id);
 
-    if let Some(ts) = &type_spec {
+    if let Some(ts) = header.type_spec {
         collect_type_spec_refs(ctx, ts, scope);
     }
 
-    collect_tf_ports(ctx, &tf_port_decls, callable_scope);
+    collect_tf_ports(ctx, header.tf_port_decls, callable_scope);
 
     // Lower callable body under the callable's procedural lifetime context.
     ctx.with_local_default(lifetime, |ctx| {
-        if let Some(f) = FunctionDecl::cast(node.clone()) {
-            collect_callable_body(ctx, f.statements(), callable_scope);
-        } else if let Some(t) = TaskDecl::cast(node.clone()) {
-            collect_callable_body(ctx, t.statements(), callable_scope);
-        }
+        collect_callable_body(ctx, node, callable_scope);
     });
 }
 
-/// Lower the body of a callable (function or task) using pre-extracted
-/// typed statement iterators. Dispatches `VarDecl` children through
-/// `collect_declarators` with the inherited local lifetime, and all
-/// other statements through the statement walker.
-fn collect_callable_body(
-    ctx: &mut DefContext<'_>,
-    stmts: impl Iterator<Item = lyra_ast::StmtNode>,
-    callable_scope: ScopeId,
-) {
-    for stmt in stmts {
-        if stmt.syntax().kind() == SyntaxKind::VarDecl {
-            collect_declarators(
-                ctx,
-                stmt.syntax(),
-                SymbolKind::Variable,
-                callable_scope,
-                DeclaratorContext::ProceduralLocal,
-            );
-        } else {
-            crate::builder_stmt::collect_statement(ctx, stmt.syntax(), callable_scope);
+/// Lower the body of a callable (function or task).
+///
+/// Dispatches `VarDecl` children through `collect_var_decl` with
+/// the inherited local lifetime, and all other statement children
+/// through the statement walker.
+fn collect_callable_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, callable_scope: ScopeId) {
+    for child in node.children() {
+        if child.kind() == SyntaxKind::VarDecl {
+            let vd = crate::builder::expect_typed::<lyra_ast::VarDecl>(&child);
+            collect_var_decl(ctx, &vd, callable_scope, DeclaratorContext::ProceduralLocal);
+        } else if lyra_ast::is_statement_kind(child.kind()) {
+            crate::builder_stmt::collect_statement(ctx, &child, callable_scope);
         }
     }
 }
@@ -289,10 +307,7 @@ fn collect_tf_ports(ctx: &mut DefContext<'_>, port_decls: &[TfPortDecl], scope: 
     }
 }
 
-pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    let Some(decl) = ModportDecl::cast(node.clone()) else {
-        return;
-    };
+pub(crate) fn collect_modport_decl(ctx: &mut DefContext<'_>, decl: &ModportDecl, scope: ScopeId) {
     let Some(owner) = ctx.current_iface_def_id else {
         return;
     };
@@ -461,28 +476,20 @@ fn parse_direction(kind: SyntaxKind, current: Option<PortDirection>) -> Option<P
     }
 }
 
-pub(crate) fn collect_import_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    for child in node.children() {
-        if child.kind() == SyntaxKind::ImportItem {
-            collect_import_item(ctx, &child, scope);
-        }
+pub(crate) fn collect_import_decl(ctx: &mut DefContext<'_>, decl: &ImportDecl, scope: ScopeId) {
+    for item in decl.items() {
+        collect_import_item(ctx, &item, scope);
     }
 }
 
-fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    let Some(ast_id) = ctx.ast_id_map.erased_ast_id(node) else {
+fn collect_import_item(ctx: &mut DefContext<'_>, item: &ImportItem, scope: ScopeId) {
+    let Some(ast_id) = ctx.ast_id_map.erased_ast_id(item.syntax()) else {
         ctx.emit_internal_error_unanchored(&format!(
             "erased_ast_id returned None for {:?} in collect_import_item",
-            node.kind()
+            item.syntax().kind()
         ));
         return;
     };
-
-    // Determine if wildcard or explicit
-    let has_star = node
-        .children_with_tokens()
-        .filter_map(lyra_parser::SyntaxElement::into_token)
-        .any(|tok| tok.kind() == SyntaxKind::Star);
 
     let ordinal = ctx.import_ordinals.entry(scope).or_insert(0);
     let ord = *ordinal;
@@ -492,9 +499,8 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
         ordinal: ord,
     };
 
-    if has_star {
-        // Wildcard: use typed accessor for package name
-        if let Some(pkg_tok) = ImportItem::cast(node.clone()).and_then(|i| i.package_name()) {
+    if item.is_wildcard() {
+        if let Some(pkg_tok) = item.package_name() {
             ctx.imports.push(Import {
                 id,
                 package: SmolStr::new(pkg_tok.text()),
@@ -504,21 +510,13 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
                 order_key: 0,
             });
         }
-    } else if let Some(qn) = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::QualifiedName)
-    {
-        // Non-wildcard: QualifiedName child with [pkg, sym]
-        let idents: Vec<_> = qn
-            .children_with_tokens()
-            .filter_map(lyra_parser::SyntaxElement::into_token)
-            .filter(|tok| tok.kind() == SyntaxKind::Ident)
-            .collect();
-        if idents.len() >= 2 {
+    } else if let Some(qn) = item.qualified_name() {
+        let segments: Vec<_> = qn.segments().collect();
+        if segments.len() >= 2 {
             ctx.imports.push(Import {
                 id,
-                package: SmolStr::new(idents[0].text()),
-                name: ImportName::Explicit(SmolStr::new(idents[1].text())),
+                package: SmolStr::new(segments[0].text()),
+                name: ImportName::Explicit(SmolStr::new(segments[1].text())),
                 scope,
                 import_stmt_site: ast_id,
                 order_key: 0,
@@ -527,10 +525,7 @@ fn collect_import_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
     }
 }
 
-pub(crate) fn collect_export_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    let Some(decl) = ExportDecl::cast(node.clone()) else {
-        return;
-    };
+pub(crate) fn collect_export_decl(ctx: &mut DefContext<'_>, decl: &ExportDecl, scope: ScopeId) {
     for item in decl.items() {
         collect_export_item(ctx, &item, scope);
     }
@@ -574,7 +569,12 @@ fn collect_export_item(ctx: &mut DefContext<'_>, item: &ExportItem, scope: Scope
     });
 }
 
-pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+pub(crate) fn collect_param_decl(
+    ctx: &mut DefContext<'_>,
+    decl: &lyra_ast::ParamDecl,
+    scope: ScopeId,
+) {
+    let node = decl.syntax();
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error_unanchored(&format!(
             "erased_ast_id returned None for {:?} in collect_param_decl",
@@ -582,16 +582,15 @@ pub(crate) fn collect_param_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, sc
         ));
         return;
     };
-    let param_decl = lyra_ast::ParamDecl::cast(node.clone());
-    let is_type_param = param_decl.as_ref().is_some_and(|pd| pd.is_type_param());
+    let is_type_param = decl.is_type_param();
 
     if is_type_param {
         collect_type_param_decl(ctx, node, scope, decl_site);
         return;
     }
 
-    let param_type_site = param_decl
-        .and_then(|pd| pd.type_spec())
+    let param_type_site = decl
+        .type_spec()
         .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
     for child in node.children() {
         if let Some(ts) = TypeSpec::cast(child.clone()) {
@@ -695,126 +694,132 @@ pub(crate) enum DeclaratorContext {
     ForInit,
 }
 
-pub(crate) fn collect_declarators(
+pub(crate) fn collect_var_decl(
     ctx: &mut DefContext<'_>,
-    node: &SyntaxNode,
-    kind: SymbolKind,
+    decl: &lyra_ast::VarDecl,
     scope: ScopeId,
     decl_ctx: DeclaratorContext,
 ) {
+    let node = decl.syntax();
     let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
         ctx.emit_internal_error_unanchored(&format!(
-            "erased_ast_id returned None for {:?} in collect_declarators",
+            "erased_ast_id returned None for {:?} in collect_var_decl",
             node.kind()
         ));
         return;
     };
-    // ForInit invariant: only variable declarations in for-init context
-    if decl_ctx == DeclaratorContext::ForInit {
-        debug_assert!(
-            kind == SymbolKind::Variable && node.kind() == SyntaxKind::VarDecl,
-            "ForInit context requires SymbolKind::Variable on VarDecl, got {kind:?} on {:?}",
-            node.kind(),
-        );
-        if kind != SymbolKind::Variable {
-            ctx.emit_internal_error(
-                &format!("ForInit context used with non-variable kind {kind:?}"),
-                decl_site,
-            );
-        }
-        if node.kind() != SyntaxKind::VarDecl {
-            ctx.emit_internal_error(
-                &format!(
-                    "ForInit context used with non-VarDecl node {:?}",
-                    node.kind()
-                ),
-                decl_site,
-            );
-        }
-    }
-    // Detect inline enum/struct in the TypeSpec child
     let origin = detect_aggregate_type(ctx, node, scope);
-    // Detect const qualifier (LRM 6.20.6)
-    let var_decl_ast = match node.kind() {
-        SyntaxKind::VarDecl => lyra_ast::VarDecl::cast(node.clone()),
-        _ => None,
-    };
-    let constness = if var_decl_ast
-        .as_ref()
-        .and_then(|vd| vd.const_token())
-        .is_some()
-    {
+    let constness = if decl.const_token().is_some() {
         Constness::Const
     } else {
         Constness::Mutable
     };
-    // Derive unqualified lifetime from semantic context
     let unqualified_lifetime = match decl_ctx {
         DeclaratorContext::ContainerItem => Lifetime::Static,
         DeclaratorContext::ProceduralLocal => ctx.lifetime_env.local_default,
         DeclaratorContext::ForInit => Lifetime::Automatic,
     };
-    // Detect explicit lifetime qualifier (LRM 6.21)
-    let lifetime = match var_decl_ast.as_ref().and_then(|vd| vd.lifetime()) {
+    let lifetime = match decl.lifetime() {
         Some(DeclLifetimeSyntax::Automatic(_)) => Lifetime::Automatic,
         Some(DeclLifetimeSyntax::Static(_)) => Lifetime::Static,
         None => unqualified_lifetime,
     };
-    let decl_type_site = match node.kind() {
-        SyntaxKind::VarDecl => lyra_ast::VarDecl::cast(node.clone())
-            .and_then(|vd| vd.type_spec())
-            .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax())),
-        SyntaxKind::NetDecl => lyra_ast::NetDecl::cast(node.clone())
-            .and_then(|nd| nd.type_spec())
-            .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax())),
-        other => {
-            ctx.emit_internal_error_unanchored(&format!(
-                "collect_declarators called with unexpected {other:?}"
-            ));
-            None
-        }
+    let decl_type_site = decl
+        .type_spec()
+        .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
+
+    collect_declarators_inner(
+        ctx,
+        node,
+        &DeclaratorFacts {
+            decl_site,
+            kind: SymbolKind::Variable,
+            scope,
+            constness,
+            lifetime,
+            decl_type_site,
+            origin,
+        },
+    );
+}
+
+pub(crate) fn collect_net_decl(ctx: &mut DefContext<'_>, decl: &lyra_ast::NetDecl, scope: ScopeId) {
+    let node = decl.syntax();
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
+        ctx.emit_internal_error_unanchored(&format!(
+            "erased_ast_id returned None for {:?} in collect_net_decl",
+            node.kind()
+        ));
+        return;
     };
+    let origin = detect_aggregate_type(ctx, node, scope);
+    let decl_type_site = decl
+        .type_spec()
+        .and_then(|ts| ctx.ast_id_map.erased_ast_id(ts.syntax()));
+
+    collect_declarators_inner(
+        ctx,
+        node,
+        &DeclaratorFacts {
+            decl_site,
+            kind: SymbolKind::Net,
+            scope,
+            constness: Constness::Mutable,
+            lifetime: Lifetime::Static,
+            decl_type_site,
+            origin,
+        },
+    );
+}
+
+struct DeclaratorFacts {
+    decl_site: lyra_ast::ErasedAstId,
+    kind: SymbolKind,
+    scope: ScopeId,
+    constness: Constness,
+    lifetime: Lifetime,
+    decl_type_site: Option<lyra_ast::ErasedAstId>,
+    origin: SymbolOrigin,
+}
+
+fn collect_declarators_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, facts: &DeclaratorFacts) {
     for child in node.children() {
         if let Some(ts) = TypeSpec::cast(child.clone()) {
-            collect_type_spec_refs(ctx, &ts, scope);
+            collect_type_spec_refs(ctx, &ts, facts.scope);
         } else if child.kind() == SyntaxKind::Declarator {
             if let Some(name_tok) = Declarator::cast(child.clone()).and_then(|d| d.name()) {
                 let Some(decl_name_site) = ctx.ast_id_map.erased_ast_id(&child) else {
                     ctx.emit_internal_error_unanchored(&format!(
-                        "erased_ast_id returned None for {:?} in collect_declarators declarator",
+                        "erased_ast_id returned None for {:?} in collect_declarators_inner",
                         child.kind()
                     ));
                     continue;
                 };
                 let sym_id = ctx.push_symbol(Symbol {
                     name: SmolStr::new(name_tok.text()),
-                    kind,
-                    constness,
-                    lifetime,
-                    decl_site,
+                    kind: facts.kind,
+                    constness: facts.constness,
+                    lifetime: facts.lifetime,
+                    decl_site: facts.decl_site,
                     name_site: decl_name_site,
-                    type_site: decl_type_site,
+                    type_site: facts.decl_type_site,
                     name_span: NameSpan::new(name_tok.text_range()),
-                    scope,
-                    origin,
+                    scope: facts.scope,
+                    origin: facts.origin,
                 });
                 ctx.register_binding(sym_id);
             }
-            collect_name_refs(ctx, &child, scope);
+            collect_name_refs(ctx, &child, facts.scope);
         }
     }
 }
 
-pub(crate) fn collect_timeunit_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
-    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
+pub(crate) fn collect_timeunit_decl(ctx: &mut DefContext<'_>, decl: &TimeunitDecl, scope: ScopeId) {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
         ctx.emit_internal_error_unanchored(&format!(
             "erased_ast_id returned None for {:?} in collect_timeunit_decl",
-            node.kind()
+            decl.syntax().kind()
         ));
-        return;
-    };
-    let Some(decl) = TimeunitDecl::cast(node.clone()) else {
-        ctx.emit_internal_error("TimeunitDecl::cast failed on TimeunitDecl node", decl_site);
         return;
     };
     let Some(unit_tok) = decl.unit_literal_token() else {
@@ -840,21 +845,14 @@ pub(crate) fn collect_timeunit_decl(ctx: &mut DefContext<'_>, node: &SyntaxNode,
 
 pub(crate) fn collect_timeprecision_decl(
     ctx: &mut DefContext<'_>,
-    node: &SyntaxNode,
+    decl: &TimeprecisionDecl,
     scope: ScopeId,
 ) {
-    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
+    let Some(decl_site) = ctx.ast_id_map.erased_ast_id(decl.syntax()) else {
         ctx.emit_internal_error_unanchored(&format!(
             "erased_ast_id returned None for {:?} in collect_timeprecision_decl",
-            node.kind()
+            decl.syntax().kind()
         ));
-        return;
-    };
-    let Some(decl) = TimeprecisionDecl::cast(node.clone()) else {
-        ctx.emit_internal_error(
-            "TimeprecisionDecl::cast failed on TimeprecisionDecl node",
-            decl_site,
-        );
         return;
     };
     let Some(prec_tok) = decl.precision_literal_token() else {

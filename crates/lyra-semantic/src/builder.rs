@@ -25,6 +25,22 @@ use crate::scopes::{ScopeId, ScopeKind, ScopeTreeBuilder};
 use crate::symbols::{GlobalDefId, Lifetime, Symbol, SymbolId, SymbolKind, SymbolTableBuilder};
 use crate::time_scale::ScopeTimeUnits;
 
+/// Cast a `SyntaxNode` to a typed AST wrapper at a matched-kind dispatch boundary.
+///
+/// This must only be called after the dispatcher has already matched
+/// `node.kind()` to the expected AST kind. Cast failure after a kind
+/// match is a builder invariant violation.
+pub(crate) fn expect_typed<T: AstNode>(node: &SyntaxNode) -> T {
+    match T::cast(node.clone()) {
+        Some(it) => it,
+        None => unreachable!(
+            "builder dispatch invariant: {:?} did not cast to {}",
+            node.kind(),
+            std::any::type_name::<T>()
+        ),
+    }
+}
+
 pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> DefIndex {
     let mut ctx = DefContext::new(file, ast_id_map);
     let root = parse.syntax();
@@ -453,32 +469,45 @@ fn collect_file_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
 fn collect_declarative_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     match node.kind() {
         SyntaxKind::VarDecl => {
-            collect_declarators(
-                ctx,
-                node,
-                SymbolKind::Variable,
-                scope,
-                DeclaratorContext::ContainerItem,
-            );
+            let decl = expect_typed::<lyra_ast::VarDecl>(node);
+            collect_var_decl(ctx, &decl, scope, DeclaratorContext::ContainerItem);
         }
         SyntaxKind::NetDecl => {
-            collect_declarators(
-                ctx,
-                node,
-                SymbolKind::Net,
-                scope,
-                DeclaratorContext::ContainerItem,
-            );
+            let decl = expect_typed::<lyra_ast::NetDecl>(node);
+            collect_net_decl(ctx, &decl, scope);
         }
-        SyntaxKind::ParamDecl => collect_param_decl(ctx, node, scope),
-        SyntaxKind::ImportDecl => collect_import_decl(ctx, node, scope),
-        SyntaxKind::TypedefDecl => collect_typedef(ctx, node, scope),
-        SyntaxKind::NettypeDecl => collect_nettype_decl(ctx, node, scope),
-        SyntaxKind::FunctionDecl | SyntaxKind::TaskDecl => {
-            collect_callable_decl(ctx, node, scope);
+        SyntaxKind::ParamDecl => {
+            let decl = expect_typed::<lyra_ast::ParamDecl>(node);
+            collect_param_decl(ctx, &decl, scope);
         }
-        SyntaxKind::TimeunitDecl => collect_timeunit_decl(ctx, node, scope),
-        SyntaxKind::TimeprecisionDecl => collect_timeprecision_decl(ctx, node, scope),
+        SyntaxKind::ImportDecl => {
+            let decl = expect_typed::<lyra_ast::ImportDecl>(node);
+            collect_import_decl(ctx, &decl, scope);
+        }
+        SyntaxKind::TypedefDecl => {
+            let decl = expect_typed::<lyra_ast::TypedefDecl>(node);
+            collect_typedef(ctx, &decl, scope);
+        }
+        SyntaxKind::NettypeDecl => {
+            let decl = expect_typed::<lyra_ast::NettypeDecl>(node);
+            collect_nettype_decl(ctx, &decl, scope);
+        }
+        SyntaxKind::FunctionDecl => {
+            let decl = expect_typed::<lyra_ast::FunctionDecl>(node);
+            collect_function_decl(ctx, &decl, scope);
+        }
+        SyntaxKind::TaskDecl => {
+            let decl = expect_typed::<lyra_ast::TaskDecl>(node);
+            collect_task_decl(ctx, &decl, scope);
+        }
+        SyntaxKind::TimeunitDecl => {
+            let decl = expect_typed::<lyra_ast::TimeunitDecl>(node);
+            collect_timeunit_decl(ctx, &decl, scope);
+        }
+        SyntaxKind::TimeprecisionDecl => {
+            let decl = expect_typed::<lyra_ast::TimeprecisionDecl>(node);
+            collect_timeprecision_decl(ctx, &decl, scope);
+        }
         _ => {}
     }
 }
@@ -523,8 +552,8 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
     ctx.with_callable_default(container_lifetime, |ctx| {
         // Pass 1: header imports (scope facts collected first so ports see them)
         for child in node.children() {
-            if child.kind() == SyntaxKind::ImportDecl {
-                collect_import_decl(ctx, &child, module_scope);
+            if let Some(decl) = lyra_ast::ImportDecl::cast(child) {
+                collect_import_decl(ctx, &decl, module_scope);
             }
         }
         // Pass 2: ports and body
@@ -610,8 +639,8 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         ctx.with_callable_default(container_lifetime, |ctx| {
             // Pass 1: header imports
             for child in node.children() {
-                if child.kind() == SyntaxKind::ImportDecl {
-                    collect_import_decl(ctx, &child, iface_scope);
+                if let Some(decl) = lyra_ast::ImportDecl::cast(child) {
+                    collect_import_decl(ctx, &decl, iface_scope);
                 }
             }
             // Pass 2: ports and body
@@ -662,8 +691,8 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     ctx.with_callable_default(container_lifetime, |ctx| {
         // Pass 1: header imports
         for child in node.children() {
-            if child.kind() == SyntaxKind::ImportDecl {
-                collect_import_decl(ctx, &child, prog_scope);
+            if let Some(decl) = lyra_ast::ImportDecl::cast(child) {
+                collect_import_decl(ctx, &decl, prog_scope);
             }
         }
         // Pass 2: ports and body
@@ -734,8 +763,8 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
 
 fn collect_package_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
-        if ExportDecl::cast(child.clone()).is_some() {
-            collect_export_decl(ctx, &child, scope);
+        if let Some(decl) = ExportDecl::cast(child.clone()) {
+            collect_export_decl(ctx, &decl, scope);
         } else {
             collect_declarative_item(ctx, &child, scope);
         }
@@ -744,8 +773,8 @@ fn collect_package_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scop
 
 fn collect_param_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     for child in node.children() {
-        if child.kind() == SyntaxKind::ParamDecl {
-            collect_param_decl(ctx, &child, scope);
+        if let Some(decl) = lyra_ast::ParamDecl::cast(child) {
+            collect_param_decl(ctx, &decl, scope);
         }
     }
 }
@@ -805,55 +834,58 @@ fn collect_module_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
 fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
     match node.kind() {
         SyntaxKind::NetDecl => {
-            collect_declarators(
-                ctx,
-                node,
-                SymbolKind::Net,
-                scope,
-                DeclaratorContext::ContainerItem,
-            );
+            let decl = expect_typed::<lyra_ast::NetDecl>(node);
+            collect_net_decl(ctx, &decl, scope);
         }
         SyntaxKind::VarDecl => {
-            collect_declarators(
-                ctx,
-                node,
-                SymbolKind::Variable,
-                scope,
-                DeclaratorContext::ContainerItem,
-            );
+            let decl = expect_typed::<lyra_ast::VarDecl>(node);
+            collect_var_decl(ctx, &decl, scope, DeclaratorContext::ContainerItem);
         }
         SyntaxKind::ParamDecl => {
-            collect_param_decl(ctx, node, scope);
+            let decl = expect_typed::<lyra_ast::ParamDecl>(node);
+            collect_param_decl(ctx, &decl, scope);
         }
         SyntaxKind::ContinuousAssign => {
             collect_name_refs(ctx, node, scope);
         }
         SyntaxKind::ImportDecl => {
-            collect_import_decl(ctx, node, scope);
+            let decl = expect_typed::<lyra_ast::ImportDecl>(node);
+            collect_import_decl(ctx, &decl, scope);
         }
         SyntaxKind::ModuleInstantiation => {
-            collect_module_instantiation(ctx, node, scope);
+            let inst = expect_typed::<lyra_ast::ModuleInstantiation>(node);
+            collect_module_instantiation(ctx, &inst, scope);
         }
         SyntaxKind::TypedefDecl => {
-            collect_typedef(ctx, node, scope);
+            let decl = expect_typed::<lyra_ast::TypedefDecl>(node);
+            collect_typedef(ctx, &decl, scope);
         }
         SyntaxKind::NettypeDecl => {
-            collect_nettype_decl(ctx, node, scope);
+            let decl = expect_typed::<lyra_ast::NettypeDecl>(node);
+            collect_nettype_decl(ctx, &decl, scope);
         }
         SyntaxKind::AlwaysBlock | SyntaxKind::InitialBlock => {
             crate::builder_stmt::collect_procedural_block(ctx, node, scope);
         }
-        SyntaxKind::FunctionDecl | SyntaxKind::TaskDecl => {
-            collect_callable_decl(ctx, node, scope);
+        SyntaxKind::FunctionDecl => {
+            let decl = expect_typed::<lyra_ast::FunctionDecl>(node);
+            collect_function_decl(ctx, &decl, scope);
+        }
+        SyntaxKind::TaskDecl => {
+            let decl = expect_typed::<lyra_ast::TaskDecl>(node);
+            collect_task_decl(ctx, &decl, scope);
         }
         SyntaxKind::ModportDecl => {
-            collect_modport_decl(ctx, node, scope);
+            let decl = expect_typed::<lyra_ast::ModportDecl>(node);
+            collect_modport_decl(ctx, &decl, scope);
         }
         SyntaxKind::TimeunitDecl => {
-            collect_timeunit_decl(ctx, node, scope);
+            let decl = expect_typed::<lyra_ast::TimeunitDecl>(node);
+            collect_timeunit_decl(ctx, &decl, scope);
         }
         SyntaxKind::TimeprecisionDecl => {
-            collect_timeprecision_decl(ctx, node, scope);
+            let decl = expect_typed::<lyra_ast::TimeprecisionDecl>(node);
+            collect_timeprecision_decl(ctx, &decl, scope);
         }
         SyntaxKind::IfStmt => {
             // Conditional generate: recurse into children (BlockStmt, etc.)
@@ -872,11 +904,11 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
     }
 }
 
-pub(crate) use crate::builder_items::{DeclaratorContext, collect_declarators, is_expression_kind};
+pub(crate) use crate::builder_items::{DeclaratorContext, is_expression_kind};
 use crate::builder_items::{
-    collect_callable_decl, collect_export_decl, collect_import_decl, collect_modport_decl,
-    collect_module_instantiation, collect_param_decl, collect_timeprecision_decl,
-    collect_timeunit_decl,
+    collect_export_decl, collect_function_decl, collect_import_decl, collect_modport_decl,
+    collect_module_instantiation, collect_net_decl, collect_param_decl, collect_task_decl,
+    collect_timeprecision_decl, collect_timeunit_decl, collect_var_decl,
 };
 
 #[cfg(test)]

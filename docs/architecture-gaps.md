@@ -26,10 +26,6 @@ This mismatch leaks into APIs (the reverse lookup `find_scope_by_owner` is a lin
 
 These are worth fixing but are not foundational limitations of the semantic data model.
 
-### Builder leaf collectors should consume typed AST wrappers
-
-All `collect_*` functions in `builder_items.rs` take `&SyntaxNode` and re-cast internally to typed AST wrappers. A cleaner layering would have `builder.rs` perform the one cast from raw CST node to typed AST, then pass the typed wrapper to collection helpers. This would eliminate redundant casts and make the typed-AST boundary sharper. Exposed by: every `collect_*` function, most visibly in timeunit/timeprecision and modport collection.
-
 ### Declaration header modifiers are not structurally modeled in typed AST
 
 The typed AST layer does not expose declaration header modifiers (e.g. `automatic`/`static` lifetime keywords) as structured accessors. Semantic code is forced to fall back to raw token scanning (`decl_lifetime_token` in `nodes_decl.rs` scans the token stream after a keyword). The long-term shape is typed header-modifier accessors in `lyra-ast` that parse declaration headers structurally, shared across container and callable declaration kinds. Exposed by: LRM 6.21 lifetime inheritance.
