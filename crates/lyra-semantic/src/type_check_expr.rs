@@ -2,7 +2,9 @@ use crate::Site;
 use crate::modport_def::PortDirection;
 use crate::modport_facts::FieldAccessFacts;
 use crate::site;
-use crate::type_check::{AccessKind, AccessMode, TypeCheckCtx, TypeCheckItem, require_site};
+use crate::type_check::{
+    AccessKind, AccessMode, TypeCheckCtx, TypeCheckItem, check_tagged_expr, require_site,
+};
 use crate::type_infer::ExprView;
 use crate::types::Ty;
 use lyra_ast::{CallExpr, CastExpr, Expr, ExprKind, StreamExpr, StreamOperandItem};
@@ -318,5 +320,44 @@ pub fn check_stream_slice_size_const(
         ctx.const_eval_int_by_site_full(slice_size_site)
     {
         items.push(TypeCheckItem::StreamSliceSizeNotConst { slice_size_site });
+    }
+}
+
+/// Harvest diagnostics from call-argument context (tagged expressions, etc.).
+///
+/// Consumes the per-argument `CallArgCheck` semantic product and emits
+/// `TypeCheckItem`s for context-dependent expression forms (tagged union
+/// constructors) that require an expected type to produce diagnostics.
+pub fn check_call_arg_context_exprs(
+    call: &CallExpr,
+    ctx: &dyn TypeCheckCtx,
+    fallback: Site,
+    items: &mut Vec<TypeCheckItem>,
+) {
+    let checks = ctx.call_arg_checks(call);
+    if checks.is_empty() {
+        return;
+    }
+
+    let args: Vec<Expr> = call
+        .arg_list()
+        .map(|al| al.args().collect())
+        .unwrap_or_default();
+
+    let map = ctx.ast_id_map();
+    for (arg, check) in args.iter().zip(checks.iter()) {
+        let Some(expected_ty) = &check.expected_ty else {
+            continue;
+        };
+        let rhs_site = require_site(site::opt_site_of(map, arg), fallback, items);
+        check_tagged_expr(
+            arg,
+            &check.inferred,
+            expected_ty,
+            ctx,
+            fallback,
+            rhs_site,
+            items,
+        );
     }
 }

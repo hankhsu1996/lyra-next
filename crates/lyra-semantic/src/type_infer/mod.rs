@@ -6,6 +6,7 @@ mod range;
 mod scalar;
 pub(crate) mod scoped;
 
+pub use call::{CallArgCheck, infer_call_arg_checks};
 pub(crate) use expr_type::try_integral_view;
 pub use expr_type::{
     BitVecType, BitWidth, CallableKind, CallablePort, CallableSigRef, CalleeFormKind, ExprType,

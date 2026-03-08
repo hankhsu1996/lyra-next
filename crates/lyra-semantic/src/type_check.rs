@@ -16,9 +16,9 @@ use crate::types::{SymbolType, Ty, UnpackedDim};
 use crate::type_check_dim::check_type_spec_member_dims;
 pub use crate::type_check_dim::{check_net_decl, check_port_decl, check_typedef_decl};
 pub use crate::type_check_expr::{
-    check_cast_expr, check_expr_self_anchored_errors, check_field_direction,
-    check_field_modport_restriction, check_method_call, check_stream_operand,
-    check_stream_slice_size_const,
+    check_call_arg_context_exprs, check_cast_expr, check_expr_self_anchored_errors,
+    check_field_direction, check_field_modport_restriction, check_method_call,
+    check_stream_operand, check_stream_slice_size_const,
 };
 pub use crate::type_check_system_call::check_system_call;
 
@@ -317,6 +317,11 @@ pub trait TypeCheckCtx {
         id: RecordId,
         member: &str,
     ) -> Result<TaggedVariantInfo, TaggedVariantError>;
+    /// Per-argument contextual checking results for a call expression.
+    fn call_arg_checks(
+        &self,
+        call: &lyra_ast::CallExpr,
+    ) -> std::sync::Arc<[crate::type_infer::CallArgCheck]>;
 }
 
 pub(crate) const MISSING_AST_ID: &str = "missing_ast_id in type checker";
@@ -830,7 +835,7 @@ fn tagged_member_name(te: &TaggedExpr) -> smol_str::SmolStr {
 /// reporting. If the expression is a tagged expression and the expected
 /// type is a tagged union, also checks operand-vs-payload assignment
 /// compatibility via the central `check_assignment_compat` path.
-fn check_tagged_expr(
+pub(crate) fn check_tagged_expr(
     rhs: &Expr,
     rhs_type: &ExprType,
     lhs_ty: &Ty,

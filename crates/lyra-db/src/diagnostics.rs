@@ -461,6 +461,9 @@ fn dispatch_check_entry(
         CheckKind::CallExpr => {
             if let Some(call) = lyra_ast::CallExpr::cast(node) {
                 lyra_semantic::type_check::check_method_call(&call, ctx, items);
+                lyra_semantic::type_check::check_call_arg_context_exprs(
+                    &call, ctx, fallback, items,
+                );
             }
         }
         CheckKind::NetDecl => {
@@ -744,6 +747,17 @@ impl TypeCheckCtx for DbTypeCheckCtx<'_> {
         let rref = RecordRef::new(self.db, self.unit, id);
         let sem = record_sem(self.db, rref);
         crate::record_queries::tagged_union_variant_from_sem(&sem, member)
+    }
+
+    fn call_arg_checks(
+        &self,
+        call: &lyra_ast::CallExpr,
+    ) -> std::sync::Arc<[lyra_semantic::type_infer::CallArgCheck]> {
+        let Some(ast_id) = self.ast_id_map.erased_ast_id(call.syntax()) else {
+            return std::sync::Arc::from([]);
+        };
+        let expr_ref = crate::expr_queries::ExprRef::new(self.db, self.unit, ast_id);
+        crate::expr_queries::call_arg_checks(self.db, expr_ref).clone()
     }
 }
 
