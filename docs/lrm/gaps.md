@@ -18,10 +18,6 @@ Escaped and plain identifiers resolve to the same semantic name via `semantic_sp
 
 Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `""" `` triple-quote stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: `` `default_nettype `` directive semantics, `` `begin_keywords ``/`` `end_keywords `` (keyword set selection), `` `timescale `` with space between value and unit (e.g. `1 ns` rejected, only `1ns` accepted), and include path resolution (no `-I`/`--incdir` CLI support). Blocked by: `default_nettype` directive event consumer, keyword set infrastructure, include search path model. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
-### 5.8: Time literals
-
-Time literal expressions (`1fs`, `1ps`, `1ns`, `1us`, `1ms`, `1s`, and real-valued forms like `2.1ms`) are not parsed as expressions. The lexer may tokenize them but the parser does not accept them in expression context. Blocked by: time literal expression parsing. Test: sv-tests `time-literals`.
-
 ## Chapter 6 -- Data Types
 
 ### 6.3.2: Strengths -- type-level strength tracking
