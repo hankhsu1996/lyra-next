@@ -6,9 +6,21 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ## Chapter 5 -- Lexical Conventions
 
+### 5.6.1: Escaped identifiers -- unescaped access
+
+Escaped identifiers (e.g. `\cpu3 `) should be referenceable by their unescaped name (`cpu3`). Name resolution does not strip the leading backslash for matching, so `\cpu3` and `cpu3` are treated as distinct names. Blocked by: name resolution escaped-identifier normalization. Test: sv-tests `nonescaped-access`.
+
 ### 5.6.4: Compiler directives -- non-conditional directive semantics
 
-Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: triple-quote stringify (`` `""" ``) and `` `default_nettype `` directive semantics. Blocked by: `default_nettype` directive event consumer. Test: `lrm/ch05/5.6.4_compiler_directives`.
+Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: triple-quote stringify (`` `""" ``), `` `default_nettype `` directive semantics, `` `begin_keywords ``/`` `end_keywords `` (keyword set selection), `` `__FILE__ ``/`` `__LINE__ `` predefined text macros, `` `timescale `` with space between value and unit (e.g. `1 ns` rejected, only `1ns` accepted), and include path resolution (no `-I`/`--incdir` CLI support). Blocked by: `default_nettype` directive event consumer, keyword set infrastructure, include search path model. Test: `lrm/ch05/5.6.4_compiler_directives`.
+
+### 5.7.1: Integer literals -- spaces in sized literals
+
+The lexer does not handle optional whitespace between the size, base specifier, and digits in sized integer literals (e.g. `'h x`, `'h 3x`, `32 'h 12ab_f001`, `-8'd 6`, `16'sd?`). The LRM allows spaces in these positions. This causes parse errors for valid integer literals. Blocked by: lexer token boundary rules for sized literals with embedded whitespace. Test: sv-tests `integers-left-padding`, `integers-unsized`, `integers-signed`, `integers-underscores`, `number_test_*`.
+
+### 5.8: Time literals
+
+Time literal expressions (`1fs`, `1ps`, `1ns`, `1us`, `1ms`, `1s`, and real-valued forms like `2.1ms`) are not parsed as expressions. The lexer may tokenize them but the parser does not accept them in expression context. Blocked by: time literal expression parsing. Test: sv-tests `time-literals`.
 
 ## Chapter 6 -- Data Types
 
@@ -171,3 +183,13 @@ Specify block terminal rules for interface ports. No specify block support. Test
 ### 26.7: std package contents (Annex G)
 
 The std built-in package should contain process, mailbox, and semaphore classes per Annex G. Not tested. Blocked by: class support (Ch 8). Test: deferred until class support lands.
+
+## Chapter 22 -- Compiler Directives
+
+### 22.3: `resetall` -- illegal inside design elements
+
+`` `resetall `` inside a module/interface/program should be diagnosed as illegal (LRM 22.3). Lyra currently accepts it silently (exit code 0). Blocked by: preprocessor or parser-level design-element scope tracking for directive legality. Test: sv-tests `22.3--resetall_illegal`.
+
+### 22.4: `include` -- search path resolution
+
+`` `include `` with relative paths fails because Lyra has no `-I`/`--incdir` CLI support. All 22.4 sv-tests tests fail for this reason. Blocked by: include search path model in preprocessor, `--incdir` CLI flag. Test: sv-tests `22.4--include_*`.
