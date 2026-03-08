@@ -4,7 +4,7 @@ use crate::Site;
 use lyra_source::{DeclSpan, FileId};
 use smol_str::SmolStr;
 
-use crate::def_entry::{DefEntry, DefScope};
+use crate::def_entry::DefEntry;
 use crate::design_element::DesignElement;
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::{EnumDef, EnumDefIdx, EnumId};
@@ -15,49 +15,20 @@ use crate::modport_def::{ModportDef, ModportDefId};
 use crate::nettype_def::{NettypeDef, NettypeDefIdx};
 use crate::record::{RecordDef, RecordDefIdx, RecordId};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTree};
-#[cfg(test)]
-use crate::symbols::SymbolKind;
 use crate::symbols::{GlobalDefId, Namespace, SymbolId, SymbolTable};
 use crate::time_scale::ScopeTimeUnits;
 
-/// Semantic role of a scope-owning declaration.
+/// Typed semantic identity of a scope owner.
 ///
-/// Used for role-qualified scope lookup in test helpers. Covers
-/// both definition-namespace owners (module, package, ...) and
-/// symbol-namespace owners (function, task).
-#[cfg(test)]
+/// Covers both definition-namespace owners (module, package, ...) and
+/// symbol-namespace owners (function, task). Production data, not
+/// test-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ScopeOwnerKind {
-    Module,
-    Package,
-    Interface,
-    Program,
-    Primitive,
-    Config,
-    Function,
-    Task,
-}
-
-#[cfg(test)]
-impl ScopeOwnerKind {
-    pub(crate) fn from_definition_kind(dk: DefinitionKind) -> Self {
-        match dk {
-            DefinitionKind::Module => Self::Module,
-            DefinitionKind::Package => Self::Package,
-            DefinitionKind::Interface => Self::Interface,
-            DefinitionKind::Program => Self::Program,
-            DefinitionKind::Primitive => Self::Primitive,
-            DefinitionKind::Config => Self::Config,
-        }
-    }
-
-    pub(crate) fn from_symbol_kind(sk: SymbolKind) -> Option<Self> {
-        match sk {
-            SymbolKind::Function => Some(Self::Function),
-            SymbolKind::Task => Some(Self::Task),
-            _ => None,
-        }
-    }
+pub enum ScopeOwner {
+    /// A definition-namespace item owns this scope.
+    Def(GlobalDefId),
+    /// A symbol-namespace item owns this scope.
+    Symbol(SymbolId),
 }
 
 /// Lookup strategy for a use-site.
@@ -128,14 +99,14 @@ pub struct DefIndex {
     pub foreach_var_defs: HashMap<SymbolId, ForeachVarDef>,
     /// Lookup-only: keyed point lookup by `ScopeId`; do not iterate.
     pub scope_time_units: HashMap<ScopeId, ScopeTimeUnits>,
-    /// Maps a scope to the `decl_site` of the declaration that owns it.
+    /// Maps a scope to its typed semantic owner.
     /// Present for named scopes (modules, packages, callables); absent
     /// for anonymous scopes (blocks, generates, file).
-    pub scope_owners: HashMap<ScopeId, Site>,
-    /// Reverse index: maps an owner `decl_site` to the `ScopeId` it owns.
+    pub scope_owners: HashMap<ScopeId, ScopeOwner>,
+    /// Reverse index: maps a typed semantic owner to the `ScopeId` it owns.
     /// Populated atomically with `scope_owners` through
     /// `DefContext::register_scope_owner`.
-    pub owner_to_scope: HashMap<Site, ScopeId>,
+    pub owner_to_scope: HashMap<ScopeOwner, ScopeId>,
     pub diagnostics: Box<[SemanticDiag]>,
     pub internal_errors: Box<[(Option<Site>, SmolStr)]>,
     /// Design-element extents, source-ordered by construction.
@@ -177,6 +148,18 @@ impl ModportStorage {
 }
 
 impl DefIndex {
+    /// Iterate over definition entries with their canonical `GlobalDefId`s.
+    ///
+    /// Yields `(GlobalDefId, &DefEntry)` in insertion order. Use this
+    /// instead of `def_entries.iter().enumerate()` with manual ID
+    /// reconstruction.
+    pub fn iter_defs(&self) -> impl Iterator<Item = (GlobalDefId, &DefEntry)> {
+        self.def_entries
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| (GlobalDefId::new(self.file, i as u32), entry))
+    }
+
     /// Look up a definition entry by `GlobalDefId`.
     ///
     /// Direct O(1) ordinal indexing into `def_entries`. Returns `None`
@@ -188,8 +171,20 @@ impl DefIndex {
         self.def_entries.get(id.ordinal() as usize)
     }
 
-    /// Find the scope owned by a specific declaration site.
-    pub fn find_scope_by_owner(&self, owner: Site) -> Option<ScopeId> {
+    /// Find the scope owned by a definition-namespace item.
+    pub fn scope_of_def(&self, def_id: GlobalDefId) -> Option<ScopeId> {
+        self.owner_to_scope.get(&ScopeOwner::Def(def_id)).copied()
+    }
+
+    /// Find the scope owned by a symbol-namespace item.
+    pub fn scope_of_symbol(&self, sym_id: SymbolId) -> Option<ScopeId> {
+        self.owner_to_scope
+            .get(&ScopeOwner::Symbol(sym_id))
+            .copied()
+    }
+
+    /// Find the scope owned by a typed semantic owner.
+    pub fn scope_of_owner(&self, owner: ScopeOwner) -> Option<ScopeId> {
         self.owner_to_scope.get(&owner).copied()
     }
 
@@ -251,7 +246,7 @@ impl DefIndex {
             if let Some(entry) = self.def_entry(def_id)
                 && entry.kind == DefinitionKind::Package
                 && entry.name == name
-                && let DefScope::Owned(scope_id) = entry.scope
+                && let Some(scope_id) = self.scope_of_def(def_id)
             {
                 let scope_data = self.scopes.get(scope_id);
                 if scope_data.kind == ScopeKind::Package {

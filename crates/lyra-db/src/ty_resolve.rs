@@ -1,4 +1,3 @@
-use lyra_semantic::def_entry::DefScope;
 use lyra_semantic::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use lyra_semantic::global_index::DefinitionKind;
 use lyra_semantic::interface_id::InterfaceDefId;
@@ -195,10 +194,7 @@ pub(crate) fn resolve_interface_scope_symbol(
     let file_id = def_id.file();
     let src = source_file_by_id(db, unit, file_id)?;
     let def = def_index_file(db, src);
-    let entry = def.def_entry(def_id)?;
-    let DefScope::Owned(iface_scope) = entry.scope else {
-        return None;
-    };
+    let iface_scope = def.scope_of_def(def_id)?;
     let sym_id = def
         .scopes
         .resolve(&def.symbols, iface_scope, ns, member_name)?;

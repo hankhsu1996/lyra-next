@@ -80,9 +80,8 @@ pub fn package_scope_index(db: &dyn salsa::Database, unit: CompilationUnit) -> P
             if entry.kind != DefinitionKind::Package {
                 continue;
             }
-            let pkg_scope = match entry.scope {
-                lyra_semantic::def_entry::DefScope::Owned(s) => s,
-                lyra_semantic::def_entry::DefScope::None => continue,
+            let Some(pkg_scope) = def.scope_of_def(def_id) else {
+                continue;
             };
             let scope_data = def.scopes.get(pkg_scope);
             if scope_data.kind != ScopeKind::Package {

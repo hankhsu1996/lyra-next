@@ -11,9 +11,10 @@ use crate::builder_types::{
     collect_name_refs, collect_nettype_decl, collect_type_spec_refs, collect_typedef,
 };
 
-use crate::def_entry::{DefEntry, DefEntryBuilder, DefScope};
+use crate::def_entry::{DefEntry, DefEntryBuilder};
 use crate::def_index::{
-    DefIndex, ForeachVarDef, ImplicitNetSiteKind, Import, LocalDecl, LocalDeclId, UseSite,
+    DefIndex, ForeachVarDef, ImplicitNetSiteKind, Import, LocalDecl, LocalDeclId, ScopeOwner,
+    UseSite,
 };
 use crate::design_element::DesignElement;
 use crate::diagnostic::SemanticDiag;
@@ -218,8 +219,8 @@ pub(crate) struct DefContext<'a> {
     pub(crate) export_ordinals: HashMap<ScopeId, u32>,
     pub(crate) current_iface_def_id: Option<GlobalDefId>,
     pub(crate) modport_ordinal: u32,
-    pub(crate) scope_owners: HashMap<ScopeId, crate::Site>,
-    pub(crate) owner_to_scope: HashMap<crate::Site, ScopeId>,
+    pub(crate) scope_owners: HashMap<ScopeId, ScopeOwner>,
+    pub(crate) owner_to_scope: HashMap<ScopeOwner, ScopeId>,
     pub(crate) diagnostics: Vec<SemanticDiag>,
     pub(crate) internal_errors: Vec<(Option<crate::Site>, SmolStr)>,
     pub(crate) design_elements: Vec<DesignElement>,
@@ -285,14 +286,21 @@ impl<'a> DefContext<'a> {
     /// Register a bidirectional scope ownership relation.
     ///
     /// Inserts both `scope -> owner` and `owner -> scope` atomically.
+    /// `owner_site` is the declaration anchor used for diagnostics on
+    /// conflict; it is not stored in the ownership maps themselves.
     /// Emits an internal error if either side was already registered to
     /// a different counterpart.
-    pub(crate) fn register_scope_owner(&mut self, scope: ScopeId, owner: crate::Site) {
+    pub(crate) fn register_scope_owner(
+        &mut self,
+        scope: ScopeId,
+        owner: ScopeOwner,
+        owner_site: crate::Site,
+    ) {
         if let Some(&existing_owner) = self.scope_owners.get(&scope)
             && existing_owner != owner
         {
             self.internal_errors.push((
-                Some(owner),
+                Some(owner_site),
                 SmolStr::new(format!(
                     "scope {scope:?} already owned by {existing_owner:?}, cannot re-register to {owner:?}"
                 )),
@@ -303,7 +311,7 @@ impl<'a> DefContext<'a> {
             && existing_scope != scope
         {
             self.internal_errors.push((
-                Some(owner),
+                Some(owner_site),
                 SmolStr::new(format!(
                     "owner {owner:?} already owns {existing_scope:?}, cannot re-register to {scope:?}"
                 )),
@@ -399,7 +407,6 @@ impl<'a> DefContext<'a> {
         kind: DefinitionKind,
         name: SmolStr,
         name_span: DeclSpan,
-        scope: DefScope,
     ) -> GlobalDefId {
         let entry = DefEntry {
             kind,
@@ -407,7 +414,6 @@ impl<'a> DefContext<'a> {
             decl_site,
             name_site: decl_site,
             name_span,
-            scope,
         };
         let def_id = self.def_entries.push(entry);
         self.decl_site_to_def.insert(decl_site, def_id);
@@ -593,14 +599,8 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
     let name = semantic_spelling(&name_tok);
     let name_span = DeclSpan::new(name_tok.text_range());
     let module_scope = ctx.scopes.push(ScopeKind::Module, None);
-    ctx.register_scope_owner(module_scope, decl_site);
-    ctx.push_def_entry(
-        decl_site,
-        DefinitionKind::Module,
-        name,
-        name_span,
-        DefScope::Owned(module_scope),
-    );
+    let def_id = ctx.push_def_entry(decl_site, DefinitionKind::Module, name, name_span);
+    ctx.register_scope_owner(module_scope, ScopeOwner::Def(def_id), decl_site);
     ctx.design_elements.push(DesignElement {
         kind: DefinitionKind::Module,
         extent: design_element_extent(node),
@@ -652,14 +652,8 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
     let name = semantic_spelling(&name_tok);
     let name_span = DeclSpan::new(name_tok.text_range());
     let package_scope = ctx.scopes.push(ScopeKind::Package, None);
-    ctx.register_scope_owner(package_scope, decl_site);
-    ctx.push_def_entry(
-        decl_site,
-        DefinitionKind::Package,
-        name,
-        name_span,
-        DefScope::Owned(package_scope),
-    );
+    let def_id = ctx.push_def_entry(decl_site, DefinitionKind::Package, name, name_span);
+    ctx.register_scope_owner(package_scope, ScopeOwner::Def(def_id), decl_site);
     ctx.design_elements.push(DesignElement {
         kind: DefinitionKind::Package,
         extent: design_element_extent(node),
@@ -691,14 +685,8 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = semantic_spelling(&name_tok);
     let name_span = DeclSpan::new(name_tok.text_range());
     let iface_scope = ctx.scopes.push(ScopeKind::Interface, None);
-    ctx.register_scope_owner(iface_scope, decl_site);
-    let def_id = ctx.push_def_entry(
-        decl_site,
-        DefinitionKind::Interface,
-        name,
-        name_span,
-        DefScope::Owned(iface_scope),
-    );
+    let def_id = ctx.push_def_entry(decl_site, DefinitionKind::Interface, name, name_span);
+    ctx.register_scope_owner(iface_scope, ScopeOwner::Def(def_id), decl_site);
     ctx.design_elements.push(DesignElement {
         kind: DefinitionKind::Interface,
         extent: design_element_extent(node),
@@ -748,14 +736,8 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = semantic_spelling(&name_tok);
     let name_span = DeclSpan::new(name_tok.text_range());
     let prog_scope = ctx.scopes.push(ScopeKind::Program, None);
-    ctx.register_scope_owner(prog_scope, decl_site);
-    ctx.push_def_entry(
-        decl_site,
-        DefinitionKind::Program,
-        name,
-        name_span,
-        DefScope::Owned(prog_scope),
-    );
+    let def_id = ctx.push_def_entry(decl_site, DefinitionKind::Program, name, name_span);
+    ctx.register_scope_owner(prog_scope, ScopeOwner::Def(def_id), decl_site);
     ctx.design_elements.push(DesignElement {
         kind: DefinitionKind::Program,
         extent: design_element_extent(node),
@@ -802,14 +784,8 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = semantic_spelling(&name_tok);
     let name_span = DeclSpan::new(name_tok.text_range());
     let prim_scope = ctx.scopes.push(ScopeKind::Module, None);
-    ctx.register_scope_owner(prim_scope, decl_site);
-    ctx.push_def_entry(
-        decl_site,
-        DefinitionKind::Primitive,
-        name,
-        name_span,
-        DefScope::Owned(prim_scope),
-    );
+    let def_id = ctx.push_def_entry(decl_site, DefinitionKind::Primitive, name, name_span);
+    ctx.register_scope_owner(prim_scope, ScopeOwner::Def(def_id), decl_site);
     ctx.design_elements.push(DesignElement {
         kind: DefinitionKind::Primitive,
         extent: design_element_extent(node),
@@ -830,14 +806,8 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
     let name = semantic_spelling(&name_tok);
     let name_span = DeclSpan::new(name_tok.text_range());
     let cfg_scope = ctx.scopes.push(ScopeKind::Module, None);
-    ctx.register_scope_owner(cfg_scope, decl_site);
-    ctx.push_def_entry(
-        decl_site,
-        DefinitionKind::Config,
-        name,
-        name_span,
-        DefScope::Owned(cfg_scope),
-    );
+    let def_id = ctx.push_def_entry(decl_site, DefinitionKind::Config, name, name_span);
+    ctx.register_scope_owner(cfg_scope, ScopeOwner::Def(def_id), decl_site);
     ctx.design_elements.push(DesignElement {
         kind: DefinitionKind::Config,
         extent: design_element_extent(node),

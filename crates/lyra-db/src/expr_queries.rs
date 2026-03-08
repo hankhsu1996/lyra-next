@@ -673,12 +673,9 @@ fn interface_member_lookup(
     let file_id = iface_def_id.file();
     let src = source_file_by_id(db, unit, file_id).ok_or(MemberLookupError::NoMembersOnType)?;
     let def = def_index_file(db, src);
-    let entry = def
-        .def_entry(iface_def_id)
+    let iface_scope = def
+        .scope_of_def(iface_def_id)
         .ok_or(MemberLookupError::NoMembersOnType)?;
-    let lyra_semantic::def_entry::DefScope::Owned(iface_scope) = entry.scope else {
-        return Err(MemberLookupError::NoMembersOnType);
-    };
 
     if let Some(mp_id) = iface_ty.modport {
         let ctx = IfaceLookupCtx {
