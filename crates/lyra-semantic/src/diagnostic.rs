@@ -2,6 +2,7 @@ use lyra_source::{DeclSpan, TokenSpan};
 use smol_str::SmolStr;
 
 use crate::Site;
+use crate::def_index::ImplicitNetSiteKind;
 
 /// Anchor for a diagnostic span in expanded-text space.
 ///
@@ -93,6 +94,10 @@ pub enum SemanticDiagKind {
     AmbiguousCuScope {
         name: SmolStr,
         sites: Box<[Site]>,
+    },
+    ImplicitNetForbidden {
+        name: SmolStr,
+        site_kind: ImplicitNetSiteKind,
     },
     InternalError {
         detail: SmolStr,
@@ -200,6 +205,9 @@ impl SemanticDiag {
                     "name `{name}` is ambiguous: {} declarations in compilation-unit scope",
                     sites.len()
                 )
+            }
+            SemanticDiagKind::ImplicitNetForbidden { name, .. } => {
+                format!("implicit net creation disabled by `default_nettype none` for `{name}`")
             }
             SemanticDiagKind::InternalError { detail } => {
                 format!("internal error: {detail}")

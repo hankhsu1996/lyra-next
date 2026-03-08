@@ -314,6 +314,14 @@ impl NamePath {
     }
 }
 
+/// Semantic classification for unresolved-name sites whose behavior depends
+/// on implicit-net policy (LRM 6.10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImplicitNetSiteKind {
+    /// LHS of a continuous assignment (`assign y = ...`).
+    ContinuousAssignLhs,
+}
+
 /// A recorded name-use site awaiting resolution.
 // Gap-1 contract: UseSite stores anchors only; no TextRange fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -325,6 +333,10 @@ pub struct UseSite {
     /// File-local monotonic rank from preorder syntax traversal.
     /// Used by the resolver for LRM 26.3 positional visibility.
     pub order_key: u32,
+    /// When `Some`, this use-site is an implicit-net candidate site.
+    /// Unresolved-name handling depends on the active `default_nettype`
+    /// policy at this site's offset.
+    pub implicit_net_site: Option<ImplicitNetSiteKind>,
 }
 
 /// A local declaration that may conflict with wildcard imports (LRM 26.3).

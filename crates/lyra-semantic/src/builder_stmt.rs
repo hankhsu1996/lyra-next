@@ -79,11 +79,11 @@ pub(crate) fn collect_statement(
         | SyntaxKind::AssignStmt
         | SyntaxKind::EventExpr
         | SyntaxKind::EventItem => {
-            collect_name_refs(ctx, node, scope);
+            collect_name_refs(ctx, node, scope, None);
         }
         _ => {
             if is_expression_kind(node.kind()) {
-                collect_name_refs(ctx, node, scope);
+                collect_name_refs(ctx, node, scope, None);
             } else {
                 for child in node.children() {
                     collect_statement(ctx, &child, scope);
@@ -137,6 +137,7 @@ fn collect_name_refs_from_expr(
                 scope,
                 name_ref_site: ast_id.erase(),
                 order_key: 0,
+                implicit_net_site: None,
             });
         }
         return;

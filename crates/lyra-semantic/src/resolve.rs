@@ -8,7 +8,7 @@ use crate::def_index::{
     CompilationUnitEnv, DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, LocalDeclId,
     NamePath,
 };
-use crate::diagnostic::{DiagSpan, SemanticDiag};
+use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::enum_def::{EnumVariantIndex, PkgEnumVariantIndex};
 use crate::global_index::{CuScopeIndex, GlobalDefIndex, PackageScopeIndex, ScopeLookup};
 use crate::name_graph::NameGraph;
@@ -1049,6 +1049,7 @@ pub fn build_resolve_index(
     core: &CoreResolveOutput,
     lookup_decl: &dyn Fn(crate::Site) -> Option<SymbolId>,
     instance_filter: &dyn Fn(crate::instance_decl::InstanceDeclIdx) -> bool,
+    default_nettype: &crate::default_nettype::DefaultNettypePolicy,
 ) -> ResolveIndex {
     let mut resolutions = HashMap::new();
     let mut diagnostics = Vec::new();
@@ -1058,25 +1059,26 @@ pub fn build_resolve_index(
             CoreResolveResult::Resolved(CoreResolution::Local { symbol, namespace }) => {
                 // Filter instance symbols: only interface instances are
                 // valid in value expressions. Module instances are rejected.
+                let site_span = DiagSpan::Site(use_site.name_ref_site);
                 if let crate::record::SymbolOrigin::Instance(idx) = def.symbols.get(*symbol).origin
                     && !instance_filter(idx)
                 {
-                    let diag = resolve_index::reason_to_diagnostic(
+                    diagnostics.push(resolve_index::reason_to_diagnostic(
                         &UnresolvedReason::NotFound,
                         use_site.expected_ns,
                         &use_site.path,
-                        DiagSpan::Site(use_site.name_ref_site),
-                    );
-                    diagnostics.push(diag);
+                        site_span,
+                    ));
                     continue;
                 }
+                let target = ResolvedTarget::Symbol(GlobalSymbolId {
+                    file: def.file,
+                    local: *symbol,
+                });
                 resolutions.insert(
                     use_site.name_ref_site,
                     Resolution {
-                        target: ResolvedTarget::Symbol(GlobalSymbolId {
-                            file: def.file,
-                            local: *symbol,
-                        }),
+                        target,
                         namespace: *namespace,
                     },
                 );
@@ -1084,7 +1086,7 @@ pub fn build_resolve_index(
                     use_site.expected_ns,
                     *namespace,
                     &use_site.path,
-                    DiagSpan::Site(use_site.name_ref_site),
+                    site_span,
                 ) {
                     diagnostics.push(diag);
                 }
@@ -1102,7 +1104,7 @@ pub fn build_resolve_index(
                 name_site,
                 namespace,
             }) => {
-                resolve_cross_file(
+                resolve_index::resolve_cross_file(
                     *name_site,
                     *namespace,
                     use_site,
@@ -1121,12 +1123,7 @@ pub fn build_resolve_index(
                 );
             }
             CoreResolveResult::Unresolved(reason) => {
-                let diag = resolve_index::reason_to_diagnostic(
-                    reason,
-                    use_site.expected_ns,
-                    &use_site.path,
-                    DiagSpan::Site(use_site.name_ref_site),
-                );
+                let diag = classify_unresolved(reason, use_site, default_nettype);
                 diagnostics.push(diag);
             }
         }
@@ -1138,6 +1135,35 @@ pub fn build_resolve_index(
         file: def.file,
         resolutions,
         diagnostics: diagnostics.into_boxed_slice(),
+    }
+}
+
+/// Classify an unresolved use-site into the appropriate diagnostic.
+///
+/// At implicit-net candidate sites where the active `default_nettype` is
+/// `none`, produces `ImplicitNetForbidden` instead of the generic
+/// `UnresolvedName`.
+pub(crate) fn classify_unresolved(
+    reason: &UnresolvedReason,
+    use_site: &crate::def_index::UseSite,
+    default_nettype: &crate::default_nettype::DefaultNettypePolicy,
+) -> SemanticDiag {
+    let site_span = DiagSpan::Site(use_site.name_ref_site);
+    if matches!(reason, UnresolvedReason::NotFound)
+        && let Some(site_kind) = use_site.implicit_net_site
+        && default_nettype
+            .active_at_site(use_site.name_ref_site)
+            .is_none()
+    {
+        let name = SmolStr::new(use_site.path.display_name());
+        let kind = SemanticDiagKind::ImplicitNetForbidden { name, site_kind };
+        SemanticDiag {
+            kind,
+            primary: site_span,
+            label: None,
+        }
+    } else {
+        resolve_index::reason_to_diagnostic(reason, use_site.expected_ns, &use_site.path, site_span)
     }
 }
 
@@ -1164,35 +1190,5 @@ fn map_import_errors(
             DiagSpan::Site(imp.import_stmt_site),
         );
         diagnostics.push(diag);
-    }
-}
-
-fn resolve_cross_file(
-    anchor: crate::Site,
-    namespace: Namespace,
-    use_site: &crate::def_index::UseSite,
-    lookup_decl: &dyn Fn(crate::Site) -> Option<SymbolId>,
-    resolutions: &mut HashMap<crate::Site, Resolution>,
-    diagnostics: &mut Vec<SemanticDiag>,
-) {
-    if let Some(local) = lookup_decl(anchor) {
-        resolutions.insert(
-            use_site.name_ref_site,
-            Resolution {
-                target: ResolvedTarget::Symbol(GlobalSymbolId {
-                    file: anchor.file(),
-                    local,
-                }),
-                namespace,
-            },
-        );
-        if let Some(diag) = resolve_index::check_type_mismatch(
-            use_site.expected_ns,
-            namespace,
-            &use_site.path,
-            DiagSpan::Site(use_site.name_ref_site),
-        ) {
-            diagnostics.push(diag);
-        }
     }
 }

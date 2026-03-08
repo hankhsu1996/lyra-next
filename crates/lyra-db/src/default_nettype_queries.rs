@@ -19,7 +19,7 @@ pub struct DefaultNettypePolicyEntry {
 pub struct FileDefaultNettypeSummary {
     /// Ordered by `expanded_offset`, stable and deterministic.
     pub entries: Vec<DefaultNettypePolicyEntry>,
-    /// Expanded offsets of `` `resetall `` directives.
+    /// Expanded offsets of `` `resetall `` directives, ordered by offset.
     pub resetall_offsets: Vec<TextSize>,
 }
 
@@ -88,10 +88,64 @@ pub fn active_default_nettype_at(
     active.unwrap_or(DefaultNettypeValue::Wire)
 }
 
-/// Whether the active policy at `offset` is `none` (implicit net creation
-/// disabled).
-pub fn default_nettype_is_none_at(summary: &FileDefaultNettypeSummary, offset: TextSize) -> bool {
-    active_default_nettype_at(summary, offset) == DefaultNettypeValue::None
+/// Convert a `DefaultNettypeValue` (preprocess layer) to an `ActiveNetType`
+/// (semantic layer).
+fn to_active_net_type(v: DefaultNettypeValue) -> lyra_semantic::default_nettype::ActiveNetType {
+    use lyra_semantic::default_nettype::ActiveNetType;
+    match v {
+        DefaultNettypeValue::Wire => ActiveNetType::Wire,
+        DefaultNettypeValue::Tri => ActiveNetType::Tri,
+        DefaultNettypeValue::Tri0 => ActiveNetType::Tri0,
+        DefaultNettypeValue::Tri1 => ActiveNetType::Tri1,
+        DefaultNettypeValue::Wand => ActiveNetType::Wand,
+        DefaultNettypeValue::Triand => ActiveNetType::Triand,
+        DefaultNettypeValue::Wor => ActiveNetType::Wor,
+        DefaultNettypeValue::Trior => ActiveNetType::Trior,
+        DefaultNettypeValue::Trireg => ActiveNetType::Trireg,
+        DefaultNettypeValue::Uwire => ActiveNetType::Uwire,
+        DefaultNettypeValue::None => ActiveNetType::None,
+    }
+}
+
+/// Build a `DefaultNettypePolicy` from the preprocessor summary.
+///
+/// Translates each directive change point and `resetall` position into
+/// a sorted `(TextSize, ActiveNetType)` timeline that the semantic
+/// resolve layer queries by site anchor.
+pub fn build_default_nettype_policy(
+    summary: &FileDefaultNettypeSummary,
+) -> lyra_semantic::default_nettype::DefaultNettypePolicy {
+    use lyra_semantic::default_nettype::ActiveNetType;
+
+    let mut changes: Vec<(TextSize, ActiveNetType)> = Vec::new();
+
+    // Merge directive entries and resetall offsets into a sorted timeline.
+    // Resetall resets to Wire (LRM 22.8 default).
+    let mut dir_iter = summary.entries.iter().peekable();
+    let mut reset_iter = summary.resetall_offsets.iter().peekable();
+
+    loop {
+        let reset_offset = reset_iter.peek().copied().copied();
+
+        match (dir_iter.peek(), reset_offset) {
+            (Some(entry), Some(r)) if r <= entry.expanded_offset => {
+                changes.push((r, ActiveNetType::Wire));
+                reset_iter.next();
+            }
+            (Some(_), _) => {
+                if let Some(entry) = dir_iter.next() {
+                    changes.push((entry.expanded_offset, to_active_net_type(entry.value)));
+                }
+            }
+            (None, Some(r)) => {
+                changes.push((r, ActiveNetType::Wire));
+                reset_iter.next();
+            }
+            (None, None) => break,
+        }
+    }
+
+    lyra_semantic::default_nettype::DefaultNettypePolicy::new(changes)
 }
 
 #[cfg(test)]
@@ -99,7 +153,11 @@ mod tests {
     use lyra_preprocess::DefaultNettypeValue;
     use lyra_source::{FileId, Span, TextRange, TextSize};
 
-    use super::{DefaultNettypePolicyEntry, FileDefaultNettypeSummary, active_default_nettype_at};
+    use super::{
+        DefaultNettypePolicyEntry, FileDefaultNettypeSummary, active_default_nettype_at,
+        build_default_nettype_policy,
+    };
+    use lyra_semantic::default_nettype::ActiveNetType;
 
     fn entry(value: DefaultNettypeValue, offset: u32) -> DefaultNettypePolicyEntry {
         DefaultNettypePolicyEntry {
@@ -198,10 +256,10 @@ mod tests {
             active_default_nettype_at(&summary, TextSize::new(50)),
             DefaultNettypeValue::None,
         );
-        assert!(super::default_nettype_is_none_at(
-            &summary,
-            TextSize::new(50)
-        ));
+        assert_eq!(
+            super::active_default_nettype_at(&summary, TextSize::new(50)),
+            DefaultNettypeValue::None,
+        );
     }
 
     #[test]
@@ -221,5 +279,114 @@ mod tests {
             active_default_nettype_at(&summary, TextSize::new(50)),
             DefaultNettypeValue::Trior,
         );
+    }
+
+    // build_default_nettype_policy conversion tests
+
+    #[test]
+    fn policy_empty_summary() {
+        let summary = FileDefaultNettypeSummary::default();
+        let policy = build_default_nettype_policy(&summary);
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(100)),
+            ActiveNetType::Wire
+        );
+    }
+
+    #[test]
+    fn policy_directive_at_exact_offset() {
+        let summary = FileDefaultNettypeSummary {
+            entries: vec![entry(DefaultNettypeValue::None, 10)],
+            resetall_offsets: vec![],
+        };
+        let policy = build_default_nettype_policy(&summary);
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(10)),
+            ActiveNetType::None
+        );
+    }
+
+    #[test]
+    fn policy_interleaved_directive_and_resetall() {
+        let summary = FileDefaultNettypeSummary {
+            entries: vec![
+                entry(DefaultNettypeValue::None, 10),
+                entry(DefaultNettypeValue::Tri, 50),
+            ],
+            resetall_offsets: vec![TextSize::new(30)],
+        };
+        let policy = build_default_nettype_policy(&summary);
+        // Before any directive
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(5)),
+            ActiveNetType::Wire
+        );
+        // After first directive
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(20)),
+            ActiveNetType::None
+        );
+        // After resetall at 30
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(40)),
+            ActiveNetType::Wire
+        );
+        // After second directive at 50
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(60)),
+            ActiveNetType::Tri
+        );
+    }
+
+    #[test]
+    fn policy_resetall_restores_wire() {
+        let summary = FileDefaultNettypeSummary {
+            entries: vec![entry(DefaultNettypeValue::Wand, 10)],
+            resetall_offsets: vec![TextSize::new(30)],
+        };
+        let policy = build_default_nettype_policy(&summary);
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(20)),
+            ActiveNetType::Wand
+        );
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(50)),
+            ActiveNetType::Wire
+        );
+    }
+
+    #[test]
+    fn policy_later_directive_overrides_earlier() {
+        let summary = FileDefaultNettypeSummary {
+            entries: vec![
+                entry(DefaultNettypeValue::Tri, 10),
+                entry(DefaultNettypeValue::None, 30),
+            ],
+            resetall_offsets: vec![],
+        };
+        let policy = build_default_nettype_policy(&summary);
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(20)),
+            ActiveNetType::Tri
+        );
+        assert_eq!(
+            policy.active_at_offset(TextSize::new(50)),
+            ActiveNetType::None
+        );
+    }
+
+    #[test]
+    fn policy_none_survives_until_next_change() {
+        let summary = FileDefaultNettypeSummary {
+            entries: vec![
+                entry(DefaultNettypeValue::None, 10),
+                entry(DefaultNettypeValue::Wire, 100),
+            ],
+            resetall_offsets: vec![],
+        };
+        let policy = build_default_nettype_policy(&summary);
+        assert!(policy.active_at_offset(TextSize::new(50)).is_none());
+        assert!(policy.active_at_offset(TextSize::new(99)).is_none());
+        assert!(!policy.active_at_offset(TextSize::new(100)).is_none());
     }
 }

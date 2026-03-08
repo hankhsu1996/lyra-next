@@ -45,6 +45,7 @@ pub(crate) fn collect_module_instantiation(
             scope,
             name_ref_site: ast_id.erase(),
             order_key: 0,
+            implicit_net_site: None,
         });
         // Register each instance name as an Instance symbol
         let Some(decl_site) = ctx.ast_id_map.erased_ast_id(node) else {
@@ -52,7 +53,7 @@ pub(crate) fn collect_module_instantiation(
                 "erased_ast_id returned None for {:?} in collect_module_instantiation",
                 node.kind()
             ));
-            collect_name_refs(ctx, node, scope);
+            collect_name_refs(ctx, node, scope, None);
             return;
         };
         for hier_inst in inst.instances() {
@@ -89,7 +90,7 @@ pub(crate) fn collect_module_instantiation(
         }
     }
     // Still collect NameRefs in port connection expressions
-    collect_name_refs(ctx, node, scope);
+    collect_name_refs(ctx, node, scope, None);
 }
 
 pub(crate) fn collect_foreach_vars(
@@ -628,7 +629,7 @@ pub(crate) fn collect_param_decl(
                 ctx.name_site_to_init_expr.insert(decl_name_site, init_id);
             }
             // Collect name refs in default value expressions
-            collect_name_refs(ctx, &child, scope);
+            collect_name_refs(ctx, &child, scope, None);
         }
     }
 }
@@ -811,7 +812,7 @@ fn collect_declarators_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, facts:
                 });
                 ctx.register_binding(sym_id);
             }
-            collect_name_refs(ctx, &child, facts.scope);
+            collect_name_refs(ctx, &child, facts.scope, None);
         }
     }
 }
