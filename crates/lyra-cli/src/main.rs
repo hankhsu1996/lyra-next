@@ -4,7 +4,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: lyra <command> [args...]");
+        eprintln!("Usage: lyra-next <command> [args...]");
         eprintln!();
         eprintln!("Commands:");
         eprintln!("  dump-tree <file>                 Print the CST of a SystemVerilog file");
@@ -24,7 +24,7 @@ fn main() -> ExitCode {
 
 fn dump_tree(args: &[String]) -> ExitCode {
     let Some(path) = args.first() else {
-        eprintln!("Usage: lyra dump-tree <file>");
+        eprintln!("Usage: lyra-next dump-tree <file>");
         return ExitCode::FAILURE;
     };
 
@@ -71,7 +71,7 @@ fn check(args: &[String]) -> ExitCode {
     }
 
     if files.is_empty() {
-        eprintln!("Usage: lyra check [--top <module>] <file>...");
+        eprintln!("Usage: lyra-next check [--top <module>] <file>...");
         return ExitCode::FAILURE;
     }
 
