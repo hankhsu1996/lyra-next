@@ -247,7 +247,7 @@ impl<'db> TyFmt<'db> {
         let iface_name = entry.name.clone();
         match iface_ty.modport {
             Some(mp_id) => {
-                let mp_name = def.modport_defs.get(&mp_id).map(|d| d.name.as_str());
+                let mp_name = def.modport_def(mp_id).map(|d| d.name.as_str());
                 match mp_name {
                     Some(n) => format!("{iface_name}.{n}"),
                     None => iface_name.to_string(),

@@ -26,4 +26,6 @@ pub enum FieldAccessTarget {
 }
 
 /// Map of pre-computed facts keyed by `FieldExpr` AST node identity.
+/// Lookup-only: keyed point lookup by `Site`; do not iterate for
+/// observable output.
 pub type FieldAccessFacts = HashMap<Site, FieldAccessFact>;

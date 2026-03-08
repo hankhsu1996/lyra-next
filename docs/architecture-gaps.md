@@ -12,10 +12,6 @@ When work on a feature exposes a broader architectural limitation, record it her
 
 All `collect_*` functions in `builder_items.rs` take `&SyntaxNode` and re-cast internally to typed AST wrappers. A cleaner layering would have `builder.rs` perform the one cast from raw CST node to typed AST, then pass the typed wrapper to collection helpers. This would eliminate redundant casts and make the typed-AST boundary sharper. Exposed by: every `collect_*` function, most visibly in timeunit/timeprecision and modport collection.
 
-## Deterministic container conventions in semantic indexes
-
-`DefIndex` uses `HashMap` for all keyed maps (`scope_time_units`, `foreach_var_defs`, `modport_defs`, etc.). Iteration order over these maps is non-deterministic. Currently all access is point-lookup by key, so this is not a correctness issue, but if any future code iterates these maps the non-determinism becomes observable. The project should adopt a deterministic map convention (e.g. `IndexMap`, sorted `Vec`, or explicit "no iteration" contract) for semantic summary containers. Exposed by: `scope_time_units: HashMap<ScopeId, ScopeTimeUnits>` in `DefIndex`.
-
 ## Declaration lifetime token scanning vs typed header accessors
 
 `decl_lifetime_token` in `nodes_decl.rs` scans the raw token stream after a keyword to find `automatic`/`static`. This works but encodes structure assumptions as "find token after keyword." The long-term shape is typed header-modifier accessors that parse declaration headers structurally, shared across container and callable declaration kinds. Exposed by: LRM 6.21 lifetime inheritance (module/interface/program/package/function/task lifetime tokens).

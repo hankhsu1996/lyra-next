@@ -413,8 +413,7 @@ pub fn modport_name(
         return SmolStr::default();
     };
     let def = def_index_file(db, src);
-    def.modport_defs
-        .get(&mp_id)
+    def.modport_def(mp_id)
         .map(|d| d.name.clone())
         .unwrap_or_default()
 }

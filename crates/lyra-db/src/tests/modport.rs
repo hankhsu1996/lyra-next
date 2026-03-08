@@ -26,11 +26,11 @@ fn setup_modport_test(
         .map(|(_, def_id, _)| *def_id)
         .expect("should have an interface definition");
 
-    // Find the first modport
+    // Find the first modport in declaration order
     let modport_id = def
-        .modport_name_map
-        .values()
-        .copied()
+        .modport_defs_in_order()
+        .iter()
+        .map(|d| d.id)
         .find(|id| id.owner.global_def() == iface_def_id)
         .expect("should have a modport");
 

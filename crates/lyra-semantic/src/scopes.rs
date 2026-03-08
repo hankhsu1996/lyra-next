@@ -49,6 +49,9 @@ pub struct Scope {
 }
 
 /// Frozen scope tree, indexed by `ScopeId`.
+///
+/// Scopes are stored in deterministic source order (preorder traversal
+/// of the syntax tree). `ScopeId(0)` is always the file scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopeTree {
     scopes: Box<[Scope]>,
@@ -170,9 +173,7 @@ impl ScopeTree {
 
     /// Find all direct child scopes of `parent` with a given kind.
     ///
-    /// Returns children in allocation order. The builder pushes scopes
-    /// in preorder syntax traversal, so allocation order is guaranteed
-    /// to match lexical (source) order. Callers may rely on this.
+    /// Returns children in source order. Callers may rely on this.
     pub fn children_of_kind(&self, parent: ScopeId, kind: ScopeKind) -> Vec<ScopeId> {
         self.scopes
             .iter()
@@ -180,6 +181,18 @@ impl ScopeTree {
             .filter(|(_, s)| s.kind == kind && s.parent == Some(parent))
             .map(|(i, _)| ScopeId(i as u32))
             .collect()
+    }
+
+    /// Find the unique scope with the given `ScopeKind`.
+    ///
+    /// Returns the first match in source order. Intended for contexts where
+    /// exactly one scope of the given kind exists (e.g., looking up the
+    /// single module or interface scope in a single-item file).
+    pub fn find_scope_by_kind(&self, kind: ScopeKind) -> Option<ScopeId> {
+        self.scopes
+            .iter()
+            .position(|s| s.kind == kind)
+            .map(|i| ScopeId(i as u32))
     }
 }
 

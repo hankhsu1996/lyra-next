@@ -47,7 +47,8 @@ pub struct DefIndex {
     /// Definition-namespace entries keyed by insertion order.
     /// Use `def_entry()` to look up by `GlobalDefId`.
     pub def_entries: Box<[DefEntry]>,
-    /// Reverse map from definition name-site to `GlobalDefId`.
+    /// Lookup-only: reverse map from definition name-site to `GlobalDefId`.
+    /// Keyed point lookup; do not iterate.
     pub name_site_to_def: HashMap<Site, GlobalDefId>,
     /// All `GlobalDefId`s in this file, sorted by `(name, kind, name_site)` for
     /// deterministic iteration. Used by `global_def_index` and `package_scope_index`.
@@ -55,24 +56,32 @@ pub struct DefIndex {
     pub use_sites: Box<[UseSite]>,
     pub imports: Box<[Import]>,
     pub local_decls: Box<[LocalDecl]>,
-    /// Reverse map from name-site `Site` to `SymbolId`.
+    /// Lookup-only: reverse map from name-site `Site` to `SymbolId`.
     /// Used by cross-file resolution to convert `Site` (from
     /// `PackageScopeIndex`) back to a `SymbolId` in this file.
+    /// Keyed point lookup; do not iterate.
     pub name_site_to_symbol: HashMap<Site, SymbolId>,
-    /// Maps parameter name-site `Site` to its initializer `Expression`
-    /// `Site`. Key present with `None` = parameter with no default value.
-    /// Key absent = not a parameter (not tracked).
+    /// Lookup-only: maps parameter name-site `Site` to its initializer
+    /// `Expression` `Site`. Key present with `None` = parameter with no
+    /// default value. Key absent = not a parameter (not tracked).
+    /// Keyed point lookup; do not iterate.
     pub name_site_to_init_expr: HashMap<Site, Option<Site>>,
     pub enum_defs: Box<[EnumDef]>,
+    /// Lookup-only: keyed point lookup; do not iterate.
     pub enum_by_site: HashMap<Site, EnumDefIdx>,
     pub record_defs: Box<[RecordDef]>,
+    /// Lookup-only: keyed point lookup; do not iterate.
     pub record_by_site: HashMap<Site, RecordDefIdx>,
     pub instance_decls: Box<[InstanceDecl]>,
     pub nettype_defs: Box<[NettypeDef]>,
-    pub modport_defs: HashMap<ModportDefId, ModportDef>,
-    pub modport_name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
+    /// Modport definitions: ordered storage + keyed lookup.
+    /// Access through `modport_def()`, `modport_defs_in_order()`,
+    /// `modport_by_name()`, or `modport_name_to_id()`.
+    pub(crate) modports: ModportStorage,
     pub export_decls: Box<[ExportDecl]>,
+    /// Lookup-only: keyed point lookup by `SymbolId`; do not iterate.
     pub foreach_var_defs: HashMap<SymbolId, ForeachVarDef>,
+    /// Lookup-only: keyed point lookup by `ScopeId`; do not iterate.
     pub scope_time_units: HashMap<ScopeId, ScopeTimeUnits>,
     /// Maps a scope to the `decl_site` of the declaration that owns it.
     /// Present for named scopes (modules, packages, callables); absent
@@ -80,6 +89,39 @@ pub struct DefIndex {
     pub scope_owners: HashMap<ScopeId, Site>,
     pub diagnostics: Box<[SemanticDiag]>,
     pub internal_errors: Box<[(Option<Site>, SmolStr)]>,
+}
+
+/// Encapsulates modport storage: declaration-order slice for traversal,
+/// position index for O(1) keyed lookup, name map for name-based lookup.
+///
+/// Storage shape is private. Consumers use `DefIndex` accessors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModportStorage {
+    defs_ordered: Box<[ModportDef]>,
+    index: HashMap<ModportDefId, u32>,
+    name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
+}
+
+impl ModportStorage {
+    pub(crate) fn empty() -> Self {
+        Self {
+            defs_ordered: Box::new([]),
+            index: HashMap::new(),
+            name_map: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn new(
+        defs_ordered: Box<[ModportDef]>,
+        index: HashMap<ModportDefId, u32>,
+        name_map: HashMap<(InterfaceDefId, SmolStr), ModportDefId>,
+    ) -> Self {
+        Self {
+            defs_ordered,
+            index,
+            name_map,
+        }
+    }
 }
 
 impl DefIndex {
@@ -128,9 +170,27 @@ impl DefIndex {
         &self.nettype_defs[idx.0 as usize]
     }
 
+    pub fn modport_def(&self, id: ModportDefId) -> Option<&ModportDef> {
+        let &idx = self.modports.index.get(&id)?;
+        Some(&self.modports.defs_ordered[idx as usize])
+    }
+
+    /// Declaration-order modport definitions. Total by construction:
+    /// the ordered slice IS the storage, not a projection over a separate map.
+    pub fn modport_defs_in_order(&self) -> &[ModportDef] {
+        &self.modports.defs_ordered
+    }
+
     pub fn modport_by_name(&self, iface: InterfaceDefId, name: &str) -> Option<&ModportDef> {
-        let id = self.modport_name_map.get(&(iface, SmolStr::new(name)))?;
-        self.modport_defs.get(id)
+        let id = self.modports.name_map.get(&(iface, SmolStr::new(name)))?;
+        self.modport_def(*id)
+    }
+
+    pub fn modport_name_to_id(&self, iface: InterfaceDefId, name: &str) -> Option<ModportDefId> {
+        self.modports
+            .name_map
+            .get(&(iface, SmolStr::new(name)))
+            .copied()
     }
 
     pub fn package_scope(&self, name: &str) -> Option<ScopeId> {

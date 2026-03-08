@@ -138,8 +138,8 @@ pub struct Resolution {
 /// Per-file resolution results. Depends on `DefIndex`.
 ///
 /// Maps use-site `Site` to resolved `Resolution`.
-/// Uses `HashMap` because the access pattern is point lookup
-/// by `AstId` (from cursor queries).
+/// `resolutions` is a lookup-only table: keyed point lookup by `Site`;
+/// do not iterate for observable output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveIndex {
     pub file: FileId,
