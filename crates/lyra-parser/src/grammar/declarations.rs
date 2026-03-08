@@ -98,6 +98,7 @@ fn net_declarator(p: &mut Parser) {
 
 // Variable declaration: `logic [7:0] a = 0, b ;`
 // Also handles declarations starting with direction keywords, `const`, or user-defined types.
+// Non-ANSI port direction declarations (`input a;`) have implicit type (LRM 23.2.2.1).
 pub(crate) fn var_decl(p: &mut Parser) {
     let m = p.start();
     // Optional lifetime qualifier (LRM 6.21)
@@ -109,18 +110,28 @@ pub(crate) fn var_decl(p: &mut Parser) {
         p.bump();
     }
     // Optional direction for port-like declarations in module body
-    if matches!(
+    let has_direction = matches!(
         p.current(),
         SyntaxKind::InputKw | SyntaxKind::OutputKw | SyntaxKind::InoutKw
-    ) {
+    );
+    if has_direction {
         p.bump();
     }
     // Optional var keyword
     if p.at(SyntaxKind::VarKw) {
         p.bump();
     }
-    // Type
-    type_spec(p);
+    // Type: non-ANSI port direction declarations may have implicit type.
+    // `input a, b;` has no type at all. `input [7:0] a;` and
+    // `input signed [7:0] a;` have implicit type with range/signing only.
+    if has_direction && is_bare_port_ident(p) {
+        // Bare identifier list, no type at all (e.g. `input a, b;`).
+    } else if has_direction && is_implicit_type_start(p) {
+        // Implicit type: optional signing + packed dimensions (LRM 6.10).
+        implicit_type_spec(p);
+    } else {
+        type_spec(p);
+    }
     // Declarators
     var_declarator(p);
     while p.eat(SyntaxKind::Comma) {
@@ -128,6 +139,37 @@ pub(crate) fn var_decl(p: &mut Parser) {
     }
     p.expect(SyntaxKind::Semicolon);
     m.complete(p, SyntaxKind::VarDecl);
+}
+
+// After a direction keyword, check whether the identifier list has no explicit
+// type (non-ANSI port direction declaration like `input a, b;`). True when the
+// current token is a plain identifier followed by `;` or `,`.
+fn is_bare_port_ident(p: &Parser) -> bool {
+    p.current() == SyntaxKind::Ident
+        && matches!(p.nth(1), SyntaxKind::Semicolon | SyntaxKind::Comma)
+}
+
+// After a direction keyword, check whether the next tokens form an implicit
+// type (signing and/or packed dimensions without a base type keyword).
+// Matches `[7:0]`, `signed`, `signed [7:0]`, etc.
+fn is_implicit_type_start(p: &Parser) -> bool {
+    matches!(
+        p.current(),
+        SyntaxKind::SignedKw | SyntaxKind::UnsignedKw | SyntaxKind::LBracket
+    )
+}
+
+// Parse an implicit data type: optional signing + packed dimensions.
+// Produces a `TypeSpec` node with no base type keyword.
+fn implicit_type_spec(p: &mut Parser) {
+    let m = p.start();
+    if p.at(SyntaxKind::SignedKw) || p.at(SyntaxKind::UnsignedKw) {
+        p.bump();
+    }
+    while p.at(SyntaxKind::LBracket) {
+        packed_dimension(p);
+    }
+    m.complete(p, SyntaxKind::TypeSpec);
 }
 
 fn var_declarator(p: &mut Parser) {

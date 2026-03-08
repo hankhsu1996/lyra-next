@@ -55,6 +55,7 @@ ast_nodes! {
     VarDecl(SyntaxKind::VarDecl) {
         type_spec: TypeSpec,
         declarators: [Declarator],
+        direction: token([InputKw, OutputKw, InoutKw]) as direction_token,
     }
 
     NetDecl(SyntaxKind::NetDecl) {
@@ -534,6 +535,24 @@ impl Declarator {
             }
         }
         None
+    }
+}
+
+impl VarDecl {
+    /// Whether this `VarDecl` is a non-ANSI port direction declaration
+    /// (e.g. `input a;`, `input [7:0] a;`, `input signed [7:0] a, b;`).
+    ///
+    /// These have a direction keyword but no explicit base type -- the
+    /// `TypeSpec`, if present, contains only signing and/or packed dimensions
+    /// (an implicit data type per LRM 6.7.1).
+    pub fn is_non_ansi_port_decl(&self) -> bool {
+        if self.direction_token().is_none() {
+            return false;
+        }
+        let Some(ts) = self.type_spec() else {
+            return true;
+        };
+        ts.type_keyword().is_none() && ts.type_name_ref().is_none()
     }
 }
 
