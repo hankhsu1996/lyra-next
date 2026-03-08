@@ -5,19 +5,17 @@ use smol_str::SmolStr;
 
 use crate::Site;
 use crate::def_index::{
-    CompilationUnitEnv, DefIndex, ExpectedNs, ExportDeclId, ExportKey, ImportName, LocalDeclId,
-    NamePath,
+    CompilationUnitEnv, ExpectedNs, ExportDeclId, ExportKey, ImportName, LocalDeclId, NamePath,
 };
-use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::enum_def::{EnumVariantIndex, PkgEnumVariantIndex};
 use crate::global_index::{CuScopeIndex, GlobalDefIndex, PackageScopeIndex, ScopeLookup};
 use crate::name_graph::NameGraph;
 use crate::resolve_index::{
-    self, CoreResolution, CoreResolveOutput, CoreResolveResult, ImportConflict, ImportConflictKind,
-    ImportError, Resolution, ResolveIndex, ResolvedTarget, UnresolvedReason, WildcardLocalConflict,
+    CoreResolution, CoreResolveOutput, CoreResolveResult, ImportConflict, ImportConflictKind,
+    ImportError, UnresolvedReason, WildcardLocalConflict,
 };
 use crate::scopes::{ScopeId, SymbolNameLookup};
-use crate::symbols::{GlobalSymbolId, Namespace, NsMask, SymbolId};
+use crate::symbols::{Namespace, NsMask};
 
 /// Shared resolution context for `resolve_simple` and related functions.
 struct ResolveCtx<'a> {
@@ -1028,167 +1026,4 @@ fn has_higher_precedence_binding(
         current = scope_data.parent;
     }
     false
-}
-
-/// Build the per-file resolution index from pre-computed core results.
-///
-/// Zips `def.use_sites` with `core.resolutions`, builds the `HashMap`
-/// and diagnostics. Import errors are also mapped to diagnostics.
-///
-/// `lookup_decl` maps a `Site` (`name_site` anchor from
-/// `CoreResolution::Def` or `CoreResolution::Pkg`) to a `SymbolId`
-/// in the target file.
-///
-/// `instance_filter` is called when core resolution resolves a use-site
-/// to an `Instance` symbol. Returns `true` if the instance should be
-/// kept as a valid resolution (e.g., interface instances). Returns
-/// `false` to reject the resolution and emit an unresolved diagnostic
-/// (e.g., module instances are not valid in value expressions).
-pub fn build_resolve_index(
-    def: &DefIndex,
-    core: &CoreResolveOutput,
-    lookup_decl: &dyn Fn(crate::Site) -> Option<SymbolId>,
-    instance_filter: &dyn Fn(crate::instance_decl::InstanceDeclIdx) -> bool,
-    default_nettype: &crate::default_nettype::DefaultNettypePolicy,
-) -> ResolveIndex {
-    let mut resolutions = HashMap::new();
-    let mut diagnostics = Vec::new();
-
-    for (use_site, result) in def.use_sites.iter().zip(core.resolutions.iter()) {
-        match result {
-            CoreResolveResult::Resolved(CoreResolution::Local { symbol, namespace }) => {
-                // Filter instance symbols: only interface instances are
-                // valid in value expressions. Module instances are rejected.
-                let site_span = DiagSpan::Site(use_site.name_ref_site);
-                if let crate::record::SymbolOrigin::Instance(idx) = def.symbols.get(*symbol).origin
-                    && !instance_filter(idx)
-                {
-                    diagnostics.push(resolve_index::reason_to_diagnostic(
-                        &UnresolvedReason::NotFound,
-                        use_site.expected_ns,
-                        &use_site.path,
-                        site_span,
-                    ));
-                    continue;
-                }
-                let target = ResolvedTarget::Symbol(GlobalSymbolId {
-                    file: def.file,
-                    local: *symbol,
-                });
-                resolutions.insert(
-                    use_site.name_ref_site,
-                    Resolution {
-                        target,
-                        namespace: *namespace,
-                    },
-                );
-                if let Some(diag) = resolve_index::check_type_mismatch(
-                    use_site.expected_ns,
-                    *namespace,
-                    &use_site.path,
-                    site_span,
-                ) {
-                    diagnostics.push(diag);
-                }
-            }
-            CoreResolveResult::Resolved(CoreResolution::Def { def }) => {
-                resolutions.insert(
-                    use_site.name_ref_site,
-                    Resolution {
-                        target: ResolvedTarget::Def(*def),
-                        namespace: Namespace::Definition,
-                    },
-                );
-            }
-            CoreResolveResult::Resolved(CoreResolution::Pkg {
-                name_site,
-                namespace,
-            }) => {
-                resolve_index::resolve_cross_file(
-                    *name_site,
-                    *namespace,
-                    use_site,
-                    lookup_decl,
-                    &mut resolutions,
-                    &mut diagnostics,
-                );
-            }
-            CoreResolveResult::Resolved(CoreResolution::EnumVariant(target)) => {
-                resolutions.insert(
-                    use_site.name_ref_site,
-                    Resolution {
-                        target: ResolvedTarget::EnumVariant(target.clone()),
-                        namespace: Namespace::Value,
-                    },
-                );
-            }
-            CoreResolveResult::Unresolved(reason) => {
-                let diag = classify_unresolved(reason, use_site, default_nettype);
-                diagnostics.push(diag);
-            }
-        }
-    }
-
-    map_import_errors(def, core, &mut diagnostics);
-
-    ResolveIndex {
-        file: def.file,
-        resolutions,
-        diagnostics: diagnostics.into_boxed_slice(),
-    }
-}
-
-/// Classify an unresolved use-site into the appropriate diagnostic.
-///
-/// At implicit-net candidate sites where the active `default_nettype` is
-/// `none`, produces `ImplicitNetForbidden` instead of the generic
-/// `UnresolvedName`.
-pub(crate) fn classify_unresolved(
-    reason: &UnresolvedReason,
-    use_site: &crate::def_index::UseSite,
-    default_nettype: &crate::default_nettype::DefaultNettypePolicy,
-) -> SemanticDiag {
-    let site_span = DiagSpan::Site(use_site.name_ref_site);
-    if matches!(reason, UnresolvedReason::NotFound)
-        && let Some(site_kind) = use_site.implicit_net_site
-        && default_nettype
-            .active_at_site(use_site.name_ref_site)
-            .is_none()
-    {
-        let name = SmolStr::new(use_site.path.display_name());
-        let kind = SemanticDiagKind::ImplicitNetForbidden { name, site_kind };
-        SemanticDiag {
-            kind,
-            primary: site_span,
-            label: None,
-        }
-    } else {
-        resolve_index::reason_to_diagnostic(reason, use_site.expected_ns, &use_site.path, site_span)
-    }
-}
-
-fn map_import_errors(
-    def: &DefIndex,
-    core: &CoreResolveOutput,
-    diagnostics: &mut Vec<SemanticDiag>,
-) {
-    for err in &core.import_errors {
-        let imp = &def.imports[err.import_idx as usize];
-        let path = match &imp.name {
-            ImportName::Explicit(member) => {
-                NamePath::Qualified(crate::name_lowering::QualifiedPath {
-                    root: crate::def_index::QualifiedRoot::Package(imp.package.clone()),
-                    member: member.clone(),
-                })
-            }
-            ImportName::Wildcard => NamePath::Simple(SmolStr::new(format!("{}::*", imp.package))),
-        };
-        let diag = resolve_index::reason_to_diagnostic(
-            &err.reason,
-            ExpectedNs::Exact(Namespace::Value),
-            &path,
-            DiagSpan::Site(imp.import_stmt_site),
-        );
-        diagnostics.push(diag);
-    }
 }

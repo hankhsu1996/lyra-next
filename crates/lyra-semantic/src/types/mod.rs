@@ -502,6 +502,11 @@ impl Ty {
         Self::logic(PackedDims::empty(), false)
     }
 
+    /// Canonical type for implicit nets (LRM 6.10): scalar logic.
+    pub fn implicit_net_data_ty() -> Self {
+        Self::simple_logic()
+    }
+
     pub fn int() -> Self {
         Self::Integral(Integral {
             keyword: IntegralKw::Int,

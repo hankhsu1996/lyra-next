@@ -12,6 +12,7 @@ use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::enum_def::EnumVariantTarget;
 use crate::scopes::ScopeId;
 use crate::symbols::{GlobalDefId, GlobalSymbolId, Namespace, NsMask, SymbolId};
+use crate::types::NetKind;
 
 /// Offset-independent resolution result from `build_resolve_core`.
 ///
@@ -120,12 +121,71 @@ pub struct WildcardLocalConflict {
     pub use_site_idx: u32,
 }
 
-/// The resolved target of a name: a symbol, a definition-namespace entry, or a range-generated enum variant.
+/// File-local ordinal identity for an implicit net created by resolve (LRM 6.10).
+///
+/// Indexes into `ImplicitNetIndex::nets`. Scoped to a single `ResolveIndex`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ImplicitNetId(pub u32);
+
+/// A resolve-created implicit net entity (LRM 6.10).
+///
+/// One entity per unique `(ScopeId, name)` pair within a file.
+/// Multiple use-sites resolve to the same `ImplicitNetId`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplicitNet {
+    pub owner_scope: ScopeId,
+    pub name: SmolStr,
+    pub net_kind: NetKind,
+    /// Canonical creation site: the first use-site that triggered creation.
+    pub decl_site: Site,
+}
+
+/// Ordered storage for implicit nets created during resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplicitNetIndex {
+    nets: Box<[ImplicitNet]>,
+}
+
+impl ImplicitNetIndex {
+    pub fn new(nets: Vec<ImplicitNet>) -> Self {
+        Self {
+            nets: nets.into_boxed_slice(),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self { nets: Box::new([]) }
+    }
+
+    pub fn get(&self, id: ImplicitNetId) -> Option<&ImplicitNet> {
+        self.nets.get(id.0 as usize)
+    }
+
+    pub fn len(&self) -> usize {
+        self.nets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nets.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (ImplicitNetId, &ImplicitNet)> {
+        self.nets
+            .iter()
+            .enumerate()
+            .map(|(i, net)| (ImplicitNetId(i as u32), net))
+    }
+}
+
+/// The resolved target of a name: a symbol, a definition-namespace entry,
+/// a range-generated enum variant, or an implicit net.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedTarget {
     Symbol(GlobalSymbolId),
     Def(GlobalDefId),
     EnumVariant(EnumVariantTarget),
+    /// Resolve-created implicit net (LRM 6.10).
+    ImplicitNet(ImplicitNetId),
 }
 
 /// A resolved name: the target and the namespace it was found in.
@@ -144,6 +204,7 @@ pub struct Resolution {
 pub struct ResolveIndex {
     pub file: FileId,
     pub resolutions: HashMap<Site, Resolution>,
+    pub implicit_nets: ImplicitNetIndex,
     pub diagnostics: Box<[SemanticDiag]>,
 }
 

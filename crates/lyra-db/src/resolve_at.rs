@@ -126,7 +126,9 @@ fn find_qualified_name_at(
 fn resolution_to_symbol(target: &ResolvedTarget) -> Option<GlobalSymbolId> {
     match target {
         ResolvedTarget::Symbol(sym) => Some(*sym),
-        ResolvedTarget::Def(_) | ResolvedTarget::EnumVariant(_) => None,
+        ResolvedTarget::Def(_)
+        | ResolvedTarget::EnumVariant(_)
+        | ResolvedTarget::ImplicitNet(_) => None,
     }
 }
 

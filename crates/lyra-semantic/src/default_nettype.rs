@@ -1,6 +1,7 @@
 use lyra_source::TextSize;
 
 use crate::Site;
+use crate::types::NetKind;
 
 /// Active `default_nettype` value at a position (LRM 6.10 + 22.8).
 ///
@@ -26,6 +27,27 @@ impl ActiveNetType {
     /// Whether this value is `None` (implicit net creation disabled).
     pub fn is_none(self) -> bool {
         matches!(self, Self::None)
+    }
+
+    /// Map this policy value to the semantic `NetKind` for implicit net
+    /// creation (LRM 6.10). Returns `None` when the policy is `None`
+    /// (implicit net creation disabled).
+    ///
+    /// `Triand`/`Trior` canonicalize to `Wand`/`Wor` because `NetKind`
+    /// represents semantic net resolution behavior (LRM 6.7.1): `triand`
+    /// is a synonym for `wand`, `trior` for `wor`.
+    pub fn to_implicit_net_kind(self) -> Option<NetKind> {
+        match self {
+            Self::Wire => Some(NetKind::Wire),
+            Self::Tri => Some(NetKind::Tri),
+            Self::Tri0 => Some(NetKind::Tri0),
+            Self::Tri1 => Some(NetKind::Tri1),
+            Self::Wand | Self::Triand => Some(NetKind::Wand),
+            Self::Wor | Self::Trior => Some(NetKind::Wor),
+            Self::Trireg => Some(NetKind::Trireg),
+            Self::Uwire => Some(NetKind::Uwire),
+            Self::None => None,
+        }
     }
 }
 
@@ -61,7 +83,7 @@ impl DefaultNettypePolicy {
 
     /// Query the active net type at a use-site anchor.
     pub fn active_at_site(&self, site: Site) -> ActiveNetType {
-        self.active_at_offset(site.text_range().start())
+        self.active_at_offset(site.start_offset())
     }
 }
 

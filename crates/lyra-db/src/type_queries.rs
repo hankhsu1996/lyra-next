@@ -622,7 +622,8 @@ fn expand_typedef(
                 Err(e) => return e,
             }
         }
-        lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
+        lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_)
+        | lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(_) => {
             return SymbolType::Error(SymbolTypeError::UserTypeUnresolved);
         }
     };
@@ -692,6 +693,7 @@ fn resolve_type_expr_name(
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
             Ty::Enum(target.enum_id)
         }
+        lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(_) => Ty::Error,
     }
 }
 
