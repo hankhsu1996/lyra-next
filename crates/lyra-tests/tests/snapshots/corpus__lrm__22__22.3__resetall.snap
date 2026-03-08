@@ -1,0 +1,13 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (6 diagnostics)
+  error[lyra.preprocess.resetall_inside_design_element] 4:2..4:11: `resetall is not allowed inside a design element
+  error[lyra.preprocess.resetall_inside_design_element] 9:2..9:11: `resetall is not allowed inside a design element
+  error[lyra.preprocess.resetall_inside_design_element] 14:2..14:11: `resetall is not allowed inside a design element
+  error[lyra.preprocess.resetall_inside_design_element] 19:2..19:11: `resetall is not allowed inside a design element
+  error[lyra.preprocess.resetall_inside_design_element] 24:2..24:11: `resetall is not allowed inside a design element
+  error[lyra.preprocess.resetall_inside_design_element] 33:2..33:11: `resetall is not allowed inside a design element
+---
+unit (0 diagnostics)

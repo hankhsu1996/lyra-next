@@ -10,6 +10,7 @@ pub mod const_eval;
 pub mod def_entry;
 pub mod def_index;
 pub mod default_nettype;
+pub mod design_element;
 pub mod diagnostic;
 pub mod enum_def;
 pub mod foreach_check;

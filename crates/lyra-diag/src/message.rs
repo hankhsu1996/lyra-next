@@ -134,6 +134,8 @@ pub enum MessageId {
     // Timescale directive
     TimescaleInvalidValue,
     TimescalePrecisionExceedsUnit,
+    // Resetall directive
+    ResetallInsideDesignElement,
     // Label messages
     RealizedHere,
     WildcardImportHere,
@@ -306,6 +308,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::StreamUnpackWidthMismatch
         | MessageId::StreamSliceSizeNotConst
         | MessageId::StreamWithNonArray => render_stream_unpack_message(msg),
+        MessageId::ResetallInsideDesignElement => {
+            "`resetall is not allowed inside a design element".into()
+        }
         _ => render_other_message(msg),
     }
 }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lyra_ast::{AstIdMap, AstNode, ExportDecl, HasSyntax, Port, TypeSpec, semantic_spelling};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::{Parse, SyntaxNode, SyntaxToken};
-use lyra_source::{DeclSpan, FileId};
+use lyra_source::{DeclSpan, FileId, TokenSpan};
 use smol_str::SmolStr;
 
 use crate::builder_order::{assign_order_keys, detect_duplicates};
@@ -15,6 +15,7 @@ use crate::def_entry::{DefEntry, DefEntryBuilder, DefScope};
 use crate::def_index::{
     DefIndex, ForeachVarDef, ImplicitNetSiteKind, Import, LocalDecl, LocalDeclId, UseSite,
 };
+use crate::design_element::DesignElement;
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::EnumDef;
 use crate::global_index::DefinitionKind;
@@ -124,6 +125,7 @@ pub fn build_def_index(file: FileId, parse: &Parse, ast_id_map: &AstIdMap) -> De
         owner_to_scope: ctx.owner_to_scope,
         diagnostics: diagnostics.into_boxed_slice(),
         internal_errors: ctx.internal_errors.into_boxed_slice(),
+        design_elements: ctx.design_elements.into_boxed_slice(),
     };
     finalize_modport_defs(&mut def_index, ctx.raw_modport_defs);
     def_index
@@ -220,6 +222,7 @@ pub(crate) struct DefContext<'a> {
     pub(crate) owner_to_scope: HashMap<crate::Site, ScopeId>,
     pub(crate) diagnostics: Vec<SemanticDiag>,
     pub(crate) internal_errors: Vec<(Option<crate::Site>, SmolStr)>,
+    pub(crate) design_elements: Vec<DesignElement>,
 }
 
 impl<'a> DefContext<'a> {
@@ -253,6 +256,7 @@ impl<'a> DefContext<'a> {
             owner_to_scope: HashMap::new(),
             diagnostics: Vec::new(),
             internal_errors: Vec::new(),
+            design_elements: Vec::new(),
         }
     }
 
@@ -556,6 +560,24 @@ fn container_callable_default(lifetime_tok: Option<&SyntaxToken>) -> Lifetime {
     }
 }
 
+/// Compute the design-element extent trimmed of leading trivia.
+///
+/// Rowan attaches leading whitespace/comments to the first token of a node,
+/// so `node.text_range().start()` can precede the actual keyword. This trims
+/// to the first non-trivia token's start.
+fn design_element_extent(node: &SyntaxNode) -> TokenSpan {
+    let range = node.text_range();
+    let mut tok = node.first_token();
+    while let Some(t) = tok {
+        if !t.kind().is_trivia() {
+            let trimmed = lyra_source::TextRange::new(t.text_range().start(), range.end());
+            return TokenSpan::new(trimmed);
+        }
+        tok = t.next_token();
+    }
+    TokenSpan::new(range)
+}
+
 fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: ScopeId) {
     let module_ast = lyra_ast::ModuleDecl::cast(node.clone());
     let Some(name_tok) = module_ast.as_ref().and_then(|m| m.name()) else {
@@ -579,6 +601,10 @@ fn collect_module(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Scop
         name_span,
         DefScope::Owned(module_scope),
     );
+    ctx.design_elements.push(DesignElement {
+        kind: DefinitionKind::Module,
+        extent: design_element_extent(node),
+    });
 
     let container_lifetime = container_callable_default(
         module_ast
@@ -634,6 +660,10 @@ fn collect_package(ctx: &mut DefContext<'_>, node: &SyntaxNode, _file_scope: Sco
         name_span,
         DefScope::Owned(package_scope),
     );
+    ctx.design_elements.push(DesignElement {
+        kind: DefinitionKind::Package,
+        extent: design_element_extent(node),
+    });
 
     let container_lifetime =
         container_callable_default(pkg_ast.as_ref().and_then(|p| p.lifetime_token()).as_ref());
@@ -669,6 +699,10 @@ fn collect_interface(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         name_span,
         DefScope::Owned(iface_scope),
     );
+    ctx.design_elements.push(DesignElement {
+        kind: DefinitionKind::Interface,
+        extent: design_element_extent(node),
+    });
     let container_lifetime =
         container_callable_default(iface_ast.as_ref().and_then(|i| i.lifetime_token()).as_ref());
 
@@ -722,6 +756,10 @@ fn collect_program(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         name_span,
         DefScope::Owned(prog_scope),
     );
+    ctx.design_elements.push(DesignElement {
+        kind: DefinitionKind::Program,
+        extent: design_element_extent(node),
+    });
 
     let container_lifetime =
         container_callable_default(prog_ast.as_ref().and_then(|p| p.lifetime_token()).as_ref());
@@ -772,6 +810,10 @@ fn collect_primitive(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         name_span,
         DefScope::Owned(prim_scope),
     );
+    ctx.design_elements.push(DesignElement {
+        kind: DefinitionKind::Primitive,
+        extent: design_element_extent(node),
+    });
 }
 
 fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
@@ -796,6 +838,10 @@ fn collect_config(ctx: &mut DefContext<'_>, node: &SyntaxNode) {
         name_span,
         DefScope::Owned(cfg_scope),
     );
+    ctx.design_elements.push(DesignElement {
+        kind: DefinitionKind::Config,
+        extent: design_element_extent(node),
+    });
 }
 
 fn collect_package_body(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {

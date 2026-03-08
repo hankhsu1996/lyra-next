@@ -96,6 +96,9 @@ pub fn file_diagnostics(
     // Modport diagnostics: resolution errors + prototype validation
     collect_modport_diagnostics(db, unit, file_id, def, pp, &mut diags);
 
+    // Resetall inside design element (LRM 22.3)
+    collect_resetall_diagnostics(pp, def, &mut diags);
+
     // Timescale precision-exceeds-unit diagnostics (LRM 3.14.2.1)
     collect_timescale_diagnostics(db, file, &mut diags);
 
@@ -272,6 +275,49 @@ fn collect_timescale_diagnostics(
                     }),
                 );
             }
+        }
+    }
+}
+
+fn collect_resetall_diagnostics(
+    pp: &lyra_preprocess::PreprocOutput,
+    def: &lyra_semantic::def_index::DefIndex,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let elements = &def.design_elements;
+    if elements.is_empty() {
+        return;
+    }
+
+    for event in &pp.directive_events {
+        let is_resetall = matches!(
+            event.kind,
+            lyra_preprocess::DirectiveEventKind::KnownDirective(
+                lyra_preprocess::DirectiveKeyword::Resetall
+            )
+        );
+        if !is_resetall {
+            continue;
+        }
+        let offset = event.expanded_offset;
+        if let Some(_elem) = elements
+            .iter()
+            .find(|e| e.extent.text_range().contains(offset))
+        {
+            diags.push(
+                lyra_diag::Diagnostic::new(
+                    lyra_diag::Severity::Error,
+                    lyra_diag::code::RESETALL_INSIDE_DESIGN_ELEMENT,
+                    lyra_diag::Message::simple(lyra_diag::MessageId::ResetallInsideDesignElement),
+                )
+                .with_label(lyra_diag::Label {
+                    kind: lyra_diag::LabelKind::Primary,
+                    span: event.span,
+                    message: lyra_diag::Message::simple(
+                        lyra_diag::MessageId::ResetallInsideDesignElement,
+                    ),
+                }),
+            );
         }
     }
 }
