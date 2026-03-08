@@ -6,6 +6,7 @@ mod decl_check;
 mod default_nettype_queries;
 mod diagnostics;
 mod dim_model;
+mod dim_resolve;
 mod elab_eval;
 mod elab_lower;
 mod elab_queries;
