@@ -91,7 +91,8 @@ pub fn eval_const_int<'db>(db: &'db dyn salsa::Database, expr_ref: ConstExprRef<
         let sym = match &resolution.target {
             lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => s,
             lyra_semantic::resolve_index::ResolvedTarget::Def(_)
-            | lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
+            | lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_)
+            | lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(_) => {
                 return Err(ConstEvalError::NonConstant);
             }
         };
@@ -251,6 +252,9 @@ fn resolve_type_from_typespec(
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
             return Some(Ty::Enum(ev.enum_id));
         }
+        lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(_) => {
+            return None;
+        }
     };
     let sym_ref = SymbolRef::new(db, unit, sym_id);
     let sym_type = type_of_symbol_raw(db, sym_ref);
@@ -283,6 +287,9 @@ fn resolve_as_type(
             }
             lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
                 return Some(Ty::Enum(ev.enum_id));
+            }
+            lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(_) => {
+                return None;
             }
         };
         let sym_ref = SymbolRef::new(db, unit, sym_id);

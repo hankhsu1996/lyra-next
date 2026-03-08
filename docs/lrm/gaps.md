@@ -34,7 +34,7 @@ Drive strength and charge strength syntax is parsed. Illegal both-highz drive st
 
 ### 6.10: Implicit declarations
 
-When `` `default_nettype none `` is active, undeclared names at implicit-net candidate sites (continuous-assignment LHS) now emit a distinct `implicit_net_forbidden` diagnostic instead of the generic `unresolved_name`. Remaining gap: actual implicit net creation (materializing a 1-bit wire or the type set by `` `default_nettype ``) is not yet implemented. When the active policy is `wire`/`tri`/etc., the name remains unresolved. Blocked by: implicit net symbol materialization in the semantic model. Remaining candidate sites: module port expressions, instance port connections. Test: `lrm/ch06/6.10_implicit_declarations`.
+Implicit nets are modeled as resolve-owned semantic entities with stable identity and deduplication by (scope, name). Continuous-assignment LHS creation is implemented: undeclared names at eligible sites create scalar nets of the active default_nettype, or emit `implicit_net_forbidden` when the policy is `none`. Expression-context type resolution goes through a canonical helper; other DB match sites (type-namespace resolution, callable lookup, const-eval) handle the variant directly with context-appropriate fallbacks. Remaining candidate sites: port connection lists (`PortConnection`), ANSI port expression declarations (`PortExprDecl`). Test: regression tests `implicit_net_wire_assign`, `implicit_net_tri_assign`, `implicit_net_declared_wins`, `default_nettype_none_assign`.
 
 ### 6.14: Chandle data type
 

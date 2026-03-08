@@ -844,6 +844,7 @@ mod tests {
         let resolve = lyra_semantic::resolve_index::ResolveIndex {
             file: FileId(0),
             resolutions: std::collections::HashMap::new(),
+            implicit_nets: lyra_semantic::resolve_index::ImplicitNetIndex::empty(),
             diagnostics: Box::new([]),
         };
         let diags = lower_file_diagnostics(FileId(0), &pp, &parse, &def, &resolve);

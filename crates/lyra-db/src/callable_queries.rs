@@ -50,6 +50,9 @@ pub(crate) fn resolve_typespec_ty_with(
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(ev) => {
             return Ty::Enum(ev.enum_id);
         }
+        lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(_) => {
+            return Ty::Error;
+        }
     };
 
     let sym_type = type_of_sym(db, unit, target);

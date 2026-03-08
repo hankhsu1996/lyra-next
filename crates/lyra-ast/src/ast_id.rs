@@ -88,6 +88,11 @@ impl ErasedAstId {
         self.0.kind
     }
 
+    /// The start offset of this AST node as a `TextSize`.
+    pub fn start_offset(self) -> TextSize {
+        TextSize::new(self.0.start)
+    }
+
     /// The source range of this AST node, derived directly from the ID.
     ///
     /// This is a convenience accessor. For file-guarded + existence-checked

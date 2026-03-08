@@ -63,6 +63,7 @@ impl<'a> DimResolveCtx<'a> {
                     lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
                         Ty::Enum(target.enum_id)
                     }
+                    lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(_) => Ty::Error,
                 };
                 return UnpackedDim::Assoc(AssocIndex::Typed(Box::new(resolved_ty)));
             }

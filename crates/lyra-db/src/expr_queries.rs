@@ -583,6 +583,10 @@ fn type_of_name_impl(
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
             ExprType::from_ty(&Ty::Enum(target.enum_id))
         }
+        lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(id) => {
+            let sym_type = crate::resolve_helpers::implicit_net_symbol_type(resolve, *id);
+            ExprType::from_symbol_type(&sym_type)
+        }
     }
 }
 
@@ -824,7 +828,8 @@ fn resolve_callable_impl(
     };
     let target_id = match &res.target {
         lyra_semantic::resolve_index::ResolvedTarget::Symbol(s) => *s,
-        lyra_semantic::resolve_index::ResolvedTarget::Def(_) => {
+        lyra_semantic::resolve_index::ResolvedTarget::Def(_)
+        | lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(_) => {
             return Err(ResolveCallableError::NotFound);
         }
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(_) => {
@@ -878,6 +883,9 @@ fn resolve_type_arg_raw_impl(
         }
         lyra_semantic::resolve_index::ResolvedTarget::EnumVariant(target) => {
             return Some(Ty::Enum(target.enum_id));
+        }
+        lyra_semantic::resolve_index::ResolvedTarget::ImplicitNet(_) => {
+            return None;
         }
     };
     let sym_ref = SymbolRef::new(db, unit, sym_id);

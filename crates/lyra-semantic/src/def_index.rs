@@ -324,6 +324,10 @@ impl NamePath {
 pub enum ImplicitNetSiteKind {
     /// LHS of a continuous assignment (`assign y = ...`).
     ContinuousAssignLhs,
+    /// Port connection in a module/interface/program instance.
+    PortConnection,
+    /// Port expression in an ANSI port declaration.
+    PortExprDecl,
 }
 
 /// A recorded name-use site awaiting resolution.
