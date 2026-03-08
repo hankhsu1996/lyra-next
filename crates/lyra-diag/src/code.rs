@@ -107,6 +107,8 @@ pub const MODPORT_CONFLICT: DiagKey = "lyra.elab.modport_conflict";
 pub const TIMESCALE_INVALID_VALUE: DiagKey = "lyra.preprocess.timescale_invalid_value";
 pub const TIMESCALE_PRECISION_EXCEEDS_UNIT: DiagKey =
     "lyra.preprocess.timescale_precision_exceeds_unit";
+pub const RESETALL_INSIDE_DESIGN_ELEMENT: DiagKey =
+    "lyra.preprocess.resetall_inside_design_element";
 
 // Internal diagnostics
 pub const INTERNAL_ERROR: DiagKey = "lyra.internal.error";
@@ -205,6 +207,7 @@ pub const ALL_KEYS: &[DiagKey] = &[
     MODPORT_CONFLICT,
     TIMESCALE_INVALID_VALUE,
     TIMESCALE_PRECISION_EXCEEDS_UNIT,
+    RESETALL_INSIDE_DESIGN_ELEMENT,
     INTERNAL_ERROR,
 ];
 

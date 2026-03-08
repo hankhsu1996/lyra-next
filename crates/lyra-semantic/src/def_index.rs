@@ -5,6 +5,7 @@ use lyra_source::{DeclSpan, FileId};
 use smol_str::SmolStr;
 
 use crate::def_entry::{DefEntry, DefScope};
+use crate::design_element::DesignElement;
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::{EnumDef, EnumDefIdx, EnumId};
 use crate::global_index::DefinitionKind;
@@ -137,6 +138,9 @@ pub struct DefIndex {
     pub owner_to_scope: HashMap<Site, ScopeId>,
     pub diagnostics: Box<[SemanticDiag]>,
     pub internal_errors: Box<[(Option<Site>, SmolStr)]>,
+    /// Design-element extents, source-ordered by construction.
+    /// Each entry stores the full trimmed extent computed in the builder.
+    pub design_elements: Box<[DesignElement]>,
 }
 
 /// Encapsulates modport storage: declaration-order slice for traversal,

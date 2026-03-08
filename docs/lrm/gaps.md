@@ -174,10 +174,6 @@ The std built-in package should contain process, mailbox, and semaphore classes 
 
 ## Chapter 22 -- Compiler Directives
 
-### 22.3: `resetall` -- illegal inside design elements
-
-`` `resetall `` inside a module/interface/program should be diagnosed as illegal (LRM 22.3). Lyra currently accepts it silently (exit code 0). Blocked by: preprocessor or parser-level design-element scope tracking for directive legality. Test: sv-tests `22.3--resetall_illegal`.
-
 ### 22.4: `include` -- search path resolution
 
 `` `include `` with relative paths fails because Lyra has no `-I`/`--incdir` CLI support. All 22.4 sv-tests tests fail for this reason. Blocked by: include search path model in preprocessor, `--incdir` CLI flag. Test: sv-tests `22.4--include_*`.

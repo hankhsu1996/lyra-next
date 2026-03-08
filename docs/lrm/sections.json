@@ -430,5 +430,22 @@
   {"section": "26.4", "chapter": 26, "title": "Using packages in module headers", "parent": "26", "children": [], "ownable": true},
   {"section": "26.5", "chapter": 26, "title": "Search order rules", "parent": "26", "children": [], "ownable": true},
   {"section": "26.6", "chapter": 26, "title": "Exporting imported names from packages", "parent": "26", "children": [], "ownable": true},
-  {"section": "26.7", "chapter": 26, "title": "The std built-in package", "parent": "26", "children": [], "ownable": true}
+  {"section": "26.7", "chapter": 26, "title": "The std built-in package", "parent": "26", "children": [], "ownable": true},
+  {"section": "22", "chapter": 22, "title": "Compiler directives", "parent": null, "children": ["22.1", "22.2", "22.3", "22.4", "22.5", "22.6", "22.7", "22.8", "22.9", "22.10", "22.11", "22.12"], "ownable": false},
+  {"section": "22.1", "chapter": 22, "title": "General", "parent": "22", "children": [], "ownable": false},
+  {"section": "22.2", "chapter": 22, "title": "Overview", "parent": "22", "children": [], "ownable": false},
+  {"section": "22.3", "chapter": 22, "title": "`resetall", "parent": "22", "children": [], "ownable": true},
+  {"section": "22.4", "chapter": 22, "title": "`include", "parent": "22", "children": [], "ownable": true},
+  {"section": "22.5", "chapter": 22, "title": "`define, `undef, and `undefineall", "parent": "22", "children": ["22.5.1", "22.5.2", "22.5.3"], "ownable": false},
+  {"section": "22.5.1", "chapter": 22, "title": "`define", "parent": "22.5", "children": [], "ownable": true},
+  {"section": "22.5.2", "chapter": 22, "title": "`undef", "parent": "22.5", "children": [], "ownable": true},
+  {"section": "22.5.3", "chapter": 22, "title": "`undefineall", "parent": "22.5", "children": [], "ownable": true},
+  {"section": "22.6", "chapter": 22, "title": "`ifdef, `else, `elsif, `endif, `ifndef", "parent": "22", "children": [], "ownable": true},
+  {"section": "22.7", "chapter": 22, "title": "`timescale", "parent": "22", "children": [], "ownable": true},
+  {"section": "22.8", "chapter": 22, "title": "`default_nettype", "parent": "22", "children": [], "ownable": true},
+  {"section": "22.9", "chapter": 22, "title": "`unconnected_drive and `nounconnected_drive", "parent": "22", "children": [], "ownable": true},
+  {"section": "22.10", "chapter": 22, "title": "`celldefine and `endcelldefine", "parent": "22", "children": [], "ownable": true},
+  {"section": "22.11", "chapter": 22, "title": "`pragma", "parent": "22", "children": ["22.11.1"], "ownable": false},
+  {"section": "22.11.1", "chapter": 22, "title": "Standard pragmas", "parent": "22.11", "children": [], "ownable": true},
+  {"section": "22.12", "chapter": 22, "title": "`line", "parent": "22", "children": [], "ownable": true}
 ]
