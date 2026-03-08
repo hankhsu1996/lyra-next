@@ -1,7 +1,6 @@
 ---
 name: commit-pr
 description: Commit changes and create a pull request in one step
-disable-model-invocation: true
 ---
 
 # Commit and PR

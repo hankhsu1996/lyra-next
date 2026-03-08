@@ -1,7 +1,6 @@
 ---
 name: merged
 description: Clean up after PR is merged
-disable-model-invocation: true
 ---
 
 # Merged
