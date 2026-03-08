@@ -14,8 +14,50 @@ use crate::modport_def::{ModportDef, ModportDefId};
 use crate::nettype_def::{NettypeDef, NettypeDefIdx};
 use crate::record::{RecordDef, RecordDefIdx, RecordId};
 use crate::scopes::{ScopeId, ScopeKind, ScopeTree};
+#[cfg(test)]
+use crate::symbols::SymbolKind;
 use crate::symbols::{GlobalDefId, Namespace, SymbolId, SymbolTable};
 use crate::time_scale::ScopeTimeUnits;
+
+/// Semantic role of a scope-owning declaration.
+///
+/// Used for role-qualified scope lookup in test helpers. Covers
+/// both definition-namespace owners (module, package, ...) and
+/// symbol-namespace owners (function, task).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ScopeOwnerKind {
+    Module,
+    Package,
+    Interface,
+    Program,
+    Primitive,
+    Config,
+    Function,
+    Task,
+}
+
+#[cfg(test)]
+impl ScopeOwnerKind {
+    pub(crate) fn from_definition_kind(dk: DefinitionKind) -> Self {
+        match dk {
+            DefinitionKind::Module => Self::Module,
+            DefinitionKind::Package => Self::Package,
+            DefinitionKind::Interface => Self::Interface,
+            DefinitionKind::Program => Self::Program,
+            DefinitionKind::Primitive => Self::Primitive,
+            DefinitionKind::Config => Self::Config,
+        }
+    }
+
+    pub(crate) fn from_symbol_kind(sk: SymbolKind) -> Option<Self> {
+        match sk {
+            SymbolKind::Function => Some(Self::Function),
+            SymbolKind::Task => Some(Self::Task),
+            _ => None,
+        }
+    }
+}
 
 /// Lookup strategy for a use-site.
 ///
@@ -87,6 +129,10 @@ pub struct DefIndex {
     /// Present for named scopes (modules, packages, callables); absent
     /// for anonymous scopes (blocks, generates, file).
     pub scope_owners: HashMap<ScopeId, Site>,
+    /// Reverse index: maps an owner `decl_site` to the `ScopeId` it owns.
+    /// Populated atomically with `scope_owners` through
+    /// `DefContext::register_scope_owner`.
+    pub owner_to_scope: HashMap<Site, ScopeId>,
     pub diagnostics: Box<[SemanticDiag]>,
     pub internal_errors: Box<[(Option<Site>, SmolStr)]>,
 }
@@ -134,10 +180,7 @@ impl DefIndex {
 
     /// Find the scope owned by a specific declaration site.
     pub fn find_scope_by_owner(&self, owner: Site) -> Option<ScopeId> {
-        self.scope_owners
-            .iter()
-            .find(|(_, site)| **site == owner)
-            .map(|(sid, _)| *sid)
+        self.owner_to_scope.get(&owner).copied()
     }
 
     pub fn enum_def(&self, idx: EnumDefIdx) -> &EnumDef {
