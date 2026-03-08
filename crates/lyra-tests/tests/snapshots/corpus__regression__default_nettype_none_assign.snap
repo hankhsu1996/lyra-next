@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.semantic.implicit_net_forbidden] 2:8..2:8: implicit net creation disabled by `default_nettype none` for `y`
+  error[lyra.semantic.unresolved_name] 2:12..2:12: unresolved name `x`
+---
+unit (0 diagnostics)

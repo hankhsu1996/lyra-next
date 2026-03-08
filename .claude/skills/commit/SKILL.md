@@ -1,7 +1,6 @@
 ---
 name: commit
 description: Create a commit with a well-formatted message
-disable-model-invocation: true
 ---
 
 # Commit

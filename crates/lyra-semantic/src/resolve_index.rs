@@ -7,7 +7,7 @@ use smallvec::SmallVec;
 
 use crate::Site;
 
-use crate::def_index::{ExpectedNs, ExportDeclId, ImportDeclId, LocalDeclId, NamePath};
+use crate::def_index::{ExpectedNs, ExportDeclId, ImportDeclId, LocalDeclId, NamePath, UseSite};
 use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::enum_def::EnumVariantTarget;
 use crate::scopes::ScopeId;
@@ -261,5 +261,37 @@ pub(crate) fn check_type_mismatch(
         })
     } else {
         None
+    }
+}
+
+/// Resolve a cross-file (package-scope) name site and insert into the
+/// resolution map, emitting type-mismatch diagnostics if needed.
+pub(crate) fn resolve_cross_file(
+    anchor: crate::Site,
+    namespace: Namespace,
+    use_site: &UseSite,
+    lookup_decl: &dyn Fn(crate::Site) -> Option<SymbolId>,
+    resolutions: &mut HashMap<crate::Site, Resolution>,
+    diagnostics: &mut Vec<SemanticDiag>,
+) {
+    if let Some(local) = lookup_decl(anchor) {
+        resolutions.insert(
+            use_site.name_ref_site,
+            Resolution {
+                target: ResolvedTarget::Symbol(GlobalSymbolId {
+                    file: anchor.file(),
+                    local,
+                }),
+                namespace,
+            },
+        );
+        if let Some(diag) = check_type_mismatch(
+            use_site.expected_ns,
+            namespace,
+            &use_site.path,
+            DiagSpan::Site(use_site.name_ref_site),
+        ) {
+            diagnostics.push(diag);
+        }
     }
 }

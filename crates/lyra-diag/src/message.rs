@@ -127,6 +127,8 @@ pub enum MessageId {
     // Index key legality
     IndexKeyNotIntegral,
     AssocIndexKeyMismatch,
+    // Implicit net policy
+    ImplicitNetForbidden,
     // Declaration legality
     AutomaticVarNonProcedural,
     // Timescale directive
@@ -227,39 +229,18 @@ impl Message {
 
 /// Render a `Message` to a human-readable string.
 pub fn render_message(msg: &Message) -> String {
-    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
     match msg.id {
-        MessageId::UnresolvedName => format!("unresolved name `{}`", name()),
-        MessageId::DuplicateDefinition => format!("duplicate definition of `{}`", name()),
-        MessageId::DuplicateModuleDefinition => format!("duplicate module definition `{}`", name()),
-        MessageId::DuplicateDefinitionInUnit => format!("duplicate definition `{}`", name()),
-        MessageId::PackageNotFound => format!("package `{}` not found", name()),
-        MessageId::MemberNotFound => {
-            let pkg = name();
-            let member = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            format!("member `{member}` not found in package `{pkg}`")
-        }
-        MessageId::AmbiguousWildcardImport => {
-            let sym_name = name();
-            let pkgs = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            format!("name `{sym_name}` is ambiguous: imported from packages {pkgs}")
-        }
-        MessageId::UnsupportedQualifiedPath => {
-            format!("qualified path `{}` is not supported", name())
-        }
-        MessageId::ExplicitImportConflictsWithLocal => {
-            let sym_name = name();
-            let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            format!("import of `{sym_name}` from package `{pkg}` conflicts with local declaration")
-        }
-        MessageId::ExplicitConflictsWithWildcard => {
-            let sym_name = name();
-            let explicit_pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
-            let wildcard_pkg = msg.args.get(2).and_then(Arg::as_name).unwrap_or("?");
-            format!(
-                "import of `{sym_name}` from package `{explicit_pkg}` conflicts with wildcard import from package `{wildcard_pkg}`"
-            )
-        }
+        MessageId::UnresolvedName
+        | MessageId::DuplicateDefinition
+        | MessageId::DuplicateModuleDefinition
+        | MessageId::DuplicateDefinitionInUnit
+        | MessageId::PackageNotFound
+        | MessageId::MemberNotFound
+        | MessageId::ImplicitNetForbidden
+        | MessageId::AmbiguousWildcardImport
+        | MessageId::UnsupportedQualifiedPath
+        | MessageId::ExplicitImportConflictsWithLocal
+        | MessageId::ExplicitConflictsWithWildcard => render_resolve_message(msg),
         MessageId::WidthMismatch
         | MessageId::BitsWide
         | MessageId::UndeclaredType
@@ -326,6 +307,52 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::StreamSliceSizeNotConst
         | MessageId::StreamWithNonArray => render_stream_unpack_message(msg),
         _ => render_other_message(msg),
+    }
+}
+
+fn render_resolve_message(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
+        MessageId::UnresolvedName => format!("unresolved name `{}`", name()),
+        MessageId::DuplicateDefinition => format!("duplicate definition of `{}`", name()),
+        MessageId::DuplicateModuleDefinition => {
+            format!("duplicate module definition `{}`", name())
+        }
+        MessageId::DuplicateDefinitionInUnit => format!("duplicate definition `{}`", name()),
+        MessageId::PackageNotFound => format!("package `{}` not found", name()),
+        MessageId::MemberNotFound => {
+            let pkg = name();
+            let member = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("member `{member}` not found in package `{pkg}`")
+        }
+        MessageId::ImplicitNetForbidden => {
+            format!(
+                "implicit net creation disabled by `default_nettype none` for `{}`",
+                name()
+            )
+        }
+        MessageId::AmbiguousWildcardImport => {
+            let sym_name = name();
+            let pkgs = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("name `{sym_name}` is ambiguous: imported from packages {pkgs}")
+        }
+        MessageId::UnsupportedQualifiedPath => {
+            format!("qualified path `{}` is not supported", name())
+        }
+        MessageId::ExplicitImportConflictsWithLocal => {
+            let sym_name = name();
+            let pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("import of `{sym_name}` from package `{pkg}` conflicts with local declaration")
+        }
+        MessageId::ExplicitConflictsWithWildcard => {
+            let sym_name = name();
+            let explicit_pkg = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            let wildcard_pkg = msg.args.get(2).and_then(Arg::as_name).unwrap_or("?");
+            format!(
+                "import of `{sym_name}` from package `{explicit_pkg}` conflicts with wildcard import from package `{wildcard_pkg}`"
+            )
+        }
+        _ => String::new(),
     }
 }
 

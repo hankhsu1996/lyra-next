@@ -12,7 +12,9 @@ use crate::builder_types::{
 };
 
 use crate::def_entry::{DefEntry, DefEntryBuilder, DefScope};
-use crate::def_index::{DefIndex, ForeachVarDef, Import, LocalDecl, LocalDeclId, UseSite};
+use crate::def_index::{
+    DefIndex, ForeachVarDef, ImplicitNetSiteKind, Import, LocalDecl, LocalDeclId, UseSite,
+};
 use crate::diagnostic::SemanticDiag;
 use crate::enum_def::EnumDef;
 use crate::global_index::DefinitionKind;
@@ -853,7 +855,7 @@ fn collect_port_list(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId
                 if let Some(ts) = TypeSpec::cast(port_child.clone()) {
                     collect_type_spec_refs(ctx, &ts, scope);
                 } else if port_child.kind() == SyntaxKind::UnpackedDimension {
-                    crate::builder_types::collect_name_refs(ctx, &port_child, scope);
+                    crate::builder_types::collect_name_refs(ctx, &port_child, scope, None);
                 }
             }
         }
@@ -881,7 +883,18 @@ fn collect_module_item(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: Scope
             collect_param_decl(ctx, &decl, scope);
         }
         SyntaxKind::ContinuousAssign => {
-            collect_name_refs(ctx, node, scope);
+            let ca = expect_typed::<lyra_ast::ContinuousAssign>(node);
+            if let Some(lhs) = ca.lhs() {
+                collect_name_refs(
+                    ctx,
+                    lhs.syntax(),
+                    scope,
+                    Some(ImplicitNetSiteKind::ContinuousAssignLhs),
+                );
+            }
+            if let Some(rhs) = ca.rhs() {
+                collect_name_refs(ctx, rhs.syntax(), scope, None);
+            }
         }
         SyntaxKind::ImportDecl => {
             let decl = expect_typed::<lyra_ast::ImportDecl>(node);

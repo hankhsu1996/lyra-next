@@ -174,6 +174,13 @@ pub(crate) fn lower_semantic_diag(
         | SemanticDiagKind::NonIntegralPackedMember { .. } => {
             lower_record_enum_diag(&diag.kind, primary_span)
         }
+        SemanticDiagKind::ImplicitNetForbidden { name, .. } => lower_name_diag(
+            code::IMPLICIT_NET_FORBIDDEN,
+            MessageId::ImplicitNetForbidden,
+            MessageId::ImplicitNetForbidden,
+            name,
+            primary_span,
+        ),
         SemanticDiagKind::NotASubroutine { name } => lower_name_diag(
             code::NOT_A_SUBROUTINE,
             MessageId::NotASubroutine,
@@ -264,6 +271,7 @@ fn lower_record_enum_diag(kind: &SemanticDiagKind, primary_span: Span) -> Diagno
         | SemanticDiagKind::UnsupportedQualifiedPath { .. }
         | SemanticDiagKind::UndeclaredType { .. }
         | SemanticDiagKind::NotAType { .. }
+        | SemanticDiagKind::ImplicitNetForbidden { .. }
         | SemanticDiagKind::NotASubroutine { .. }
         | SemanticDiagKind::PrototypeMismatch { .. }
         | SemanticDiagKind::InternalError { .. } => {

@@ -9,6 +9,7 @@ pub mod coerce;
 pub mod const_eval;
 pub mod def_entry;
 pub mod def_index;
+pub mod default_nettype;
 pub mod diagnostic;
 pub mod enum_def;
 pub mod foreach_check;
@@ -27,6 +28,8 @@ pub mod nettype_def;
 pub mod record;
 mod resolve;
 pub mod resolve_index;
+#[cfg(test)]
+mod resolve_tests;
 pub mod scopes;
 pub mod site;
 pub(crate) mod streaming;

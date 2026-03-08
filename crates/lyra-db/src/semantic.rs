@@ -17,6 +17,7 @@ use lyra_semantic::scopes::ScopeKind;
 use lyra_semantic::symbols::{GlobalDefId, GlobalSymbolId};
 use smol_str::SmolStr;
 
+use crate::default_nettype_queries::{build_default_nettype_policy, file_default_nettype_summary};
 use crate::enum_queries::enum_variant_index;
 use crate::pipeline::{ast_id_map, parse_file};
 use crate::{CompilationUnit, SourceFile, source_file_by_id};
@@ -328,7 +329,9 @@ pub fn base_resolve_index(
     };
     let instance_filter =
         |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
-    lyra_semantic::build_resolve_index(def, core, &lookup_decl, &instance_filter)
+    let dnt_summary = file_default_nettype_summary(db, file);
+    let policy = build_default_nettype_policy(dnt_summary);
+    lyra_semantic::build_resolve_index(def, core, &lookup_decl, &instance_filter, &policy)
 }
 
 /// Build per-file resolution index (Salsa-cached).
@@ -352,7 +355,9 @@ pub fn resolve_index_file(
     };
     let instance_filter =
         |idx: InstanceDeclIdx| -> bool { instance_decl_is_interface(core, def, global, idx) };
-    lyra_semantic::build_resolve_index(def, core, &lookup_decl, &instance_filter)
+    let dnt_summary = file_default_nettype_summary(db, file);
+    let policy = build_default_nettype_policy(dnt_summary);
+    lyra_semantic::build_resolve_index(def, core, &lookup_decl, &instance_filter, &policy)
 }
 
 /// Check whether an instance declaration refers to an interface type.

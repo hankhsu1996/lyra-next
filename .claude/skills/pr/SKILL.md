@@ -1,7 +1,6 @@
 ---
 name: pr
 description: Create a pull request with a well-formatted description
-disable-model-invocation: true
 ---
 
 # Pull Request

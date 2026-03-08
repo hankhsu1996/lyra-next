@@ -84,7 +84,7 @@ pub use timescale_queries::{effective_time_params, file_timescale_summary};
 // Re-export default_nettype queries
 pub use default_nettype_queries::{
     DefaultNettypePolicyEntry, FileDefaultNettypeSummary, active_default_nettype_at,
-    default_nettype_is_none_at, file_default_nettype_summary,
+    file_default_nettype_summary,
 };
 
 // Re-export elaboration queries

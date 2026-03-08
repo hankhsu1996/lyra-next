@@ -8,7 +8,7 @@ use lyra_source::{DeclSpan, TokenSpan};
 use smol_str::SmolStr;
 
 use crate::builder::DefContext;
-use crate::def_index::{ExpectedNs, NamePath, UseSite};
+use crate::def_index::{ExpectedNs, ImplicitNetSiteKind, NamePath, UseSite};
 use crate::diagnostic::{DiagSpan, SemanticDiag, SemanticDiagKind};
 use crate::enum_def::{EnumBase, EnumDef, EnumDefIdx, EnumMemberDef, EnumMemberRangeKind};
 use crate::name_lowering::QualifiedNameLowerError;
@@ -24,6 +24,8 @@ use crate::types::Ty;
 /// Try to lower a `QualifiedName` and push it as a use site.
 ///
 /// On success, pushes a `UseSite` with the given `expected_ns`.
+/// Qualified names are never implicit-net candidates (LRM 6.10),
+/// so `implicit_net_site` is always `None`.
 /// On unsupported (>2 segments) or malformed, emits a diagnostic instead.
 pub(crate) fn try_push_qualified_use_site(
     ctx: &mut DefContext<'_>,
@@ -42,6 +44,7 @@ pub(crate) fn try_push_qualified_use_site(
                 scope,
                 name_ref_site: ast_id.erase(),
                 order_key: 0,
+                implicit_net_site: None,
             });
         }
         Err(QualifiedNameLowerError::TooManySegments { count }) => {
@@ -71,7 +74,7 @@ pub(crate) fn collect_type_spec_refs(ctx: &mut DefContext<'_>, ts: &TypeSpec, sc
             // type(expr): collect expression name refs
             for child in te.syntax().children() {
                 if child.kind() != SyntaxKind::TypeSpec {
-                    collect_name_refs(ctx, &child, scope);
+                    collect_name_refs(ctx, &child, scope, None);
                 }
             }
         }
@@ -89,7 +92,7 @@ fn collect_typespec_dim_refs(ctx: &mut DefContext<'_>, ts: &TypeSpec, scope: Sco
     for child in ts.syntax().children() {
         match child.kind() {
             SyntaxKind::PackedDimension | SyntaxKind::UnpackedDimension => {
-                collect_name_refs(ctx, &child, scope);
+                collect_name_refs(ctx, &child, scope, None);
             }
             _ => {}
         }
@@ -117,6 +120,7 @@ fn register_type_expr_use_site(
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,
+                    implicit_net_site: None,
                 });
             }
         }
@@ -142,6 +146,7 @@ fn register_type_use_site(
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,
+                    implicit_net_site: None,
                 });
             }
         }
@@ -155,6 +160,7 @@ fn register_type_use_site(
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,
+                    implicit_net_site: None,
                 });
             }
         }
@@ -179,7 +185,7 @@ pub(crate) fn collect_typedef(ctx: &mut DefContext<'_>, td: &TypedefDecl, scope:
         if let Some(ts) = TypeSpec::cast(child.clone()) {
             collect_type_spec_refs(ctx, &ts, scope);
         } else if child.kind() == SyntaxKind::UnpackedDimension {
-            collect_name_refs(ctx, &child, scope);
+            collect_name_refs(ctx, &child, scope, None);
         }
     }
     if let Some(name_tok) = td.name() {
@@ -524,6 +530,7 @@ fn collect_unpacked_dim_refs(
                         scope,
                         name_ref_site: ast_id.erase(),
                         order_key: 0,
+                        implicit_net_site: None,
                     });
                 }
                 return;
@@ -535,19 +542,63 @@ fn collect_unpacked_dim_refs(
             crate::type_extract::UserTypeRef::DottedType { .. } => {}
         }
     }
-    collect_name_refs_inner(ctx, dim.syntax(), scope);
+    collect_name_refs_inner(ctx, dim.syntax(), scope, None);
 }
 
-pub(crate) fn collect_name_refs(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+/// Collect name refs from a subtree.
+///
+/// When `implicit_net_site` is `Some`, discovered simple `NameRef` sites
+/// are tagged with that classification. `QualifiedName` sites are never
+/// tagged -- qualified paths are not implicit-net candidates (LRM 6.10).
+/// Used by the `ContinuousAssign` LHS collector.
+pub(crate) fn collect_name_refs(
+    ctx: &mut DefContext<'_>,
+    node: &SyntaxNode,
+    scope: ScopeId,
+    implicit_net_site: Option<ImplicitNetSiteKind>,
+) {
     // When called directly on an UnpackedDimension, apply TypeOrValue semantics.
     if let Some(dim) = lyra_ast::UnpackedDimension::cast(node.clone()) {
         collect_unpacked_dim_refs(ctx, &dim, scope);
         return;
     }
-    collect_name_refs_inner(ctx, node, scope);
+    // Handle leaf expression kinds that the inner walker finds as children
+    // but misses when called directly on the node itself.
+    match node.kind() {
+        SyntaxKind::NameRef => {
+            if let Some(name_ref) = NameRef::cast(node.clone())
+                && let Some(ident) = name_ref.ident()
+                && let Some(ast_id) = ctx.ast_id_map.ast_id(&name_ref)
+            {
+                ctx.use_sites.push(UseSite {
+                    path: NamePath::Simple(semantic_spelling(&ident)),
+                    expected_ns: ExpectedNs::Exact(Namespace::Value),
+                    scope,
+                    name_ref_site: ast_id.erase(),
+                    order_key: 0,
+                    implicit_net_site,
+                });
+            }
+            return;
+        }
+        SyntaxKind::QualifiedName => {
+            if let Some(qn) = QualifiedName::cast(node.clone()) {
+                // Qualified names are never implicit-net candidates (LRM 6.10).
+                try_push_qualified_use_site(ctx, &qn, scope, ExpectedNs::Exact(Namespace::Value));
+            }
+            return;
+        }
+        _ => {}
+    }
+    collect_name_refs_inner(ctx, node, scope, implicit_net_site);
 }
 
-fn collect_name_refs_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: ScopeId) {
+fn collect_name_refs_inner(
+    ctx: &mut DefContext<'_>,
+    node: &SyntaxNode,
+    scope: ScopeId,
+    implicit_net_site: Option<ImplicitNetSiteKind>,
+) {
     for child in node.children() {
         if child.kind() == SyntaxKind::NameRef {
             if let Some(name_ref) = NameRef::cast(child.clone())
@@ -560,28 +611,25 @@ fn collect_name_refs_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: S
                     scope,
                     name_ref_site: ast_id.erase(),
                     order_key: 0,
+                    implicit_net_site,
                 });
             }
         } else if child.kind() == SyntaxKind::QualifiedName {
             if let Some(qn) = QualifiedName::cast(child.clone()) {
+                // Qualified names are never implicit-net candidates (LRM 6.10).
                 try_push_qualified_use_site(ctx, &qn, scope, ExpectedNs::Exact(Namespace::Value));
             }
         } else if child.kind() == SyntaxKind::CastExpr {
-            // CastExpr contains a TypeSpec (the cast target type) and an
-            // inner expression. Process the TypeSpec as a type reference and
-            // recurse into the rest of the expression.
             for cast_child in child.children() {
                 if cast_child.kind() == SyntaxKind::TypeSpec {
                     if let Some(ts) = lyra_ast::TypeSpec::cast(cast_child) {
                         collect_type_spec_refs(ctx, &ts, scope);
                     }
                 } else {
-                    collect_name_refs(ctx, &cast_child, scope);
+                    collect_name_refs_inner(ctx, &cast_child, scope, implicit_net_site);
                 }
             }
         } else if child.kind() == SyntaxKind::TypeExpr {
-            // Standalone type(...) in expression context: inner names can be
-            // types or values (TypeOrValue namespace).
             if let Some(te) = lyra_ast::TypeExpr::cast(child) {
                 if let Some(inner_ts) = te.inner_type_spec() {
                     if let Some(utr) = crate::type_extract::user_type_ref(&inner_ts) {
@@ -589,7 +637,7 @@ fn collect_name_refs_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: S
                     }
                     collect_typespec_dim_refs(ctx, &inner_ts, scope);
                 } else if let Some(inner_expr) = te.inner_expr() {
-                    collect_name_refs(ctx, inner_expr.syntax(), scope);
+                    collect_name_refs_inner(ctx, inner_expr.syntax(), scope, implicit_net_site);
                 }
             }
         } else if child.kind() == SyntaxKind::TypeSpec {
@@ -606,20 +654,19 @@ fn collect_name_refs_inner(ctx: &mut DefContext<'_>, node: &SyntaxNode, scope: S
                 for item_child in child.children() {
                     if first {
                         first = false;
-                        // Bare NameRef key is a struct field name, not a variable
                         if item_child.kind() == SyntaxKind::NameRef {
                             continue;
                         }
                     }
-                    collect_name_refs(ctx, &item_child, scope);
+                    collect_name_refs_inner(ctx, &item_child, scope, implicit_net_site);
                 }
             } else {
-                collect_name_refs(ctx, &child, scope);
+                collect_name_refs_inner(ctx, &child, scope, implicit_net_site);
             }
         } else if let Some(dim) = lyra_ast::UnpackedDimension::cast(child.clone()) {
             collect_unpacked_dim_refs(ctx, &dim, scope);
         } else {
-            collect_name_refs(ctx, &child, scope);
+            collect_name_refs_inner(ctx, &child, scope, implicit_net_site);
         }
     }
 }
