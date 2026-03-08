@@ -1,0 +1,11 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (4 diagnostics)
+  error[lyra.parse.error] 3:18..3:18: expected `;`
+  error[lyra.parse.error] 3:18..3:18: unexpected token in module body
+  error[lyra.parse.error] 3:20..3:20: unexpected token in module body
+  error[lyra.parse.error] 3:23..3:23: unexpected token in module body
+---
+unit (0 diagnostics)

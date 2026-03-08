@@ -161,34 +161,46 @@ impl DefIndex {
     }
 }
 
+/// Root of a qualified name path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum QualifiedRoot {
+    /// `Pkg::member` -- package-qualified name.
+    Package(SmolStr),
+    /// `$unit::member` -- compilation-unit-qualified name.
+    Unit,
+}
+
+impl QualifiedRoot {
+    /// Display name for diagnostics.
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Package(pkg) => pkg.as_str(),
+            Self::Unit => "$unit",
+        }
+    }
+}
+
 /// A name path: simple identifier or qualified path.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NamePath {
     /// Simple identifier: `foo`
     Simple(SmolStr),
-    /// Qualified path: `a::b::c`. Segments are the identifiers.
-    Qualified { segments: Box<[SmolStr]> },
+    /// Qualified path: `root::member`.
+    Qualified(crate::name_lowering::QualifiedPath),
 }
 
 impl NamePath {
     pub fn as_simple(&self) -> Option<&str> {
         match self {
             Self::Simple(s) => Some(s.as_str()),
-            Self::Qualified { .. } => None,
-        }
-    }
-
-    pub fn as_qualified(&self) -> Option<&[SmolStr]> {
-        match self {
-            Self::Simple(_) => None,
-            Self::Qualified { segments } => Some(segments),
+            Self::Qualified(_) => None,
         }
     }
 
     pub fn display_name(&self) -> String {
         match self {
             Self::Simple(s) => s.to_string(),
-            Self::Qualified { segments } => segments.join("::"),
+            Self::Qualified(qp) => qp.display_name(),
         }
     }
 }

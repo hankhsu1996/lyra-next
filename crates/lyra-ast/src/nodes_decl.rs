@@ -167,12 +167,45 @@ impl ExportItem {
     }
 }
 
+/// A classified segment of a `QualifiedName`.
+///
+/// Distinguishes the `$unit` compilation-unit scope marker from
+/// ordinary named identifiers at the AST level, so consumers do not
+/// need to inspect token kinds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QualifiedSegment {
+    /// `$unit` -- compilation-unit scope prefix.
+    UnitScope,
+    /// An ordinary identifier segment (package name or member name).
+    Named(String),
+}
+
 impl QualifiedName {
     pub fn segments(&self) -> impl Iterator<Item = SyntaxToken> + '_ {
         self.syntax
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|tok| matches!(tok.kind(), SyntaxKind::Ident | SyntaxKind::EscapedIdent))
+            .filter(|tok| {
+                matches!(
+                    tok.kind(),
+                    SyntaxKind::Ident | SyntaxKind::EscapedIdent | SyntaxKind::SystemIdent
+                )
+            })
+    }
+
+    /// Return segments with structural classification applied.
+    ///
+    /// A `SystemIdent` token with text `$unit` becomes
+    /// `QualifiedSegment::UnitScope`; all other identifier tokens
+    /// become `QualifiedSegment::Named`.
+    pub fn classified_segments(&self) -> impl Iterator<Item = QualifiedSegment> + '_ {
+        self.segments().map(|tok| {
+            if tok.kind() == SyntaxKind::SystemIdent {
+                QualifiedSegment::UnitScope
+            } else {
+                QualifiedSegment::Named(tok.text().to_string())
+            }
+        })
     }
 }
 

@@ -3,7 +3,7 @@ use lyra_source::FileId;
 use smol_str::SmolStr;
 
 use crate::builder::build_def_index;
-use crate::def_index::{ExpectedNs, ImportName};
+use crate::def_index::{ExpectedNs, ImportName, NamePath, QualifiedRoot};
 use crate::diagnostic::SemanticDiagKind;
 use crate::name_graph::NameGraph;
 use crate::scopes::ScopeKind;
@@ -93,13 +93,19 @@ fn qualified_name_use_site() {
     let qualified_sites: Vec<_> = def
         .use_sites
         .iter()
-        .filter(|u| u.path.as_qualified().is_some())
+        .filter(|u| matches!(u.path, NamePath::Qualified(_)))
         .collect();
     assert_eq!(qualified_sites.len(), 1);
-    let segs = qualified_sites[0].path.as_qualified().unwrap();
-    assert_eq!(segs.len(), 2);
-    assert_eq!(segs[0].as_str(), "pkg");
-    assert_eq!(segs[1].as_str(), "x");
+    match &qualified_sites[0].path {
+        NamePath::Qualified(qp) => {
+            assert!(
+                matches!(&qp.root, QualifiedRoot::Package(pkg) if pkg == "pkg"),
+                "expected Package root"
+            );
+            assert_eq!(qp.member.as_str(), "x");
+        }
+        other @ NamePath::Simple(_) => panic!("expected Package-qualified path, got {other:?}"),
+    }
 }
 
 #[test]

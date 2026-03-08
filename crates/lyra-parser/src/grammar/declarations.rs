@@ -185,15 +185,14 @@ pub(crate) fn type_spec(p: &mut Parser) {
         struct_type(p);
     } else if is_data_type_keyword(p.current()) {
         p.bump();
+    } else if super::is_unit_scope_prefix(p)
+        && p.nth(1) == SyntaxKind::ColonColon
+        && p.nth(2) == SyntaxKind::Ident
+    {
+        super::parse_qualified_name(p);
     } else if p.at(SyntaxKind::Ident) {
         if p.nth(1) == SyntaxKind::ColonColon && p.nth(2) == SyntaxKind::Ident {
-            let qn = p.start();
-            p.bump(); // pkg
-            while p.at(SyntaxKind::ColonColon) && p.nth(1) == SyntaxKind::Ident {
-                p.bump(); // ::
-                p.bump(); // segment
-            }
-            qn.complete(p, SyntaxKind::QualifiedName);
+            super::parse_qualified_name(p);
         } else if p.nth(1) == SyntaxKind::Dot && p.nth(2) == SyntaxKind::Ident {
             let dn = p.start();
             let nr = p.start();
@@ -493,6 +492,7 @@ pub(crate) fn at_unambiguous_data_decl_start(p: &Parser) -> bool {
     ) || (matches!(k, SyntaxKind::StaticKw | SyntaxKind::AutomaticKw)
         && !matches!(p.nth(1), SyntaxKind::FunctionKw | SyntaxKind::TaskKw))
         || (k == SyntaxKind::Ident && p.nth(1) == SyntaxKind::ColonColon)
+        || (super::is_unit_scope_prefix(p) && p.nth(1) == SyntaxKind::ColonColon)
         || (k == SyntaxKind::Ident
             && p.nth(1) == SyntaxKind::Dot
             && p.nth(2) == SyntaxKind::Ident

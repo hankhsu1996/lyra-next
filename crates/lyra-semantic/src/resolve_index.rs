@@ -76,8 +76,11 @@ pub enum UnresolvedReason {
     NotFound,
     /// Package in qualified name or import not found.
     PackageNotFound { package: SmolStr },
-    /// Member not found in package.
-    MemberNotFound { package: SmolStr, member: SmolStr },
+    /// Member not found in qualified root (package or `$unit`).
+    MemberNotFound {
+        root: crate::def_index::QualifiedRoot,
+        member: SmolStr,
+    },
     /// Multiple wildcard imports provide the same name.
     AmbiguousWildcardImport { candidates: Box<[SmolStr]> },
     /// Multiple compilation-unit file-scope declarations share this name.
@@ -201,9 +204,9 @@ pub(crate) fn reason_to_diagnostic(
             primary,
             label: None,
         },
-        UnresolvedReason::MemberNotFound { package, member } => SemanticDiag {
+        UnresolvedReason::MemberNotFound { root, member } => SemanticDiag {
             kind: SemanticDiagKind::MemberNotFound {
-                package: package.clone(),
+                package: SmolStr::new(root.display_name()),
                 member: member.clone(),
             },
             primary,

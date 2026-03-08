@@ -36,7 +36,7 @@ pub use nodes::{
     TimeprecisionDecl, TimeunitDecl, TimingControl, TypeExpr, TypeSpec, TypedefDecl,
     UnpackedDimension, ValueRange, VarDecl, WhileStmt,
 };
-pub use nodes_decl::NetDeclKind;
+pub use nodes_decl::{NetDeclKind, QualifiedSegment};
 pub use nodes_expr::{
     RangeKind, StreamDir, StreamRangeOp, SyntaxAssignOp, SyntaxBinaryOp, SyntaxPrefixOp,
 };

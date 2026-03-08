@@ -161,18 +161,19 @@ fn atom(p: &mut Parser) -> Option<CompletedMarker> {
                 system_tf_arg_list(p);
                 return Some(m.complete(p, SyntaxKind::SystemTfCall));
             }
+            // $unit :: Ident qualified name
+            if super::is_unit_scope_prefix(p)
+                && p.nth(1) == SyntaxKind::ColonColon
+                && p.nth(2) == SyntaxKind::Ident
+            {
+                return Some(super::parse_qualified_name(p));
+            }
             // Check for qualified name: Ident :: Ident [:: Ident]*
             if p.current() == SyntaxKind::Ident
                 && p.nth(1) == SyntaxKind::ColonColon
                 && p.nth(2) == SyntaxKind::Ident
             {
-                let m = p.start();
-                p.bump(); // first segment
-                while p.at(SyntaxKind::ColonColon) && p.nth(1) == SyntaxKind::Ident {
-                    p.bump(); // ::
-                    p.bump(); // segment
-                }
-                return Some(m.complete(p, SyntaxKind::QualifiedName));
+                return Some(super::parse_qualified_name(p));
             }
             let m = p.start();
             p.bump();

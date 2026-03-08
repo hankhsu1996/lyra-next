@@ -330,14 +330,15 @@ pub fn enum_sem<'db>(db: &'db dyn salsa::Database, eref: EnumRef<'db>) -> EnumSe
             };
             resolve_result_to_ty(db, unit, file_id, &result, name, anchor, &mut diags)
         }
-        TypeRef::Qualified { segments, .. } => {
-            let result = lyra_semantic::resolve_qualified_name(
-                segments,
+        TypeRef::Qualified { path, .. } => {
+            let result = lyra_semantic::resolve_qualified_path(
+                path,
                 resolve_env.global,
                 resolve_env.pkg_scope,
+                resolve_env.cu_scope,
                 ExpectedNs::TypeThenValue,
             );
-            let display_name = segments.join("::");
+            let display_name = path.display_name();
             let anchor = TypeResolveDiagAnchor {
                 primary: base_primary,
                 label: None,

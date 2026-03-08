@@ -10,6 +10,7 @@ const PARSER_FUEL: u32 = 256;
 
 pub(crate) struct Parser<'t> {
     tokens: &'t [Token],
+    src: &'t str,
     pos: usize,
     // Fuel prevents runaway lookahead in broken input. Decremented by `nth()`,
     // reset by `bump()`. Cell is needed because `nth`/`current`/`at` take
@@ -39,7 +40,7 @@ pub(crate) struct CompletedMarker {
 }
 
 impl<'t> Parser<'t> {
-    pub(crate) fn new(tokens: &'t [Token]) -> Self {
+    pub(crate) fn new(tokens: &'t [Token], src: &'t str) -> Self {
         let mut offsets = Vec::with_capacity(tokens.len() + 1);
         let mut off = 0u32;
         for tok in tokens {
@@ -49,11 +50,43 @@ impl<'t> Parser<'t> {
         offsets.push(off);
         Self {
             tokens,
+            src,
             pos: 0,
             fuel: Cell::new(PARSER_FUEL),
             events: Vec::new(),
             errors: Vec::new(),
             offsets,
+        }
+    }
+
+    // Return the raw token index of the nth significant (non-trivia) token.
+    // Returns `None` if fewer than `n+1` significant tokens remain.
+    fn nth_raw_index(&self, n: usize) -> Option<usize> {
+        let mut pos = self.pos;
+        let mut seen = 0usize;
+        while pos < self.tokens.len() {
+            if self.tokens[pos].kind.is_trivia() {
+                pos += 1;
+                continue;
+            }
+            if seen == n {
+                return Some(pos);
+            }
+            seen += 1;
+            pos += 1;
+        }
+        None
+    }
+
+    /// Return the source text of the nth significant (non-trivia) token.
+    pub(crate) fn nth_text(&self, n: usize) -> &'t str {
+        match self.nth_raw_index(n) {
+            Some(pos) => {
+                let start = self.offsets[pos] as usize;
+                let end = self.offsets[pos + 1] as usize;
+                &self.src[start..end]
+            }
+            None => "",
         }
     }
 
@@ -68,21 +101,10 @@ impl<'t> Parser<'t> {
         }
         self.fuel.set(fuel - 1);
 
-        let mut pos = self.pos;
-        let mut seen = 0usize;
-        while pos < self.tokens.len() {
-            let kind = self.tokens[pos].kind;
-            if kind.is_trivia() {
-                pos += 1;
-                continue;
-            }
-            if seen == n {
-                return normalize(kind);
-            }
-            seen += 1;
-            pos += 1;
+        match self.nth_raw_index(n) {
+            Some(pos) => normalize(self.tokens[pos].kind),
+            None => SyntaxKind::Eof,
         }
-        SyntaxKind::Eof
     }
 
     pub(crate) fn current(&self) -> SyntaxKind {

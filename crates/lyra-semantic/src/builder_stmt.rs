@@ -1,11 +1,12 @@
 use lyra_ast::{AstNode, ForStmt, ForeachStmt, HasSyntax, NameRef, QualifiedName};
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
+
 use smol_str::SmolStr;
 
 use crate::builder::{DeclaratorContext, DefContext, collect_declarators, is_expression_kind};
 use crate::builder_items::collect_foreach_vars;
-use crate::builder_types::collect_name_refs;
+use crate::builder_types::{collect_name_refs, try_push_qualified_use_site};
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::scopes::ScopeKind;
 use crate::symbols::{Namespace, SymbolKind};
@@ -161,22 +162,8 @@ fn collect_name_refs_from_expr(
         return;
     }
     if node.kind() == SyntaxKind::QualifiedName {
-        if let Some(qn) = QualifiedName::cast(node.clone())
-            && let Some(ast_id) = ctx.ast_id_map.ast_id(&qn)
-        {
-            let segments: Box<[SmolStr]> = qn
-                .segments()
-                .map(|ident| SmolStr::new(ident.text()))
-                .collect();
-            if !segments.is_empty() {
-                ctx.use_sites.push(UseSite {
-                    path: NamePath::Qualified { segments },
-                    expected_ns: ExpectedNs::Exact(Namespace::Value),
-                    scope,
-                    name_ref_site: ast_id.erase(),
-                    order_key: 0,
-                });
-            }
+        if let Some(qn) = QualifiedName::cast(node.clone()) {
+            try_push_qualified_use_site(ctx, &qn, scope, ExpectedNs::Exact(Namespace::Value));
         }
         return;
     }
