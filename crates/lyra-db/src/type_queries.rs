@@ -491,7 +491,7 @@ fn resolve_def_base_ty(
     };
     let modport = match user_type {
         UserTypeRef::DottedType { member, .. } => {
-            let target_file_id = def_id.ast_id().file();
+            let target_file_id = def_id.file();
             let Some(target_file) = source_file_by_id(db, unit, target_file_id) else {
                 return Err(SymbolType::Error(SymbolTypeError::UserTypeUnresolved));
             };

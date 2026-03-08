@@ -36,7 +36,7 @@ fn cross_file_module_instantiation() {
     let (def_id, kind) = global
         .resolve_definition("adder")
         .expect("adder should be in global def index");
-    assert_eq!(def_id.ast_id().file(), lyra_source::FileId(0));
+    assert_eq!(def_id.file(), lyra_source::FileId(0));
     assert_eq!(kind, lyra_semantic::global_index::DefinitionKind::Module);
 }
 
@@ -203,12 +203,11 @@ fn def_resolves_to_def_variant() {
     let result = &core.resolutions[adder_use_idx];
     match result {
         CoreResolveResult::Resolved(CoreResolution::Def { def }) => {
-            let anchor = def.ast_id();
-            // The def anchor should be in file_a
+            // The def should be in file_a
             assert_eq!(
-                anchor.file(),
+                def.file(),
                 lyra_source::FileId(0),
-                "def anchor should point to file_a"
+                "def should point to file_a"
             );
             // Verify def_entry resolves this
             let def_a = def_index_file(&db, file_a);

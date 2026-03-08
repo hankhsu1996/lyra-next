@@ -27,7 +27,7 @@ pub fn modport_prototype_diagnostics<'db>(
     let modport_id = mref.modport_id(db);
 
     let iface_def_id = modport_id.owner.global_def();
-    let file_id = iface_def_id.ast_id().file();
+    let file_id = iface_def_id.file();
     let Some(src) = source_file_by_id(db, unit, file_id) else {
         return Box::new([]);
     };

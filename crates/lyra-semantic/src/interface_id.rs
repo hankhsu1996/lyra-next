@@ -1,6 +1,3 @@
-use crate::Site;
-use lyra_source::FileId;
-
 use crate::def_index::DefIndex;
 use crate::global_index::{DefinitionKind, GlobalDefIndex};
 use crate::symbols::GlobalDefId;
@@ -37,6 +34,6 @@ impl InterfaceDefId {
 
     /// Builder-internal placeholder. Replaced during finalization.
     pub(crate) fn placeholder() -> Self {
-        Self(GlobalDefId::new(Site::placeholder(FileId(u32::MAX))))
+        Self(GlobalDefId::PLACEHOLDER)
     }
 }

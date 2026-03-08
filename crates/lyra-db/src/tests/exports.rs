@@ -72,7 +72,7 @@ fn cross_file_interface_instantiation() {
     let def_id = global
         .resolve_definition("my_bus")
         .expect("my_bus should appear in global def index");
-    assert_eq!(def_id.0.ast_id().file(), lyra_source::FileId(0));
+    assert_eq!(def_id.0.file(), lyra_source::FileId(0));
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn cross_file_program_instantiation() {
     let def_id = global
         .resolve_definition("my_prog")
         .expect("my_prog should appear in global def index");
-    assert_eq!(def_id.0.ast_id().file(), lyra_source::FileId(0));
+    assert_eq!(def_id.0.file(), lyra_source::FileId(0));
 }
 
 #[test]

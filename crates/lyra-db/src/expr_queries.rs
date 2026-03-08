@@ -606,7 +606,7 @@ fn interface_member_lookup(
         return Err(MemberLookupError::NoMembersOnType);
     };
     let iface_def_id = concrete_iface.global_def();
-    let file_id = iface_def_id.ast_id().file();
+    let file_id = iface_def_id.file();
     let src = source_file_by_id(db, unit, file_id).ok_or(MemberLookupError::NoMembersOnType)?;
     let def = def_index_file(db, src);
     let entry = def

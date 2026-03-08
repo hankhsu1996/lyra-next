@@ -104,9 +104,10 @@ fn find_qualified_name_at(
         let def_id = global.resolve_package(pkg_name.as_ref())?;
         let target_file = source_file_by_id(db, unit, def_id.file())?;
         let target_def = def_index_file(db, target_file);
+        let entry = target_def.def_entry(def_id)?;
         let local = target_def
             .name_site_to_symbol
-            .get(&def_id.ast_id())
+            .get(&entry.decl_site)
             .copied()?;
         Some(GlobalSymbolId {
             file: def_id.file(),
@@ -236,7 +237,7 @@ impl<'db> TyFmt<'db> {
             return "interface".to_string();
         };
         let iface_def_id = concrete_iface.global_def();
-        let file_id = iface_def_id.ast_id().file();
+        let file_id = iface_def_id.file();
         let Some(src) = source_file_by_id(self.db, self.unit, file_id) else {
             return "interface".to_string();
         };

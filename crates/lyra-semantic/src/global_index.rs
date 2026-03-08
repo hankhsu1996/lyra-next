@@ -26,9 +26,8 @@ impl DefinitionKind {
 ///
 /// Modules and packages share the same namespace per IEEE 3.13(a).
 /// Stores only stable, offset-independent data: names and
-/// `GlobalDefId`s. Derived `PartialEq` backdates correctly across
-/// whitespace edits because `GlobalDefId` wraps topology-based
-/// `Site`.
+/// `GlobalDefId`s. `GlobalDefId` is a semantic ordinal identity
+/// (file + ordinal), independent of source offsets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalDefIndex {
     /// All definitions sorted by `(name, id)`. Modules and packages

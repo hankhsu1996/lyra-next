@@ -1,6 +1,8 @@
 use lyra_source::DeclSpan;
 use smol_str::SmolStr;
 
+use lyra_source::FileId;
+
 use crate::Site;
 use crate::global_index::DefinitionKind;
 use crate::scopes::ScopeId;
@@ -40,20 +42,27 @@ pub enum DefScope {
 }
 
 /// Builder for accumulating `DefEntry` items before freezing.
+///
+/// Canonical allocator for file-local definition IDs. Each `push`
+/// assigns the next ordinal, producing `GlobalDefId(file, ordinal)`.
+/// `GlobalDefId.ordinal()` indexes the resulting `DefEntry` sequence.
 pub(crate) struct DefEntryBuilder {
+    file: FileId,
     entries: Vec<DefEntry>,
 }
 
 impl DefEntryBuilder {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(file: FileId) -> Self {
         Self {
+            file,
             entries: Vec::new(),
         }
     }
 
-    pub(crate) fn push(&mut self, site: Site, entry: DefEntry) -> GlobalDefId {
+    pub(crate) fn push(&mut self, entry: DefEntry) -> GlobalDefId {
+        let ordinal = self.entries.len() as u32;
         self.entries.push(entry);
-        GlobalDefId::new(site)
+        GlobalDefId::new(self.file, ordinal)
     }
 
     pub(crate) fn freeze(self) -> Box<[DefEntry]> {
