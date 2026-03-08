@@ -98,10 +98,6 @@ Type representation handles all unpacked dimension forms. Built-in array methods
 
 Callable signature infrastructure stores port types and call-site argument checking exists. Specific LRM rules for passing arrays (by reference vs by value, open array parameters, compatibility rules for dynamic/associative/queue arguments) are not validated. Blocked by: array argument passing semantics, open array parameter support. Test: `lrm/ch07/7.7_arrays_as_arguments`.
 
-### 7.8.2: String index -- remaining typed key coverage
-
-Declaration, string-literal indexing, methods, foreach iteration, and string-key compatibility checking all work. Non-string index expressions on string-keyed arrays are diagnosed. Typed non-string key coverage (integral, enum) is implemented via the 7.8.4 work. Test: `lrm/ch07/7.8.2_string_index`.
-
 ### 7.8.3: Associative array with class index
 
 Associative arrays with class-type keys (`int aa[SomeClass]`) cannot be declared because class support is absent. `AssocIndex::Typed(Ty)` representation exists but no class types can be constructed. Blocked by: class support (Ch 8). Test: deferred until class support lands.
