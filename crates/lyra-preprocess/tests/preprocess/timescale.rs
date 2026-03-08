@@ -93,6 +93,43 @@ fn no_space_around_slash() {
 }
 
 #[test]
+fn spaced_value_canonicalized() {
+    let out = pp("`timescale 1 ns / 1 ps\nmodule m; endmodule\n");
+    let ts = find_timescale_event(&out).expect("timescale event");
+    assert_eq!(ts.unit_text, "1ns");
+    assert_eq!(ts.precision_text, "1ps");
+    assert!(out.errors.is_empty());
+}
+
+#[test]
+fn spaced_value_mixed_magnitudes() {
+    let out = pp("`timescale 10 us / 100 ns\n");
+    let ts = find_timescale_event(&out).expect("timescale event");
+    assert_eq!(ts.unit_text, "10us");
+    assert_eq!(ts.precision_text, "100ns");
+    assert!(out.errors.is_empty());
+}
+
+#[test]
+fn block_comment_trivia_canonicalized() {
+    let out = pp("`timescale 1 /* unit */ ns / 1 /* precision */ ps\n");
+    let ts = find_timescale_event(&out).expect("timescale event");
+    assert_eq!(ts.unit_text, "1ns");
+    assert_eq!(ts.precision_text, "1ps");
+    assert!(out.errors.is_empty());
+}
+
+#[test]
+fn spaced_and_adjacent_produce_same_text() {
+    let spaced = pp("`timescale 1 ns / 1 ps\n");
+    let adjacent = pp("`timescale 1ns / 1ps\n");
+    let ts_s = find_timescale_event(&spaced).expect("spaced");
+    let ts_a = find_timescale_event(&adjacent).expect("adjacent");
+    assert_eq!(ts_s.unit_text, ts_a.unit_text);
+    assert_eq!(ts_s.precision_text, ts_a.precision_text);
+}
+
+#[test]
 fn malformed_missing_precision() {
     let out = pp("`timescale 1ns\n");
     assert!(find_timescale_event(&out).is_none());
