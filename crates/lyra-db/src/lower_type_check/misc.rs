@@ -396,6 +396,28 @@ pub(super) fn lower_index_key_not_integral(
     );
 }
 
+pub(super) fn lower_queue_operator_error(
+    expr_site: lyra_semantic::Site,
+    code: lyra_diag::DiagKey,
+    msg_id: lyra_diag::MessageId,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    let Some(span) = source_map.map_span(expr_site.text_range()) else {
+        return;
+    };
+    let msg = lyra_diag::Message::simple(msg_id);
+    diags.push(
+        lyra_diag::Diagnostic::new(lyra_diag::Severity::Error, code, msg.clone()).with_label(
+            lyra_diag::Label {
+                kind: lyra_diag::LabelKind::Primary,
+                span,
+                message: msg,
+            },
+        ),
+    );
+}
+
 pub(super) fn lower_assoc_key_mismatch(
     index_site: lyra_semantic::Site,
     expected: &lyra_semantic::types::Ty,

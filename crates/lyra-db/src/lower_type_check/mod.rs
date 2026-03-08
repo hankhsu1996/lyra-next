@@ -56,6 +56,18 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::InternalError { .. } => {
             misc::lower_internal_type_check_error(item, source_map, diags);
         }
+        _ => lower_type_check_item_continued(db, unit, item, source_map, diags),
+    }
+}
+
+fn lower_type_check_item_continued(
+    db: &dyn salsa::Database,
+    unit: crate::CompilationUnit,
+    item: &TypeCheckItem,
+    source_map: &lyra_preprocess::SourceMap,
+    diags: &mut Vec<lyra_diag::Diagnostic>,
+) {
+    match item {
         TypeCheckItem::NewExprNotDynArray { .. }
         | TypeCheckItem::NewExprTooManyInitArgs { .. }
         | TypeCheckItem::NewExprSizeNotLongint { .. }
@@ -119,6 +131,31 @@ pub(crate) fn lower_type_check_item(
         TypeCheckItem::TaggedExprError { .. } => {
             call::lower_tagged_expr_error(item, source_map, diags);
         }
+        TypeCheckItem::DollarOutsideQueueContext { expr_site }
+        | TypeCheckItem::QueuePartSelectNotAllowed { expr_site }
+        | TypeCheckItem::EmptyConcatRequiresContext { expr_site }
+        | TypeCheckItem::QueueConcatIncompatible { expr_site } => {
+            let (code, msg_id) = match item {
+                TypeCheckItem::DollarOutsideQueueContext { .. } => (
+                    lyra_diag::code::DOLLAR_OUTSIDE_QUEUE_CONTEXT,
+                    lyra_diag::MessageId::DollarOutsideQueueContext,
+                ),
+                TypeCheckItem::QueuePartSelectNotAllowed { .. } => (
+                    lyra_diag::code::QUEUE_PART_SELECT_NOT_ALLOWED,
+                    lyra_diag::MessageId::QueuePartSelectNotAllowed,
+                ),
+                TypeCheckItem::QueueConcatIncompatible { .. } => (
+                    lyra_diag::code::QUEUE_CONCAT_INCOMPAT,
+                    lyra_diag::MessageId::QueueConcatIncompatible,
+                ),
+                _ => (
+                    lyra_diag::code::EMPTY_CONCAT_REQUIRES_CONTEXT,
+                    lyra_diag::MessageId::EmptyConcatRequiresContext,
+                ),
+            };
+            misc::lower_queue_operator_error(*expr_site, code, msg_id, source_map, diags);
+        }
+        _ => {}
     }
 }
 

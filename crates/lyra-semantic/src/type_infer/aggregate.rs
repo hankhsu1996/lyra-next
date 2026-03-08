@@ -7,20 +7,71 @@ use super::expr_type::{
     try_integral_view,
 };
 use super::infer_expr;
-use crate::types::{ConstInt, Ty};
+use crate::types::{ConstInt, Ty, UnpackedDim};
 
-pub(super) fn infer_concat(concat: &ConcatExpr, ctx: &dyn InferCtx) -> ExprType {
+/// Internal classification of a concatenation expression.
+enum ConcatResult {
+    IntegralConcat(ExprType),
+    UnpackedConcat(ExprType),
+    EmptyConcat,
+    Error(ExprType),
+}
+
+/// Classify a concatenation expression by operand types.
+///
+/// - Zero operands: `EmptyConcat` (needs assignment context).
+/// - Any operand is a queue: `UnpackedConcat` (queue concatenation).
+/// - All operands are integral: `IntegralConcat`.
+fn classify_concat(concat: &ConcatExpr, ctx: &dyn InferCtx) -> ConcatResult {
+    let operands: Vec<ExprType> = concat
+        .operands()
+        .map(|child| infer_expr(&child, ctx, None))
+        .collect();
+
+    if operands.is_empty() {
+        return ConcatResult::EmptyConcat;
+    }
+
+    for op in &operands {
+        if matches!(op.view, ExprView::Error(_)) {
+            return ConcatResult::Error(op.clone());
+        }
+        if matches!(op.view, ExprView::QueueDollar) {
+            return ConcatResult::Error(ExprType::error(
+                ExprTypeErrorKind::DollarOutsideQueueContext,
+            ));
+        }
+    }
+
+    // Only trigger queue concatenation when at least one operand is a queue.
+    // Other unpacked array types (fixed, dynamic) stay on the integral path;
+    // general unpacked concat is out of scope for queue operators.
+    let has_queue = operands.iter().any(|op| {
+        matches!(
+            op.ty,
+            Ty::Array {
+                dim: UnpackedDim::Queue { .. },
+                ..
+            }
+        )
+    });
+
+    if has_queue {
+        analyze_unpacked_concat(&operands, ctx)
+    } else {
+        infer_integral_concat(&operands, ctx)
+    }
+}
+
+/// Integral concatenation: all operands must be integral.
+fn infer_integral_concat(operands: &[ExprType], ctx: &dyn InferCtx) -> ConcatResult {
     let mut total_width: Option<u32> = Some(0);
     let mut all_known = true;
     let mut any_four_state = false;
 
-    for child in concat.operands() {
-        let child_ty = infer_expr(&child, ctx, None);
-        if let ExprView::Error(_) = &child_ty.view {
-            return child_ty;
-        }
-        let Some(bv) = try_integral_view(&child_ty, ctx) else {
-            return ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand);
+    for op in operands {
+        let Some(bv) = try_integral_view(op, ctx) else {
+            return ConcatResult::Error(ExprType::error(ExprTypeErrorKind::ConcatNonBitOperand));
         };
         any_four_state = any_four_state || bv.four_state;
         match bv.width.self_determined() {
@@ -41,11 +92,109 @@ pub(super) fn infer_concat(concat: &ConcatExpr, ctx: &dyn InferCtx) -> ExprType 
         BitWidth::Unknown
     };
 
-    ExprType::bitvec(BitVecType {
+    ConcatResult::IntegralConcat(ExprType::bitvec(BitVecType {
         width,
         signed: Signedness::Unsigned,
         four_state: any_four_state,
-    })
+    }))
+}
+
+/// Queue concatenation: validate element type compatibility (LRM 10.10).
+///
+/// Called only when at least one operand is a queue (enforced by
+/// `classify_concat`). Queue operands must have equivalent element types
+/// (LRM 6.22.2): same packed width and signedness for integrals, identical
+/// otherwise. Scalar operands must be assignment-compatible with the queue
+/// element type (LRM 6.22.3): any integral scalar into any integral queue
+/// element. The result queue uses the queue operand's element type; scalar
+/// operands conform to it. Non-queue array operands are rejected.
+fn analyze_unpacked_concat(operands: &[ExprType], _ctx: &dyn InferCtx) -> ConcatResult {
+    let mut queue_elem: Option<Ty> = None;
+    let mut scalar_elems: Vec<Ty> = Vec::new();
+
+    for op in operands {
+        match &op.ty {
+            Ty::Array {
+                dim: UnpackedDim::Queue { .. },
+                elem,
+                ..
+            } => {
+                let elem_ty = elem.as_ref().clone();
+                match &queue_elem {
+                    None => queue_elem = Some(elem_ty),
+                    Some(existing) => {
+                        if !queue_elem_equivalent(existing, &elem_ty) {
+                            return ConcatResult::Error(ExprType::error(
+                                ExprTypeErrorKind::QueueConcatIncompatible,
+                            ));
+                        }
+                    }
+                }
+            }
+            Ty::Array { .. } | Ty::Error | Ty::Void => {
+                return ConcatResult::Error(ExprType::error(
+                    ExprTypeErrorKind::QueueConcatIncompatible,
+                ));
+            }
+            _ => scalar_elems.push(op.ty.clone()),
+        }
+    }
+
+    // At least one queue operand is guaranteed by classify_concat.
+    let Some(result_elem) = queue_elem else {
+        return ConcatResult::Error(ExprType::error(ExprTypeErrorKind::QueueConcatIncompatible));
+    };
+
+    // Validate all scalar operands against the result element type
+    for s in &scalar_elems {
+        if !scalar_assignable_to_elem(&result_elem, s) {
+            return ConcatResult::Error(ExprType::error(
+                ExprTypeErrorKind::QueueConcatIncompatible,
+            ));
+        }
+    }
+
+    ConcatResult::UnpackedConcat(ExprType::from_ty(&Ty::Array {
+        elem: Box::new(result_elem),
+        dim: UnpackedDim::Queue { bound: None },
+    }))
+}
+
+/// Whether two queue element types are equivalent (LRM 6.22.2).
+/// Integral types are equivalent if they have the same packed width and
+/// signedness. All other types require identity.
+fn queue_elem_equivalent(a: &Ty, b: &Ty) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a, b) {
+        (Ty::Integral(l), Ty::Integral(r)) => {
+            l.signed == r.signed && l.try_packed_width() == r.try_packed_width()
+        }
+        _ => false,
+    }
+}
+
+/// Whether a scalar operand type is assignment-compatible with a queue
+/// element type for unpacked concatenation (LRM 6.22.3 / 10.10).
+/// Any integral scalar is assignable to any integral queue element.
+fn scalar_assignable_to_elem(elem: &Ty, scalar: &Ty) -> bool {
+    if elem == scalar {
+        return true;
+    }
+    matches!((elem, scalar), (Ty::Integral(_), Ty::Integral(_)))
+}
+
+pub(super) fn infer_concat(concat: &ConcatExpr, ctx: &dyn InferCtx) -> ExprType {
+    match classify_concat(concat, ctx) {
+        ConcatResult::IntegralConcat(et)
+        | ConcatResult::UnpackedConcat(et)
+        | ConcatResult::Error(et) => et,
+        ConcatResult::EmptyConcat => ExprType {
+            ty: Ty::Error,
+            view: ExprView::EmptyConcat,
+        },
+    }
 }
 
 /// Pack-width accumulator with explicit merge semantics.

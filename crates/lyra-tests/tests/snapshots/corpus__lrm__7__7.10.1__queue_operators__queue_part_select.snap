@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: test.sv (2 diagnostics)
+  error[lyra.type.queue_part_select_not_allowed] 6:13..6:13: indexed part-select (`+:` / `-:`) is not allowed on queues
+  error[lyra.type.queue_part_select_not_allowed] 10:13..10:13: indexed part-select (`+:` / `-:`) is not allowed on queues
+---
+unit (0 diagnostics)

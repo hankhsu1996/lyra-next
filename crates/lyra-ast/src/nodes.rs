@@ -295,6 +295,9 @@ ast_nodes! {
     // Type operator (LRM 6.23)
     TypeExpr(SyntaxKind::TypeExpr) { @custom }
 
+    // Queue dollar expression (LRM 7.10.1)
+    DollarExpr(SyntaxKind::DollarExpr) {}
+
     // Array manipulation `with (expr)` clause (LRM 7.12)
     ArrayManipWithClause(SyntaxKind::ArrayManipWithClause) { @custom }
 

@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: test.sv (1 diagnostic)
+  error[lyra.type.empty_concat_requires_context] 5:12..5:12: empty concatenation `{}` requires a queue or dynamic array target
+---
+unit (0 diagnostics)

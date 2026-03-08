@@ -130,6 +130,10 @@ pub enum ExprTypeErrorKind {
     TaggedExprUnknownMember,
     TaggedExprUnexpectedOperandForVoidMember,
     TaggedExprMissingOperandForPayloadMember,
+    DollarOutsideQueueContext,
+    QueuePartSelectNotAllowed,
+    EmptyConcatRequiresContext,
+    QueueConcatIncompatible,
 }
 
 /// How an expression's type is viewed for operations.
@@ -143,6 +147,13 @@ pub enum ExprView {
     /// semantically resolved. The underlying `Ty` is `Error` (unsupported).
     /// Downstream rules gate on this view to skip inapplicable checks.
     AssignmentPattern,
+    /// Queue dollar expression (`$` in queue index/slice context).
+    /// Types as 32-bit signed int, but semantically restricted to queue
+    /// index/slice bounds. Consumers must explicitly accept or reject.
+    QueueDollar,
+    /// Empty concatenation (`{}`): valid syntax that requires assignment
+    /// context to resolve its type (e.g., queue/dynamic-array empty literal).
+    EmptyConcat,
     /// Type could not be determined.
     Error(ExprTypeErrorKind),
 }
@@ -265,7 +276,10 @@ impl ExprType {
     pub fn pretty(&self) -> SmolStr {
         match &self.view {
             ExprView::BitVec(bv) => bv.pretty(),
-            ExprView::Plain | ExprView::AssignmentPattern => self.ty.pretty(),
+            ExprView::Plain
+            | ExprView::AssignmentPattern
+            | ExprView::QueueDollar
+            | ExprView::EmptyConcat => self.ty.pretty(),
             ExprView::Error(_) => SmolStr::new_static("<error>"),
         }
     }
@@ -362,6 +376,9 @@ pub(crate) fn try_integral_view(et: &ExprType, ctx: &dyn InferCtx) -> Option<Bit
                 None
             }
         }
-        ExprView::AssignmentPattern | ExprView::Error(_) => None,
+        ExprView::AssignmentPattern
+        | ExprView::QueueDollar
+        | ExprView::EmptyConcat
+        | ExprView::Error(_) => None,
     }
 }

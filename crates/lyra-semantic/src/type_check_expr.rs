@@ -244,7 +244,8 @@ pub fn check_stream_operand(
 ///
 /// Reads the inferred type of `expr` via `ctx.expr_type_stmt()` and harvests
 /// structured `ExprTypeErrorKind`s that carry their own anchoring site.
-/// Currently handles `IndexKeyNotIntegral` and `AssocIndexKeyMismatch`.
+/// Handles `IndexKeyNotIntegral`, `AssocIndexKeyMismatch`,
+/// `DollarOutsideQueueContext`, and `QueuePartSelectNotAllowed`.
 pub fn check_expr_self_anchored_errors(
     expr: &Expr,
     ctx: &dyn TypeCheckCtx,
@@ -269,6 +270,24 @@ pub fn check_expr_self_anchored_errors(
                 expected: (**expected).clone(),
                 actual: (**actual).clone(),
             });
+        }
+        ExprView::Error(ExprTypeErrorKind::DollarOutsideQueueContext) => {
+            let map = ctx.ast_id_map();
+            if let Some(expr_site) = crate::site::opt_site_of(map, expr) {
+                items.push(TypeCheckItem::DollarOutsideQueueContext { expr_site });
+            }
+        }
+        ExprView::Error(ExprTypeErrorKind::QueuePartSelectNotAllowed) => {
+            let map = ctx.ast_id_map();
+            if let Some(expr_site) = crate::site::opt_site_of(map, expr) {
+                items.push(TypeCheckItem::QueuePartSelectNotAllowed { expr_site });
+            }
+        }
+        ExprView::Error(ExprTypeErrorKind::QueueConcatIncompatible) => {
+            let map = ctx.ast_id_map();
+            if let Some(expr_site) = crate::site::opt_site_of(map, expr) {
+                items.push(TypeCheckItem::QueueConcatIncompatible { expr_site });
+            }
         }
         _ => {}
     }

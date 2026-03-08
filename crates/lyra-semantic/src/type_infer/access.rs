@@ -83,6 +83,20 @@ pub(super) fn infer_index(idx_expr: &IndexExpr, ctx: &dyn InferCtx) -> ExprType 
         return idx;
     }
 
+    // `$` is valid only as a queue index
+    if matches!(idx.view, ExprView::QueueDollar) {
+        if !matches!(
+            base.ty,
+            Ty::Array {
+                dim: UnpackedDim::Queue { .. },
+                ..
+            }
+        ) {
+            return ExprType::error(ExprTypeErrorKind::DollarOutsideQueueContext);
+        }
+        return apply_index(&base);
+    }
+
     // Associative array key validation
     if let Ty::Array {
         dim: UnpackedDim::Assoc(assoc_index),

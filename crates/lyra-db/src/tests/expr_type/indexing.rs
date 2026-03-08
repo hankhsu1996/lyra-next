@@ -392,7 +392,7 @@ fn expr_type_array_slice_dynamic_error() {
 }
 
 #[test]
-fn expr_type_array_slice_queue_error() {
+fn expr_type_queue_slice_returns_queue() {
     let db = LyraDatabase::default();
     let file = new_file(
         &db,
@@ -400,9 +400,17 @@ fn expr_type_array_slice_queue_error() {
         "module m; int arr [$]; parameter P = arr[1:0]; endmodule",
     );
     let unit = single_file_unit(&db, file);
-    assert_eq!(
-        expr_type_of_first_param(&db, file, unit),
-        ExprType::error(ExprTypeErrorKind::SliceNonSliceableArray)
+    let result = expr_type_of_first_param(&db, file, unit);
+    assert_eq!(result.view, ExprView::Plain);
+    assert!(
+        matches!(
+            result.ty,
+            Ty::Array {
+                dim: UnpackedDim::Queue { .. },
+                ..
+            }
+        ),
+        "queue slice should return queue type, got: {result:?}"
     );
 }
 
