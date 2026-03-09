@@ -74,6 +74,32 @@ fn choose_best_diag_span_no_label_uses_primary() {
     assert_eq!(tr, site.text_range());
 }
 
+#[test]
+fn include_map_duplicate_keys_uses_first() {
+    let db = LyraDatabase::default();
+    let file_a = SourceFile::new(
+        &db,
+        lyra_source::FileId(1),
+        "a.svh".to_string(),
+        "typedef int A;".to_string(),
+        IncludeMap::default(),
+    );
+    let file_b = SourceFile::new(
+        &db,
+        lyra_source::FileId(2),
+        "b.svh".to_string(),
+        "typedef int B;".to_string(),
+        IncludeMap::default(),
+    );
+    let req = crate::IncludeRequest {
+        kind: crate::IncludeKind::Quoted,
+        spelling: smol_str::SmolStr::from("h.svh"),
+    };
+    let map = IncludeMap::new(vec![(req.clone(), file_a), (req.clone(), file_b)]);
+    let result = map.lookup(&req);
+    assert!(result.is_some(), "duplicate key should still resolve");
+}
+
 pub(super) fn new_file(db: &dyn salsa::Database, id: u32, text: &str) -> SourceFile {
     SourceFile::new(
         db,
@@ -220,7 +246,13 @@ fn roundtrip_expanded_text_with_include() {
         lyra_source::FileId(0),
         "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
-        IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
+        IncludeMap::new(vec![(
+            crate::IncludeRequest {
+                kind: crate::IncludeKind::Quoted,
+                spelling: smol_str::SmolStr::from("b.sv"),
+            },
+            file_b,
+        )]),
     );
     let pp = preprocess_file(&db, file_a);
     let parse = parse_file(&db, file_a);
@@ -360,7 +392,13 @@ fn edit_included_file_invalidates_includer() {
         lyra_source::FileId(0),
         "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
-        IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
+        IncludeMap::new(vec![(
+            crate::IncludeRequest {
+                kind: crate::IncludeKind::Quoted,
+                spelling: smol_str::SmolStr::from("b.sv"),
+            },
+            file_b,
+        )]),
     );
 
     let _ = parse_file(&db, file_a);
@@ -399,7 +437,13 @@ fn full_expansion_stack_single_include() {
         lyra_source::FileId(0),
         "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
-        IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
+        IncludeMap::new(vec![(
+            crate::IncludeRequest {
+                kind: crate::IncludeKind::Quoted,
+                spelling: smol_str::SmolStr::from("b.sv"),
+            },
+            file_b,
+        )]),
     );
 
     // Offset 12 is in the included range
@@ -428,7 +472,13 @@ fn full_expansion_stack_nested_is_single_frame() {
         lyra_source::FileId(1),
         "test_1.sv".to_string(),
         "`include \"c.sv\"".to_string(),
-        IncludeMap::new(vec![("c.sv".to_string(), file_c)]),
+        IncludeMap::new(vec![(
+            crate::IncludeRequest {
+                kind: crate::IncludeKind::Quoted,
+                spelling: smol_str::SmolStr::from("c.sv"),
+            },
+            file_c,
+        )]),
     );
     // A includes B
     let file_a = SourceFile::new(
@@ -436,7 +486,13 @@ fn full_expansion_stack_nested_is_single_frame() {
         lyra_source::FileId(0),
         "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
-        IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
+        IncludeMap::new(vec![(
+            crate::IncludeRequest {
+                kind: crate::IncludeKind::Quoted,
+                spelling: smol_str::SmolStr::from("b.sv"),
+            },
+            file_b,
+        )]),
     );
 
     // preprocess() only does one level of expansion, so A splices
@@ -463,7 +519,13 @@ fn edit_included_file_does_not_invalidate_unrelated() {
         lyra_source::FileId(0),
         "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
-        IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
+        IncludeMap::new(vec![(
+            crate::IncludeRequest {
+                kind: crate::IncludeKind::Quoted,
+                spelling: smol_str::SmolStr::from("b.sv"),
+            },
+            file_b,
+        )]),
     );
     let file_c = SourceFile::new(
         &db,

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::{IncludeKind, IncludeRequest};
 use lyra_source::FileId;
 use salsa::Setter;
 
@@ -38,8 +39,8 @@ pub struct DiscoveredFile {
 
 /// An include map entry in the discovery plan.
 pub struct IncludeEntry {
-    /// The include spelling as it appears in the source.
-    pub spelling: String,
+    /// The structured include request (kind + spelling).
+    pub request: IncludeRequest,
     /// Index into `IncludePlan::files` for the resolved target.
     pub target: usize,
 }
@@ -86,9 +87,9 @@ pub fn apply_include_plan(
         .collect();
 
     for (file_idx, entries) in &plan.include_maps {
-        let map_entries: Vec<(String, SourceFile)> = entries
+        let map_entries: Vec<(IncludeRequest, SourceFile)> = entries
             .iter()
-            .map(|e| (e.spelling.clone(), source_files[e.target]))
+            .map(|e| (e.request.clone(), source_files[e.target]))
             .collect();
         source_files[*file_idx]
             .set_include_map(db)
@@ -100,9 +101,9 @@ pub fn apply_include_plan(
 
 /// Run fixed-point include discovery starting from root files.
 ///
-/// Search order for each include spelling:
-/// 1. Including file's directory
-/// 2. Configured include dirs in argument order
+/// Search order depends on include kind (LRM 22.4):
+/// - Quoted (`"file"`): includer directory first, then include dirs.
+/// - Angle-bracket (`<file>`): include dirs only.
 ///
 /// First match wins. This is a pure function with no database
 /// interaction; the caller is responsible for creating `SourceFile`
@@ -138,17 +139,13 @@ pub fn discover(
         let text = files[current_idx].text.clone();
 
         let tokens = lyra_lexer::lex_with_mode(&text, lyra_lexer::LexMode::Preprocess);
-        let spelling_ranges = lyra_preprocess::scan_includes(&tokens, &text);
+        let occurrences = lyra_preprocess::scan_includes(&tokens, &text);
 
         let mut entries = Vec::new();
 
-        for range in &spelling_ranges {
-            let start: usize = range.start().into();
-            let end: usize = range.end().into();
-            let spelling = &text[start..end];
-
+        for occ in &occurrences {
             if let Some(target_norm) =
-                resolve_spelling(spelling, &current_path, include_dirs, loader)
+                resolve_include_request(&occ.request, &current_path, include_dirs, loader)
             {
                 let target_idx = if let Some(&idx) = path_to_index.get(&target_norm) {
                     idx
@@ -167,7 +164,7 @@ pub fn discover(
                 };
 
                 entries.push(IncludeEntry {
-                    spelling: spelling.to_owned(),
+                    request: occ.request.clone(),
                     target: target_idx,
                 });
             }
@@ -184,20 +181,26 @@ pub fn discover(
     }
 }
 
-/// Resolve a single include spelling against search paths.
-fn resolve_spelling(
-    spelling: &str,
+/// Resolve an include request against search paths.
+///
+/// Quoted includes search the includer's directory first, then
+/// configured include dirs. Angle-bracket includes skip the
+/// includer's directory and only search include dirs.
+fn resolve_include_request(
+    request: &IncludeRequest,
     includer_path: &str,
     include_dirs: &[String],
     loader: &dyn IncludeLoader,
 ) -> Option<String> {
-    // 1. Including file's directory
-    let candidate = loader.join_from_includer(includer_path, spelling);
-    if let Some(norm) = loader.normalize_path(&candidate) {
-        return Some(norm);
+    let spelling = request.spelling.as_str();
+
+    if request.kind == IncludeKind::Quoted {
+        let candidate = loader.join_from_includer(includer_path, spelling);
+        if let Some(norm) = loader.normalize_path(&candidate) {
+            return Some(norm);
+        }
     }
 
-    // 2. Configured include dirs in order
     for dir in include_dirs {
         let candidate = loader.join_from_dir(dir, spelling);
         if let Some(norm) = loader.normalize_path(&candidate) {
@@ -300,7 +303,8 @@ mod tests {
         let (idx, entries) = &plan.include_maps[0];
         assert_eq!(*idx, 0);
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].spelling, "header.svh");
+        assert_eq!(entries[0].request.spelling.as_str(), "header.svh");
+        assert_eq!(entries[0].request.kind, IncludeKind::Quoted);
         assert_eq!(entries[0].target, 1);
     }
 
@@ -318,14 +322,13 @@ mod tests {
         let plan = discover(&roots, &[], &loader);
         assert_eq!(plan.files.len(), 3);
 
-        // b.svh should have an include map pointing to c.svh
         let b_map = plan
             .include_maps
             .iter()
             .find(|(idx, _)| plan.files[*idx].path == "b.svh");
         assert!(b_map.is_some());
         let (_, entries) = b_map.unwrap();
-        assert_eq!(entries[0].spelling, "c.svh");
+        assert_eq!(entries[0].request.spelling.as_str(), "c.svh");
         assert_eq!(plan.files[entries[0].target].path, "c.svh");
     }
 
@@ -428,5 +431,74 @@ mod tests {
         assert!(plan.files[0].is_root);
         assert_eq!(plan.files[1].path, "a.sv");
         assert!(plan.files[1].is_root);
+    }
+
+    #[test]
+    fn angle_bracket_skips_includer_dir() {
+        let loader = MemLoader::new(vec![
+            ("src/main.sv", "`include <h.svh>\nmodule m; endmodule"),
+            ("src/h.svh", "typedef int LOCAL;"),
+            ("inc/h.svh", "typedef int GLOBAL;"),
+        ]);
+        let roots = vec![(
+            "src/main.sv".to_owned(),
+            "`include <h.svh>\nmodule m; endmodule".to_owned(),
+        )];
+        let plan = discover(&roots, &["inc".to_owned()], &loader);
+        let h = plan
+            .files
+            .iter()
+            .find(|f| f.path.contains("h.svh"))
+            .unwrap();
+        assert_eq!(h.path, "inc/h.svh");
+        assert_eq!(h.text, "typedef int GLOBAL;");
+    }
+
+    #[test]
+    fn angle_bracket_no_match_without_inc_dir() {
+        let loader = MemLoader::new(vec![
+            ("src/main.sv", "`include <h.svh>\nmodule m; endmodule"),
+            ("src/h.svh", "typedef int LOCAL;"),
+        ]);
+        let roots = vec![(
+            "src/main.sv".to_owned(),
+            "`include <h.svh>\nmodule m; endmodule".to_owned(),
+        )];
+        let plan = discover(&roots, &[], &loader);
+        assert_eq!(plan.files.len(), 1);
+        assert!(plan.include_maps.is_empty());
+    }
+
+    #[test]
+    fn same_spelling_different_kind_resolves_independently() {
+        let loader = MemLoader::new(vec![
+            (
+                "src/main.sv",
+                "`include \"h.svh\"\n`include <h.svh>\nmodule m; endmodule",
+            ),
+            ("src/h.svh", "typedef int LOCAL;"),
+            ("inc/h.svh", "typedef int GLOBAL;"),
+        ]);
+        let roots = vec![(
+            "src/main.sv".to_owned(),
+            "`include \"h.svh\"\n`include <h.svh>\nmodule m; endmodule".to_owned(),
+        )];
+        let plan = discover(&roots, &["inc".to_owned()], &loader);
+        assert_eq!(plan.files.len(), 3);
+
+        let (_, entries) = &plan.include_maps[0];
+        assert_eq!(entries.len(), 2);
+
+        let quoted = entries
+            .iter()
+            .find(|e| e.request.kind == IncludeKind::Quoted)
+            .unwrap();
+        assert_eq!(plan.files[quoted.target].path, "src/h.svh");
+
+        let angle = entries
+            .iter()
+            .find(|e| e.request.kind == IncludeKind::AngleBracket)
+            .unwrap();
+        assert_eq!(plan.files[angle.target].path, "inc/h.svh");
     }
 }

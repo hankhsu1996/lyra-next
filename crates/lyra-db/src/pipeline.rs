@@ -1,4 +1,6 @@
 use lyra_preprocess::{IncludeProvider, MacroEnv, PreprocessInputs, ResolvedInclude};
+
+use crate::IncludeRequest;
 use salsa::Setter;
 
 use crate::{IncludeMap, SourceFile};
@@ -14,15 +16,15 @@ pub fn lex_file(db: &dyn salsa::Database, file: SourceFile) -> Vec<lyra_lexer::T
     lyra_lexer::lex_with_mode(file.text(db), lyra_lexer::LexMode::Preprocess)
 }
 
-/// Include provider that resolves paths via Salsa queries.
+/// Include provider that resolves requests via Salsa queries.
 struct DbIncludeProvider<'a> {
     db: &'a dyn salsa::Database,
     include_map: &'a IncludeMap,
 }
 
 impl IncludeProvider for DbIncludeProvider<'_> {
-    fn resolve(&self, path: &str) -> Option<ResolvedInclude<'_>> {
-        let file = self.include_map.lookup(path)?;
+    fn resolve(&self, request: &IncludeRequest) -> Option<ResolvedInclude<'_>> {
+        let file = self.include_map.lookup(request)?;
         Some(ResolvedInclude {
             file_id: file.file_id(self.db),
             tokens: lex_file(self.db, file),

@@ -57,11 +57,24 @@ impl TestWorkspace {
     /// (roots + discovered includes) are available for `FileId` lookup.
     /// Paths are workspace-relative (relative to `dir`).
     pub fn from_dir(dir: &Path) -> Result<Self, std::io::Error> {
-        let ws = Self::new();
-        Self::from_dir_inner(ws, dir)
+        Self::from_dir_with_include_dirs(dir, &[])
     }
 
-    fn from_dir_inner(mut ws: Self, dir: &Path) -> Result<Self, std::io::Error> {
+    /// Build a workspace from all `.sv` and `.svh` files in a directory,
+    /// with explicit include search directories (relative to `dir`).
+    pub fn from_dir_with_include_dirs(
+        dir: &Path,
+        include_dirs: &[String],
+    ) -> Result<Self, std::io::Error> {
+        let ws = Self::new();
+        Self::from_dir_inner(ws, dir, include_dirs)
+    }
+
+    fn from_dir_inner(
+        mut ws: Self,
+        dir: &Path,
+        include_dirs: &[String],
+    ) -> Result<Self, std::io::Error> {
         let mut entries = Vec::new();
         collect_sv_files(dir, &mut entries)?;
         entries.sort();
@@ -87,7 +100,8 @@ impl TestWorkspace {
 
         // Run pure include discovery and apply to database
         let loader = include_loader::FixtureIncludeLoader::new(&all_fixture_files);
-        let plan = lyra_db::include_resolve::discover(&root_paths, &[], &loader);
+        let inc_dirs: Vec<String> = include_dirs.to_vec();
+        let plan = lyra_db::include_resolve::discover(&root_paths, &inc_dirs, &loader);
         let source_files = lyra_db::include_resolve::apply_include_plan(&mut ws.db, &plan, 0);
 
         // Track all files for FileId lookup

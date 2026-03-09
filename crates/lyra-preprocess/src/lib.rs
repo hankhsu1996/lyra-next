@@ -18,6 +18,44 @@ pub use crate::directive::DirectiveKeyword;
 pub use crate::env::{MacroDef, MacroEnv, MacroTok, MacroTokenSeq, MacroValue};
 pub use crate::source_map::SourceMap;
 
+/// Whether an `` `include `` directive uses quoted or angle-bracket form.
+///
+/// LRM 22.4 defines distinct search policies for each form:
+/// - Quoted (`"filename"`): search includer directory first, then include dirs.
+/// - Angle-bracket (`<filename>`): search include dirs only, skip includer directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum IncludeKind {
+    Quoted,
+    AngleBracket,
+}
+
+/// A structured include request: the spelling (filename) and form (quoted vs
+/// angle-bracket). This is the canonical identity for include map keys and
+/// resolution queries.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct IncludeRequest {
+    pub kind: IncludeKind,
+    pub spelling: SmolStr,
+}
+
+/// A single `` `include `` occurrence found during scanning.
+///
+/// Contains all structural data about the directive: the structured
+/// request (kind + spelling), the ranges of each syntactic piece,
+/// and the token skip count for engine consumption.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncludeOccurrence {
+    pub request: IncludeRequest,
+    /// Range of the `` `include `` directive keyword token.
+    pub directive_range: TextRange,
+    /// Range of the inner filename text (without delimiters).
+    pub spelling_range: TextRange,
+    /// Range of the full literal (including delimiters: quotes or angle brackets).
+    pub literal_range: TextRange,
+    /// Number of tokens to skip past the directive (for engine use).
+    pub(crate) skip_count: usize,
+}
+
 /// A resolved include file returned by an [`IncludeProvider`].
 ///
 /// Borrows tokens and text from the provider, avoiding copies on the
@@ -30,13 +68,13 @@ pub struct ResolvedInclude<'a> {
     pub text: &'a str,
 }
 
-/// Callback for resolving `` `include `` paths to file contents.
+/// Callback for resolving `` `include `` directives to file contents.
 ///
 /// The DB layer implements this by reading through Salsa queries,
 /// which establishes incremental dependencies. The borrowed return
 /// type ensures the provider contract does not force allocations.
 pub trait IncludeProvider {
-    fn resolve(&self, path: &str) -> Option<ResolvedInclude<'_>>;
+    fn resolve(&self, request: &IncludeRequest) -> Option<ResolvedInclude<'_>>;
 }
 
 /// A preprocess error (e.g., unresolved include, malformed directive).
@@ -267,7 +305,7 @@ impl IncludeGraph {
 struct NoOpProvider;
 
 impl IncludeProvider for NoOpProvider {
-    fn resolve(&self, _path: &str) -> Option<ResolvedInclude<'_>> {
+    fn resolve(&self, _request: &IncludeRequest) -> Option<ResolvedInclude<'_>> {
         None
     }
 }
@@ -296,11 +334,12 @@ pub fn preprocess_identity(file: FileId, tokens: &[Token], text: &str) -> Prepro
     })
 }
 
-/// Lightweight scan for `` `include `` directives. Returns the quoted
-/// paths without performing any expansion. Useful for the tool layer
-/// to discover include dependencies before setting up resolution.
-pub fn scan_includes(tokens: &[Token], text: &str) -> Vec<TextRange> {
-    let mut paths = Vec::new();
+/// Lightweight scan for `` `include `` directives. Returns structured
+/// include occurrences without performing any expansion. Useful for
+/// the tool layer to discover include dependencies before setting up
+/// resolution.
+pub fn scan_includes(tokens: &[Token], text: &str) -> Vec<IncludeOccurrence> {
+    let mut occurrences = Vec::new();
     let mut cursor: usize = 0;
 
     for (i, tok) in tokens.iter().enumerate() {
@@ -309,34 +348,36 @@ pub fn scan_includes(tokens: &[Token], text: &str) -> Vec<TextRange> {
 
         if tok.kind == SyntaxKind::Directive
             && tok_text == "`include"
-            && let Some((inner_range, _, _)) = find_include_path(tokens, i, cursor)
+            && let Some(occ) = find_include_path(tokens, text, i, cursor)
         {
-            paths.push(inner_range);
+            occurrences.push(occ);
         }
         cursor += tok_len;
     }
 
-    paths
+    occurrences
 }
 
 /// Find the include path after a `` `include `` directive token.
 ///
-/// Returns `(inner_range, literal_range, token_count_to_skip)` where
-/// `inner_range` is the path text without quotes, `literal_range` is
-/// the full string literal span, and `token_count_to_skip` includes
-/// the directive token itself plus any whitespace and the string
-/// literal.
-fn find_include_path(
+/// Handles both quoted (`"file"`) and angle-bracket (`<file>`) forms.
+/// For angle-bracket includes, leading/trailing whitespace inside the
+/// delimiters is trimmed from the spelling to produce a canonical key.
+pub(crate) fn find_include_path(
     tokens: &[Token],
+    text: &str,
     directive_idx: usize,
     directive_cursor: usize,
-) -> Option<(TextRange, TextRange, usize)> {
+) -> Option<IncludeOccurrence> {
     let mut cursor = directive_cursor;
     let dir_len: usize = tokens[directive_idx].len.into();
+    let directive_range = TextRange::new(
+        TextSize::new(directive_cursor as u32),
+        TextSize::new((directive_cursor + dir_len) as u32),
+    );
     cursor += dir_len;
 
     let mut j = directive_idx + 1;
-    // Skip whitespace tokens
     while j < tokens.len() && tokens[j].kind == SyntaxKind::Whitespace {
         let tok_len: usize = tokens[j].len.into();
         cursor += tok_len;
@@ -350,23 +391,84 @@ fn find_include_path(
     let path_tok = tokens[j];
     let tok_len: usize = path_tok.len.into();
 
-    if path_tok.kind != SyntaxKind::StringLiteral {
+    if path_tok.kind == SyntaxKind::StringLiteral {
+        if tok_len < 2 {
+            return None;
+        }
+        let inner_start = cursor + 1;
+        let inner_end = cursor + tok_len - 1;
+        let spelling = SmolStr::from(&text[inner_start..inner_end]);
+        let spelling_range = TextRange::new(
+            TextSize::new(inner_start as u32),
+            TextSize::new(inner_end as u32),
+        );
+        let literal_range = TextRange::new(
+            TextSize::new(cursor as u32),
+            TextSize::new((cursor + tok_len) as u32),
+        );
+        let skip_count = j - directive_idx + 1;
+        return Some(IncludeOccurrence {
+            request: IncludeRequest {
+                kind: IncludeKind::Quoted,
+                spelling,
+            },
+            directive_range,
+            spelling_range,
+            literal_range,
+            skip_count,
+        });
+    }
+
+    if path_tok.kind == SyntaxKind::Lt {
+        let lt_cursor = cursor;
+        cursor += tok_len;
+        j += 1;
+
+        let content_start = cursor;
+        while j < tokens.len() {
+            let t = tokens[j];
+            if t.kind == SyntaxKind::Gt {
+                let content_end = cursor;
+                let gt_len: usize = t.len.into();
+                let raw = &text[content_start..content_end];
+                let trimmed = raw.trim();
+                let trim_offset = raw.len() - raw.trim_start().len();
+                let trimmed_start = content_start + trim_offset;
+                let trimmed_end = trimmed_start + trimmed.len();
+                let spelling = SmolStr::from(trimmed);
+                let spelling_range = TextRange::new(
+                    TextSize::new(trimmed_start as u32),
+                    TextSize::new(trimmed_end as u32),
+                );
+                let literal_range = TextRange::new(
+                    TextSize::new(lt_cursor as u32),
+                    TextSize::new((cursor + gt_len) as u32),
+                );
+                let skip_count = j - directive_idx + 1;
+                return Some(IncludeOccurrence {
+                    request: IncludeRequest {
+                        kind: IncludeKind::AngleBracket,
+                        spelling,
+                    },
+                    directive_range,
+                    spelling_range,
+                    literal_range,
+                    skip_count,
+                });
+            }
+            if t.kind == SyntaxKind::Eof {
+                return None;
+            }
+            let t_len: usize = t.len.into();
+            let t_text = &text[cursor..cursor + t_len];
+            if t_text.contains('\n') {
+                return None;
+            }
+            cursor += t_len;
+            j += 1;
+        }
         return None;
     }
 
-    if tok_len < 2 {
-        return None;
-    }
-
-    let inner_range = TextRange::new(
-        TextSize::new((cursor + 1) as u32),
-        TextSize::new((cursor + tok_len - 1) as u32),
-    );
-    let literal_range = TextRange::new(
-        TextSize::new(cursor as u32),
-        TextSize::new((cursor + tok_len) as u32),
-    );
-
-    let skip_count = j - directive_idx + 1;
-    Some((inner_range, literal_range, skip_count))
+    None
 }

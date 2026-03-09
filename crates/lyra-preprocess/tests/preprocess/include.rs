@@ -2,12 +2,14 @@ use std::collections::HashMap;
 
 use lyra_lexer::SyntaxKind;
 use lyra_preprocess::{
-    IncludeProvider, MacroEnv, PreprocessInputs, ResolvedInclude, preprocess, scan_includes,
+    IncludeKind, IncludeProvider, IncludeRequest, MacroEnv, PreprocessInputs, ResolvedInclude,
+    preprocess, scan_includes,
 };
 use lyra_source::{ExpansionKind, FileId, TextRange, TextSize};
+use smol_str::SmolStr;
 
 struct MapProvider {
-    files: HashMap<String, (FileId, String, Vec<lyra_lexer::Token>)>,
+    files: HashMap<IncludeRequest, (FileId, String, Vec<lyra_lexer::Token>)>,
 }
 
 impl MapProvider {
@@ -19,14 +21,27 @@ impl MapProvider {
 
     fn add(&mut self, path: &str, file_id: FileId, text: &str) {
         let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
-        self.files
-            .insert(path.to_string(), (file_id, text.to_string(), tokens));
+        let data = (file_id, text.to_string(), tokens);
+        self.files.insert(
+            IncludeRequest {
+                kind: IncludeKind::Quoted,
+                spelling: SmolStr::from(path),
+            },
+            data.clone(),
+        );
+        self.files.insert(
+            IncludeRequest {
+                kind: IncludeKind::AngleBracket,
+                spelling: SmolStr::from(path),
+            },
+            data,
+        );
     }
 }
 
 impl IncludeProvider for MapProvider {
-    fn resolve(&self, path: &str) -> Option<ResolvedInclude<'_>> {
-        let (file_id, text, tokens) = self.files.get(path)?;
+    fn resolve(&self, request: &IncludeRequest) -> Option<ResolvedInclude<'_>> {
+        let (file_id, text, tokens) = self.files.get(request)?;
         Some(ResolvedInclude {
             file_id: *file_id,
             tokens,
@@ -230,20 +245,84 @@ fn unresolved_include_stripped_with_error() {
 fn scan_includes_finds_paths() {
     let text = "`include \"a.sv\"\nmodule top; `include \"b.sv\"\nendmodule";
     let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
-    let ranges = scan_includes(&tokens, text);
-    let paths: Vec<&str> = ranges
-        .iter()
-        .map(|r| &text[usize::from(r.start())..usize::from(r.end())])
-        .collect();
+    let occs = scan_includes(&tokens, text);
+    let paths: Vec<&str> = occs.iter().map(|o| o.request.spelling.as_str()).collect();
     assert_eq!(paths, vec!["a.sv", "b.sv"]);
+    assert!(occs.iter().all(|o| o.request.kind == IncludeKind::Quoted));
 }
 
 #[test]
 fn scan_includes_empty_for_no_includes() {
     let text = "module top; endmodule";
     let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
-    let paths = scan_includes(&tokens, text);
-    assert!(paths.is_empty());
+    let occs = scan_includes(&tokens, text);
+    assert!(occs.is_empty());
+}
+
+#[test]
+fn scan_includes_angle_bracket() {
+    let text = "`include <sys.svh>\nmodule top; endmodule";
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
+    let occs = scan_includes(&tokens, text);
+    assert_eq!(occs.len(), 1);
+    assert_eq!(occs[0].request.spelling.as_str(), "sys.svh");
+    assert_eq!(occs[0].request.kind, IncludeKind::AngleBracket);
+}
+
+#[test]
+fn scan_includes_mixed_quoted_and_angle() {
+    let text = "`include \"local.svh\"\n`include <global.svh>\nmodule top; endmodule";
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
+    let occs = scan_includes(&tokens, text);
+    assert_eq!(occs.len(), 2);
+    assert_eq!(occs[0].request.spelling.as_str(), "local.svh");
+    assert_eq!(occs[0].request.kind, IncludeKind::Quoted);
+    assert_eq!(occs[1].request.spelling.as_str(), "global.svh");
+    assert_eq!(occs[1].request.kind, IncludeKind::AngleBracket);
+}
+
+#[test]
+fn scan_includes_unterminated_angle_bracket() {
+    let text = "`include <missing_gt.svh\nmodule top; endmodule";
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
+    let occs = scan_includes(&tokens, text);
+    assert!(occs.is_empty());
+}
+
+#[test]
+fn scan_includes_angle_bracket_trims_whitespace() {
+    let text = "`include < sys.svh >\nmodule top; endmodule";
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
+    let occs = scan_includes(&tokens, text);
+    assert_eq!(occs.len(), 1);
+    assert_eq!(occs[0].request.spelling.as_str(), "sys.svh");
+    assert_eq!(occs[0].request.kind, IncludeKind::AngleBracket);
+}
+
+#[test]
+fn angle_bracket_include_expansion() {
+    let mut provider = MapProvider::new();
+    provider.add("sys.svh", FileId(1), "wire sys;");
+
+    let text = "module top; `include <sys.svh>\nendmodule";
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
+    let output = run_preprocess(FileId(0), &tokens, text, &provider);
+
+    assert!(output.expanded_text.contains("wire sys;"));
+    assert!(!output.expanded_text.contains("`include"));
+    assert_eq!(output.includes.dependencies(), &[FileId(1)]);
+}
+
+#[test]
+fn unresolved_angle_bracket_include() {
+    let provider = MapProvider::new();
+
+    let text = "module top; `include <missing.svh>\nendmodule";
+    let tokens = lyra_lexer::lex_with_mode(text, lyra_lexer::LexMode::Preprocess);
+    let output = run_preprocess(FileId(0), &tokens, text, &provider);
+
+    assert_eq!(output.errors.len(), 1);
+    assert!(output.errors[0].message.contains("missing.svh"));
 }
 
 #[test]

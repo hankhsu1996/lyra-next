@@ -130,6 +130,8 @@ struct TestMeta {
     kind: Kind,
     #[serde(default)]
     lrm: Option<LrmMeta>,
+    #[serde(default)]
+    include_dirs: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize, PartialEq, Eq, Clone, Copy)]
@@ -149,7 +151,7 @@ struct Case {
     key: String,
     rel: PathBuf,
     dir: PathBuf,
-    _meta: TestMeta,
+    include_dirs: Vec<String>,
 }
 
 // Extracts e.g. "5.6.1" from "5.6.1_escaped_identifiers"
@@ -243,11 +245,12 @@ fn discover_lrm_owner(
                 .to_path_buf();
             let meta = load_and_validate_yaml(&yaml_path, &rel, section, index);
             let key = format!("lrm__{chapter}__{section}__{label}__{case_name}");
+            let include_dirs = meta.include_dirs.clone();
             cases.push(Case {
                 key,
                 rel,
                 dir: case_path,
-                _meta: meta,
+                include_dirs,
             });
         }
     } else {
@@ -262,11 +265,12 @@ fn discover_lrm_owner(
             .to_path_buf();
         let meta = load_and_validate_yaml(&yaml_path, &rel, section, index);
         let key = format!("lrm__{chapter}__{section}__{label}");
+        let include_dirs = meta.include_dirs.clone();
         cases.push(Case {
             key,
             rel,
             dir: owner_path,
-            _meta: meta,
+            include_dirs,
         });
     }
 }
@@ -305,11 +309,12 @@ fn discover_regression_cases(base: &Path, cases: &mut Vec<Case>) {
             rel.display()
         );
         let key = format!("regression__{name}");
+        let include_dirs = meta.include_dirs.clone();
         cases.push(Case {
             key,
             rel,
             dir,
-            _meta: meta,
+            include_dirs,
         });
     }
 }
@@ -457,7 +462,7 @@ fn corpus_snapshots() {
     let cases = discover_test_cases(&base, &index);
 
     for case in &cases {
-        let ws = TestWorkspace::from_dir(&case.dir)
+        let ws = TestWorkspace::from_dir_with_include_dirs(&case.dir, &case.include_dirs)
             .unwrap_or_else(|e| panic!("failed to load corpus case {}: {e}", case.rel.display()));
         let unit = ws.compilation_unit();
 

@@ -154,7 +154,3 @@ Specify block terminal rules for interface ports. No specify block support. Test
 The std built-in package should contain process, mailbox, and semaphore classes per Annex G. Not tested. Blocked by: class support (Ch 8). Test: deferred until class support lands.
 
 ## Chapter 22 -- Compiler Directives
-
-### 22.4: `include` -- quoted vs angle-bracket differentiation
-
-`` `include `` with `-I`/`--incdir` search paths is implemented. Relative-to-includer resolution, nested include discovery, and first-match-wins across include dirs all work. Remaining: quoted (`"..."`) vs angle-bracket (`<...>`) differentiated search policy per LRM 22.4. Currently both use the same search order. Test: sv-tests `22.4--include_*`.

@@ -4,7 +4,10 @@ use lyra_source::FileId;
 struct NoIncludes;
 
 impl lyra_preprocess::IncludeProvider for NoIncludes {
-    fn resolve(&self, _: &str) -> Option<lyra_preprocess::ResolvedInclude<'_>> {
+    fn resolve(
+        &self,
+        _: &lyra_preprocess::IncludeRequest,
+    ) -> Option<lyra_preprocess::ResolvedInclude<'_>> {
         None
     }
 }

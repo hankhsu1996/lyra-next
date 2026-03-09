@@ -1,0 +1,5 @@
+kind: lrm
+lrm:
+  section: "22.4"
+include_dirs:
+  - "inc"
