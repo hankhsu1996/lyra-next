@@ -92,28 +92,33 @@ pub use default_nettype_queries::{
 pub use elab_lower::elab_diagnostics;
 pub use elab_queries::{TopModule, design_unit_signature, elaborate_top};
 
-/// Sorted include-path lookup for deterministic O(log n) resolution.
+// Re-export include-request types so consumers use lyra_db::{IncludeKind, IncludeRequest}
+// without coupling to lyra_preprocess directly.
+pub use lyra_preprocess::{IncludeKind, IncludeRequest};
+
+/// Sorted include-request lookup for deterministic O(log n) resolution.
 ///
-/// Stored as a sorted `Vec` to satisfy Salsa input constraints
-/// (`Clone + Eq + Hash`). Construction sorts entries by path;
-/// lookup uses binary search.
+/// Keyed by `IncludeRequest` (kind + spelling) so that quoted and
+/// angle-bracket includes with the same spelling can resolve
+/// independently. Stored as a sorted `Vec` to satisfy Salsa input
+/// constraints (`Clone + Eq + Hash`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct IncludeMap {
-    entries: Vec<(String, SourceFile)>,
+    entries: Vec<(IncludeRequest, SourceFile)>,
 }
 
 impl IncludeMap {
-    /// Build an `IncludeMap` from unsorted entries. Sorts by path.
-    pub fn new(mut entries: Vec<(String, SourceFile)>) -> Self {
+    /// Build an `IncludeMap` from unsorted entries. Sorts by request.
+    pub fn new(mut entries: Vec<(IncludeRequest, SourceFile)>) -> Self {
         entries.sort_by(|(a, _), (b, _)| a.cmp(b));
         Self { entries }
     }
 
-    /// Look up a path in O(log n).
-    pub fn lookup(&self, path: &str) -> Option<SourceFile> {
+    /// Look up an include request in O(log n).
+    pub fn lookup(&self, request: &IncludeRequest) -> Option<SourceFile> {
         let idx = self
             .entries
-            .binary_search_by(|(p, _)| p.as_str().cmp(path))
+            .binary_search_by(|(r, _)| r.cmp(request))
             .ok()?;
         Some(self.entries[idx].1)
     }
@@ -122,7 +127,7 @@ impl IncludeMap {
         self.entries.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &(String, SourceFile)> {
+    pub fn iter(&self) -> impl Iterator<Item = &(IncludeRequest, SourceFile)> {
         self.entries.iter()
     }
 }

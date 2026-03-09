@@ -249,11 +249,8 @@ impl<'a> Preprocessor<'a> {
             return self.strip_directive_line(idx);
         }
 
-        if let Some((inner_range, path_range, skip_count)) =
-            find_include_path(self.tokens, idx, self.src_cursor)
-        {
-            let path = &self.text[usize::from(inner_range.start())..usize::from(inner_range.end())];
-            if let Some(resolved) = self.provider.resolve(path) {
+        if let Some(occ) = find_include_path(self.tokens, self.text, idx, self.src_cursor) {
+            if let Some(resolved) = self.provider.resolve(&occ.request) {
                 self.flush_identity();
 
                 let inc_start = TextSize::new(self.expanded_text.len() as u32);
@@ -269,7 +266,7 @@ impl<'a> Preprocessor<'a> {
 
                 let inc_end = TextSize::new(self.expanded_text.len() as u32);
 
-                let skip_bytes: usize = self.tokens[idx..idx + skip_count]
+                let skip_bytes: usize = self.tokens[idx..idx + occ.skip_count]
                     .iter()
                     .map(|t| usize::from(t.len))
                     .sum();
@@ -295,14 +292,21 @@ impl<'a> Preprocessor<'a> {
                 self.includes.push(resolved.file_id);
                 self.src_cursor += skip_bytes;
                 self.flush_start = self.src_cursor;
-                return skip_count;
+                return occ.skip_count;
             }
-            // Unresolved include: error points at the string literal in origin space
+            let delim = match occ.request.kind {
+                crate::IncludeKind::Quoted => "\"",
+                crate::IncludeKind::AngleBracket => "<",
+            };
+            let close = match occ.request.kind {
+                crate::IncludeKind::Quoted => "\"",
+                crate::IncludeKind::AngleBracket => ">",
+            };
             self.push_error(
-                path_range,
+                occ.literal_range,
                 SmolStr::from(format!(
-                    "unresolved include: \"{}\"",
-                    &self.text[usize::from(inner_range.start())..usize::from(inner_range.end())]
+                    "unresolved include: {delim}{}{close}",
+                    occ.request.spelling,
                 )),
             );
         }
