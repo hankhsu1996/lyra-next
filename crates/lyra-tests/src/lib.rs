@@ -1,4 +1,5 @@
 pub mod annotation;
+mod include_loader;
 mod resolve;
 
 use std::fmt::Write;
@@ -14,9 +15,15 @@ use lyra_source::{FileId, LineIndex};
 
 /// A test workspace that holds multiple source files and provides
 /// dump utilities for snapshot testing.
+///
+/// `files` contains root source files (used for compilation unit,
+/// per-file diagnostics, and annotation matching). `all_source_files`
+/// contains every loaded file including discovered includes (used for
+/// FileId-based lookup of diagnostic locations).
 pub struct TestWorkspace {
     db: LyraDatabase,
     files: Vec<(String, SourceFile)>,
+    all_source_files: Vec<(String, SourceFile)>,
 }
 
 impl TestWorkspace {
@@ -24,43 +31,78 @@ impl TestWorkspace {
         Self {
             db: LyraDatabase::default(),
             files: Vec::new(),
+            all_source_files: Vec::new(),
         }
     }
 
     /// Add a source file to the workspace.
     pub fn add_file(&mut self, path: &str, text: &str) -> &mut Self {
-        let file_id = FileId(self.files.len() as u32);
-        let source = SourceFile::new(&self.db, file_id, text.to_owned(), IncludeMap::default());
+        let file_id = FileId(self.all_source_files.len() as u32);
+        let source = SourceFile::new(
+            &self.db,
+            file_id,
+            path.to_owned(),
+            text.to_owned(),
+            IncludeMap::default(),
+        );
         self.files.push((path.to_owned(), source));
+        self.all_source_files.push((path.to_owned(), source));
         self
     }
 
-    /// Build a workspace from all `.sv` files in a directory, sorted by name.
+    /// Build a workspace from all `.sv` and `.svh` files in a directory,
+    /// sorted by name, with include resolution via the shared resolver.
+    ///
+    /// Root files (`.sv`) are used for the compilation unit. All files
+    /// (roots + discovered includes) are available for `FileId` lookup.
+    /// Paths are workspace-relative (relative to `dir`).
     pub fn from_dir(dir: &Path) -> Result<Self, std::io::Error> {
-        let mut ws = Self::new();
-        let mut entries: Vec<_> = std::fs::read_dir(dir)?
-            .filter_map(|entry| {
-                let entry = entry.ok()?;
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("sv") {
-                    Some(path)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let ws = Self::new();
+        Self::from_dir_inner(ws, dir)
+    }
+
+    fn from_dir_inner(mut ws: Self, dir: &Path) -> Result<Self, std::io::Error> {
+        let mut entries = Vec::new();
+        collect_sv_files(dir, &mut entries)?;
         entries.sort();
 
-        for path in entries {
-            let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("non-UTF-8 file name: {}", path.display()),
-                )
-            })?;
-            let text = std::fs::read_to_string(&path)?;
-            ws.add_file(name, &text);
+        // Build workspace-relative paths and collect file contents
+        let mut root_paths: Vec<(String, String)> = Vec::new();
+        let mut all_fixture_files: Vec<(String, String)> = Vec::new();
+
+        for path in &entries {
+            let rel_path = path
+                .strip_prefix(dir)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned();
+            let text = std::fs::read_to_string(path)?;
+            all_fixture_files.push((rel_path.clone(), text.clone()));
+
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext == "sv" {
+                root_paths.push((rel_path, text));
+            }
         }
+
+        // Run pure include discovery and apply to database
+        let loader = include_loader::FixtureIncludeLoader::new(&all_fixture_files);
+        let plan = lyra_db::include_resolve::discover(&root_paths, &[], &loader);
+        let source_files = lyra_db::include_resolve::apply_include_plan(&mut ws.db, &plan, 0);
+
+        // Track all files for FileId lookup
+        for (idx, f) in plan.files.iter().enumerate() {
+            ws.all_source_files
+                .push((f.path.clone(), source_files[idx]));
+        }
+
+        // Track root files for compilation unit and per-file diagnostics
+        for (idx, f) in plan.files.iter().enumerate() {
+            if f.is_root {
+                ws.files.push((f.path.clone(), source_files[idx]));
+            }
+        }
+
         Ok(ws)
     }
 
@@ -69,34 +111,45 @@ impl TestWorkspace {
         &self.db
     }
 
-    /// The `SourceFile` at the given index.
+    /// The `SourceFile` at the given index (root files only).
     pub fn source_file(&self, index: usize) -> SourceFile {
         self.files[index].1
     }
 
-    /// Source text of the file at the given index.
+    /// Source text of the file at the given index (root files only).
     pub fn file_text(&self, index: usize) -> &str {
         self.files[index].1.text(&self.db)
     }
 
-    /// Path (name) of the file at the given index.
+    /// Path (name) of the file at the given index (root files only).
     pub fn file_path(&self, index: usize) -> &str {
         &self.files[index].0
     }
 
-    /// Number of files.
+    /// Number of root files.
     pub fn file_count(&self) -> usize {
         self.files.len()
     }
 
-    /// Map a `FileId` back to the file's index in this workspace.
+    /// Map a `FileId` back to the root file index. Returns `None` for
+    /// include-only files. Used by annotation matching which only
+    /// targets root files.
     pub fn file_index_for_id(&self, id: FileId) -> Option<usize> {
         self.files
             .iter()
             .position(|(_, s)| s.file_id(&self.db) == id)
     }
 
-    /// Build a `CompilationUnit` from all files in the workspace.
+    /// Look up any file (root or include) by `FileId`. Returns
+    /// `(path, source_text)`.
+    fn lookup_any_file(&self, id: FileId) -> Option<(&str, &str)> {
+        self.all_source_files
+            .iter()
+            .find(|(_, s)| s.file_id(&self.db) == id)
+            .map(|(path, sf)| (path.as_str(), sf.text(&self.db).as_str()))
+    }
+
+    /// Build a `CompilationUnit` from root files.
     pub fn compilation_unit(&self) -> CompilationUnit {
         let sources: Vec<SourceFile> = self.files.iter().map(|(_, s)| *s).collect();
         new_compilation_unit(&self.db, sources)
@@ -115,7 +168,6 @@ impl TestWorkspace {
         let unit = self.compilation_unit();
         let mut out = String::new();
 
-        // Collect and format per-file diagnostics
         for (i, (path, source)) in self.files.iter().enumerate() {
             let diags = file_diagnostics(&self.db, *source, unit);
             let line_index = LineIndex::new(self.file_text(i));
@@ -162,7 +214,6 @@ impl TestWorkspace {
 
         out.push_str("---\n");
 
-        // Unit diagnostics
         let unit_diags = unit_diagnostics(&self.db, unit);
         let _ = writeln!(
             out,
@@ -176,12 +227,9 @@ impl TestWorkspace {
                 let code = d.code;
                 let sev = severity_str(d.severity);
                 let msg = d.render_message();
-                // Unit diagnostics may have a span (for the duplicate location)
                 let loc = d.primary_span().map(|span| {
-                    let file_idx = self.file_index_for_id(span.file);
-                    let file_path = file_idx.map_or("?", |i| self.file_path(i));
-                    let li = file_idx.map(|i| LineIndex::new(self.file_text(i)));
-                    if let Some(li) = li {
+                    if let Some((file_path, file_text)) = self.lookup_any_file(span.file) {
+                        let li = LineIndex::new(file_text);
                         let start = li.line_col(span.range.start());
                         let end = li.line_col(span.range.end());
                         format!(
@@ -235,7 +283,6 @@ impl TestWorkspace {
         if all_errors.is_empty() {
             out.push_str("no diagnostics\n");
         } else {
-            // Sort by (file_id, offset, message) for stability
             all_errors.sort_by(|a, b| {
                 a.0.cmp(&b.0)
                     .then_with(|| a.1.range.start().cmp(&b.1.range.start()))
@@ -254,6 +301,24 @@ impl Default for TestWorkspace {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Recursively collect `.sv` and `.svh` files from a directory tree.
+fn collect_sv_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<(), std::io::Error> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_sv_files(&path, out)?;
+        } else if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| ext == "sv" || ext == "svh")
+        {
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 /// Print a syntax tree node with 2-space indentation per depth level.

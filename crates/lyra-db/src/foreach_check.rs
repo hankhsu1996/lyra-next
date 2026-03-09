@@ -269,6 +269,7 @@ mod tests {
         DbSourceFile::new(
             db,
             FileId(id),
+            format!("test_{id}.sv"),
             text.to_owned(),
             crate::IncludeMap::default(),
         )
