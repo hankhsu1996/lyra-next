@@ -137,6 +137,8 @@ pub enum MessageId {
     QueuePartSelectNotAllowed,
     EmptyConcatRequiresContext,
     QueueConcatIncompatible,
+    // Fixed part-select legality
+    FixedPartSelectNonConstant,
     // Implicit net policy
     ImplicitNetForbidden,
     // Declaration legality
@@ -320,6 +322,9 @@ pub fn render_message(msg: &Message) -> String {
         | MessageId::QueuePartSelectNotAllowed
         | MessageId::EmptyConcatRequiresContext
         | MessageId::QueueConcatIncompatible => render_queue_operator_message(msg),
+        MessageId::FixedPartSelectNonConstant => {
+            "fixed part-select bounds must be constant integer expressions".into()
+        }
         MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
         | MessageId::StreamUnpackGreedyRemainder

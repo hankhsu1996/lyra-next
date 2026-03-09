@@ -4,30 +4,50 @@ use super::expr_type::{ExprType, ExprTypeErrorKind, ExprView, InferCtx, try_inte
 use super::infer_expr;
 use crate::types::{ConstInt, Ty, UnpackedDim};
 
+/// Classification of a fixed-range width computation failure.
+enum FixedRangeError {
+    /// At least one bound is a non-constant expression.
+    NonConstantBound,
+    /// Bounds are constant but the resulting width is invalid.
+    InvalidWidth,
+}
+
 /// Compute the constant width of a range select from const-eval results.
 ///
 /// Fixed `[hi:lo]`: width = |hi - lo| + 1. Both must be known.
 /// Indexed `[+:k]` / `[-:k]`: width = k. Must be known and > 0.
 fn compute_slice_width(
     kind: RangeKind,
-    op1_const: ConstInt,
-    op2_const: ConstInt,
-) -> Result<u32, ExprTypeErrorKind> {
+    op1_const: &ConstInt,
+    op2_const: &ConstInt,
+) -> Result<u32, FixedRangeError> {
     match kind {
         RangeKind::IndexedPlus | RangeKind::IndexedMinus => match op2_const {
-            ConstInt::Known(w) if w > 0 => {
-                u32::try_from(w).map_err(|_| ExprTypeErrorKind::SliceWidthInvalid)
+            ConstInt::Known(w) if *w > 0 => {
+                u32::try_from(*w).map_err(|_| FixedRangeError::InvalidWidth)
             }
-            _ => Err(ExprTypeErrorKind::SliceWidthInvalid),
+            _ => Err(FixedRangeError::InvalidWidth),
         },
         RangeKind::Fixed => match (op1_const, op2_const) {
             (ConstInt::Known(h), ConstInt::Known(l)) => {
-                let diff = (i128::from(h) - i128::from(l)).unsigned_abs() + 1;
-                u32::try_from(diff).map_err(|_| ExprTypeErrorKind::SliceWidthInvalid)
+                let diff = (i128::from(*h) - i128::from(*l)).unsigned_abs() + 1;
+                u32::try_from(diff).map_err(|_| FixedRangeError::InvalidWidth)
             }
-            _ => Err(ExprTypeErrorKind::SliceWidthInvalid),
+            _ if is_non_constant_bound(op1_const) || is_non_constant_bound(op2_const) => {
+                Err(FixedRangeError::NonConstantBound)
+            }
+            _ => Err(FixedRangeError::InvalidWidth),
         },
     }
+}
+
+/// Whether a const-eval result positively determined that the expression is
+/// non-constant (as opposed to merely unevaluated or failed for other reasons).
+fn is_non_constant_bound(c: &ConstInt) -> bool {
+    matches!(
+        c,
+        ConstInt::Error(crate::types::ConstEvalError::NonConstant)
+    )
 }
 
 /// Whether an expression view is valid as a queue index/slice bound.
@@ -135,9 +155,14 @@ fn infer_fixed_array_slice(
     }
 
     let width =
-        match compute_slice_width(kind, ctx.const_eval(&op1_node), ctx.const_eval(&op2_node)) {
+        match compute_slice_width(kind, &ctx.const_eval(&op1_node), &ctx.const_eval(&op2_node)) {
             Ok(w) => w,
-            Err(e) => return ExprType::error(e),
+            Err(FixedRangeError::NonConstantBound) => {
+                return ExprType::error(ExprTypeErrorKind::FixedPartSelectNonConstant);
+            }
+            Err(FixedRangeError::InvalidWidth) => {
+                return ExprType::error(ExprTypeErrorKind::SliceWidthInvalid);
+            }
         };
 
     debug_assert!(width > 0, "array slice with width 0");
@@ -173,9 +198,14 @@ fn infer_integral_part_select(
     }
 
     let width =
-        match compute_slice_width(kind, ctx.const_eval(&op1_node), ctx.const_eval(&op2_node)) {
+        match compute_slice_width(kind, &ctx.const_eval(&op1_node), &ctx.const_eval(&op2_node)) {
             Ok(w) => w,
-            Err(e) => return ExprType::error(e),
+            Err(FixedRangeError::NonConstantBound) => {
+                return ExprType::error(ExprTypeErrorKind::FixedPartSelectNonConstant);
+            }
+            Err(FixedRangeError::InvalidWidth) => {
+                return ExprType::error(ExprTypeErrorKind::SliceWidthInvalid);
+            }
         };
 
     match &base.ty {

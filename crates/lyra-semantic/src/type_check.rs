@@ -254,6 +254,9 @@ pub enum TypeCheckItem {
     QueueConcatIncompatible {
         expr_site: Site,
     },
+    FixedPartSelectNonConstant {
+        expr_site: Site,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.

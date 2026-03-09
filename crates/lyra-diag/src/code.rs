@@ -88,6 +88,7 @@ pub const DOLLAR_OUTSIDE_QUEUE_CONTEXT: DiagKey = "lyra.type.dollar_outside_queu
 pub const QUEUE_PART_SELECT_NOT_ALLOWED: DiagKey = "lyra.type.queue_part_select_not_allowed";
 pub const EMPTY_CONCAT_REQUIRES_CONTEXT: DiagKey = "lyra.type.empty_concat_requires_context";
 pub const QUEUE_CONCAT_INCOMPAT: DiagKey = "lyra.type.queue_concat_incompat";
+pub const FIXED_PART_SELECT_NON_CONSTANT: DiagKey = "lyra.type.fixed_part_select_non_constant";
 pub const IMPLICIT_NET_FORBIDDEN: DiagKey = "lyra.semantic.implicit_net_forbidden";
 pub const AUTOMATIC_VAR_NON_PROCEDURAL: DiagKey = "lyra.decl.automatic_var_non_procedural";
 
@@ -199,6 +200,7 @@ pub const ALL_KEYS: &[DiagKey] = &[
     QUEUE_PART_SELECT_NOT_ALLOWED,
     EMPTY_CONCAT_REQUIRES_CONTEXT,
     QUEUE_CONCAT_INCOMPAT,
+    FIXED_PART_SELECT_NON_CONSTANT,
     AUTOMATIC_VAR_NON_PROCEDURAL,
     UNRESOLVED_MODULE_INST,
     NOT_INSTANTIABLE,

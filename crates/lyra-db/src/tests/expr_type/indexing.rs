@@ -211,6 +211,80 @@ fn expr_type_field_error_non_composite() {
     );
 }
 
+// LRM 11.5.1: fixed part-select bounds must be constant integer expressions
+
+#[test]
+fn expr_type_fixed_part_select_var_upper_bound() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; integer i; parameter P = x[i:0]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::FixedPartSelectNonConstant)
+    );
+}
+
+#[test]
+fn expr_type_fixed_part_select_var_lower_bound() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; integer j; parameter P = x[7:j]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::FixedPartSelectNonConstant)
+    );
+}
+
+#[test]
+fn expr_type_fixed_part_select_both_var_bounds() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; integer i, j; parameter P = x[i:j]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::FixedPartSelectNonConstant)
+    );
+}
+
+#[test]
+fn expr_type_fixed_part_select_invalid_const_width() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; parameter P = x[0+:0]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(
+        expr_type_of_first_param(&db, file, unit),
+        ExprType::error(ExprTypeErrorKind::SliceWidthInvalid)
+    );
+}
+
+#[test]
+fn expr_type_fixed_part_select_const_bounds_valid() {
+    let db = LyraDatabase::default();
+    let file = new_file(
+        &db,
+        0,
+        "module m; logic [7:0] x; parameter P = x[3:0]; endmodule",
+    );
+    let unit = single_file_unit(&db, file);
+    assert_eq!(expr_type_of_first_param(&db, file, unit), bv_u4(4));
+}
+
 // LRM 11.8.1: bit-select and part-select results are unsigned regardless of operand signedness
 
 #[test]

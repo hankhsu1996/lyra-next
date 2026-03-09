@@ -131,6 +131,15 @@ fn lower_type_check_item_continued(
         TypeCheckItem::TaggedExprError { .. } => {
             call::lower_tagged_expr_error(item, source_map, diags);
         }
+        TypeCheckItem::FixedPartSelectNonConstant { expr_site } => {
+            misc::lower_expr_site_error(
+                *expr_site,
+                lyra_diag::code::FIXED_PART_SELECT_NON_CONSTANT,
+                lyra_diag::MessageId::FixedPartSelectNonConstant,
+                source_map,
+                diags,
+            );
+        }
         TypeCheckItem::DollarOutsideQueueContext { expr_site }
         | TypeCheckItem::QueuePartSelectNotAllowed { expr_site }
         | TypeCheckItem::EmptyConcatRequiresContext { expr_site }
@@ -153,7 +162,7 @@ fn lower_type_check_item_continued(
                     lyra_diag::MessageId::EmptyConcatRequiresContext,
                 ),
             };
-            misc::lower_queue_operator_error(*expr_site, code, msg_id, source_map, diags);
+            misc::lower_expr_site_error(*expr_site, code, msg_id, source_map, diags);
         }
         _ => {}
     }

@@ -1,0 +1,10 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: test.sv (3 diagnostics)
+  error[lyra.type.fixed_part_select_non_constant] 11:15..11:15: fixed part-select bounds must be constant integer expressions
+  error[lyra.type.fixed_part_select_non_constant] 16:15..16:15: fixed part-select bounds must be constant integer expressions
+  error[lyra.type.fixed_part_select_non_constant] 21:15..21:15: fixed part-select bounds must be constant integer expressions
+---
+unit (0 diagnostics)
