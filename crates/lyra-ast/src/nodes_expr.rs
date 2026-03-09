@@ -370,6 +370,64 @@ impl crate::nodes::AssignmentPatternExpr {
     pub fn operands(&self) -> impl Iterator<Item = crate::expr::Expr> + '_ {
         support::expr_children(&self.syntax)
     }
+
+    /// Typed item children.
+    pub fn items(&self) -> support::AstChildren<crate::nodes::AssignmentPatternItem> {
+        support::children(&self.syntax)
+    }
+}
+
+/// Syntactic classification of an assignment pattern item.
+#[derive(Debug, Clone)]
+pub enum AssignmentPatternItemKind {
+    /// Positional: bare expression.
+    Positional(crate::expr::Expr),
+    /// Keyed: `key : value`.
+    Keyed {
+        key: crate::expr::Expr,
+        value: crate::expr::Expr,
+    },
+    /// Default: `default : value`.
+    Default { value: crate::expr::Expr },
+}
+
+impl crate::nodes::AssignmentPatternItem {
+    /// The colon token separating key/default from value.
+    pub fn colon_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Colon)
+    }
+
+    /// The `default` keyword token, if present.
+    pub fn default_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::DefaultKw)
+    }
+
+    /// The first expression child.
+    pub fn first_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 0)
+    }
+
+    /// The second expression child (present only in keyed form).
+    pub fn second_expr(&self) -> Option<crate::expr::Expr> {
+        support::expr_child(&self.syntax, 1)
+    }
+
+    /// Classify the item by syntactic shape.
+    ///
+    /// Returns `None` for malformed items (error recovery).
+    pub fn kind(&self) -> Option<AssignmentPatternItemKind> {
+        if self.colon_token().is_none() {
+            let expr = self.first_expr()?;
+            return Some(AssignmentPatternItemKind::Positional(expr));
+        }
+        if self.default_token().is_some() {
+            let value = self.first_expr()?;
+            return Some(AssignmentPatternItemKind::Default { value });
+        }
+        let key = self.first_expr()?;
+        let value = self.second_expr()?;
+        Some(AssignmentPatternItemKind::Keyed { key, value })
+    }
 }
 
 impl ReplicExpr {
@@ -788,5 +846,89 @@ mod tests {
         // a[i+1:j] -- the + is inside BinExpr, not a direct child
         let re = parse_range_expr("module m; parameter P = a[i+1:j]; endmodule");
         assert_eq!(re.range_kind(), RangeKind::Fixed);
+    }
+
+    fn find_first<T: AstNode>(node: &lyra_parser::SyntaxNode) -> Option<T> {
+        if let Some(n) = T::cast(node.clone()) {
+            return Some(n);
+        }
+        for child in node.children() {
+            if let Some(r) = find_first::<T>(&child) {
+                return Some(r);
+            }
+        }
+        None
+    }
+
+    fn parse_tree(src: &str) -> lyra_parser::SyntaxNode {
+        let tokens = lyra_lexer::lex(src);
+        let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, src);
+        let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
+        parse.syntax().clone()
+    }
+
+    fn parse_assignment_pattern(src: &str) -> crate::nodes::AssignmentPatternExpr {
+        let tree = parse_tree(src);
+        find_first::<crate::nodes::AssignmentPatternExpr>(&tree)
+            .expect("should contain an AssignmentPatternExpr")
+    }
+
+    #[test]
+    fn assignment_pattern_positional_item() {
+        let ap = parse_assignment_pattern("module m; int aa[int] = '{1, 2}; endmodule");
+        let items: Vec<_> = ap.items().collect();
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            items[0].kind(),
+            Some(AssignmentPatternItemKind::Positional(_))
+        ));
+    }
+
+    #[test]
+    fn assignment_pattern_keyed_item() {
+        let ap = parse_assignment_pattern("module m; int aa[int] = '{0: 10, 1: 20}; endmodule");
+        let items: Vec<_> = ap.items().collect();
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            items[0].kind(),
+            Some(AssignmentPatternItemKind::Keyed { .. })
+        ));
+    }
+
+    #[test]
+    fn assignment_pattern_default_item() {
+        let ap = parse_assignment_pattern("module m; int aa[int] = '{default: 42}; endmodule");
+        let items: Vec<_> = ap.items().collect();
+        assert_eq!(items.len(), 1);
+        assert!(matches!(
+            items[0].kind(),
+            Some(AssignmentPatternItemKind::Default { .. })
+        ));
+    }
+
+    #[test]
+    fn assignment_pattern_item_accessors() {
+        let ap = parse_assignment_pattern("module m; int aa[int] = '{0: 10}; endmodule");
+        let item = ap.items().next().expect("should have item");
+        assert!(item.colon_token().is_some());
+        assert!(item.default_token().is_none());
+        assert!(item.first_expr().is_some());
+        assert!(item.second_expr().is_some());
+    }
+
+    #[test]
+    fn assignment_pattern_items_iterator() {
+        let ap =
+            parse_assignment_pattern("module m; int aa[int] = '{0: 10, default: 5}; endmodule");
+        let items: Vec<_> = ap.items().collect();
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            items[0].kind(),
+            Some(AssignmentPatternItemKind::Keyed { .. })
+        ));
+        assert!(matches!(
+            items[1].kind(),
+            Some(AssignmentPatternItemKind::Default { .. })
+        ));
     }
 }

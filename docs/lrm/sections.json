@@ -185,7 +185,7 @@
   {"section": "7.9.8", "chapter": 7, "title": "Arguments to traversal methods", "parent": "7.9", "children": [], "ownable": false},
   {"section": "7.9.9", "chapter": 7, "title": "Associative array assignment", "parent": "7.9", "children": [], "ownable": false},
   {"section": "7.9.10", "chapter": 7, "title": "Associative array arguments", "parent": "7.9", "children": [], "ownable": false},
-  {"section": "7.9.11", "chapter": 7, "title": "Associative array literals", "parent": "7.9", "children": [], "ownable": false},
+  {"section": "7.9.11", "chapter": 7, "title": "Associative array literals", "parent": "7.9", "children": [], "ownable": true},
   {"section": "7.10", "chapter": 7, "title": "Queues", "parent": "7", "children": ["7.10.0", "7.10.1", "7.10.2", "7.10.3", "7.10.4", "7.10.5"], "ownable": false},
   {"section": "7.10.0", "chapter": 7, "title": "Queue declaration", "parent": "7.10", "children": [], "ownable": true},
   {"section": "7.10.1", "chapter": 7, "title": "Queue operators", "parent": "7.10", "children": [], "ownable": true},

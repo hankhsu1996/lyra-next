@@ -110,6 +110,7 @@ ast_nodes! {
     CondExpr(SyntaxKind::CondExpr) { @custom }
     ConcatExpr(SyntaxKind::ConcatExpr) { @custom }
     AssignmentPatternExpr(SyntaxKind::AssignmentPatternExpr) { @custom }
+    AssignmentPatternItem(SyntaxKind::AssignmentPatternItem) { @custom }
     ReplicExpr(SyntaxKind::ReplicExpr) { @custom }
     StreamExpr(SyntaxKind::StreamExpr) { @custom }
     StreamSliceSize(SyntaxKind::StreamSliceSize) { @custom }

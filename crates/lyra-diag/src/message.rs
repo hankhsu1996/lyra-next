@@ -140,6 +140,10 @@ pub enum MessageId {
     QueueConcatIncompatible,
     // Fixed part-select legality
     FixedPartSelectNonConstant,
+    // Assignment pattern diagnostics (LRM 7.9.11)
+    AssignPatternPositionalInAssocArray,
+    AssignPatternDuplicateDefault,
+    AssignPatternKeyTypeMismatch,
     // Implicit net policy
     ImplicitNetForbidden,
     // Declaration legality
@@ -326,6 +330,9 @@ pub fn render_message(msg: &Message) -> String {
         MessageId::FixedPartSelectNonConstant => {
             "fixed part-select bounds must be constant integer expressions".into()
         }
+        MessageId::AssignPatternPositionalInAssocArray
+        | MessageId::AssignPatternDuplicateDefault
+        | MessageId::AssignPatternKeyTypeMismatch => render_assign_pattern_message(msg),
         MessageId::StreamUnpackOperandInvalid
         | MessageId::StreamUnpackOperandUnsupported
         | MessageId::StreamUnpackGreedyRemainder
@@ -933,6 +940,23 @@ fn render_enum_value_message(msg: &Message) -> String {
             format!("sized literal width {lit_w} does not match enum base width {base_w}")
         }
         MessageId::EnumDuplicateOriginalHere => "first defined with this value here".into(),
+        _ => String::new(),
+    }
+}
+
+fn render_assign_pattern_message(msg: &Message) -> String {
+    match msg.id {
+        MessageId::AssignPatternPositionalInAssocArray => {
+            "positional entry is not allowed in associative array assignment pattern".into()
+        }
+        MessageId::AssignPatternDuplicateDefault => {
+            "duplicate `default` entry in assignment pattern".into()
+        }
+        MessageId::AssignPatternKeyTypeMismatch => {
+            let expected = msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+            let actual = msg.args.get(1).and_then(Arg::as_name).unwrap_or("?");
+            format!("assignment pattern key type `{actual}` does not match index type `{expected}`")
+        }
         _ => String::new(),
     }
 }

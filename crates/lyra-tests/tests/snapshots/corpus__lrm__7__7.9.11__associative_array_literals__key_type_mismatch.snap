@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.type.assign_pattern_key_type_mismatch] 7:11..7:11: assignment pattern key type `bit signed [31:0]` does not match index type `string`
+---
+unit (0 diagnostics)
