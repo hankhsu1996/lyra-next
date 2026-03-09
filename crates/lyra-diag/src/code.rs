@@ -34,6 +34,8 @@ pub const FOREACH_VAR_SAME_AS_ARRAY: DiagKey = "lyra.semantic.foreach_var_same_a
 pub const FOREACH_TOO_MANY_VARS: DiagKey = "lyra.semantic.foreach_too_many_vars";
 pub const CASE_INSIDE_REQUIRES_PLAIN_CASE: DiagKey =
     "lyra.semantic.case_inside_requires_plain_case";
+pub const CASE_MATCHES_REQUIRES_PLAIN_CASE: DiagKey =
+    "lyra.semantic.case_matches_requires_plain_case";
 pub const PROTOTYPE_MISMATCH: DiagKey = "lyra.semantic.prototype_mismatch";
 pub const FOREACH_WILDCARD_ASSOC: DiagKey = "lyra.semantic.foreach_wildcard_assoc";
 
@@ -149,6 +151,7 @@ pub const ALL_KEYS: &[DiagKey] = &[
     FOREACH_VAR_SAME_AS_ARRAY,
     FOREACH_TOO_MANY_VARS,
     CASE_INSIDE_REQUIRES_PLAIN_CASE,
+    CASE_MATCHES_REQUIRES_PLAIN_CASE,
     PROTOTYPE_MISMATCH,
     FOREACH_WILDCARD_ASSOC,
     IMPLICIT_NET_FORBIDDEN,

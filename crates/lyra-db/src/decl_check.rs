@@ -152,6 +152,7 @@ impl DeclCtx {
                     let body = match &ci {
                         lyra_ast::CaseItemLike::Normal(n) => n.body(),
                         lyra_ast::CaseItemLike::Inside(i) => i.body(),
+                        lyra_ast::CaseItemLike::Pattern(p) => p.body(),
                     };
                     if let Some(b) = body {
                         self.walk_generate_stmt(&b);

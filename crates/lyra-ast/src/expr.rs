@@ -5,8 +5,9 @@ use lyra_source::TokenSpan;
 use crate::node::{AstNode, HasSyntax, is_expression_kind};
 use crate::nodes::{
     AssignmentPatternExpr, BinExpr, CallExpr, CastExpr, ConcatExpr, CondExpr, DollarExpr,
-    Expression, FieldExpr, IndexExpr, Literal, NameRef, NewExpr, ParenExpr, PrefixExpr,
-    QualifiedName, RangeExpr, ReplicExpr, StreamExpr, SystemTfCall, TaggedExpr, TypeExpr, TypeSpec,
+    Expression, FieldExpr, IndexExpr, Literal, MatchesExpr, NameRef, NewExpr, ParenExpr,
+    PrefixExpr, QualifiedName, RangeExpr, ReplicExpr, StreamExpr, SystemTfCall, TaggedExpr,
+    TypeExpr, TypeSpec,
 };
 
 /// Typed handle for any expression-kind syntax node.
@@ -136,6 +137,7 @@ impl Expr {
             SyntaxKind::TypeExpr => TypeExpr::cast(node).map(ExprKind::TypeExpr),
             SyntaxKind::TaggedExpr => TaggedExpr::cast(node).map(ExprKind::TaggedExpr),
             SyntaxKind::DollarExpr => DollarExpr::cast(node).map(ExprKind::DollarExpr),
+            SyntaxKind::MatchesExpr => MatchesExpr::cast(node).map(ExprKind::MatchesExpr),
             _ => None,
         }
     }
@@ -167,6 +169,7 @@ pub enum ExprKind {
     TypeExpr(TypeExpr),
     TaggedExpr(TaggedExpr),
     DollarExpr(DollarExpr),
+    MatchesExpr(MatchesExpr),
 }
 
 impl ExprKind {
@@ -215,6 +218,7 @@ impl ExprKind {
             Self::TypeExpr(n) => n.syntax(),
             Self::TaggedExpr(n) => n.syntax(),
             Self::DollarExpr(n) => n.syntax(),
+            Self::MatchesExpr(n) => n.syntax(),
         }
     }
 }

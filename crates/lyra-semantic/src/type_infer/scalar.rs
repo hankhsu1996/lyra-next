@@ -1,5 +1,6 @@
 use lyra_ast::{
-    BinExpr, CastExpr, CondExpr, Literal, LiteralKind, PrefixExpr, SyntaxPrefixOp, TypeExpr,
+    BinExpr, CastExpr, CondExpr, Literal, LiteralKind, MatchesExpr, PrefixExpr, SyntaxPrefixOp,
+    TypeExpr,
 };
 
 use super::expr_type::{
@@ -172,14 +173,25 @@ pub(super) fn infer_binary(
     ExprType::bitvec(coerce_integral(&result_self, &result_ctx))
 }
 
+// `matches` returns a 1-bit predicate (LRM 12.6).
+pub(super) fn infer_matches(me: &MatchesExpr, ctx: &dyn InferCtx) -> ExprType {
+    // Infer LHS for side effects (name resolution, type checking)
+    if let Some(e) = me.expr() {
+        infer_expr(&e, ctx, None);
+    }
+    // Pattern type compatibility is deferred; result is always 1-bit
+    ExprType::bitvec(BitVecType {
+        width: BitWidth::Known(1),
+        signed: Signedness::Unsigned,
+        four_state: true,
+    })
+}
+
 pub(super) fn infer_cond(
     cond_expr: &CondExpr,
     ctx: &dyn InferCtx,
     expected: Option<&IntegralCtx>,
 ) -> ExprType {
-    let Some(cond_node) = cond_expr.condition() else {
-        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
-    };
     let Some(then_node) = cond_expr.then_expr() else {
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
@@ -187,10 +199,14 @@ pub(super) fn infer_cond(
         return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     };
 
-    // Condition is always self-determined
-    let cond = infer_expr(&cond_node, ctx, None);
-    if matches!(cond.view, ExprView::QueueDollar) {
-        return ExprType::error(ExprTypeErrorKind::DollarOutsideQueueContext);
+    // Condition is always self-determined.
+    if let Some(cond_node) = cond_expr.condition() {
+        let cond = infer_expr(&cond_node, ctx, None);
+        if matches!(cond.view, ExprView::QueueDollar) {
+            return ExprType::error(ExprTypeErrorKind::DollarOutsideQueueContext);
+        }
+    } else {
+        return ExprType::error(ExprTypeErrorKind::UnsupportedExprKind);
     }
 
     // Self-determined types of both arms

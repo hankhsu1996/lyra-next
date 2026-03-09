@@ -15,38 +15,111 @@ pub(crate) enum ExprMode {
     Bracket,
 }
 
-// Parse an expression (normal mode). Returns None if no expression could be parsed.
+// Plain expression (normal mode). Returns None if no expression could
+// be parsed.
+//
+// Handles ternary (`?:`) but does NOT accept `matches`/`&&&` predicate
+// syntax. Use `cond_predicate()` for grammar positions that allow
+// conditional predicates (e.g. `if()` conditions, `case matches`).
 pub(crate) fn expr(p: &mut Parser) -> Option<CompletedMarker> {
-    expr_bp(p, 0, ExprMode::Normal)
+    let lhs = expr_bp(p, 0, ExprMode::Normal)?;
+    Some(maybe_ternary(p, lhs))
 }
 
 // Parse an expression that may be the LHS of an assignment statement.
-// `<=` will NOT be consumed as an operator.
+// `<=` will NOT be consumed as an operator. No ternary (LHS only).
 pub(crate) fn expr_for_stmt(p: &mut Parser) -> Option<CompletedMarker> {
     expr_bp(p, 0, ExprMode::StmtLhs)
 }
 
+// Parse an expression in bracket mode (indexed part-select context).
+fn expr_in_bracket(p: &mut Parser) -> Option<CompletedMarker> {
+    let lhs = expr_bp(p, 0, ExprMode::Bracket)?;
+    Some(maybe_ternary(p, lhs))
+}
+
+// Conditional predicate (LRM 12.6): `expression_or_cond_pattern
+// { &&& expression_or_cond_pattern }`.
+//
+// Used in `if()` conditions and `case matches` items. Also handles a
+// trailing ternary `?:` so that `if (a > b ? 1 : 0)` and
+// `if (a matches p ? b : c)` both work. NOT reachable from plain
+// `expr()` -- `expr()` never consumes `matches` or `&&&`, and
+// parenthesized expressions call `expr()`, not `cond_predicate()`.
+pub(crate) fn cond_predicate(p: &mut Parser) -> Option<CompletedMarker> {
+    let mut lhs = expression_or_cond_pattern(p)?;
+    if p.at(SyntaxKind::AmpAmpAmp) {
+        let m = lhs.precede(p);
+        while p.at(SyntaxKind::AmpAmpAmp) {
+            cond_guard(p);
+        }
+        lhs = m.complete(p, SyntaxKind::CondPredicate);
+    }
+    // A ternary whose test is a predicate (e.g. `x matches p ? a : b`)
+    // is a `conditional_expression` per LRM. The ternary `?` can follow
+    // a cond_predicate when it appears inside an expression context
+    // (e.g. parenthesized expression, if-condition).
+    if p.at(SyntaxKind::Question) {
+        Some(finish_ternary(p, lhs))
+    } else {
+        Some(lhs)
+    }
+}
+
+// LRM `expression_or_cond_pattern`: either a plain expression or
+// `expression matches pattern`. Used as each element of a
+// `cond_predicate` and inside `&&&` guards.
+fn expression_or_cond_pattern(p: &mut Parser) -> Option<CompletedMarker> {
+    let mut lhs = expr(p)?;
+    if p.at(SyntaxKind::MatchesKw) {
+        let m = lhs.precede(p);
+        p.bump(); // matches
+        super::patterns::pattern(p);
+        lhs = m.complete(p, SyntaxKind::MatchesExpr);
+    }
+    Some(lhs)
+}
+
+// Parse a single `&&& guard_expr` clause (LRM 12.6).
+//
+// Each guard element is an `expression_or_cond_pattern`, so the guard
+// can itself contain `matches`.
+pub(crate) fn cond_guard(p: &mut Parser) {
+    let g = p.start();
+    p.bump(); // &&&
+    super::eat_attr_instances(p);
+    expression_or_cond_pattern(p);
+    g.complete(p, SyntaxKind::CondPredicateGuard);
+}
+
+// Ternary `? expr : expr`. Only handles `?` -- does NOT consume
+// `matches` or `&&&`.
+fn maybe_ternary(p: &mut Parser, lhs: CompletedMarker) -> CompletedMarker {
+    if p.at(SyntaxKind::Question) {
+        finish_ternary(p, lhs)
+    } else {
+        lhs
+    }
+}
+
+fn finish_ternary(p: &mut Parser, test: CompletedMarker) -> CompletedMarker {
+    let m = test.precede(p);
+    p.bump(); // ?
+    super::eat_attr_instances(p);
+    expr(p); // middle: full expression (right-assoc via recursion)
+    p.expect(SyntaxKind::Colon);
+    expr(p); // right: full expression
+    m.complete(p, SyntaxKind::CondExpr)
+}
+
 // Pratt parser with minimum binding power.
+//
+// Handles all binary/prefix operators. Ternary (`?`), `matches`, and
+// `&&&` are handled at a higher layer.
 fn expr_bp(p: &mut Parser, min_bp: u8, mode: ExprMode) -> Option<CompletedMarker> {
     let mut lhs = lhs(p, mode)?;
 
     loop {
-        // Conditional ternary: `? expr : expr`
-        if p.at(SyntaxKind::Question) {
-            let (l_bp, _) = (2, 1);
-            if l_bp < min_bp {
-                break;
-            }
-            let m = lhs.precede(p);
-            p.bump(); // ?
-            super::eat_attr_instances(p);
-            expr_bp(p, 0, mode); // middle expression, no min_bp restriction
-            p.expect(SyntaxKind::Colon);
-            expr_bp(p, 1, mode); // right-associative
-            lhs = m.complete(p, SyntaxKind::CondExpr);
-            continue;
-        }
-
         // In StmtLhs mode, `<=` stops the expression for NBA handling
         if mode == ExprMode::StmtLhs && p.at(SyntaxKind::LtEq) {
             break;
@@ -215,7 +288,7 @@ fn atom_non_tagged(p: &mut Parser) -> Option<CompletedMarker> {
         SyntaxKind::LParen => {
             let m = p.start();
             p.bump(); // (
-            expr_bp(p, 0, ExprMode::Normal);
+            expr(p);
             p.expect(SyntaxKind::RParen);
             Some(m.complete(p, SyntaxKind::ParenExpr))
         }
@@ -243,7 +316,7 @@ fn atom_non_tagged(p: &mut Parser) -> Option<CompletedMarker> {
             p.bump(); // new
             if p.at(SyntaxKind::LBracket) {
                 p.bump(); // [
-                expr_bp(p, 0, ExprMode::Normal);
+                expr(p);
                 p.expect(SyntaxKind::RBracket);
                 if p.at(SyntaxKind::LParen) {
                     arg_list(p);
@@ -344,15 +417,15 @@ pub(crate) fn parse_index_or_range(p: &mut Parser, lhs: CompletedMarker) -> Comp
     let m = lhs.precede(p);
     p.bump(); // [
     // Use Bracket mode so `+:` and `-:` are not consumed as binary ops
-    expr_bp(p, 0, ExprMode::Bracket);
+    expr_in_bracket(p);
     if p.eat(SyntaxKind::Colon) {
         // Part select: [hi:lo]
-        expr_bp(p, 0, ExprMode::Normal);
+        expr(p);
         p.expect(SyntaxKind::RBracket);
         m.complete(p, SyntaxKind::RangeExpr)
     } else if eat_indexed_part_select_op(p) {
         // Indexed part select: [base+:width] or [base-:width]
-        expr_bp(p, 0, ExprMode::Normal);
+        expr(p);
         p.expect(SyntaxKind::RBracket);
         m.complete(p, SyntaxKind::RangeExpr)
     } else {
@@ -365,9 +438,9 @@ fn arg_list(p: &mut Parser) {
     let m = p.start();
     p.bump(); // (
     if !p.at(SyntaxKind::RParen) {
-        expr_bp(p, 0, ExprMode::Normal);
+        expr(p);
         while p.eat(SyntaxKind::Comma) {
-            expr_bp(p, 0, ExprMode::Normal);
+            expr(p);
         }
     }
     p.expect(SyntaxKind::RParen);
@@ -381,10 +454,10 @@ fn system_tf_arg_list(p: &mut Parser) {
         if super::declarations::is_scalar_type_keyword(p.current()) {
             super::declarations::type_spec(p);
         } else {
-            expr_bp(p, 0, ExprMode::Normal);
+            expr(p);
         }
         while p.eat(SyntaxKind::Comma) {
-            expr_bp(p, 0, ExprMode::Normal);
+            expr(p);
         }
     }
     p.expect(SyntaxKind::RParen);
@@ -407,15 +480,15 @@ fn concat_or_replic(p: &mut Parser) -> CompletedMarker {
     }
 
     // Parse first expression
-    expr_bp(p, 0, ExprMode::Normal);
+    expr(p);
 
     if p.at(SyntaxKind::LBrace) {
         // Replication: `{ count { items } }`
         p.bump(); // inner {
         if !p.at(SyntaxKind::RBrace) {
-            expr_bp(p, 0, ExprMode::Normal);
+            expr(p);
             while p.eat(SyntaxKind::Comma) {
-                expr_bp(p, 0, ExprMode::Normal);
+                expr(p);
             }
         }
         p.expect(SyntaxKind::RBrace); // inner }
@@ -424,7 +497,7 @@ fn concat_or_replic(p: &mut Parser) -> CompletedMarker {
     } else {
         // Concatenation: `{ a, b, c }`
         while p.eat(SyntaxKind::Comma) {
-            expr_bp(p, 0, ExprMode::Normal);
+            expr(p);
         }
         p.expect(SyntaxKind::RBrace);
         m.complete(p, SyntaxKind::ConcatExpr)
@@ -448,7 +521,7 @@ fn stream_expr(p: &mut Parser, m: crate::parser::Marker) -> CompletedMarker {
         if super::declarations::is_data_type_keyword(p.current()) || p.at(SyntaxKind::Ident) {
             super::declarations::type_spec(p);
         } else {
-            expr_bp(p, 0, ExprMode::Normal);
+            expr(p);
         }
         ss.complete(p, SyntaxKind::StreamSliceSize);
     }
@@ -471,7 +544,7 @@ fn stream_expr(p: &mut Parser, m: crate::parser::Marker) -> CompletedMarker {
 
 fn stream_operand_item(p: &mut Parser) {
     let m = p.start();
-    expr_bp(p, 0, ExprMode::Normal);
+    expr(p);
     if p.at(SyntaxKind::WithKw) {
         stream_with_clause(p);
     }
@@ -494,9 +567,9 @@ fn stream_with_clause(p: &mut Parser) {
 
 fn stream_range(p: &mut Parser) {
     let m = p.start();
-    expr_bp(p, 0, ExprMode::Bracket);
+    expr_in_bracket(p);
     if p.eat(SyntaxKind::Colon) || eat_indexed_part_select_op(p) {
-        expr_bp(p, 0, ExprMode::Normal);
+        expr(p);
     }
     m.complete(p, SyntaxKind::StreamRange);
 }
@@ -511,12 +584,12 @@ fn assignment_pattern_item(p: &mut Parser) {
         let m = p.start();
         p.bump(); // default
         p.bump(); // :
-        expr_bp(p, 0, ExprMode::Normal);
+        expr(p);
         m.complete(p, SyntaxKind::AssignmentPatternItem);
         return;
     }
     // Try to parse an expression
-    let Some(cm) = expr_bp(p, 0, ExprMode::Normal) else {
+    let Some(cm) = expr(p) else {
         p.error("expected expression");
         return;
     };
@@ -525,9 +598,9 @@ fn assignment_pattern_item(p: &mut Parser) {
         let m = cm.precede(p);
         p.bump(); // inner {
         if !p.at(SyntaxKind::RBrace) {
-            expr_bp(p, 0, ExprMode::Normal);
+            expr(p);
             while p.eat(SyntaxKind::Comma) {
-                expr_bp(p, 0, ExprMode::Normal);
+                expr(p);
             }
         }
         p.expect(SyntaxKind::RBrace);
@@ -538,7 +611,7 @@ fn assignment_pattern_item(p: &mut Parser) {
     let m = cm.precede(p);
     if p.at(SyntaxKind::Colon) {
         p.bump(); // :
-        expr_bp(p, 0, ExprMode::Normal);
+        expr(p);
     }
     m.complete(p, SyntaxKind::AssignmentPatternItem);
 }

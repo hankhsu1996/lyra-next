@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
 use lyra_ast::{
-    AssignStmt, AstIdMap, AstNode, BlockStmt, CaseInsideItem, CaseItem, CaseItemLike, CaseStmt,
-    ContinuousAssign, ErasedAstId, Expr, ExprKind, ForStmt, ForeachStmt, ForeverStmt, FunctionDecl,
-    GenerateItem, GenerateRegion, HasSyntax, IfStmt, ModuleBody, RepeatStmt, ReturnStmt,
-    SourceFile, StmtNode, SystemTfCall, TaskDecl, TimingControl, ValueRangeKind, VarDecl,
-    WhileStmt, expr_children,
+    AssignStmt, AstIdMap, AstNode, BlockStmt, CaseInsideItem, CaseItem, CaseItemLike,
+    CasePatternItem, CaseStmt, CondPredicate, ContinuousAssign, ErasedAstId, Expr, ExprKind,
+    ForStmt, ForeachStmt, ForeverStmt, FunctionDecl, GenerateItem, GenerateRegion, HasSyntax,
+    IfStmt, MatchesExpr, ModuleBody, PatternNode, RepeatStmt, ReturnStmt, SourceFile, StmtNode,
+    SystemTfCall, TaskDecl, TimingControl, ValueRangeKind, VarDecl, WhileStmt, expr_children,
 };
 use lyra_parser::SyntaxNode;
 use lyra_semantic::type_check::AccessMode;
@@ -198,6 +198,9 @@ impl IndexBuilder<'_> {
                 CaseItemLike::Inside(ci) => {
                     self.collect_inside_case_item(&ci, access);
                 }
+                CaseItemLike::Pattern(ci) => {
+                    self.collect_pattern_case_item(&ci, access);
+                }
             }
         }
     }
@@ -228,6 +231,80 @@ impl IndexBuilder<'_> {
         }
         if let Some(b) = ci.body() {
             self.collect_stmt(&b, access);
+        }
+    }
+
+    fn collect_condition_children(&mut self, if_s: &IfStmt, access: AccessMode) {
+        // The condition may be a plain Expr, a MatchesExpr, or a CondPredicate.
+        // Use typed accessors to avoid raw CST traversal.
+        if let Some(cp) = if_s.cond_predicate() {
+            self.collect_cond_predicate(&cp, access);
+        } else if let Some(e) = if_s.condition() {
+            self.collect_from_expr(&e, access);
+        }
+    }
+
+    fn collect_pattern_case_item(&mut self, ci: &CasePatternItem, access: AccessMode) {
+        if let Some(pat) = ci.pattern() {
+            self.collect_pattern_node(&pat, access);
+        }
+        if let Some(guard) = ci.guard()
+            && let Some(e) = guard.expr()
+        {
+            self.collect_from_expr(&e, access);
+        }
+        if let Some(b) = ci.body() {
+            self.collect_stmt(&b, access);
+        }
+    }
+
+    fn collect_pattern_node(&mut self, pat: &PatternNode, access: AccessMode) {
+        match pat {
+            PatternNode::Wildcard(_) | PatternNode::Bind(_) => {}
+            PatternNode::Paren(p) => {
+                if let Some(inner) = p.pattern() {
+                    self.collect_pattern_node(&inner, access);
+                }
+            }
+            PatternNode::Tagged(t) => {
+                if let Some(inner) = t.inner_pattern() {
+                    self.collect_pattern_node(&inner, access);
+                }
+            }
+            PatternNode::Struct(s) => {
+                for field in s.fields() {
+                    if let Some(inner) = field.pattern() {
+                        self.collect_pattern_node(&inner, access);
+                    }
+                }
+            }
+            PatternNode::Constant(c) => {
+                if let Some(e) = c.expr() {
+                    self.collect_from_expr(&e, access);
+                }
+            }
+        }
+    }
+
+    fn collect_matches_expr(&mut self, me: &MatchesExpr, access: AccessMode) {
+        if let Some(e) = me.expr() {
+            self.collect_from_expr(&e, access);
+        }
+        if let Some(pat) = me.pattern() {
+            self.collect_pattern_node(&pat, access);
+        }
+    }
+
+    fn collect_cond_predicate(&mut self, cp: &CondPredicate, access: AccessMode) {
+        if let Some(me) = cp.matches_expr() {
+            self.collect_matches_expr(&me, access);
+        } else if let Some(e) = cp.head_expr() {
+            self.collect_from_expr(&e, access);
+        }
+        for guard in cp.guards() {
+            if let Some(e) = guard.expr() {
+                self.collect_from_expr(&e, access);
+            }
         }
     }
 
@@ -276,9 +353,7 @@ impl IndexBuilder<'_> {
         } else if let Some(assign) = AssignStmt::cast(node.clone()) {
             self.collect_assign_stmt(&assign);
         } else if let Some(if_s) = IfStmt::cast(node.clone()) {
-            if let Some(c) = if_s.condition() {
-                self.collect_from_expr(&c, access);
-            }
+            self.collect_condition_children(&if_s, access);
             if let Some(t) = if_s.then_body() {
                 self.collect_stmt(&t, access);
             }
@@ -375,6 +450,11 @@ impl IndexBuilder<'_> {
                             }
                         }
                     }
+                }
+                ExprKind::MatchesExpr(me) => {
+                    self.push(me.syntax(), CheckKind::GenericExpr, access);
+                    self.collect_matches_expr(&me, access);
+                    return; // skip default child recursion
                 }
                 _ => {
                     self.push(ek.syntax(), CheckKind::GenericExpr, access);

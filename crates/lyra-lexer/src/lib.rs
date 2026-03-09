@@ -363,7 +363,13 @@ fn lex_gt(bytes: &[u8]) -> (SyntaxKind, usize) {
 
 fn lex_amp(bytes: &[u8]) -> (SyntaxKind, usize) {
     match bytes.get(1) {
-        Some(&b'&') => (SyntaxKind::AmpAmp, 2),
+        Some(&b'&') => {
+            if bytes.get(2) == Some(&b'&') {
+                (SyntaxKind::AmpAmpAmp, 3)
+            } else {
+                (SyntaxKind::AmpAmp, 2)
+            }
+        }
         Some(&b'=') => (SyntaxKind::AmpEq, 2),
         _ => (SyntaxKind::Amp, 1),
     }

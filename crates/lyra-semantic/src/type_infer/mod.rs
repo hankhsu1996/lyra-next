@@ -56,6 +56,7 @@ pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx
             ty: Ty::int(),
             view: ExprView::QueueDollar,
         },
+        ExprKind::MatchesExpr(me) => scalar::infer_matches(&me, ctx),
     };
     reject_void_value(result)
 }
