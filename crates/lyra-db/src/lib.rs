@@ -15,6 +15,7 @@ mod enum_queries;
 mod expr_queries;
 pub mod facts;
 mod foreach_check;
+pub mod include_resolve;
 mod jump_check;
 mod lower_diag;
 mod lower_type_check;
@@ -135,6 +136,8 @@ impl IncludeMap {
 #[salsa::input]
 pub struct SourceFile {
     pub file_id: lyra_source::FileId,
+    #[return_ref]
+    pub path: String,
     #[return_ref]
     pub text: String,
     #[return_ref]

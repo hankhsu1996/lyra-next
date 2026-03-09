@@ -1,3 +1,5 @@
+mod include_loader;
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -7,8 +9,12 @@ fn main() -> ExitCode {
         eprintln!("Usage: lyra-next <command> [args...]");
         eprintln!();
         eprintln!("Commands:");
-        eprintln!("  dump-tree <file>                 Print the CST of a SystemVerilog file");
-        eprintln!("  check [--top <module>] <file>... Run diagnostics on SystemVerilog files");
+        eprintln!(
+            "  dump-tree <file>                              Print the CST of a SystemVerilog file"
+        );
+        eprintln!(
+            "  check [--top <module>] [-I <dir>]... <file>... Run diagnostics on SystemVerilog files"
+        );
         return ExitCode::FAILURE;
     }
 
@@ -40,12 +46,10 @@ fn dump_tree(args: &[String]) -> ExitCode {
     let pp = lyra_preprocess::preprocess_identity(lyra_source::FileId(0), &tokens, &source);
     let parse = lyra_parser::parse(&pp.tokens, &pp.expanded_text);
 
-    // Print parse errors if any
     for err in &parse.errors {
         eprintln!("{err:?}");
     }
 
-    // Print the tree
     print!("{:#?}", parse.syntax());
 
     ExitCode::SUCCESS
@@ -53,32 +57,50 @@ fn dump_tree(args: &[String]) -> ExitCode {
 
 fn check(args: &[String]) -> ExitCode {
     let mut top_module: Option<&str> = None;
-    let mut files: Vec<&str> = Vec::new();
+    let mut file_args: Vec<&str> = Vec::new();
+    let mut include_dirs: Vec<String> = Vec::new();
     let mut i = 0;
 
     while i < args.len() {
-        if args[i] == "--top" {
-            i += 1;
-            if i >= args.len() {
-                eprintln!("Error: --top requires a module name argument");
-                return ExitCode::FAILURE;
+        match args[i].as_str() {
+            "--top" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("Error: --top requires a module name argument");
+                    return ExitCode::FAILURE;
+                }
+                top_module = Some(&args[i]);
             }
-            top_module = Some(&args[i]);
-        } else {
-            files.push(&args[i]);
+            "-I" | "--incdir" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("Error: -I/--incdir requires a directory argument");
+                    return ExitCode::FAILURE;
+                }
+                include_dirs.push(args[i].clone());
+            }
+            arg if arg.starts_with("-I") => {
+                include_dirs.push(arg[2..].to_owned());
+            }
+            _ => {
+                file_args.push(&args[i]);
+            }
         }
         i += 1;
     }
 
-    if files.is_empty() {
-        eprintln!("Usage: lyra-next check [--top <module>] <file>...");
+    if file_args.is_empty() {
+        eprintln!("Usage: lyra-next check [--top <module>] [-I <dir>]... <file>...");
         return ExitCode::FAILURE;
     }
 
-    let db = lyra_db::LyraDatabase::default();
-    let mut source_files = Vec::new();
-
-    for (idx, path) in files.iter().enumerate() {
+    // Normalize root paths and read source text
+    let mut root_paths: Vec<(String, String)> = Vec::new();
+    for path in &file_args {
+        let Some(norm) = include_loader::FsIncludeLoader::normalize_file_path(path) else {
+            eprintln!("Error: cannot access {path}");
+            return ExitCode::FAILURE;
+        };
         let source = match std::fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) => {
@@ -86,48 +108,89 @@ fn check(args: &[String]) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        let file = lyra_db::SourceFile::new(
-            &db,
-            lyra_source::FileId(idx as u32),
-            source,
-            lyra_db::IncludeMap::default(),
-        );
-        source_files.push(file);
+        root_paths.push((norm, source));
     }
 
-    let unit = lyra_db::new_compilation_unit(&db, source_files.clone());
-    let all_diags = collect_diagnostics(&db, &files, &source_files, unit, top_module);
+    // Normalize include dirs
+    let norm_inc_dirs: Vec<String> = include_dirs
+        .iter()
+        .filter_map(|d| {
+            let p = std::path::Path::new(d);
+            match p.canonicalize() {
+                Ok(c) => Some(c.to_string_lossy().into_owned()),
+                Err(e) => {
+                    eprintln!("Warning: cannot access include directory {d}: {e}");
+                    None
+                }
+            }
+        })
+        .collect();
+
+    // Discover includes (pure algorithm, no DB)
+    let loader = include_loader::FsIncludeLoader;
+    let plan = lyra_db::include_resolve::discover(&root_paths, &norm_inc_dirs, &loader);
+
+    // Apply the plan: create SourceFiles and set include maps
+    let mut db = lyra_db::LyraDatabase::default();
+    let source_files = lyra_db::include_resolve::apply_include_plan(&mut db, &plan, 0);
+
+    // Root files for the compilation unit
+    let root_files: Vec<lyra_db::SourceFile> = plan
+        .files
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.is_root)
+        .map(|(idx, _)| source_files[idx])
+        .collect();
+
+    let unit = lyra_db::new_compilation_unit(&db, root_files.clone());
+    let all_diags = collect_diagnostics(
+        &db,
+        &file_args,
+        &root_files,
+        &source_files,
+        unit,
+        top_module,
+    );
     print_diagnostics(&db, &all_diags, &source_files)
 }
 
 fn resolve_diag_path(
     db: &lyra_db::LyraDatabase,
     d: &lyra_diag::Diagnostic,
-    source_files: &[lyra_db::SourceFile],
-    files: &[&str],
+    all_files: &[lyra_db::SourceFile],
+    display_paths: &[&str],
+    root_files: &[lyra_db::SourceFile],
 ) -> String {
     d.primary_span()
         .and_then(|s| {
-            source_files
+            root_files
                 .iter()
                 .position(|f| f.file_id(db) == s.file)
-                .map(|i| files[i].to_string())
+                .map(|i| display_paths[i].to_string())
+                .or_else(|| {
+                    all_files
+                        .iter()
+                        .find(|f| f.file_id(db) == s.file)
+                        .map(|f| f.path(db).clone())
+                })
         })
         .unwrap_or_else(|| "<unknown>".to_string())
 }
 
 fn collect_diagnostics(
     db: &lyra_db::LyraDatabase,
-    files: &[&str],
-    source_files: &[lyra_db::SourceFile],
+    display_paths: &[&str],
+    root_files: &[lyra_db::SourceFile],
+    all_files: &[lyra_db::SourceFile],
     unit: lyra_db::CompilationUnit,
     top_module: Option<&str>,
 ) -> Vec<(String, lyra_diag::Diagnostic)> {
     let mut all_diags: Vec<(String, lyra_diag::Diagnostic)> = Vec::new();
 
-    for (idx, file) in source_files.iter().enumerate() {
+    for (idx, file) in root_files.iter().enumerate() {
         let diags = lyra_db::file_diagnostics(db, *file, unit);
-        let path = files[idx];
+        let path = display_paths[idx];
         for d in diags {
             all_diags.push((path.to_string(), d.clone()));
         }
@@ -135,7 +198,7 @@ fn collect_diagnostics(
 
     let unit_diags = lyra_db::unit_diagnostics(db, unit);
     for d in unit_diags {
-        let file_path = resolve_diag_path(db, d, source_files, files);
+        let file_path = resolve_diag_path(db, d, all_files, display_paths, root_files);
         all_diags.push((file_path, d.clone()));
     }
 
@@ -143,7 +206,7 @@ fn collect_diagnostics(
         let top = lyra_db::TopModule::new(db, unit, smol_str::SmolStr::new(top_name));
         let elab_diags = lyra_db::elab_diagnostics(db, top);
         for d in elab_diags {
-            let file_path = resolve_diag_path(db, d, source_files, files);
+            let file_path = resolve_diag_path(db, d, all_files, display_paths, root_files);
             all_diags.push((file_path, d.clone()));
         }
     }
@@ -168,7 +231,7 @@ fn collect_diagnostics(
 fn print_diagnostics(
     db: &lyra_db::LyraDatabase,
     all_diags: &[(String, lyra_diag::Diagnostic)],
-    source_files: &[lyra_db::SourceFile],
+    all_files: &[lyra_db::SourceFile],
 ) -> ExitCode {
     let mut has_errors = false;
     for (path, d) in all_diags {
@@ -185,7 +248,7 @@ fn print_diagnostics(
         let code = d.code;
 
         if let Some(span) = d.primary_span() {
-            let line_col = source_files
+            let line_col = all_files
                 .iter()
                 .find(|f| f.file_id(db) == span.file)
                 .map(|f| {

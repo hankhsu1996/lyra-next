@@ -8,7 +8,7 @@ When you discover a gap during `/lrm-add`, add an entry here. When you fix the g
 
 ### 5.6.4: Compiler directives -- non-conditional directive semantics
 
-Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `""" `` triple-quote stringify, `` `` `` concat, `` `\`" `` escaped quote). Remaining gaps: `` `default_nettype `` directive semantics, `` `begin_keywords ``/`` `end_keywords `` (keyword set selection), and include path resolution (no `-I`/`--incdir` CLI support). Blocked by: `default_nettype` directive event consumer, keyword set infrastructure, include search path model. Test: `lrm/ch05/5.6.4_compiler_directives`.
+Macro expansion supports object-like and function-like macros, argument substitution, nested expansion, line continuation, and LRM 22.5.1 stringification/concatenation operators (`` `" `` stringify, `` `""" `` triple-quote stringify, `` `` `` concat, `` `\`" `` escaped quote). `` `default_nettype `` directive semantics are implemented with per-file policy summaries and position-aware lookup. Include path resolution with `-I`/`--incdir` is implemented. Remaining gaps: `` `begin_keywords ``/`` `end_keywords `` (keyword set selection). Blocked by: keyword set infrastructure. Test: `lrm/ch05/5.6.4_compiler_directives`.
 
 ## Chapter 6 -- Data Types
 
@@ -155,6 +155,6 @@ The std built-in package should contain process, mailbox, and semaphore classes 
 
 ## Chapter 22 -- Compiler Directives
 
-### 22.4: `include` -- search path resolution
+### 22.4: `include` -- quoted vs angle-bracket differentiation
 
-`` `include `` with relative paths fails because Lyra has no `-I`/`--incdir` CLI support. All 22.4 sv-tests tests fail for this reason. Blocked by: include search path model in preprocessor, `--incdir` CLI flag. Test: sv-tests `22.4--include_*`.
+`` `include `` with `-I`/`--incdir` search paths is implemented. Relative-to-includer resolution, nested include discovery, and first-match-wins across include dirs all work. Remaining: quoted (`"..."`) vs angle-bracket (`<...>`) differentiated search policy per LRM 22.4. Currently both use the same search order. Test: sv-tests `22.4--include_*`.

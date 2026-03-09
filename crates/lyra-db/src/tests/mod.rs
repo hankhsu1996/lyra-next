@@ -78,6 +78,7 @@ pub(super) fn new_file(db: &dyn salsa::Database, id: u32, text: &str) -> SourceF
     SourceFile::new(
         db,
         lyra_source::FileId(id),
+        format!("test_{id}.sv"),
         text.to_string(),
         IncludeMap::default(),
     )
@@ -156,6 +157,7 @@ fn source_map_identity() {
     let file = SourceFile::new(
         &db,
         fid,
+        "test_5.sv".to_string(),
         "module m; endmodule".to_string(),
         IncludeMap::default(),
     );
@@ -181,6 +183,7 @@ fn file_diagnostics_maps_parse_errors() {
     let file = SourceFile::new(
         &db,
         lyra_source::FileId(42),
+        "test_42.sv".to_string(),
         "module top;".to_string(),
         IncludeMap::default(),
     );
@@ -208,12 +211,14 @@ fn roundtrip_expanded_text_with_include() {
     let file_b = SourceFile::new(
         &db,
         lyra_source::FileId(1),
+        "test_1.sv".to_string(),
         "wire w;".to_string(),
         IncludeMap::default(),
     );
     let file_a = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
         IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
     );
@@ -267,12 +272,14 @@ fn edit_file_a_does_not_reparse_file_b() {
     let file_a = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module a; endmodule".to_string(),
         IncludeMap::default(),
     );
     let file_b = SourceFile::new(
         &db,
         lyra_source::FileId(1),
+        "test_1.sv".to_string(),
         "module b; endmodule".to_string(),
         IncludeMap::default(),
     );
@@ -304,6 +311,7 @@ fn line_index_invalidated_on_text_change() {
     let file = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "line one\nline two".to_string(),
         IncludeMap::default(),
     );
@@ -321,6 +329,7 @@ fn unchanged_text_is_cached() {
     let file = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module m; endmodule".to_string(),
         IncludeMap::default(),
     );
@@ -342,12 +351,14 @@ fn edit_included_file_invalidates_includer() {
     let file_b = SourceFile::new(
         &db,
         lyra_source::FileId(1),
+        "test_1.sv".to_string(),
         "wire w;".to_string(),
         IncludeMap::default(),
     );
     let file_a = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
         IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
     );
@@ -379,12 +390,14 @@ fn full_expansion_stack_single_include() {
     let file_b = SourceFile::new(
         &db,
         lyra_source::FileId(1),
+        "test_1.sv".to_string(),
         "wire w;".to_string(),
         IncludeMap::default(),
     );
     let file_a = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
         IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
     );
@@ -405,6 +418,7 @@ fn full_expansion_stack_nested_is_single_frame() {
     let file_c = SourceFile::new(
         &db,
         lyra_source::FileId(2),
+        "test_2.sv".to_string(),
         "wire c;".to_string(),
         IncludeMap::default(),
     );
@@ -412,6 +426,7 @@ fn full_expansion_stack_nested_is_single_frame() {
     let file_b = SourceFile::new(
         &db,
         lyra_source::FileId(1),
+        "test_1.sv".to_string(),
         "`include \"c.sv\"".to_string(),
         IncludeMap::new(vec![("c.sv".to_string(), file_c)]),
     );
@@ -419,6 +434,7 @@ fn full_expansion_stack_nested_is_single_frame() {
     let file_a = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
         IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
     );
@@ -438,18 +454,21 @@ fn edit_included_file_does_not_invalidate_unrelated() {
     let file_b = SourceFile::new(
         &db,
         lyra_source::FileId(1),
+        "test_1.sv".to_string(),
         "wire w;".to_string(),
         IncludeMap::default(),
     );
     let file_a = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module top; `include \"b.sv\"\nendmodule".to_string(),
         IncludeMap::new(vec![("b.sv".to_string(), file_b)]),
     );
     let file_c = SourceFile::new(
         &db,
         lyra_source::FileId(2),
+        "test_2.sv".to_string(),
         "module c; endmodule".to_string(),
         IncludeMap::default(),
     );
@@ -483,6 +502,7 @@ fn def_index_cached_when_text_unchanged() {
     let file = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module m; logic x; endmodule".to_string(),
         IncludeMap::default(),
     );
@@ -504,6 +524,7 @@ fn def_index_recomputed_on_text_change() {
     let file = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module m; logic x; endmodule".to_string(),
         IncludeMap::default(),
     );
@@ -526,6 +547,7 @@ fn resolve_index_recomputed_on_text_change() {
     let file = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module m; logic x; assign x = 0; endmodule".to_string(),
         IncludeMap::default(),
     );
@@ -553,6 +575,7 @@ fn whitespace_edit_skips_resolve_core() {
     let file = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module m; logic x; assign x = 0; endmodule".to_string(),
         IncludeMap::default(),
     );
@@ -618,12 +641,14 @@ fn edit_unrelated_file_does_not_recompute_def_index() {
     let file_a = SourceFile::new(
         &db,
         lyra_source::FileId(0),
+        "test_0.sv".to_string(),
         "module a; logic x; endmodule".to_string(),
         IncludeMap::default(),
     );
     let file_b = SourceFile::new(
         &db,
         lyra_source::FileId(1),
+        "test_1.sv".to_string(),
         "module b; logic y; endmodule".to_string(),
         IncludeMap::default(),
     );
