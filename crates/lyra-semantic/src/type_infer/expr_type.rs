@@ -135,6 +135,7 @@ pub enum ExprTypeErrorKind {
     EmptyConcatRequiresContext,
     QueueConcatIncompatible,
     FixedPartSelectNonConstant,
+    AssignmentPatternNeedsContext,
 }
 
 /// How an expression's type is viewed for operations.

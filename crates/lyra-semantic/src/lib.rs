@@ -42,6 +42,7 @@ pub(crate) mod test_support;
 pub mod time_scale;
 pub mod type_check;
 pub(crate) mod type_check_array_query;
+pub(crate) mod type_check_assignment_pattern;
 pub(crate) mod type_check_dim;
 pub(crate) mod type_check_expr;
 pub(crate) mod type_check_system_call;

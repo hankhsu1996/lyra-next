@@ -545,6 +545,41 @@ fn collect_unpacked_dim_refs(
     collect_name_refs_inner(ctx, dim.syntax(), scope, None);
 }
 
+/// Collect name refs from an assignment pattern item's children.
+///
+/// For keyed items, bare `NameRef` keys are skipped: at builder time the
+/// target type is unknown, so bare identifiers in key position are assumed
+/// to be struct member designators rather than value references. Non-
+/// `NameRef` expression keys (e.g. associative array index expressions)
+/// are traversed normally.
+///
+/// This heuristic is a temporary builder-time approximation. Long term,
+/// assignment-pattern key interpretation should move to a target-aware
+/// semantic phase that knows the destination type (struct vs associative
+/// array vs fixed array) and can resolve keys accordingly.
+pub(crate) fn collect_assignment_pattern_item_refs<F>(
+    item: &lyra_ast::AssignmentPatternItem,
+    fallback_node: &SyntaxNode,
+    mut collect: F,
+) where
+    F: FnMut(&SyntaxNode),
+{
+    match item.kind() {
+        Some(lyra_ast::AssignmentPatternItemKind::Keyed { ref key, ref value }) => {
+            if key.syntax().kind() != SyntaxKind::NameRef {
+                collect(key.syntax());
+            }
+            collect(value.syntax());
+        }
+        Some(lyra_ast::AssignmentPatternItemKind::Default { ref value }) => {
+            collect(value.syntax());
+        }
+        _ => {
+            collect(fallback_node);
+        }
+    }
+}
+
 /// Collect name refs from a subtree.
 ///
 /// When `implicit_net_site` is `Some`, discovered simple `NameRef` sites
@@ -646,20 +681,10 @@ fn collect_name_refs_inner(
             // Skip declarator names but collect refs in their initializers
             // (already handled by collect_declarators)
         } else if child.kind() == SyntaxKind::AssignmentPatternItem {
-            let is_keyed = child
-                .children_with_tokens()
-                .any(|ct| ct.kind() == SyntaxKind::Colon);
-            if is_keyed {
-                let mut first = true;
-                for item_child in child.children() {
-                    if first {
-                        first = false;
-                        if item_child.kind() == SyntaxKind::NameRef {
-                            continue;
-                        }
-                    }
-                    collect_name_refs_inner(ctx, &item_child, scope, implicit_net_site);
-                }
+            if let Some(item) = lyra_ast::AssignmentPatternItem::cast(child.clone()) {
+                collect_assignment_pattern_item_refs(&item, &child, |node| {
+                    collect_name_refs_inner(ctx, node, scope, implicit_net_site);
+                });
             } else {
                 collect_name_refs_inner(ctx, &child, scope, implicit_net_site);
             }

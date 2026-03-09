@@ -1,5 +1,6 @@
 mod access;
 mod aggregate;
+mod assignment_pattern;
 mod call;
 mod expr_type;
 mod range;
@@ -37,10 +38,9 @@ pub fn infer_expr(expr: &Expr, ctx: &dyn InferCtx, expected: Option<&IntegralCtx
         ExprKind::BinExpr(b) => scalar::infer_binary(&b, ctx, expected),
         ExprKind::CondExpr(c) => scalar::infer_cond(&c, ctx, expected),
         ExprKind::ConcatExpr(c) => aggregate::infer_concat(&c, ctx),
-        ExprKind::AssignmentPatternExpr(_) => ExprType {
-            ty: Ty::Error,
-            view: ExprView::AssignmentPattern,
-        },
+        ExprKind::AssignmentPatternExpr(_) => {
+            ExprType::error(ExprTypeErrorKind::AssignmentPatternNeedsContext)
+        }
         ExprKind::ReplicExpr(r) => aggregate::infer_replic(&r, ctx),
         ExprKind::IndexExpr(i) => access::infer_index(&i, ctx),
         ExprKind::RangeExpr(r) => range::infer_range(&r, ctx),
@@ -90,6 +90,9 @@ pub fn infer_expr_with_expected(
     match peeled.classify() {
         Some(ExprKind::NewExpr(ne)) => return infer_new_expr(&ne, expected),
         Some(ExprKind::TaggedExpr(te)) => return infer_tagged_expr(&te, expected, ctx),
+        Some(ExprKind::AssignmentPatternExpr(ap)) => {
+            return assignment_pattern::infer_assignment_pattern_with_expected(&ap, expected, ctx);
+        }
         _ => {}
     }
     infer_expr(expr, ctx, integral_ctx)

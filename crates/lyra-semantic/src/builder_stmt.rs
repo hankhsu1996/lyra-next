@@ -1,12 +1,15 @@
 use lyra_ast::{
-    AstNode, ForStmt, ForeachStmt, HasSyntax, NameRef, QualifiedName, semantic_spelling,
+    AssignmentPatternItem, AstNode, ForStmt, ForeachStmt, HasSyntax, NameRef, QualifiedName,
+    semantic_spelling,
 };
 use lyra_lexer::SyntaxKind;
 use lyra_parser::SyntaxNode;
 
 use crate::builder::{DeclaratorContext, DefContext, expect_typed, is_expression_kind};
 use crate::builder_items::{collect_foreach_vars, collect_var_decl};
-use crate::builder_types::{collect_name_refs, try_push_qualified_use_site};
+use crate::builder_types::{
+    collect_assignment_pattern_item_refs, collect_name_refs, try_push_qualified_use_site,
+};
 use crate::def_index::{ExpectedNs, NamePath, UseSite};
 use crate::scopes::ScopeKind;
 use crate::symbols::Namespace;
@@ -150,20 +153,10 @@ fn collect_name_refs_from_expr(
     }
     for child in node.children() {
         if child.kind() == SyntaxKind::AssignmentPatternItem {
-            let is_keyed = child
-                .children_with_tokens()
-                .any(|ct| ct.kind() == SyntaxKind::Colon);
-            if is_keyed {
-                let mut first = true;
-                for item_child in child.children() {
-                    if first {
-                        first = false;
-                        if item_child.kind() == SyntaxKind::NameRef {
-                            continue;
-                        }
-                    }
-                    collect_name_refs_from_expr(ctx, &item_child, scope);
-                }
+            if let Some(item) = AssignmentPatternItem::cast(child.clone()) {
+                collect_assignment_pattern_item_refs(&item, &child, |node| {
+                    collect_name_refs_from_expr(ctx, node, scope);
+                });
             } else {
                 collect_name_refs_from_expr(ctx, &child, scope);
             }

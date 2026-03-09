@@ -86,9 +86,9 @@ Callable signature infrastructure stores port types and call-site argument check
 
 Associative arrays with class-type keys (`int aa[SomeClass]`) cannot be declared because class support is absent. `AssocIndex::Typed(Ty)` representation exists but no class types can be constructed. Blocked by: class support (Ch 8). Test: deferred until class support lands.
 
-### 7.9.11: Associative array literals
+### 7.9.11: Associative array literals -- remaining assignment-pattern targets
 
-Associative array literal syntax (`'{key1: val1, key2: val2}`) is not supported. Aggregate literal/pattern expressions are not parsed. Blocked by: aggregate literal expression parsing and type checking. Test: `lrm/ch07/7.9.11_associative_array_literals`.
+Assignment patterns parse and participate in expected-type inference. For associative-array targets, keyed/default entries are validated against index and element types, positional entries are rejected, and duplicate defaults are diagnosed (LRM 7.9.11). Remaining: assignment-pattern validation for struct, fixed-size array, queue, and class targets. Blocked by: per-target-kind assignment-pattern checking. Test: `lrm/ch07/7.9.11_associative_array_literals/cases/`.
 
 
 ## Chapter 11 -- Operators and Expressions

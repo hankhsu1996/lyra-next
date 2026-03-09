@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.type.assign_pattern_positional_in_assoc] 7:11..7:11: positional entry is not allowed in associative array assignment pattern
+---
+unit (0 diagnostics)

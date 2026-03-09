@@ -91,6 +91,10 @@ pub const QUEUE_PART_SELECT_NOT_ALLOWED: DiagKey = "lyra.type.queue_part_select_
 pub const EMPTY_CONCAT_REQUIRES_CONTEXT: DiagKey = "lyra.type.empty_concat_requires_context";
 pub const QUEUE_CONCAT_INCOMPAT: DiagKey = "lyra.type.queue_concat_incompat";
 pub const FIXED_PART_SELECT_NON_CONSTANT: DiagKey = "lyra.type.fixed_part_select_non_constant";
+pub const ASSIGN_PATTERN_POSITIONAL_IN_ASSOC: DiagKey =
+    "lyra.type.assign_pattern_positional_in_assoc";
+pub const ASSIGN_PATTERN_DUPLICATE_DEFAULT: DiagKey = "lyra.type.assign_pattern_duplicate_default";
+pub const ASSIGN_PATTERN_KEY_TYPE_MISMATCH: DiagKey = "lyra.type.assign_pattern_key_type_mismatch";
 pub const IMPLICIT_NET_FORBIDDEN: DiagKey = "lyra.semantic.implicit_net_forbidden";
 pub const AUTOMATIC_VAR_NON_PROCEDURAL: DiagKey = "lyra.decl.automatic_var_non_procedural";
 
@@ -204,6 +208,9 @@ pub const ALL_KEYS: &[DiagKey] = &[
     EMPTY_CONCAT_REQUIRES_CONTEXT,
     QUEUE_CONCAT_INCOMPAT,
     FIXED_PART_SELECT_NON_CONSTANT,
+    ASSIGN_PATTERN_POSITIONAL_IN_ASSOC,
+    ASSIGN_PATTERN_DUPLICATE_DEFAULT,
+    ASSIGN_PATTERN_KEY_TYPE_MISMATCH,
     AUTOMATIC_VAR_NON_PROCEDURAL,
     UNRESOLVED_MODULE_INST,
     NOT_INSTANTIABLE,

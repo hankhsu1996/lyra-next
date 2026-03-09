@@ -1,4 +1,5 @@
 mod array;
+mod assignment_pattern;
 mod call;
 mod enum_diag;
 mod misc;
@@ -49,6 +50,11 @@ pub(crate) fn lower_type_check_item(
         }
         TypeCheckItem::MethodCallError { .. } => {
             call::lower_method_call_error(item, source_map, expanded_text, diags);
+        }
+        TypeCheckItem::AssignPatternPositionalInAssocArray { .. }
+        | TypeCheckItem::AssignPatternDuplicateDefault { .. }
+        | TypeCheckItem::AssignPatternKeyTypeMismatch { .. } => {
+            assignment_pattern::lower_assignment_pattern_item(item, source_map, diags);
         }
         TypeCheckItem::UnsupportedLhsForm { .. } | TypeCheckItem::InvalidLhs { .. } => {
             misc::lower_lhs_item(item, source_map, diags);

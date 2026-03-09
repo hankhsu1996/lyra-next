@@ -13,6 +13,7 @@ use crate::record::{Packing, RecordId, TaggedVariantError, TaggedVariantInfo};
 use crate::type_infer::{BitVecType, BitWidth, ExprType, ExprTypeErrorKind, ExprView};
 use crate::types::{SymbolType, Ty, UnpackedDim};
 
+use crate::type_check_assignment_pattern::check_assignment_pattern;
 use crate::type_check_dim::check_type_spec_member_dims;
 pub use crate::type_check_dim::{check_net_decl, check_port_decl, check_typedef_decl};
 pub use crate::type_check_expr::{
@@ -257,6 +258,17 @@ pub enum TypeCheckItem {
     FixedPartSelectNonConstant {
         expr_site: Site,
     },
+    AssignPatternPositionalInAssocArray {
+        item_site: Site,
+    },
+    AssignPatternDuplicateDefault {
+        item_site: Site,
+    },
+    AssignPatternKeyTypeMismatch {
+        item_site: Site,
+        expected: Ty,
+        actual: Ty,
+    },
 }
 
 /// Callbacks for the type checker. No DB access -- pure.
@@ -478,6 +490,8 @@ pub fn check_var_decl(
             items,
         );
 
+        check_assignment_pattern(&init_expr, &lhs_type.ty, ctx, items);
+
         if let Some(ne) = detect_new_expr(&init_expr) {
             check_new_expr(&ne, &lhs_type.ty, ctx, decl_site, lhs_site, rhs_site, items);
         }
@@ -541,6 +555,8 @@ fn check_assignment_pair(
                 rhs_site,
                 items,
             );
+
+            check_assignment_pattern(rhs, &lhs_type.ty, ctx, items);
 
             if let Some(ne) = detect_new_expr(rhs) {
                 check_new_expr(&ne, &lhs_type.ty, ctx, stmt_site, lhs_site, rhs_site, items);
@@ -813,6 +829,7 @@ fn result_needs_expected_type(result: &ExprType) -> bool {
         ExprView::Error(
             ExprTypeErrorKind::NewExprNeedsExpectedDynArray
                 | ExprTypeErrorKind::TaggedExprNeedsContext
+                | ExprTypeErrorKind::AssignmentPatternNeedsContext
         )
     )
 }

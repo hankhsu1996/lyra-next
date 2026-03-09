@@ -1,0 +1,8 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (1 diagnostic)
+  error[lyra.type.assign_pattern_duplicate_default] 7:22..7:22: duplicate `default` entry in assignment pattern
+---
+unit (0 diagnostics)
