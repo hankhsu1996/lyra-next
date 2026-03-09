@@ -396,7 +396,7 @@ pub(super) fn lower_index_key_not_integral(
     );
 }
 
-pub(super) fn lower_queue_operator_error(
+pub(super) fn lower_expr_site_error(
     expr_site: lyra_semantic::Site,
     code: lyra_diag::DiagKey,
     msg_id: lyra_diag::MessageId,

@@ -291,6 +291,12 @@ pub fn check_expr_self_anchored_errors(
                 items.push(TypeCheckItem::QueueConcatIncompatible { expr_site });
             }
         }
+        ExprView::Error(ExprTypeErrorKind::FixedPartSelectNonConstant) => {
+            let map = ctx.ast_id_map();
+            if let Some(expr_site) = crate::site::opt_site_of(map, expr) {
+                items.push(TypeCheckItem::FixedPartSelectNonConstant { expr_site });
+            }
+        }
         _ => {}
     }
 }

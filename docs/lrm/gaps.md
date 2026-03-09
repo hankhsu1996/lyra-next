@@ -97,10 +97,6 @@ Associative array literal syntax (`'{key1: val1, key2: val2}`) is not supported.
 
 Streaming of arrays, structs, unions, and strings follows recursive bitstream conversion rules (LRM 11.4.14.1). Only integral operands are supported. Blocked by: bitstream type conversion. Test: `lrm/ch11/11.4.14.1_streaming_aggregate`.
 
-### 11.5.1: Fixed part-select with non-constant bounds
-
-Engine currently requires constant bounds for `[hi:lo]` fixed part-select. Supporting non-constant bounds needs symbolic/dynamic width representation. Blocked by: dynamic width model. Test: `lrm/ch11/11.5.1_bit_select_and_part_select/cases/part_select_nonconstant`.
-
 ## Chapter 12 -- Procedural Programming Statements
 
 ### 12.5.4: Set membership case statement (`case inside`) -- runtime semantics
