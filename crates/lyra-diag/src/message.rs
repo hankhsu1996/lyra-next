@@ -113,6 +113,7 @@ pub enum MessageId {
     ReturnMissingValue,
     // Case statement legality messages
     CaseInsideRequiresPlainCase,
+    CaseMatchesRequiresPlainCase,
     // Foreach loop legality messages
     AssignToForeachVar,
     ForeachVarSameAsArray,
@@ -430,6 +431,9 @@ fn render_other_message(msg: &Message) -> String {
         MessageId::CaseInsideRequiresPlainCase => {
             "`inside` is only allowed with `case`, not `casex` or `casez`".into()
         }
+        MessageId::CaseMatchesRequiresPlainCase => {
+            "`matches` is only allowed with `case`, not `casex` or `casez`".into()
+        }
         MessageId::AssignToForeachVar => {
             format!("cannot assign to foreach loop variable `{}`", name())
         }
@@ -455,6 +459,13 @@ fn render_other_message(msg: &Message) -> String {
         MessageId::AutomaticVarNonProcedural => {
             "automatic variable declarations are only allowed in procedural contexts".into()
         }
+        _ => render_other_message_tail(msg),
+    }
+}
+
+fn render_other_message_tail(msg: &Message) -> String {
+    let name = || msg.args.first().and_then(Arg::as_name).unwrap_or("?");
+    match msg.id {
         MessageId::ParseError | MessageId::PreprocessError => msg
             .args
             .first()

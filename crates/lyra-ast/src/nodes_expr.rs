@@ -345,6 +345,7 @@ impl FieldExpr {
 }
 
 impl CondExpr {
+    /// The condition expression (test position of `cond ? then : else`).
     pub fn condition(&self) -> Option<crate::expr::Expr> {
         support::expr_child(&self.syntax, 0)
     }

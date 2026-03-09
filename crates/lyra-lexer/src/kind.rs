@@ -366,6 +366,9 @@ pub enum SyntaxKind {
     XnorKw,
     XorKw,
 
+    // Sequential conjunction (LRM 12.6)
+    AmpAmpAmp,
+
     // Attribute delimiters
     AttrOpen,
     AttrClose,
@@ -536,6 +539,19 @@ pub enum SyntaxKind {
 
     // Queue dollar expression (LRM 7.10.1)
     DollarExpr,
+
+    // Pattern matching (LRM 12.6)
+    WildcardPattern,
+    BindPattern,
+    ParenPattern,
+    TaggedPattern,
+    StructPattern,
+    PatternField,
+    ConstantPattern,
+    MatchesExpr,
+    CondPredicate,
+    CondPredicateGuard,
+    CasePatternItem,
 
     #[doc(hidden)]
     __Last,

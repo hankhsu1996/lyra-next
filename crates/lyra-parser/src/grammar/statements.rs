@@ -73,7 +73,7 @@ fn block_stmt(p: &mut Parser) {
     m.complete(p, SyntaxKind::BlockStmt);
 }
 
-// `[unique|priority] if (expr) stmt [else stmt]`
+// `[unique|priority] if (cond_predicate) stmt [else stmt]`
 fn if_stmt(p: &mut Parser) {
     let m = p.start();
     // Optional unique/priority modifier
@@ -82,7 +82,7 @@ fn if_stmt(p: &mut Parser) {
     }
     p.expect(SyntaxKind::IfKw);
     p.expect(SyntaxKind::LParen);
-    expressions::expr(p);
+    expressions::cond_predicate(p);
     p.expect(SyntaxKind::RParen);
     stmt(p);
     if p.eat(SyntaxKind::ElseKw) {
@@ -93,6 +93,7 @@ fn if_stmt(p: &mut Parser) {
 
 // `[unique|priority] case[xz] (expr) { case_item } endcase`
 // `[unique|priority] case (expr) inside { case_inside_item } endcase` (LRM 12.5.4)
+// `[unique|priority] case (expr) matches { case_pattern_item } endcase` (LRM 12.6.1)
 fn case_stmt(p: &mut Parser) {
     let m = p.start();
     // Optional unique/unique0/priority modifier
@@ -107,10 +108,13 @@ fn case_stmt(p: &mut Parser) {
     expressions::expr(p);
     p.expect(SyntaxKind::RParen);
     let is_inside = p.eat(SyntaxKind::InsideKw);
+    let is_matches = !is_inside && p.eat(SyntaxKind::MatchesKw);
     while !p.at(SyntaxKind::EndcaseKw) && !p.at_end() && !at_block_end(p) {
         let cp = p.checkpoint();
         if is_inside {
             case_inside_item(p);
+        } else if is_matches {
+            case_pattern_item(p);
         } else {
             case_item(p);
         }
@@ -154,6 +158,23 @@ fn case_inside_item(p: &mut Parser) {
         stmt(p);
     }
     m.complete(p, SyntaxKind::CaseInsideItem);
+}
+
+// `case_pattern_item ::= pattern [&&& expr] : stmt | default [:] stmt` (LRM 12.6.1)
+fn case_pattern_item(p: &mut Parser) {
+    let m = p.start();
+    if p.eat(SyntaxKind::DefaultKw) {
+        p.eat(SyntaxKind::Colon);
+        stmt(p);
+    } else {
+        super::patterns::pattern(p);
+        if p.at(SyntaxKind::AmpAmpAmp) {
+            expressions::cond_guard(p);
+        }
+        p.expect(SyntaxKind::Colon);
+        stmt(p);
+    }
+    m.complete(p, SyntaxKind::CasePatternItem);
 }
 
 // `range_list ::= value_range { , value_range }`

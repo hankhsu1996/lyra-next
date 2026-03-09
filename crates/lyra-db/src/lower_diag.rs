@@ -660,6 +660,25 @@ pub(crate) fn lower_case_check_items(
                     }),
                 );
             }
+            CaseCheckItem::IllegalMatchesCaseKind { kw_span, .. } => {
+                if !kw_span.is_valid() {
+                    continue;
+                }
+                let (span, _) = map_span_or_fallback(file_id, source_map, kw_span.text_range());
+                let msg_id = MessageId::CaseMatchesRequiresPlainCase;
+                diags.push(
+                    Diagnostic::new(
+                        Severity::Error,
+                        code::CASE_MATCHES_REQUIRES_PLAIN_CASE,
+                        Message::simple(msg_id),
+                    )
+                    .with_label(Label {
+                        kind: LabelKind::Primary,
+                        span,
+                        message: Message::simple(msg_id),
+                    }),
+                );
+            }
         }
     }
 }

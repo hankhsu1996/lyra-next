@@ -309,6 +309,19 @@ ast_nodes! {
     // Time unit/precision declarations (LRM 3.14.2.2)
     TimeunitDecl(SyntaxKind::TimeunitDecl) { @custom }
     TimeprecisionDecl(SyntaxKind::TimeprecisionDecl) { @custom }
+
+    // Pattern matching (LRM 12.6)
+    WildcardPattern(SyntaxKind::WildcardPattern) {}
+    BindPattern(SyntaxKind::BindPattern) { @custom }
+    ParenPattern(SyntaxKind::ParenPattern) { @custom }
+    TaggedPattern(SyntaxKind::TaggedPattern) { @custom }
+    StructPattern(SyntaxKind::StructPattern) { @custom }
+    PatternField(SyntaxKind::PatternField) { @custom }
+    ConstantPattern(SyntaxKind::ConstantPattern) { @custom }
+    MatchesExpr(SyntaxKind::MatchesExpr) { @custom }
+    CondPredicate(SyntaxKind::CondPredicate) { @custom }
+    CondPredicateGuard(SyntaxKind::CondPredicateGuard) { @custom }
+    CasePatternItem(SyntaxKind::CasePatternItem) { @custom }
 }
 
 // Custom accessors

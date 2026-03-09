@@ -14,6 +14,8 @@ use lyra_source::TokenSpan;
 pub enum CaseCheckItem {
     /// `inside` used with `casex` or `casez` (LRM 12.5.4).
     IllegalInsideCaseKind { kind: CaseKind, kw_span: TokenSpan },
+    /// `matches` used with `casex` or `casez` (LRM 12.6.1).
+    IllegalMatchesCaseKind { kind: CaseKind, kw_span: TokenSpan },
 }
 
 /// Per-file case-legality product.

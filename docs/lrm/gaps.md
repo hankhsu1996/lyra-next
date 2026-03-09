@@ -72,7 +72,7 @@ Record-to-record identity mismatch is diagnosed. Packed/softpacked record to/fro
 
 ### 7.3.2: Tagged unions
 
-Tagged union declarations are parsed with void and typed members. Tagged expression constructors (LRM 11.9) are context-typed in assignment, variable-initialization, and call-argument positions via a first-class call-argument semantic product (`CallArgCheck`). The expected type determines the record, void-vs-payload arity is validated, and operand type compatibility is checked via the central assignment compatibility path. Constructor structural errors (unknown member, void member with operand, payload member without operand, non-tagged-union target) produce user-visible diagnostics in all contexts. Remaining gaps: pattern matching (12.6), runtime tag-safety work, `matches` operator. Blocked by: pattern expression parsing. Test: `lrm/ch07/7.3.2_tagged_unions`.
+Tagged union declarations are parsed with void and typed members. Tagged expression constructors (LRM 11.9) are context-typed in assignment, variable-initialization, and call-argument positions via a first-class call-argument semantic product (`CallArgCheck`). The expected type determines the record, void-vs-payload arity is validated, and operand type compatibility is checked via the central assignment compatibility path. Constructor structural errors (unknown member, void member with operand, payload member without operand, non-tagged-union target) produce user-visible diagnostics in all contexts. Pattern matching syntax (12.6.1, 12.6.2) has dedicated pattern AST nodes, a dedicated conditional-predicate parser separate from the plain expression parser, and semantic collection of pattern-embedded expressions. `matches` and `&&&` are accepted only in `cond_predicate` call sites (`if()` conditions, `case matches` guards) and are not reachable from plain expression parsing or parenthesized expressions. Remaining gaps: runtime tag-safety work, conditional-expression predicate test (12.6.3), pattern/type compatibility checking, bind-variable scope introduction and name resolution, exhaustiveness/refutability rules. Blocked by: semantic pattern analysis. Test: `lrm/ch07/7.3.2_tagged_unions`.
 
 ### 7.4: Dynamic arrays, queues, and associative arrays -- foreach iteration
 
@@ -105,15 +105,15 @@ Streaming of arrays, structs, unions, and strings follows recursive bitstream co
 
 ### 12.6.1: Pattern matching in case statements
 
-`case` with `tagged union` patterns and wildcard patterns. Tagged union types and constructor expressions exist. Blocked by: pattern expression parsing, `case tagged` syntax. Test: `lrm/ch12/12.6.1_pattern_matching_case`.
+Pattern syntax is parsed with dedicated AST nodes (tagged, wildcard, struct, bind, constant, paren patterns). `case ... matches` with pattern items and `&&&` guard parsing is supported. Semantic collection walks pattern-embedded expressions. `casex`/`casez` combined with `matches` is diagnosed as illegal. `matches` returns a 1-bit predicate type. Remaining gaps: pattern/type compatibility checking, bind-variable scope introduction and name resolution, exhaustiveness/refutability rules. Blocked by: semantic pattern analysis. Tests: `lrm/ch12/12.6.1_pattern_matching_case/cases/`.
 
 ### 12.6.2: Pattern matching in if statements
 
-`if` with `matches` pattern-matching operator. Tagged union types and constructor expressions exist. Blocked by: `matches` operator parsing. Test: `lrm/ch12/12.6.2_pattern_matching_if`.
+`if (expr matches pattern)` uses a dedicated `cond_predicate` parser separate from `expr`. `matches` and `&&&` are accepted only in `cond_predicate` call sites (`if()` conditions, `case matches` guards) and are not reachable from the plain expression parser or parenthesized expressions. `MatchesExpr` and optional `&&& guard` via `CondPredicate` produce structured AST nodes. Semantic collection and type inference walk predicate contents (head expression, guards). Remaining gaps: bind-variable scope introduction, pattern/type compatibility. Blocked by: semantic pattern analysis. Tests: `lrm/ch12/12.6.2_pattern_matching_if/cases/`.
 
 ### 12.6.3: Pattern matching in conditional expressions
 
-Ternary `?:` with `matches` pattern-matching operator. Requires same infrastructure as 12.6.2. Blocked by: `matches` operator parsing. Test: `lrm/ch12/12.6.3_pattern_matching_conditional`.
+LRM `conditional_expression ::= cond_predicate ? expression : expression` allows predicate syntax (`matches`, `&&&`) in the ternary test position. The plain expression parser does not support this; predicate syntax is restricted to `if()` conditions and `case matches` guards. Ternary with predicate test (`val matches tagged Valid .n ? n : 0`) requires a dedicated conditional-expression parser that uses `cond_predicate` in the test position while keeping predicate syntax out of general expression context. Blocked by: conditional-expression parser layer. Test: deferred until conditional-expression support lands.
 
 ## Chapter 20 -- System Functions
 

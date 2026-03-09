@@ -7,9 +7,10 @@ use lyra_parser::SyntaxToken;
 
 use crate::node::AstNode;
 use crate::nodes::{
-    AssignStmt, BinExpr, BlockStmt, CaseInsideItem, CaseItem, CaseStmt, ContinuousAssign,
-    DoWhileStmt, DriveStrength, ForStmt, ForeachStmt, ForeachVarList, ForeverStmt, IfStmt, NameRef,
-    RangeList, RepeatStmt, ReturnStmt, TimingControl, ValueRange, WhileStmt,
+    AssignStmt, BinExpr, BlockStmt, CaseInsideItem, CaseItem, CasePatternItem, CaseStmt,
+    CondPredicate, ContinuousAssign, DoWhileStmt, DriveStrength, ForStmt, ForeachStmt,
+    ForeachVarList, ForeverStmt, IfStmt, NameRef, RangeList, RepeatStmt, ReturnStmt, TimingControl,
+    ValueRange, WhileStmt,
 };
 use crate::nodes_expr::SyntaxAssignOp;
 use crate::support::{self, AstChildren};
@@ -71,6 +72,11 @@ impl IfStmt {
         support::children::<crate::node::StmtNode>(&self.syntax).nth(1)
     }
 
+    /// The condition as a `CondPredicate` (when `matches`/`&&&` is used).
+    pub fn cond_predicate(&self) -> Option<CondPredicate> {
+        support::child::<CondPredicate>(&self.syntax)
+    }
+
     /// Whether this if-statement has an `else` clause.
     pub fn has_else(&self) -> bool {
         support::token(&self.syntax, SyntaxKind::ElseKw).is_some()
@@ -122,28 +128,37 @@ impl CaseStmt {
         support::token(&self.syntax, SyntaxKind::InsideKw).is_some()
     }
 
+    /// Whether this is a `case ... matches` statement (LRM 12.6.1).
+    pub fn is_matches(&self) -> bool {
+        support::token(&self.syntax, SyntaxKind::MatchesKw).is_some()
+    }
+
     /// Iterate normal `CaseItem` children only (excludes `CaseInsideItem`).
     pub fn normal_items(&self) -> AstChildren<CaseItem> {
         support::children(&self.syntax)
     }
 
-    /// Iterate all case items (normal or inside) as a unified type.
+    /// Iterate all case items (normal, inside, or pattern) as a unified type.
     pub fn items(&self) -> impl Iterator<Item = CaseItemLike> + '_ {
         self.syntax
             .children()
             .filter_map(|child| match child.kind() {
                 SyntaxKind::CaseItem => CaseItem::cast(child).map(CaseItemLike::Normal),
                 SyntaxKind::CaseInsideItem => CaseInsideItem::cast(child).map(CaseItemLike::Inside),
+                SyntaxKind::CasePatternItem => {
+                    CasePatternItem::cast(child).map(CaseItemLike::Pattern)
+                }
                 _ => None,
             })
     }
 }
 
-/// A case item from either a normal `case` or a `case inside` statement.
+/// A case item from a `case`, `case inside`, or `case matches` statement.
 #[derive(Debug, Clone)]
 pub enum CaseItemLike {
     Normal(CaseItem),
     Inside(CaseInsideItem),
+    Pattern(CasePatternItem),
 }
 
 impl CaseInsideItem {

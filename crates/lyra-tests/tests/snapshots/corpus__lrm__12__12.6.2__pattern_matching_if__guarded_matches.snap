@@ -1,0 +1,9 @@
+---
+source: crates/lyra-tests/tests/corpus.rs
+expression: ws.dump_diagnostics()
+---
+// file: main.sv (2 diagnostics)
+  error[lyra.semantic.unresolved_name] 13:39..13:39: unresolved name `n`
+  error[lyra.semantic.unresolved_name] 14:14..14:14: unresolved name `n`
+---
+unit (0 diagnostics)

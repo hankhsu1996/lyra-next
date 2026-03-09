@@ -3,6 +3,7 @@ mod expressions;
 mod generate;
 mod items;
 mod net;
+mod patterns;
 mod ports;
 mod statements;
 mod strength;

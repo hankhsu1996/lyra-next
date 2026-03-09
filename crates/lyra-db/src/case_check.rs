@@ -95,6 +95,7 @@ fn walk_generate_item(item: &lyra_ast::GenerateItem, items: &mut Vec<CaseCheckIt
                 let body = match &ci {
                     lyra_ast::CaseItemLike::Normal(n) => n.body(),
                     lyra_ast::CaseItemLike::Inside(i) => i.body(),
+                    lyra_ast::CaseItemLike::Pattern(p) => p.body(),
                 };
                 if let Some(b) = body {
                     walk_stmt(&b, items);
@@ -133,6 +134,7 @@ fn walk_stmt(stmt: &StmtNode, items: &mut Vec<CaseCheckItem>) {
             let body = match &ci {
                 lyra_ast::CaseItemLike::Normal(n) => n.body(),
                 lyra_ast::CaseItemLike::Inside(i) => i.body(),
+                lyra_ast::CaseItemLike::Pattern(p) => p.body(),
             };
             if let Some(b) = body {
                 walk_stmt(&b, items);
@@ -174,17 +176,20 @@ fn walk_stmt(stmt: &StmtNode, items: &mut Vec<CaseCheckItem>) {
 }
 
 fn check_case_stmt(case: &CaseStmt, items: &mut Vec<CaseCheckItem>) {
-    if !case.is_inside() {
-        return;
-    }
     let Some(kind) = case.case_kind() else {
         return;
     };
-    if matches!(kind, CaseKind::CaseX | CaseKind::CaseZ) {
+    if case.is_inside() && matches!(kind, CaseKind::CaseX | CaseKind::CaseZ) {
         let kw_span = case
             .case_keyword_token()
             .map_or(TokenSpan::INVALID, |t| TokenSpan::new(t.text_range()));
         items.push(CaseCheckItem::IllegalInsideCaseKind { kind, kw_span });
+    }
+    if case.is_matches() && matches!(kind, CaseKind::CaseX | CaseKind::CaseZ) {
+        let kw_span = case
+            .case_keyword_token()
+            .map_or(TokenSpan::INVALID, |t| TokenSpan::new(t.text_range()));
+        items.push(CaseCheckItem::IllegalMatchesCaseKind { kind, kw_span });
     }
 }
 
